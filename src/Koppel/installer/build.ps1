@@ -77,7 +77,7 @@ New-Item -ItemType Directory -Force -Path $staging, $cache, $out | Out-Null
 
 Write-Host 'Restoring from the lock files...'
 Invoke-Checked { pnpm --dir $src install --frozen-lockfile }
-Invoke-Checked { dotnet restore $hostProject -p:RestoreLockedMode=true -nologo -v q }
+Invoke-Checked { dotnet restore $hostProject -p:RestoreLockedMode=true -p:PublishReadyToRun=true -nologo -v q }
 
 Write-Host 'Writing the third-party notices...'
 $notices = Join-Path $product 'src\Koppel\THIRD-PARTY-NOTICES.txt'

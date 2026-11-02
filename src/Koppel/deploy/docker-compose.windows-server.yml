@@ -10,7 +10,7 @@ name: koppel
 
 services:
   koppel:
-    image: matumisoftware/koppel:latest
+    image: matumisoftware/koppel:0.1.0
     hostname: ${KOPPEL_HOSTNAME:-${COMPUTERNAME:-koppel}}
     environment:
       # usbipd-win listens on the host's port 3240.

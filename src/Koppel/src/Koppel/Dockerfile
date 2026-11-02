@@ -3,17 +3,29 @@
 # One image serves both roles; the role is a setting. USB needs a privileged container running as
 # root and the host's usbip-host / vhci-hcd modules; see docker-compose.yml.
 
+# Base images are pinned to exact versions so a rebuild does not move under us. To bump one, pick the new tag
+# on mcr.microsoft.com / Docker Hub and change it here; the SDK and the runtime must be the same .NET patch
+# (`docker run --rm <sdk image> dotnet --list-runtimes` shows the runtime an SDK carries). Pinning by digest as
+# well (tag@sha256:...) is possible: `docker buildx imagetools inspect <image>` prints it.
+#
+# Node comes from the official node image (copied in below) instead of a downloaded setup script, and is
+# pinned with it. The node image is Debian and the SDK image is Ubuntu; Node needs only an older glibc than
+# Ubuntu's, so the copied binary runs (the `node --version` below proves it on every build).
+
+# -------- Stage 0: Node ------------------------------------------------------
+FROM node:24.22.2-bookworm-slim AS node
+
 # -------- Stage 1: build ---------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble AS build
 ARG BUILD_CONFIGURATION=Release
 
-# Toolchain: Node 24 (NodeSource) + pnpm 9.15.0, as in the Timebase images.
-RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
- && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
- && apt-get install -y --no-install-recommends nodejs \
- && npm install -g pnpm@9.15.0 \
- && rm -rf /var/lib/apt/lists/*
+# Toolchain: Node 24 (from the node stage) + pnpm 9.15.0, as in the Timebase images.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+ && node --version \
+ && npm install -g pnpm@9.15.0
 
 WORKDIR /build
 
@@ -27,16 +39,26 @@ COPY global.json Directory.Build.props Directory.Packages.props .editorconfig ./
 COPY Koppel.Core ./Koppel.Core
 COPY Koppel ./Koppel
 
+# NuGet restores from the packages.lock.json files and fails if they have drifted (RestoreLockedMode). The
+# lock files cover every platform the host ships on, so the restore takes no -r. PublishReadyToRun is on the
+# restore too, so it fetches the ahead-of-time compiler pack the publish needs.
+RUN dotnet restore Koppel/src/Koppel/Koppel.csproj -p:RestoreLockedMode=true -p:PublishReadyToRun=true --nologo
+
 # PublishRunWebpack builds the SPA and stages dist/ into wwwroot/. ReadyToRun compiles ahead of time:
 # without it a low-power thin client spends seconds compiling on its first request (8 to 14 s measured
 # on an AMD GX-212JC), long enough for a client's first token or pairing request to time out.
+# An architecture this does not know fails the build, rather than quietly building x64.
 ARG TARGETARCH
-RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) \
- && dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo \
+RUN case "$TARGETARCH" in \
+      amd64) RID=linux-x64 ;; \
+      arm64) RID=linux-arm64 ;; \
+      *) echo "Unsupported TARGETARCH '$TARGETARCH': build with BuildKit (docker buildx build or compose) for linux/amd64 or linux/arm64." >&2; exit 1 ;; \
+    esac \
+ && dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo --no-restore \
       -r $RID --self-contained false -p:PublishReadyToRun=true -p:SkipSpaInstall=true
 
 # -------- Stage 2: runtime -------------------------------------------------
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble AS final
 
 WORKDIR /app
 COPY --from=build /publish ./
@@ -52,5 +74,10 @@ EXPOSE 5240 5241 3240
 
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys
+
+# The anonymous GET /healthz on the UI port. The image has no curl, so bash opens the connection itself.
+# It checks the default UI port: if you move Ports__Http (or bind elsewhere), change this to match.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5240 && printf 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $status == *' 200 '* ]]"]
 
 ENTRYPOINT ["dotnet", "Koppel.dll"]

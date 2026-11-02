@@ -17,11 +17,17 @@ if [ "$local_arch" != "$remote_arch" ]; then
   exit 1
 fi
 
-echo "Building the image..."
-docker compose -f "$src/Koppel/docker-compose.yml" build
+# The image name and tag come from the deploy compose, the file that runs on the target, so what is built and
+# saved here is exactly what that compose looks for (and, with its pull_policy, never pulls over).
+image="$(docker compose -f "$here/docker-compose.yml" config --images)"
+tag="${image##*:}"
 
-echo "Copying the image to $target..."
-docker save matumisoftware/koppel:latest | gzip | ssh "$target" 'gunzip | docker load'
+echo "Building $image..."
+# An empty DOCKER_REGISTRY keeps a registry set in this shell out of the image name.
+DOCKER_REGISTRY= KOPPEL_TAG="$tag" docker compose -f "$src/Koppel/docker-compose.yml" build
+
+echo "Copying $image to $target..."
+docker save "$image" | gzip | ssh "$target" 'gunzip | docker load'
 
 echo "Starting Koppel on $target..."
 ssh "$target" 'mkdir -p ~/koppel'

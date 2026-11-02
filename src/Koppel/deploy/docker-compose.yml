@@ -2,14 +2,18 @@
 #   docker compose up -d
 # Then browse http://<this machine>:5240/
 #
-# Upgrade with `docker compose pull && docker compose up -d`. Config and keys live in the koppel
-# volume, not the image, so an upgrade keeps them.
+# The image tag is pinned. To upgrade, change it to the new version and run
+# `docker compose pull && docker compose up -d`. Config and keys live in the koppel volume, not the
+# image, so an upgrade keeps them. (deploy.sh sets this tag itself when it copies an image over.)
 
 name: koppel
 
 services:
   koppel:
-    image: matumisoftware/koppel:latest
+    image: matumisoftware/koppel:0.1.0
+    # An image already here (one deploy.sh copied, or one you built) is used as it is and is never
+    # replaced by a pull from Docker Hub. Only a missing image is pulled.
+    pull_policy: missing
     # The host's network: clients find the server through multicast DNS, which does not cross Docker's
     # bridge. Koppel listens on the host's ports directly (5240 UI, 5241 HTTPS, 3240 USB over TLS) and
     # takes the host's name, which it shows and puts in its certificate.
@@ -21,6 +25,20 @@ services:
     user: "0"
     privileged: true
     restart: always
+    # To encrypt the key ring at rest, keep a PFX (no password) outside the koppel volume, mode 0600, and
+    # mount it as a secret. Without it the key ring sits as plain files in the volume, so anyone who can
+    # read the volume can decrypt Koppel's secret files. Make one with:
+    #   openssl req -x509 -newkey rsa:2048 -nodes -keyout k.pem -out c.pem -subj /CN=koppel-keys -days 3650
+    #   openssl pkcs12 -export -inkey k.pem -in c.pem -passout pass: -out koppel-keys.pfx
+    # then uncomment this, the secrets: line below and the secrets block at the bottom.
+    # environment:
+    #   Paths__KeyCertificate: /run/secrets/koppel_keys
+    # secrets:
+    #   - koppel_keys
 
 volumes:
   koppel:
+
+# secrets:
+#   koppel_keys:
+#     file: ./koppel-keys.pfx

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using Koppel.Core.Usb;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -8,6 +9,23 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Koppel.Tests;
+
+/// <summary>
+/// Gives each request on a test server the local port its scheme stands for, as Kestrel does for a real
+/// connection: the UI port for http, the HTTPS port for https.
+/// </summary>
+public sealed class TestListenerPorts(int httpPort, int httpsPort) : IStartupFilter
+{
+    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+    {
+        app.Use((context, nextMiddleware) =>
+        {
+            context.Connection.LocalPort = context.Request.IsHttps ? httpsPort : httpPort;
+            return nextMiddleware(context);
+        });
+        next(app);
+    };
+}
 
 /// <summary>
 /// A Koppel host with its own temporary config and key directories. By default it runs on a test
@@ -19,7 +37,7 @@ public sealed class KoppelFactory : IDisposable
     private readonly WebApplicationFactory<Program> _factory;
     private readonly bool _kestrel;
 
-    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null)
+    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server")
     {
         _kestrel = kestrel;
         Directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
@@ -29,7 +47,7 @@ public sealed class KoppelFactory : IDisposable
 
         // Seed settings so parallel hosts never fight over the default USB port.
         System.IO.Directory.CreateDirectory(Path.Combine(Directory, "config"));
-        File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "server", "shareOnStartup": true, "listenPort": {{UsbPort}} }""");
+        File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "{{role}}", "shareOnStartup": true, "listenPort": {{UsbPort}} }""");
 
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
@@ -49,6 +67,12 @@ public sealed class KoppelFactory : IDisposable
 
             builder.ConfigureTestServices(s =>
             {
+                // A test server has no listener port; give each request the one its scheme stands for.
+                if (!kestrel)
+                {
+                    s.AddTransient<IStartupFilter>(_ => new TestListenerPorts(HttpPort, HttpsPort));
+                }
+
                 // Never the machine's own usbip-win2: a test that wants a driver brings a fake one.
                 s.AddSingleton<IUsbIpDriver>(new UnsupportedUsb("No USB/IP driver in tests."));
                 // Tests connect to the gateway from a user-mode process, which the Windows kernel-only check refuses.
@@ -77,14 +101,26 @@ public sealed class KoppelFactory : IDisposable
 
     public string ConfigFile(string name) => Path.Combine(Directory, "config", name);
 
-    /// <summary>A client on the UI side (plain HTTP).</summary>
-    public HttpClient CreateUiClient() => _kestrel
+    /// <summary>A client on the UI side (plain HTTP), sending the header the UI sends on every request.</summary>
+    public HttpClient CreateUiClient()
+    {
+        var client = CreatePlainClient();
+        client.DefaultRequestHeaders.Add("X-Koppel-UI", "1");
+        return client;
+    }
+
+    /// <summary>A UI-side client without the header, as another site's page would be.</summary>
+    public HttpClient CreatePlainClient() => _kestrel
         ? new HttpClient { BaseAddress = new Uri($"http://localhost:{HttpPort}") }
         : _factory.CreateClient();
 
-    /// <summary>A client that looks like it arrived over HTTPS, as remote Koppel clients do.</summary>
-    public HttpClient CreateHttpsClient() =>
-        _factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
+    /// <summary>
+    /// A client that arrives over HTTPS, as remote Koppel clients do. On a Kestrel host it connects to the
+    /// real HTTPS port and accepts the server's self-signed certificate.
+    /// </summary>
+    public HttpClient CreateHttpsClient() => _kestrel
+        ? new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true }) { BaseAddress = new Uri($"https://localhost:{HttpsPort}") }
+        : _factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
 
     public async Task<HubConnection> ConnectUiHubAsync(CancellationToken cancellationToken)
     {

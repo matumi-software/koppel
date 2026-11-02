@@ -12,6 +12,7 @@ using Koppel.Security;
 using Koppel.Server;
 using Koppel.Settings;
 using Koppel.Usb;
+using Koppel.Web;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,13 +23,23 @@ builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
 // endpoint and the APIs remote clients call; clients pin the certificate's fingerprint.
 var httpPort = builder.Configuration.GetValue("Ports:Http", 5240);
 var httpsPort = builder.Configuration.GetValue("Ports:Https", 5241);
+var httpAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting], builder.Environment.IsDevelopment());
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
-    kestrel.ListenAnyIP(httpPort);
+    if (httpAddress is null)
+    {
+        kestrel.ListenAnyIP(httpPort);
+    }
+    else
+    {
+        kestrel.Listen(httpAddress, httpPort);
+    }
+
     kestrel.ListenAnyIP(httpsPort, listen => listen.UseHttps(https =>
         https.ServerCertificateSelector = (_, _) => kestrel.ApplicationServices.GetRequiredService<ServerSecretsStore>().Certificate));
 });
 
+builder.Services.AddKoppelRateLimits(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options => KoppelJson.Configure(options.SerializerOptions));
 builder.Services.AddSignalR().AddJsonProtocol(options => KoppelJson.Configure(options.PayloadSerializerOptions));
 
@@ -68,15 +79,13 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerFinder>());
 builder.Services.AddHostedService<UiHubRelay>();
 
 // USB goes through the Linux kernel's USB/IP drivers. Other platforms report why they cannot share yet.
-// Usb:Upstream (host:port) shares another USB/IP server's devices instead, such as usbipd-win on a
+// Usb:Upstream (host, host:port or [v6]:port) shares another USB/IP server's devices instead, such as usbipd-win on a
 // Windows host; Gateway:Port lets a USB/IP driver on this machine attach (see UsbIpGateway).
 var sysRoot = builder.Configuration["Usb:SysRoot"] ?? "/sys";
 var unsupported = new UnsupportedUsb("Sharing and attaching USB devices needs Linux, or a USB/IP server or driver on the host. See docs/windows.md.");
 if (builder.Configuration["Usb:Upstream"] is { Length: > 0 } upstream)
 {
-    var (upstreamHost, upstreamPort) = upstream.LastIndexOf(':') is var colon and > 0
-        ? (upstream[..colon], int.Parse(upstream[(colon + 1)..], System.Globalization.CultureInfo.InvariantCulture))
-        : (upstream, 3240);
+    var (upstreamHost, upstreamPort) = UpstreamAddress.Parse(upstream);
     builder.Services.AddSingleton<IUsbHost>(sp => new UsbIpUpstreamHost(upstreamHost, upstreamPort, sp.GetRequiredService<TimeProvider>()));
 }
 else
@@ -96,10 +105,17 @@ builder.Services.AddKoppelAuthServer();
 
 var app = builder.Build();
 
+app.UseSecurityHeaders();
 if (app.Environment.IsDevelopment())
 {
     app.UseDeveloperExceptionPage();
 }
+
+// Port and role first: a request for a surface this listener or role does not have never reaches
+// the rest. The rate limiter comes after, so such a request does not use up a caller's allowance.
+app.UseSurfaceGuard();
+app.UseUiRequestGuard();
+app.UseRateLimiter();
 
 // Static files before routing, so the SPA assets never hit an endpoint.
 app.UseStaticFiles();
@@ -117,7 +133,10 @@ app.MapUsbClientEndpoints();
 app.MapSystemEndpoints();
 app.MapActivityEndpoints();
 app.MapHub<UiHub>("/api/hubs/ui");
-app.MapHub<RemoteHub>("/api/hubs/remote");
+app.MapHub<RemoteHub>("/api/hubs/remote", options => options.CloseOnAuthenticationExpiration = true);
+
+// For a container's health check: anonymous, on the UI port, whatever the role.
+app.MapGet("/healthz", () => TypedResults.Text("ok"));
 
 app.MapFallbackToFile("index.html");
 

@@ -39,8 +39,8 @@ if (serving) {
     }
 }
 
-const target = env.ASPNETCORE_HTTPS_PORT ? `https://localhost:${env.ASPNETCORE_HTTPS_PORT}` :
-    env.ASPNETCORE_URLS ? env.ASPNETCORE_URLS.split(';')[0] : 'http://localhost:5240';
+// The UI API is served on Koppel's HTTP port only; the HTTPS port answers remote clients.
+const target = env.KOPPEL_UI_URL ?? 'http://127.0.0.1:5240';
 
 export default defineConfig({
     plugins: [plugin()],
@@ -57,6 +57,8 @@ export default defineConfig({
                 target,
                 secure: false,
                 ws: true,
+                // Tells Koppel the browser used https, so its same-origin check on Origin passes.
+                xfwd: true,
             }
         },
         port: parseInt(env.DEV_SERVER_PORT || '61040'),

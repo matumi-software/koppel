@@ -1,4 +1,4 @@
-import { getJson, sendChange } from './http';
+import { getJson, sendChange, uiFetch } from './http';
 
 /** Mirrors Koppel.Client.ConnectionView. The secret never comes back, only whether one is stored. */
 export interface ConnectionView {
@@ -18,6 +18,8 @@ export interface ConnectionUpdate {
 
 export interface ConnectionTestResult {
   ok: boolean;
+  /** One of a fixed set, such as `unreachable` or `certificateMismatch`. */
+  outcome: string;
   message: string;
 }
 
@@ -26,9 +28,9 @@ export const getConnection = () => getJson<ConnectionView>('/api/client/connecti
 export const putConnection = (update: ConnectionUpdate) => sendChange('/api/client/connection', 'PUT', update);
 
 export async function testConnection(): Promise<ConnectionTestResult> {
-  const response = await fetch('/api/client/connection/test', { method: 'POST' });
+  const response = await uiFetch('/api/client/connection/test', { method: 'POST' });
   if (!response.ok) {
-    return { ok: false, message: `The test failed (${response.status}).` };
+    return { ok: false, outcome: 'failed', message: `The test failed (${response.status}).` };
   }
   return (await response.json()) as ConnectionTestResult;
 }

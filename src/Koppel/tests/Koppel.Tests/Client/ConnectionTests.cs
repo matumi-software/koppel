@@ -10,7 +10,7 @@ namespace Koppel.Tests.Client;
 public sealed class ConnectionTests : IDisposable
 {
     private const string Fingerprint = "3F:9A:1C:2B:7D:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA";
-    private readonly KoppelFactory _koppel = new();
+    private readonly KoppelFactory _koppel = new(role: "client");
 
     public void Dispose() => _koppel.Dispose();
 

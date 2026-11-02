@@ -14,7 +14,7 @@ namespace Koppel.Tests.Server;
 public sealed class PairingTests : IDisposable
 {
     private readonly KoppelFactory _server = new(kestrel: true);
-    private readonly KoppelFactory _client = new(kestrel: true);
+    private readonly KoppelFactory _client = new(kestrel: true, role: "client");
 
     public void Dispose()
     {

@@ -52,7 +52,7 @@ public sealed class ClientAuthTests : IDisposable
 
         using var token = await RequestTokenAsync(http, clientId, secret, ct);
 
-        token.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        token.StatusCode.Should().Be(HttpStatusCode.NotFound, "the token endpoint is only on the HTTPS port");
     }
 
     [Fact]

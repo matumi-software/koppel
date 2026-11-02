@@ -1,5 +1,3 @@
-using Koppel.Settings;
-
 namespace Koppel.Server;
 
 internal sealed record PairOpenRequest(string? ClientName, string? Commitment);
@@ -16,19 +14,13 @@ internal static class PairingEndpoints
     public const string TokenHeader = "X-Pair-Token";
 
     /// <summary>
-    /// Endpoints a client calls to pair, before it has credentials: no token, but HTTPS only, so the
-    /// client has pinned the certificate it will derive the code from. See <see cref="PairingStore"/>.
+    /// Endpoints a client calls to pair, before it has credentials: no token, but on the HTTPS port only
+    /// and not in the client role (see <see cref="Web.SurfaceGuard"/>), so the client has pinned the
+    /// certificate it will derive the code from. See <see cref="PairingStore"/>.
     /// </summary>
     public static IEndpointRouteBuilder MapPairingEndpoints(this IEndpointRouteBuilder app)
     {
         var pair = app.MapGroup("/api/pair");
-        pair.AddEndpointFilter(async (context, next) =>
-        {
-            var settings = context.HttpContext.RequestServices.GetRequiredService<SettingsStore>();
-            return context.HttpContext.Request.IsHttps && settings.Current.Role != KoppelRole.Client
-                ? await next(context)
-                : TypedResults.NotFound();
-        });
 
         pair.MapPost("/", IResult (PairOpenRequest request, PairingStore pairing, HttpContext http) =>
         {

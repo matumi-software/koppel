@@ -1,4 +1,4 @@
-import { getJson, rejection, sendChange } from './http';
+import { getJson, rejection, sendChange, uiFetch } from './http';
 
 /** Mirrors Koppel.Server.ClientView. */
 export interface ClientView {
@@ -30,7 +30,7 @@ export const getClients = () => getJson<ClientView[]>('/api/server/clients');
 
 /** Creates a client. The list itself updates when ClientsChanged arrives. */
 export async function createClient(name: string): Promise<CreatedClient> {
-  const response = await fetch('/api/server/clients', {
+  const response = await uiFetch('/api/server/clients', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -53,7 +53,7 @@ export async function getClientSecret(clientId: string): Promise<string> {
 
 /** Replaces the secret and returns the new one. The client list follows over the hub. */
 export async function rotateClientSecret(clientId: string): Promise<string> {
-  const response = await fetch(`/api/server/clients/${encodeURIComponent(clientId)}/rotate`, { method: 'POST' });
+  const response = await uiFetch(`/api/server/clients/${encodeURIComponent(clientId)}/rotate`, { method: 'POST' });
   if (!response.ok) throw await rejection(response);
   return ((await response.json()) as { clientSecret: string }).clientSecret;
 }

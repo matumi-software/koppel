@@ -1,6 +1,9 @@
+using Koppel.Core.Configuration;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Koppel.Core.Activity;
 
@@ -64,7 +67,7 @@ public interface IActivityReader
 /// A bounded in-memory log, like Timebase's InMemoryActivityStore: it survives page reloads and is
 /// shared by every browser, but starts empty when the process restarts.
 /// </summary>
-public sealed class InMemoryActivityStore(TimeProvider time, int capacity = 500) : IActivityRecorder, IActivityReader
+public sealed class InMemoryActivityStore(TimeProvider time, int capacity = 500, ILogger<InMemoryActivityStore>? logger = null) : IActivityRecorder, IActivityReader
 {
     private readonly LinkedList<ActivityEvent> _events = new();
     private readonly Lock _gate = new();
@@ -84,10 +87,8 @@ public sealed class InMemoryActivityStore(TimeProvider time, int capacity = 500)
             }
         }
 
-        if (Recorded is { } handler)
-        {
-            await handler(activity);
-        }
+        // A handler that fails must not fail the caller that only recorded something.
+        await Recorded.RaiseAsync(activity, logger ?? NullLogger<InMemoryActivityStore>.Instance);
 
         return activity;
     }

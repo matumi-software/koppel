@@ -369,7 +369,10 @@
         "contentHash": "riMCsgbGKGonluQzaRRrx5ney0QNkEmepNTrHD3QpqU/ICZpCJsyAWNi6JESTxqYkc+9kNQ55aZaH/n3xOjSlg=="
       },
       "koppel.core.activity": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Koppel.Core.Configuration": "[0.1.0, )"
+        }
       },
       "koppel.core.auth": {
         "type": "Project",

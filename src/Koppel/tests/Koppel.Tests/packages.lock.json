@@ -999,7 +999,10 @@
         }
       },
       "koppel.core.activity": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Koppel.Core.Configuration": "[0.1.0, )"
+        }
       },
       "koppel.core.auth": {
         "type": "Project",

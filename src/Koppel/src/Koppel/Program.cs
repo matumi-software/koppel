@@ -58,7 +58,7 @@ builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, httpPort, httpsPort));
 builder.Services.AddSingleton(new ReservedPorts(httpPort, httpsPort, builder.Configuration.GetValue("Gateway:Port", OperatingSystem.IsWindows() ? UsbIpGateway.WindowsDefaultPort : 0)));
-builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>(), logger: sp.GetRequiredService<ILogger<InMemoryActivityStore>>()));
 builder.Services.AddSingleton<IActivityRecorder>(sp => sp.GetRequiredService<InMemoryActivityStore>());
 builder.Services.AddSingleton<IActivityReader>(sp => sp.GetRequiredService<InMemoryActivityStore>());
 builder.Services.AddSingleton(sp => SecretBoxFactory.Create(paths, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Koppel.Security")));

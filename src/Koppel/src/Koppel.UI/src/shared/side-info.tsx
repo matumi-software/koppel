@@ -1,7 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 import { ActivityFeed, Facts } from '@koppel/react-ui';
 import { toEntries, useActivity } from '@/activity/activity-context';
 import { getSystemInfo } from '@/api/http';
+import { useHubEvent } from '@/hub/hub-context';
 
 const uptime = (since: string) => {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 60_000));
@@ -12,6 +14,7 @@ const uptime = (since: string) => {
 };
 
 const roles = { server: 'Server', client: 'Client', both: 'Server and client' } as const;
+const infoKey = ['system-info'] as const;
 
 /**
  * The side panel when nothing is selected: facts about this machine, then the activity log, which
@@ -19,7 +22,12 @@ const roles = { server: 'Server', client: 'Client', both: 'Server and client' } 
  */
 export function SideInfo() {
   const { items } = useActivity();
-  const info = useQuery({ queryKey: ['system-info'], queryFn: getSystemInfo, refetchInterval: 60_000 });
+  const queryClient = useQueryClient();
+  const info = useQuery({ queryKey: infoKey, queryFn: getSystemInfo, refetchInterval: 60_000 });
+
+  // The role and USB port come from the settings, so a confirmed settings change refetches them.
+  const onSettingsChanged = useCallback(() => void queryClient.invalidateQueries({ queryKey: infoKey }), [queryClient]);
+  useHubEvent('SettingsChanged', onSettingsChanged);
   const data = info.data;
 
   return (

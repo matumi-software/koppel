@@ -18,8 +18,8 @@ import {
 import { useHub } from './hub-context';
 
 /**
- * Applies a push to the cache. A fetch still in flight would land after it with older data, so it is
- * cancelled first.
+ * Applies a push that carries the whole value to the cache. A fetch still in flight would land after
+ * it with older data, so it is cancelled first.
  */
 async function apply<T>(queryClient: QueryClient, key: QueryKey, next: T | ((current: T | undefined) => T)) {
   await queryClient.cancelQueries({ queryKey: key });
@@ -53,11 +53,11 @@ export function HubPushes() {
       PairingStatusChanged: replace(queryClient, pairingStatusKey),
       ServersDiscovered: replace(queryClient, discoveredServersKey),
       // One event, not the whole list: merge it in by id, and if the list never loaded, load it.
+      // The fetch in flight is not cancelled: it merges with the cache after it lands, so it keeps this event.
       ActivityRecorded: (event) => {
         const loaded = queryClient.getQueryData(activityKey) !== undefined;
-        void apply<ServerActivity[]>(queryClient, activityKey, (current) => mergeActivity(current, [event as ServerActivity])).then(() => {
-          if (!loaded) void queryClient.invalidateQueries({ queryKey: activityKey });
-        });
+        queryClient.setQueryData<ServerActivity[]>(activityKey, (current) => mergeActivity(current, [event as ServerActivity]));
+        if (!loaded) void queryClient.invalidateQueries({ queryKey: activityKey });
       },
     };
     for (const [name, handler] of Object.entries(handlers)) connection.on(name, handler);

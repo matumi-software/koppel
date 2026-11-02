@@ -13,8 +13,11 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const server = useQuery({
     queryKey: activityKey,
-    // Events pushed while the fetch ran must survive it.
-    queryFn: async () => mergeActivity(queryClient.getQueryData(activityKey), await getActivity()),
+    // Events pushed while the fetch ran must survive it, so the cache is read after the await.
+    queryFn: async () => {
+      const fetched = await getActivity();
+      return mergeActivity(queryClient.getQueryData(activityKey), fetched);
+    },
   });
   const [local, setLocal] = useState<ActivityItem[]>([]);
   const next = useRef(0);

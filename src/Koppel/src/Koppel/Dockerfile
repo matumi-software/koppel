@@ -1,7 +1,7 @@
 # Multi-stage build for Koppel. Build context = src/ (see Koppel/docker-compose.yml).
 #
-# One image serves both roles; the role is a setting. USB access (privileged mode,
-# /dev/bus/usb, host kernel modules) is added in compose when the USB layer lands.
+# One image serves both roles; the role is a setting. USB needs a privileged container running as
+# root and the host's usbip-host / vhci-hcd modules; see docker-compose.yml.
 
 # -------- Stage 1: build ---------------------------------------------------
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -42,7 +42,8 @@ VOLUME /koppel
 USER $APP_UID
 
 # 5240: the UI (HTTP). 5241: token endpoint and remote API (HTTPS, self-signed, pinned by clients).
-EXPOSE 5240 5241
+# 3240: USB traffic (TLS, token-authenticated).
+EXPOSE 5240 5241 3240
 
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys

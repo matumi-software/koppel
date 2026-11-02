@@ -1,6 +1,9 @@
 # Run from this folder (src/Koppel):
 #   docker compose up --build
 # Then browse http://localhost:5240/
+#
+# The host needs the USB/IP kernel modules: `modprobe usbip-host` on a server,
+# `modprobe vhci-hcd` on a client (add them to /etc/modules to load at boot).
 
 name: koppel
 
@@ -11,10 +14,15 @@ services:
       context: ..
       dockerfile: Koppel/src/Koppel/Dockerfile
     ports:
-      - "5240:5240"
-      - "5241:5241"
+      - "5240:5240"   # UI
+      - "5241:5241"   # token endpoint and remote API (HTTPS)
+      - "3240:3240"   # USB traffic (TLS)
     volumes:
       - koppel:/koppel
+    # Binding devices to usbip-host and attaching through vhci-hcd writes to /sys, which needs root
+    # in a privileged container. Attached devices appear on the host kernel.
+    user: "0"
+    privileged: true
     restart: unless-stopped
     # To encrypt the key ring at rest, mount a PFX as a secret and point Koppel at it:
     # environment:

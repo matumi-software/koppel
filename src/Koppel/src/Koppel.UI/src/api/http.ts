@@ -27,7 +27,7 @@ export async function getJson<T>(url: string): Promise<T> {
  * Sends a change and resolves once the server accepted it (202). That is not a confirmation:
  * the confirmed value arrives over the hub.
  */
-export async function sendChange(url: string, method: 'PATCH' | 'PUT' | 'DELETE', body?: unknown): Promise<void> {
+export async function sendChange(url: string, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', body?: unknown): Promise<void> {
   const response = await fetch(url, {
     method,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },

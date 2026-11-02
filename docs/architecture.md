@@ -10,7 +10,7 @@ One codebase and one Docker image cover every role; the role is a setting.
 |---|---|---|
 | Control plane | ASP.NET Core host, REST for commands, SignalR for pushes, React UI | Scaffolded |
 | Auth | The server is an OAuth server (client credentials); client ID and secret are kept encrypted next to the config on both sides | Done |
-| Data plane | USB/IP protocol (Linux kernel spec), wrapped in TLS | Planned |
+| Data plane | USB/IP protocol (Linux kernel spec), wrapped in TLS | Linux done, untested on real hardware; Windows not started |
 
 ## The confirm rule
 
@@ -37,6 +37,16 @@ Code (under `src/Koppel/`): `src/Koppel/Settings/SettingsStore.cs` (write, then 
 - **Tokens:** OAuth 2.0 client credentials, issued by OpenIddict in degraded mode (no database; clients come from our encrypted file). Access tokens are signed with an RSA key kept in the encrypted secrets file, last 30 minutes, and are only accepted over HTTPS.
 - **Not covered yet:** the UI on port 5240 has no login. Anyone who can reach that port can manage the machine. Keep it on a trusted network or bind it to localhost until UI login lands.
 
+## USB data plane
+
+- **Server:** `UsbServer` polls sysfs every two seconds, applies the share choices kept in `devices.json` (binds the device to `usbip-host`), and re-shares a device when it is plugged back in. `UsbIpTlsServer` listens with TLS on the USB port (setting `listenPort`, default 3240).
+- **Handshake:** inside TLS the client sends `KOPPEL/1 <access token>`; the server checks the token and that the client is still registered, answers `OK` or `DENIED <reason>`, then speaks plain USB/IP (device list or import).
+- **Relay:** on import the server writes one end of a loopback socket pair to the device's `usbip_sockfd`, so the kernel serves USB from there, and relays the other end through TLS. The client does the mirror image: it imports over TLS, writes its loopback end to `vhci_hcd`'s `attach`, and relays.
+- **Live list:** clients follow the server's shared devices over the `/api/hubs/remote` SignalR hub (HTTPS, bearer token, pinned certificate).
+- **Docker:** USB needs a privileged container running as root, and the host must have the modules loaded (`modprobe usbip-host` on servers, `modprobe vhci-hcd` on clients). Attached devices appear on the client's host kernel.
+- **Tested:** the protocol encoding, the sysfs adapters against a fake `/sys`, and a full server-to-client run on real Kestrel with fake kernels on both ends (token, pinning, hub, TLS, import, byte round trip). **Not tested:** the real kernel modules with real USB devices. Docker Desktop has no USB bus, so that needs a Linux machine with USB, set up under `D:	esting`.
+- **Windows:** reports that USB needs Linux for now. Planned: the client through usbip-win2, the server by driving an installed usbipd-win.
+
 ## Config on disk
 
 The config directory holds:
@@ -44,6 +54,7 @@ The config directory holds:
 - `settings.json`: plain, may be edited by hand.
 - `secrets.json` (server role): signing key, HTTPS certificate, registered clients. Encrypted.
 - `connection.json` (client role): server address, pinned fingerprint, client ID and secret. Encrypted.
+- `devices.json` (server role): the bus IDs the user chose to share. Plain.
 
 The encrypted files use ASP.NET Core Data Protection with a key ring in a separate keys directory
 (`Paths:Keys`, chmod 700 or a restricted ACL). On Windows the key ring is protected with machine

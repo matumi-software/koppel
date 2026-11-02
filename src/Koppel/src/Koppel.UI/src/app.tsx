@@ -1,11 +1,21 @@
-import { Button, KoppelMark, LinkBanner } from '@koppel/react-ui';
+import { useState } from 'react';
+import { Button, KoppelMark, LinkBanner, SegmentedControl } from '@koppel/react-ui';
+import { DevicesPage } from '@/devices/devices-page';
 import { useHub } from '@/hub/hub-context';
 import { SettingsPage } from '@/settings/settings-page';
 
 const serverName = window.location.hostname;
 
+type View = 'devices' | 'settings';
+
+const views = [
+  { value: 'devices', label: 'Devices' },
+  { value: 'settings', label: 'Settings' },
+] as const;
+
 export function App() {
   const { state, retry } = useHub();
+  const [view, setView] = useState<View>('devices');
 
   return (
     <div className="app">
@@ -14,7 +24,8 @@ export function App() {
           <KoppelMark size={24} />
           <span className="kp-type-heading">Koppel</span>
         </div>
-        {state === 'live' && <LinkBanner state="live" serverName={serverName} />}
+        <SegmentedControl<View> label="View" options={views} value={view} onChange={setView} />
+        {state === 'live' ? <LinkBanner state="live" serverName={serverName} /> : <span />}
       </header>
       {state !== 'live' && (
         <div className="app-band">
@@ -29,9 +40,7 @@ export function App() {
           />
         </div>
       )}
-      <main className="app-main">
-        <SettingsPage />
-      </main>
+      <main className="app-main">{view === 'devices' ? <DevicesPage /> : <SettingsPage />}</main>
     </div>
   );
 }

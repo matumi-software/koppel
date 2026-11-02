@@ -9,7 +9,8 @@ namespace Koppel.Core.Usb.Linux;
 /// <c>usbip bind</c> and <c>usbipd</c> tools do it. Needs root and the <c>usbip-host</c> module.
 /// </summary>
 /// <param name="sysRoot">Normally <c>/sys</c>; tests point it at a fake tree.</param>
-public sealed partial class SysfsUsbHost(string sysRoot = "/sys") : IUsbHost
+/// <param name="devRoot">Normally <c>/dev</c>, where the usbfs device nodes are.</param>
+public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot = "/dev") : IUsbHost
 {
     private string Devices => Path.Combine(sysRoot, "bus", "usb", "devices");
 
@@ -71,6 +72,23 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys") : IUsbHost
         return int.TryParse(status, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && Enum.IsDefined((ExportStatus)value)
             ? (ExportStatus)value
             : ExportStatus.NotExported;
+    }
+
+    public void Reset(string busId)
+    {
+        var device = Path.Combine(Devices, ValidBusId(busId));
+        var node = Path.Combine(
+            devRoot,
+            "bus",
+            "usb",
+            ReadUInt(device, "busnum").ToString("D3", CultureInfo.InvariantCulture),
+            ReadUInt(device, "devnum").ToString("D3", CultureInfo.InvariantCulture));
+        if (!File.Exists(node))
+        {
+            throw new UsbHostException($"Cannot reset {busId}: there is no device node {node}.");
+        }
+
+        UsbDeviceFs.Reset(node);
     }
 
     public void Export(string busId, Socket socket)

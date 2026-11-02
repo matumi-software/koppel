@@ -64,6 +64,26 @@ public sealed class UsbEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task Server_resets_the_device_before_a_client_gets_it()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var clientHub = await _client.ConnectUiHubAsync(ct);
+        var linked = Link.Waiter(clientHub, "ClientDevicesChanged", d =>
+            d.GetProperty("link").GetString() == "connected" && d.GetProperty("devices").GetArrayLength() == 1);
+        var attached = Link.Waiter(clientHub, "ClientDevicesChanged", d =>
+            d.GetProperty("devices").EnumerateArray().Any(x => x.GetProperty("attachedHere").GetBoolean()));
+        await Link.ConnectAsync(_server, _client, ct);
+        await Link.WithLastAsync(linked, clientHub, ct);
+
+        using var ui = _client.CreateUiClient();
+        using var attach = await ui.PostAsync("/api/client/devices/1-1.4/attach", null, ct);
+        await attached.WaitAsync(TimeSpan.FromSeconds(20), ct);
+
+        // Drivers on the server may have changed the device before it was shared; a reset undoes that.
+        _serverKernel.ResetBeforeExport.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Gateway_lets_a_usbip_driver_on_the_client_machine_list_and_attach_through_tls()
     {
         var ct = TestContext.Current.CancellationToken;

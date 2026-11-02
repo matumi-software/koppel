@@ -32,6 +32,16 @@ public interface IUsbHost
     ExportStatus GetStatus(string busId);
 
     /// <summary>
+    /// Resets a shared device on its USB port, so a client gets it the way a fresh plug-in would. A
+    /// driver on this machine may have changed the device before it was shared: Linux's Logitech
+    /// receiver driver switches the receiver to a mode only that driver reads, and the mouse then
+    /// stays silent on the client. Does nothing where the host cannot reset devices.
+    /// </summary>
+    void Reset(string busId)
+    {
+    }
+
+    /// <summary>
     /// Hands an open TCP socket to the kernel, which from then on carries the device's USB traffic over
     /// it. The caller must keep <paramref name="socket"/> alive until the client goes away.
     /// </summary>

@@ -165,6 +165,16 @@ internal sealed partial class UsbIpTlsServer(
             return;
         }
 
+        try
+        {
+            usb.Host.Reset(busId);
+        }
+        catch (UsbHostException ex)
+        {
+            // Most devices work without it, so the attach goes ahead.
+            LogResetFailed(busId, ex.Message);
+        }
+
         var (kernelEnd, relayEnd) = await UsbSockets.CreateLoopbackPairAsync(stoppingToken);
         using (kernelEnd)
         await using (var relay = new NetworkStream(relayEnd, ownsSocket: true))
@@ -237,6 +247,9 @@ internal sealed partial class UsbIpTlsServer(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Device {BusId} released by {ClientId}")]
     private partial void LogDetached(string busId, string clientId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not reset {BusId} before export: {Reason}")]
+    private partial void LogResetFailed(string busId, string reason);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Export of {BusId} failed: {Reason}")]
     private partial void LogExportFailed(string busId, string reason);

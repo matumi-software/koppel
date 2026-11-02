@@ -19,8 +19,12 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
 
     private readonly ConcurrentDictionary<int, Socket> _attached = new();
     private volatile bool _used;
+    private volatile bool _reset;
 
     public TaskCompletionSource<Socket> AttachedSocket { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Whether the device was reset before the last export.</summary>
+    public bool ResetBeforeExport { get; private set; }
 
     public string? Unavailable => null;
 
@@ -36,8 +40,12 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
 
     public ExportStatus GetStatus(string busId) => _used ? ExportStatus.Used : ExportStatus.Available;
 
+    public void Reset(string busId) => _reset = true;
+
     public void Export(string busId, Socket socket)
     {
+        ResetBeforeExport = _reset;
+        _reset = false;
         _used = true;
         _ = Task.Run(async () =>
         {

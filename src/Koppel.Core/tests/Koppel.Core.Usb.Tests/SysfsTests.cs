@@ -92,6 +92,32 @@ public sealed class SysfsTests : IDisposable
     }
 
     [Fact]
+    public void Reset_goes_through_the_usbfs_node_for_the_device_bus_and_number()
+    {
+        AddDevice("1-1.4", "046d", "c52b", "00", "12", "usbip-host");
+        var dev = Path.Combine(_sys, "dev");
+        var host = new SysfsUsbHost(_sys, dev);
+
+        var reset = () => host.Reset("1-1.4");
+
+        reset.Should().Throw<UsbHostException>().WithMessage($"*{Path.Combine(dev, "bus", "usb", "001", "005")}*");
+    }
+
+    [Fact]
+    public void Reset_reports_a_node_the_kernel_will_not_reset()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Calls the Linux ioctl; runs in the Linux container.");
+        AddDevice("1-1.4", "046d", "c52b", "00", "12", "usbip-host");
+        var node = Directory.CreateDirectory(Path.Combine(_sys, "dev", "bus", "usb", "001")).FullName;
+        File.WriteAllText(Path.Combine(node, "005"), "");
+        var host = new SysfsUsbHost(_sys, Path.Combine(_sys, "dev"));
+
+        var reset = () => host.Reset("1-1.4");
+
+        reset.Should().Throw<UsbHostException>().WithMessage("*refused to reset*");
+    }
+
+    [Fact]
     public void Vhci_picks_a_free_port_on_the_right_hub_and_writes_the_attach_line()
     {
         var vhci = Directory.CreateDirectory(Path.Combine(_sys, "devices", "platform", "vhci_hcd.0")).FullName;

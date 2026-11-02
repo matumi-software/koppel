@@ -27,6 +27,7 @@ export function App() {
   const { items } = useActivity();
   const [page, go] = usePageFromHash();
   const [isMenuOpen, setMenuOpen] = useState(false);
+  const [signOutFailure, setSignOutFailure] = useState<string>();
   const [title, setTitle] = useState('Koppel');
   const [asideSlot, setAsideSlot] = useState<HTMLDivElement | null>(null);
   const locked = link !== 'live';
@@ -103,9 +104,20 @@ export function App() {
           </Button>
         }
       />
-      <Button variant="ghost" onPress={() => void signOut()}>
+      <Button
+        variant="ghost"
+        onPress={() => {
+          setSignOutFailure(undefined);
+          signOut().catch((error: unknown) => setSignOutFailure(error instanceof Error ? error.message : 'the request failed.'));
+        }}
+      >
         Sign out
       </Button>
+      {signOutFailure && (
+        <p className="app-error kp-type-caption" role="status">
+          Not signed out: {signOutFailure}
+        </p>
+      )}
       {isClient && client.data && (
         <span className="kp-type-caption" style={{ color: client.data.link === 'connected' ? 'var(--text-tertiary)' : 'var(--pending-text)' }}>
           {client.data.link === 'connected'

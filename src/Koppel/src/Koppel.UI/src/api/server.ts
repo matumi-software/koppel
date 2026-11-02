@@ -43,12 +43,8 @@ export async function createClient(name: string): Promise<CreatedClient> {
 
 /** One client's secret, fetched only when someone reveals or copies it. */
 export async function getClientSecret(clientId: string): Promise<string> {
-  const response = await fetch(`/api/server/clients/${encodeURIComponent(clientId)}/secret`);
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `Could not load the secret (${response.status}).`);
-  }
-  return ((await response.json()) as { clientSecret: string }).clientSecret;
+  // Through getJson, so a 401 shows the login screen.
+  return (await getJson<{ clientSecret: string }>(`/api/server/clients/${encodeURIComponent(clientId)}/secret`)).clientSecret;
 }
 
 /** Replaces the secret and returns the new one. The client list follows over the hub. */

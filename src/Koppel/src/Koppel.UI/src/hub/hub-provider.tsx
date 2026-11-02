@@ -7,12 +7,16 @@ import { HubContext } from './hub-context';
 
 const retryDelays = [0, 2000, 5000, 10000, 30000];
 
-function createConnection() {
+function createConnection(onRetry: () => void) {
   return new HubConnectionBuilder()
     .withUrl('/api/hubs/ui')
     // Keep retrying forever; the last delay repeats.
     .withAutomaticReconnect({
-      nextRetryDelayInMilliseconds: (context) => retryDelays[Math.min(context.previousRetryCount, retryDelays.length - 1)],
+      nextRetryDelayInMilliseconds: (context) => {
+        // The session may have ended during the outage, and a refused negotiate would retry forever.
+        onRetry();
+        return retryDelays[Math.min(context.previousRetryCount, retryDelays.length - 1)];
+      },
     })
     .build();
 }
@@ -21,7 +25,10 @@ function createConnection() {
 export function HubProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { recheck } = useAuth();
-  const [connection] = useState(createConnection);
+  const onRetry = useRef(() => {});
+  // The callback only runs on a retry, never during render.
+  // eslint-disable-next-line react-hooks/refs
+  const [connection] = useState(() => createConnection(() => onRetry.current()));
   const [state, setState] = useState<LinkState>('reconnecting');
   // A start must wait for the previous stop (StrictMode mounts, stops and mounts again).
   const stopping = useRef<Promise<void>>(Promise.resolve());
@@ -49,6 +56,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     active.current = true;
+    onRetry.current = recheck;
     connection.onreconnecting(() => {
       setState('reconnecting');
       recheck();

@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { getAuthState, logout, type AuthState } from '@/api/auth';
 import { onUnauthorized } from '@/api/http';
 import { authKey } from '@/query-keys';
@@ -17,7 +17,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const state = useQuery({ queryKey: authKey, queryFn: getAuthState });
   const signedIn = state.data?.signedIn === true;
 
-  const recheck = useCallback(() => void queryClient.invalidateQueries({ queryKey: authKey }), [queryClient]);
+  // A recheck that lands while signing out could bring the signed-in answer back and flash the app.
+  const signingOut = useRef(false);
+  const recheck = useCallback(() => {
+    if (!signingOut.current) void queryClient.invalidateQueries({ queryKey: authKey });
+  }, [queryClient]);
 
   // Any request answered 401 means the session ended: show the login screen without waiting for a refetch.
   useEffect(
@@ -34,8 +38,16 @@ export function AuthGate({ children }: { children: ReactNode }) {
     () => ({
       recheck,
       signOut: async () => {
-        await logout();
-        queryClient.setQueryData<AuthState>(authKey, (current) => (current ? { ...current, signedIn: false } : current));
+        signingOut.current = true;
+        try {
+          // An auth check already in flight would land after the sign-out with the old answer.
+          await queryClient.cancelQueries({ queryKey: authKey });
+          await logout();
+          await queryClient.cancelQueries({ queryKey: authKey });
+          queryClient.setQueryData<AuthState>(authKey, (current) => (current ? { ...current, signedIn: false } : current));
+        } finally {
+          signingOut.current = false;
+        }
       },
     }),
     [recheck, queryClient],

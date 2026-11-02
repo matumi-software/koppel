@@ -43,7 +43,7 @@ The image is `matumisoftware/koppel` on Docker Hub (amd64 for now).
    `http://<machine>:5240`, set the password and choose the role.
 
 The container uses the host's network so clients can find it. It restarts after a crash, and comes
-back at the next reboot even if someone stopped it by hand.
+back at the next reboot even if someone stopped it by hand. The image has a health check, but plain Docker only reports an unhealthy container and does not restart it.
 
 The compose file pins the image version (`matumisoftware/koppel:0.1.0`). To upgrade, change the tag to the new
 version, then:
@@ -109,4 +109,4 @@ See the commands in [CLAUDE.md](CLAUDE.md) and the design in
 ## License
 
 MIT, see [LICENSE](LICENSE). The Windows installer bundles usbip-win2 (BSD-2-Clause); its notices
-ship as `THIRD-PARTY-NOTICES.txt`.
+ship as `THIRD-PARTY-NOTICES.txt`, which the setup window's licence link opens.

@@ -41,12 +41,12 @@ First release. If you ran a development build, read Installer and deploy before 
 ### Installer and deploy
 
 - Install fails, with instructions, if `%ProgramData%\Koppel` is a link or is owned by someone who is not an administrator. A folder owned by an administrator is taken over. A machine where an ordinary user owns the folder needs it renamed once.
-- The driver install writes to the MSI log, not to a file. Setup may ask for a restart. A usbip-win2 you installed yourself is used and left alone, and uninstall removes only what Koppel installed.
-- The service restarts after a crash. Firewall rules are split into domain and private.
+- The driver install writes to the MSI log, not to a file. Setup may ask for a restart. A usbip-win2 you installed yourself is used and left alone, and uninstall removes only what Koppel installed, and only packages Windows still lists as usbip-win2's. A restart needed by the uninstall is requested too. A file in the data folder that no administrator owns is renamed aside.
+- The service restarts after a crash, and after it stops with an error. Firewall rules are split into domain and private. The setup window's licence link opens `THIRD-PARTY-NOTICES.txt`.
 - Docker deploy composes pin `matumisoftware/koppel:0.1.0`. To upgrade, edit the tag, then `docker compose pull && docker compose up -d`. `deploy.sh` images are never replaced by a pull.
-- Builds are pinned: base images, the vendored usbip-win2 files (hashes and signers checked), and package lock files. `THIRD-PARTY-NOTICES.txt` ships in the installer and the image.
+- Builds are pinned: base images, the vendored usbip-win2 files (hashes, signer certificates and the unsigned DLLs' hashes checked), and package lock files. `THIRD-PARTY-NOTICES.txt` ships in the installer and the image.
 - `prepare-host.sh` is run with `sudo bash`, installs Docker from Docker's apt repository and hints at `linux-modules-extra` when a module will not load.
-- The image has a health check on `/healthz`.
+- The image has a health check on `/healthz`, at the configured UI address. Plain Docker does not restart an unhealthy container.
 
 ### Known limits
 

@@ -125,18 +125,18 @@ docker compose exec koppel dotnet Koppel.dll --reset-password
 ## The native install
 
 `src\Koppel\installer\build.ps1` makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows
-service (LocalSystem, starts at boot, restarts after a crash), the usbip-win2 driver, the Visual C++
+service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, the Visual C++
 runtime and a firewall rule for finding servers. The UI is at http://localhost:5240 and answers on
 this machine only: the installer sets `Ports__HttpAddress=127.0.0.1` for the service.
 
-- **Data folder:** `%ProgramData%\Koppel` is created with Administrators as owner and access for SYSTEM and Administrators only. If it already exists as a file or a link, or is owned by someone who is not an administrator, the install stops and says so: rename or delete the folder (copy any keys out first) and run setup again. A folder owned by an administrator, such as one an earlier install left, is taken over: the owner and access are reset for everything under it and any link inside is deleted.
-- **Driver:** its output goes to the MSI log, not to a file in the data folder. Keep a log of the install to read it (for example `msiexec /i Koppel.msi /l*v setup.log`). If Windows says a restart finishes the driver install, setup asks for one.
-- **A usbip-win2 you installed yourself** is found and used as it is. Koppel never changes or removes its driver. Koppel's own uninstall removes only the driver it installed itself (recorded in `%ProgramData%\Koppel\driver-state.json`). If the record is missing, the uninstall leaves the driver and prints how to remove it by hand.
+- **Data folder:** `%ProgramData%\Koppel` is created with Administrators as owner and access for SYSTEM and Administrators only. If it already exists as a file or a link, or is owned by someone who is not an administrator, the install stops and says so: rename or delete the folder (copy any keys out first) and run setup again. A folder owned by an administrator, such as one an earlier install left, is taken over: the owner and access are reset for everything under it any link inside is deleted, and a file or folder inside that is not owned by an administrator is renamed aside (`not-admin-owned-<time>`) and not used. The service also locks `%ProgramData%\Koppel` itself down on every start.
+- **Driver:** its output goes to the MSI log, not to a file in the data folder. Keep a log of the install to read it (for example `msiexec /i Koppel.msi /l*v setup.log`). If Windows says a restart finishes the driver install or its removal, setup or uninstall asks for one.
+- **A usbip-win2 you installed yourself** is found and used as it is. Koppel never changes or removes its driver. Koppel's own uninstall removes only the driver it installed itself (recorded in `%ProgramData%\Koppel\driver-state.json`), and only a package Windows still lists as one of usbip-win2's (`usbip2_*.inf`), because Windows reuses the `oemNN.inf` numbers. A usbip-win2 installed on its own is looked for first, even when a record exists. If the record is missing, or is not owned and protected by administrators, the uninstall leaves the driver and prints how to remove it by hand.
 - **The gateway is on by default** (127.0.0.1, port 3242), and serves only the Windows kernel, which is how usbip-win2's driver connects. Another program on the machine that connects to it is turned away, and so is any import Koppel did not ask for itself, such as another user's `usbip attach`. Koppel attaches devices through it by itself; you do not run `usbip attach` by hand.
 - **Servers:** a native Windows machine can be a client. As a server it still needs `Usb:Upstream` pointed at usbipd-win.
 
 Not tested: the elevated parts of the installer (taking over an existing data folder, the driver
-record and standalone detection, rollback, the restart request) have not been run on a test machine.
+record and standalone detection, rollback, the restart request, the recovery after an error stop) have not been run on a test machine.
 The installer is not code signed.
 
 ## Finding servers

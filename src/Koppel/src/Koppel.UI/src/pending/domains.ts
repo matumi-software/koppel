@@ -1,9 +1,9 @@
 import type { ConnectionView } from '@/api/client';
 import type { ClientView } from '@/api/server';
 import type { KoppelRole, KoppelSettings } from '@/api/settings';
-import type { DiscoveredServer, PairingStatus } from '@/api/pairing';
+import type { DiscoveredServer, PairingRequest, PairingStatus } from '@/api/pairing';
 import type { ClientDevices, ServerDevices } from '@/api/usb';
-import { clientDevicesKey, clientsKey, connectionKey, pairingStatusKey, serverDevicesKey, settingsKey } from '@/query-keys';
+import { clientDevicesKey, clientsKey, connectionKey, pairingRequestsKey, pairingStatusKey, serverDevicesKey, settingsKey } from '@/query-keys';
 import type { PendingDomain } from './pending-store';
 
 /** How long to wait for the server's confirmation before calling a change failed. */
@@ -57,7 +57,7 @@ export const pendingDomains = {
           : `${settingLabels[key as keyof KoppelSettings] ?? key}: ${typeof target === 'boolean' ? (target ? 'on' : 'off') : String(target)}`,
     }),
     verdict: (key, target, settings) =>
-      (key === 'setup' ? settings.setupComplete && settings.role === (target as SetupTarget).role : settings[key as keyof KoppelSettings] === target)
+      (key === 'setup' ? settings.setupComplete && settings.role === (target as SetupTarget | undefined)?.role : settings[key as keyof KoppelSettings] === target)
         ? 'confirmed'
         : 'waiting',
   }),
@@ -100,12 +100,24 @@ export const pendingDomains = {
     timeoutMs: confirmTimeoutMs,
     describe: () => ({ text: 'Save the server connection' }),
     verdict: (_key, sent, view) =>
+      sent !== undefined &&
       view.serverUrl !== null &&
       originOf(view.serverUrl) === originOf(sent.serverUrl) &&
       hexOf(view.serverFingerprint) === hexOf(sent.serverFingerprint) &&
       view.clientId === sent.clientId.trim()
         ? 'confirmed'
         : 'waiting',
+  }),
+
+  /** Approve or Refuse on a request to pair, by request id. Settled once the request no longer waits in the list. */
+  pairingRequests: domain<'approve' | 'deny', PairingRequest[]>({
+    queryKey: pairingRequestsKey,
+    timeoutMs: confirmTimeoutMs,
+    describe: (id, action, queryClient) => {
+      const name = queryClient.getQueryData<PairingRequest[]>(pairingRequestsKey)?.find((r) => r.id === id)?.clientName ?? id;
+      return { text: `${action === 'approve' ? 'Approve' : 'Refuse'} pairing with ${name}`, subject: id };
+    },
+    verdict: (id, _action, list) => (list.some((r) => r.id === id && r.state === 'waiting') ? 'waiting' : 'confirmed'),
   }),
 
   /**
@@ -122,7 +134,7 @@ export const pendingDomains = {
     verdict: (key, target, status) => {
       if (key === 'cancel') return status.state === 'idle' ? 'confirmed' : 'waiting';
       if (key === 'confirm') return status.state === 'confirm' ? 'waiting' : 'confirmed';
-      return status.state !== 'idle' && status.serverUrl === target?.url ? 'confirmed' : 'waiting';
+      return status.state !== 'idle' && !!target && status.serverUrl !== null && originOf(status.serverUrl) === originOf(target.url) ? 'confirmed' : 'waiting';
     },
   }),
 };

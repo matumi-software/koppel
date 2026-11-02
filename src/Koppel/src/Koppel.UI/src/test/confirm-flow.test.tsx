@@ -177,6 +177,87 @@ describe('the confirm rule', () => {
   });
 });
 
+describe('pushes and answers that arrive out of order', () => {
+  const event = (id: string, at: string) => ({
+    id,
+    timestampUtc: at,
+    entity: { id: 'x', name: 'x', type: 'device' as const },
+    reason: 'shared' as const,
+    outcome: 'succeeded' as const,
+    summary: id,
+    detail: null,
+  });
+
+  it('keeps an activity event pushed while the activity fetch is in flight', async () => {
+    const slow = deferred<Response>();
+    let fetches = 0;
+    mockFetch({ ...routes(), 'GET /api/activity?max=200': () => (++fetches === 1 ? json([]) : slow.promise) });
+    const { hub, queryClient } = renderApp(<Watcher />);
+    await waitFor(() => expect(fetches).toBe(1));
+    await act(async () => {});
+
+    // The refetch after a reconnect is under way when the push lands, then it answers without it.
+    void queryClient.invalidateQueries({ queryKey: ['activity'] });
+    await waitFor(() => expect(fetches).toBe(2));
+    act(() => hub.emit('ActivityRecorded', event('new', '2026-01-01T00:00:02Z')));
+    await act(async () => {
+      slow.resolve(json([event('old', '2026-01-01T00:00:01Z')]));
+      await slow.promise;
+    });
+
+    await waitFor(() => expect(text('app-activity')).toBe('new|old'));
+    expect(queryClient.getQueryData<{ id: string }[]>(['activity'])?.map((e) => e.id)).toEqual(['new', 'old']);
+  });
+
+  it('ignores a rejection that arrives after the change was confirmed', async () => {
+    const late = deferred<Response>();
+    mockFetch({ ...routes(), 'PATCH /api/settings': () => late.promise });
+    const { hub } = renderApp(
+      <>
+        <SettingsPage />
+        <Watcher />
+      </>,
+    );
+    await screen.findByText('Turn on');
+    fireEvent.click(screen.getByText('Turn on'));
+    await waitFor(() => expect(text('pending')).toBe('true'));
+
+    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => {
+      late.resolve(new Response(null, { status: 500 }));
+      await late.promise;
+    });
+    // A later push must not trip over a failure that was never recorded.
+    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: false }));
+
+    expect(text('failure')).toBe('none');
+    expect(text('saved')).toBe('true');
+    expect(text('app-pending')).toBe('none');
+  });
+
+  it('does not let a late rejection of an old send fail a newer one', async () => {
+    const first = deferred<Response>();
+    let sends = 0;
+    mockFetch({ ...routes(), 'PATCH /api/settings': () => (++sends === 1 ? first.promise : accepted()) });
+    const { hub } = renderApp(<SettingsPage />);
+    await screen.findByText('Turn on');
+    fireEvent.click(screen.getByText('Turn on'));
+    await waitFor(() => expect(text('pending')).toBe('true'));
+    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => hub.emit('SettingsChanged', settings));
+    fireEvent.click(screen.getByText('Turn on'));
+    await waitFor(() => expect(text('pending')).toBe('true'));
+
+    await act(async () => {
+      first.resolve(new Response(null, { status: 500 }));
+      await first.promise;
+    });
+
+    expect(text('pending')).toBe('true');
+    expect(text('failure')).toBe('none');
+  });
+});
+
 describe('hub pushes', () => {
   it('registers one handler per event, however many pages read the cache', async () => {
     mockFetch(routes());

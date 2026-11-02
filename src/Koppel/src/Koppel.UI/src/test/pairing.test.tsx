@@ -1,5 +1,6 @@
 import { act, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useActivity } from '@/activity/activity-context';
 import type { DiscoveredServer, PairingStatus } from '@/api/pairing';
 import { NearbyServers } from '@/client/nearby-servers';
 import { PairingRequests } from '@/server/pairing-requests';
@@ -25,6 +26,11 @@ const routes = (servers: DiscoveredServer[], connection: unknown = noConnection,
   'GET /api/activity?max=200': () => json([]),
   'GET /api/system/info': () => json({ name: 'bench-1' }),
 });
+
+function ActivityLines() {
+  const { items } = useActivity();
+  return <span data-testid="activity">{items.map((i) => `${i.lead ?? ''} ${i.text}`.trim()).join('|')}</span>;
+}
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -95,5 +101,87 @@ describe('pairing requests', () => {
     renderApp(<PairingRequests locked={false} />);
 
     expect(await screen.findByText(/Refused bench-2 from 10.0.0.9: The code was wrong three times\./)).toBeTruthy();
+  });
+});
+
+describe('approving and refusing a request', () => {
+  const waiting = { id: 'r1', clientName: 'bench-2', from: '10.0.0.9', requestedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:05:00Z', state: 'waiting', message: null };
+  const activityText = () => screen.getByTestId('activity').textContent;
+
+  const open = () =>
+    renderApp(
+      <>
+        <PairingRequests locked={false} />
+        <ActivityLines />
+      </>,
+    );
+
+  it('is pending with an activity line until the request leaves the list', async () => {
+    const { count } = mockFetch({
+      'GET /api/server/pairing': () => json([waiting]),
+      'GET /api/activity?max=200': () => json([]),
+      'POST /api/server/pairing/r1/approve': () => accepted(),
+    });
+    const { hub } = open();
+    fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '123456' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    await vi.waitFor(() => expect(count('POST /api/server/pairing/r1/approve')).toBe(1));
+    expect(activityText()).toContain('Waiting. Approve pairing with bench-2');
+    expect((screen.getByRole('button', { name: 'Refuse' }) as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => hub.emit('PairingRequestsChanged', []));
+
+    await vi.waitFor(() => expect(screen.queryByText(/bench-2 from/)).toBeNull());
+    expect(activityText()).toBe('');
+  });
+
+  it('shows the refusal of a wrong code, and the activity line says it was not done', async () => {
+    mockFetch({
+      'GET /api/server/pairing': () => json([waiting]),
+      'GET /api/activity?max=200': () => json([]),
+      'POST /api/server/pairing/r1/approve': () => json({ errors: { code: ['That code is not right.'] } }, 400),
+    });
+    open();
+    fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '123456' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('Not done: That code is not right.')).toBeTruthy();
+    expect(activityText()).toContain('Not done. Approve pairing with bench-2');
+  });
+
+  it('refuses through the same store', async () => {
+    const { count } = mockFetch({
+      'GET /api/server/pairing': () => json([waiting]),
+      'GET /api/activity?max=200': () => json([]),
+      'POST /api/server/pairing/r1/deny': () => accepted(),
+    });
+    open();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Refuse' }));
+
+    await vi.waitFor(() => expect(count('POST /api/server/pairing/r1/deny')).toBe(1));
+    expect(activityText()).toContain('Refuse pairing with bench-2');
+  });
+});
+
+describe('pairing with a nearby server', () => {
+  it('counts the pairing as under way when the server spells the address its own way', async () => {
+    const { count } = mockFetch({ ...routes([server('lab', 'a')]), 'POST /api/client/pairing': () => accepted() });
+    const { hub } = renderApp(
+      <>
+        <NearbyServers locked={false} />
+        <ActivityLines />
+      </>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Pair' }));
+    await vi.waitFor(() => expect(count('POST /api/client/pairing')).toBe(1));
+    expect(screen.getByTestId('activity').textContent).toContain('Pair with lab');
+
+    act(() => hub.emit('PairingStatusChanged', { ...idle, state: 'waiting', serverName: 'lab', serverUrl: 'HTTPS://10.0.0.5:5241', code: '123456' }));
+
+    await vi.waitFor(() => expect(screen.getByTestId('activity').textContent).toBe(''));
   });
 });

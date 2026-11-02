@@ -14,6 +14,6 @@ export function usePending<N extends PendingDomainName>(name: N) {
   const stores = useContext(PendingContext);
   if (!stores) throw new Error('usePending must be used inside PendingProvider.');
   const store = stores[name];
-  const { pending, failures, saved } = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  return { pending, failures, saved, request: store.request };
+  const { pending, failures, saved, completed } = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  return { pending, failures, saved, completed, request: store.request };
 }

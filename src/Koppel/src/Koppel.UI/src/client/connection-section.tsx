@@ -16,16 +16,17 @@ const connectionPending = 'connection';
  */
 export function ConnectionSection({ locked }: { locked: boolean }) {
   const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection });
-  const { saved } = usePending('connection');
+  const { completed } = usePending('connection');
   if (!connection.data) {
     return null;
   }
-  // Remount the form when the stored connection changes or a save is confirmed, so it shows what is
-  // stored and the secret that was typed is gone.
+  // Remount the form when a save is confirmed, so the secret that was typed is gone. A late confirm of
+  // a save that had failed does not count, and a changed stored connection is taken in by the form
+  // itself without dropping edits: the person may be typing by then.
   return (
     <>
       <NearbyServers locked={locked} />
-      <ConnectionForm key={`${JSON.stringify(connection.data)}#${saved[connectionPending] ?? 0}`} stored={connection.data} locked={locked} />
+      <ConnectionForm key={completed[connectionPending] ?? 0} stored={connection.data} locked={locked} />
     </>
   );
 }
@@ -40,6 +41,21 @@ function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: bo
   const { pending, failures, request } = usePending('connection');
   const isPending = connectionPending in pending;
   const failure = failures[connectionPending];
+
+  // When the stored connection changes, show it, unless the person has edits of their own to keep.
+  const [seen, setSeen] = useState(stored);
+  if (seen !== stored) {
+    const edited =
+      !isPending &&
+      (serverUrl !== (seen.serverUrl ?? '') || fingerprint !== (seen.serverFingerprint ?? '') || clientId !== (seen.clientId ?? '') || secret !== '');
+    setSeen(stored);
+    if (!edited) {
+      setServerUrl(stored.serverUrl ?? '');
+      setFingerprint(stored.serverFingerprint ?? '');
+      setClientId(stored.clientId ?? '');
+      setSecret('');
+    }
+  }
 
   const save = () => {
     setTest(undefined);

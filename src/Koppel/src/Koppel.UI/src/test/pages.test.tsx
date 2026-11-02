@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionView } from '@/api/client';
 import type { KoppelSettings } from '@/api/settings';
 import { App } from '@/app';
+import { AuthContext } from '@/auth/auth-context';
+import { confirmTimeoutMs } from '@/pending/domains';
 import { ConfigurationPage } from '@/settings/configuration-page';
 import { SetupPage } from '@/setup/setup-page';
 import { FrameContext, type FrameApi } from '@/shell/frame-context';
@@ -107,6 +109,22 @@ describe('the open page', () => {
     renderApp(<App />);
 
     await waitFor(() => expect(window.location.hash).toBe('#overview'));
+  });
+});
+
+describe('sign out', () => {
+  it('says so when the server did not sign the browser out', async () => {
+    window.location.hash = '#overview';
+    mockFetch(baseRoutes);
+    renderApp(
+      <AuthContext.Provider value={{ recheck: () => {}, signOut: () => Promise.reject(new Error('the server answered 500.')) }}>
+        <App />
+      </AuthContext.Provider>,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+
+    expect(await screen.findByText('Not signed out: the server answered 500.')).toBeTruthy();
   });
 });
 
@@ -235,6 +253,30 @@ describe('the server connection', () => {
     await act(async () => hub.emit('ConnectionChanged', { ...connection, serverUrl: 'https://lab.example:5241' }));
 
     await waitFor(() => expect(clientId().disabled).toBe(false));
+  });
+
+  it('does not rebuild the form under someone typing when a save that had failed is confirmed late', async () => {
+    mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
+    const { hub } = renderApp(configuration());
+    await screen.findByLabelText('Client secret');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fireEvent.change(clientId(), { target: { value: 'bench-2' } });
+      fireEvent.click(saveConnection());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(confirmTimeoutMs + 1);
+      });
+      expect(screen.getByText(/Not saved: no confirmation from the server\./)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+    // Back to editing, then the server's confirmation of the old save arrives.
+    fireEvent.change(secret(), { target: { value: 'hunter2' } });
+
+    await act(async () => hub.emit('ConnectionChanged', { ...connection, clientId: 'bench-2' }));
+
+    expect(secret().value).toBe('hunter2');
+    expect(screen.queryByText(/Not saved/)).toBeNull();
   });
 
   it('shows why a test call failed instead of dropping the rejection', async () => {

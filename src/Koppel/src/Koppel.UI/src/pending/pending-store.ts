@@ -20,6 +20,8 @@ export interface PendingSnapshot<T> {
   failures: Readonly<Record<string, string>>;
   /** How many changes of each item the server has confirmed since the page loaded. */
   saved: Readonly<Record<string, number>>;
+  /** Like `saved`, but counts only changes that were pending when confirmed, not a late confirm of one that had failed. */
+  completed: Readonly<Record<string, number>>;
 }
 
 /**
@@ -29,11 +31,14 @@ export interface PendingSnapshot<T> {
  * whenever the cache holds new confirmed data, whether that came from a push or a refetch.
  */
 export class PendingStore<T, D> {
-  private snapshot: PendingSnapshot<T> = { pending: {}, failures: {}, saved: {} };
+  private snapshot: PendingSnapshot<T> = { pending: {}, failures: {}, saved: {}, completed: {} };
   private readonly listeners = new Set<() => void>();
   private readonly failedTargets = new Map<string, T>();
   private readonly logIds = new Map<string, string>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Which send each pending key is waiting on, so a late answer to an old send cannot settle a newer one. */
+  private readonly sends = new Map<string, number>();
+  private sendCount = 0;
 
   private readonly domain: PendingDomain<T, D>;
   private readonly queryClient: QueryClient;
@@ -69,6 +74,9 @@ export class PendingStore<T, D> {
 
   /** `serverLogged`: the server's own activity log already has the outcome, so our line goes. */
   private settle(key: string, failure?: string, serverLogged = false) {
+    // Already settled, for example a rejection that arrives after the confirmation.
+    if (!(key in this.snapshot.pending)) return;
+    this.sends.delete(key);
     clearTimeout(this.timers.get(key));
     this.timers.delete(key);
     const target = this.snapshot.pending[key];
@@ -78,6 +86,7 @@ export class PendingStore<T, D> {
       pending: this.without(this.snapshot.pending, key),
       failures: failure ? { ...this.snapshot.failures, [key]: failure } : this.without(this.snapshot.failures, key),
       saved: failure ? this.snapshot.saved : this.confirmed(key),
+      completed: failure ? this.snapshot.completed : { ...this.snapshot.completed, [key]: (this.snapshot.completed[key] ?? 0) + 1 },
     });
     const logId = this.logIds.get(key);
     if (logId) {
@@ -100,15 +109,20 @@ export class PendingStore<T, D> {
     const logId = describe && this.activityApi?.add({ state: 'pending', lead: 'Waiting.', text: describe.text, subject: describe?.subject });
     if (logId) this.logIds.set(key, logId);
     this.timers.set(key, setTimeout(() => this.settle(key, 'no confirmation from the server.'), this.domain.timeoutMs));
+    const sendId = ++this.sendCount;
+    this.sends.set(key, sendId);
     // The send may throw before it returns a promise.
     Promise.resolve()
       .then(send)
-      .catch((error: unknown) => this.settle(key, error instanceof Error ? error.message : 'the request failed.'));
+      .catch((error: unknown) => {
+        if (this.sends.get(key) === sendId) this.settle(key, error instanceof Error ? error.message : 'the request failed.');
+      });
   };
 
   /**
    * Call whenever the cache holds new confirmed data. Settles each pending change the data decides,
-   * and clears a failure once the data shows the value that failed after all.
+   * and clears a failure once the data shows the value that failed after all. That late confirm does
+   * not count as `completed`, so a form the person is editing is not rebuilt under them.
    */
   judge(data: D) {
     for (const [key, target] of Object.entries(this.snapshot.pending)) {

@@ -113,6 +113,21 @@ describe('pairing requests', () => {
     expect(await screen.findByText(/too many pairing requests and is turning new ones away/)).toBeTruthy();
   });
 
+  it('shows the alert when a push says the budget ran out, and drops it when it returns', async () => {
+    mockFetch({
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [] }),
+      'GET /api/activity?max=200': () => json([]),
+    });
+    const { hub } = renderApp(<PairingRequests locked={false} />);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    await act(async () => hub.emit('PairingRequestsChanged', { budgetExhausted: true, requests: [] }));
+    expect(await screen.findByText(/turning new ones away/)).toBeTruthy();
+
+    await act(async () => hub.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
+    await vi.waitFor(() => expect(screen.queryByText(/turning new ones away/)).toBeNull());
+  });
+
   it('shows nothing when there is nothing to say', async () => {
     mockFetch({
       'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [] }),
@@ -139,7 +154,7 @@ describe('approving and refusing a request', () => {
 
   it('is pending with an activity line until the request leaves the list', async () => {
     const { count } = mockFetch({
-      'GET /api/server/pairing': () => json([waiting]),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [waiting] }),
       'GET /api/activity?max=200': () => json([]),
       'POST /api/server/pairing/r1/approve': () => accepted(),
     });
@@ -152,7 +167,7 @@ describe('approving and refusing a request', () => {
     expect(activityText()).toContain('Waiting. Approve pairing with bench-2');
     expect((screen.getByRole('button', { name: 'Refuse' }) as HTMLButtonElement).disabled).toBe(true);
 
-    await act(async () => hub.emit('PairingRequestsChanged', []));
+    await act(async () => hub.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
 
     await vi.waitFor(() => expect(screen.queryByText(/bench-2 from/)).toBeNull());
     expect(activityText()).toBe('');
@@ -160,7 +175,7 @@ describe('approving and refusing a request', () => {
 
   it('shows the refusal of a wrong code, and the activity line says it was not done', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json([waiting]),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [waiting] }),
       'GET /api/activity?max=200': () => json([]),
       'POST /api/server/pairing/r1/approve': () => json({ errors: { code: ['That code is not right.'] } }, 400),
     });
@@ -175,7 +190,7 @@ describe('approving and refusing a request', () => {
 
   it('refuses through the same store', async () => {
     const { count } = mockFetch({
-      'GET /api/server/pairing': () => json([waiting]),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [waiting] }),
       'GET /api/activity?max=200': () => json([]),
       'POST /api/server/pairing/r1/deny': () => accepted(),
     });

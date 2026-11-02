@@ -1,7 +1,7 @@
 import type { ConnectionView } from '@/api/client';
 import type { ClientView } from '@/api/server';
 import type { KoppelRole, KoppelSettings } from '@/api/settings';
-import type { DiscoveredServer, PairingRequest, PairingStatus } from '@/api/pairing';
+import type { DiscoveredServer, PairingOverview, PairingStatus } from '@/api/pairing';
 import type { ClientDevices, ServerDevices } from '@/api/usb';
 import { clientDevicesKey, clientsKey, connectionKey, pairingRequestsKey, pairingStatusKey, serverDevicesKey, settingsKey } from '@/query-keys';
 import type { PendingDomain } from './pending-store';
@@ -110,14 +110,14 @@ export const pendingDomains = {
   }),
 
   /** Approve or Refuse on a request to pair, by request id. Settled once the request no longer waits in the list. */
-  pairingRequests: domain<'approve' | 'deny', PairingRequest[]>({
+  pairingRequests: domain<'approve' | 'deny', PairingOverview>({
     queryKey: pairingRequestsKey,
     timeoutMs: confirmTimeoutMs,
     describe: (id, action, queryClient) => {
-      const name = queryClient.getQueryData<PairingRequest[]>(pairingRequestsKey)?.find((r) => r.id === id)?.clientName ?? id;
+      const name = queryClient.getQueryData<PairingOverview>(pairingRequestsKey)?.requests.find((r) => r.id === id)?.clientName ?? id;
       return { text: `${action === 'approve' ? 'Approve' : 'Refuse'} pairing with ${name}`, subject: id };
     },
-    verdict: (id, _action, list) => (list.some((r) => r.id === id && r.state === 'waiting') ? 'waiting' : 'confirmed'),
+    verdict: (id, _action, view) => (view.requests.some((r) => r.id === id && r.state === 'waiting') ? 'waiting' : 'confirmed'),
   }),
 
   /**

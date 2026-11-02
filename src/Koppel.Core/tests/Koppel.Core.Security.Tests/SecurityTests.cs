@@ -29,6 +29,42 @@ public sealed class SecurityTests : IDisposable
     }
 
     [Fact]
+    public void New_hashes_are_sha256_and_never_contain_the_secret()
+    {
+        var secret = Secrets.NewSecret();
+
+        var hash = Secrets.Hash(secret);
+
+        hash.Should().StartWith("sha256$").And.NotContain(secret);
+        Secrets.Verify(secret, hash).Should().BeTrue();
+        Secrets.IsLegacy(hash).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("sha256$")]
+    [InlineData("sha256$not base64!")]
+    [InlineData("sha256$AAAA")]
+    [InlineData("pbkdf2-sha256$1$AAAA")]
+    [InlineData("pbkdf2-sha256$abc$AAAA$AAAA")]
+    public void Malformed_hashes_never_verify(string stored)
+    {
+        Secrets.Verify("secret", stored).Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_pbkdf2_hash_from_an_older_version_still_verifies()
+    {
+        const string secret = "an-old-secret";
+        var salt = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        var derived = System.Security.Cryptography.Rfc2898DeriveBytes.Pbkdf2(System.Text.Encoding.UTF8.GetBytes(secret), salt, 210_000, System.Security.Cryptography.HashAlgorithmName.SHA256, 32);
+        var legacy = $"pbkdf2-sha256$210000${Convert.ToBase64String(salt)}${Convert.ToBase64String(derived)}";
+
+        Secrets.Verify(secret, legacy).Should().BeTrue();
+        Secrets.Verify(secret + "x", legacy).Should().BeFalse();
+        Secrets.IsLegacy(legacy).Should().BeTrue();
+    }
+
+    [Fact]
     public void Pinned_fingerprint_matches_regardless_of_format()
     {
         using var certificate = ServerCertificate.Load(ServerCertificate.CreatePfx("lab-rack-3"));

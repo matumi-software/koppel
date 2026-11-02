@@ -128,6 +128,31 @@ public sealed class PairingTests : IDisposable
     }
 
     [Fact]
+    public async Task Poll_and_withdraw_without_the_token_from_the_open_reply_are_refused()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var https = PinnedClient(await FingerprintAsync(ct));
+        var nonce = PairingCode.NewNonce();
+        using var opened = await https.PostAsJsonAsync("/api/pair", new { clientName = "bench", commitment = PairingCode.Commit(nonce) }, ct);
+        var reply = await opened.EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonElement>(ct);
+        var requestId = reply.GetProperty("requestId").GetString();
+        var token = reply.GetProperty("pollToken").GetString()!;
+        (await https.PostAsJsonAsync($"/api/pair/{requestId}/reveal", new { clientNonce = nonce }, ct)).EnsureSuccessStatusCode();
+
+        (await https.GetAsync($"/api/pair/{requestId}", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await SendAsync(https, HttpMethod.Get, requestId, "not-the-token", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.DeleteAsync($"/api/pair/{requestId}", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await SendAsync(https, HttpMethod.Delete, requestId, "not-the-token", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using var serverUi = _server.CreateUiClient();
+        var listed = await serverUi.GetStringAsync("/api/server/pairing", ct);
+        listed.Should().Contain(requestId!).And.NotContain(token, "the token goes to the opener only");
+
+        (await SendAsync(https, HttpMethod.Get, requestId, token, ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await SendAsync(https, HttpMethod.Delete, requestId, token, ct)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/pairing", ct)).GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
     public async Task Pairing_is_only_offered_over_https()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -157,6 +182,13 @@ public sealed class PairingTests : IDisposable
 
     private HttpClient PinnedClient(string fingerprint) =>
         new(ServerCertificate.CreatePinnedHandler(fingerprint)) { BaseAddress = new Uri($"https://localhost:{_server.HttpsPort}") };
+
+    private static Task<HttpResponseMessage> SendAsync(HttpClient https, HttpMethod method, string? requestId, string token, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(method, $"/api/pair/{requestId}");
+        request.Headers.Add("X-Pair-Token", token);
+        return https.SendAsync(request, ct);
+    }
 
     private static string Wrong(string code) => code == "000000" ? "111111" : "000000";
 }

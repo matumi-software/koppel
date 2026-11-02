@@ -30,7 +30,9 @@ internal sealed record UsbListenerStatus(bool Listening, int Port, string? Error
 /// </para>
 /// <para>
 /// Before a client is authenticated it costs the server little: the number of connections in that state is
-/// capped, in all and per address, and they have a few seconds to finish. A port change restarts only
+/// capped, in all and per address (IPv6 per /64), and they have a few seconds to finish. When the cap is
+/// reached the oldest waiting connection is dropped, not the new one, and some places are kept for addresses
+/// that authenticated recently (see <see cref="PreAuthSlots"/>). A port change restarts only
 /// the listener; the sessions already running keep going. A session ends when its client is revoked or
 /// its secret is rotated (see <see cref="LiveSessions"/>), when the role leaves the server side, or when
 /// Koppel stops.
@@ -47,8 +49,6 @@ internal sealed partial class UsbIpTlsServer(
 {
     public const string Preface = "KOPPEL/1 ";
     private const int MaxPrefaceBytes = 8192;
-    private const int MaxPreAuth = 64;
-    private const int MaxPreAuthPerAddress = 8;
 
     /// <summary>Time for the TLS handshake and the token, together.</summary>
     private static readonly TimeSpan PreAuthBudget = TimeSpan.FromSeconds(5);
@@ -60,9 +60,9 @@ internal sealed partial class UsbIpTlsServer(
     private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(5);
 
     private readonly ConcurrentDictionary<Task, byte> _sessions = new();
-    private readonly ConcurrentDictionary<IPAddress, int> _preAuthByAddress = new();
-    private readonly SemaphoreSlim _wake = new(0);
-    private int _preAuth;
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _busLocks = new(StringComparer.Ordinal);
+    private readonly PreAuthSlots _preAuth = new(services.GetService<TimeProvider>() ?? TimeProvider.System);
+    private readonly WakeSignal _wake = new();
     private UsbListenerStatus _status = new(false, 0, null);
     private CancellationTokenSource? _cycle;
     private int _cyclePort;
@@ -91,18 +91,14 @@ internal sealed partial class UsbIpTlsServer(
         }
     }
 
-    public override void Dispose()
-    {
-        _wake.Dispose();
-        base.Dispose();
-    }
-
     private static bool Serves(KoppelRole role) => role is KoppelRole.Server or KoppelRole.Both;
 
     private async Task RunAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            // A change before this point is in what is read next; one after it sets the signal again.
+            _wake.Reset();
             var current = settings.Current;
             if (!Serves(current.Role))
             {
@@ -174,7 +170,7 @@ internal sealed partial class UsbIpTlsServer(
             // The listener cycle ended by itself.
         }
 
-        _wake.Release();
+        _wake.Set();
         return Task.CompletedTask;
     }
 
@@ -221,20 +217,13 @@ internal sealed partial class UsbIpTlsServer(
     private async Task HandleAsync(Socket socket, CancellationToken serving)
     {
         var address = AddressOf(socket);
-        if (!TryEnterPreAuth(address))
-        {
-            LogTooManyHandshakes(address);
-            socket.Dispose();
-            return;
-        }
-
-        var preAuth = true;
+        using var slot = _preAuth.Enter(address);
         try
         {
             Tune(socket);
             await using var tls = new SslStream(new NetworkStream(socket, ownsSocket: true));
             SessionIdentity? identity;
-            using (var budget = CancellationTokenSource.CreateLinkedTokenSource(serving))
+            using (var budget = CancellationTokenSource.CreateLinkedTokenSource(serving, slot.Evicted))
             {
                 budget.CancelAfter(PreAuthBudget);
                 await tls.AuthenticateAsServerAsync(
@@ -243,8 +232,7 @@ internal sealed partial class UsbIpTlsServer(
                 identity = await AuthenticateAsync(tls, budget.Token);
             }
 
-            preAuth = false;
-            LeavePreAuth(address);
+            slot.Authenticated();
             if (identity is null)
             {
                 return;
@@ -256,7 +244,7 @@ internal sealed partial class UsbIpTlsServer(
         }
         catch (OperationCanceledException)
         {
-            LogSessionEnded("it was cancelled or ran out of time");
+            LogSessionEnded(slot.Evicted.IsCancellationRequested ? "a newer connection took its place while it waited" : "it was cancelled or ran out of time");
         }
         catch (Exception ex) when (ex is IOException or System.Security.Authentication.AuthenticationException or EndOfStreamException or ObjectDisposedException or SocketException)
         {
@@ -266,13 +254,6 @@ internal sealed partial class UsbIpTlsServer(
         {
             // One bad session must not take the host down, and it must leave a trace.
             LogSessionFailed(ex);
-        }
-        finally
-        {
-            if (preAuth)
-            {
-                LeavePreAuth(address);
-            }
         }
     }
 
@@ -343,55 +324,83 @@ internal sealed partial class UsbIpTlsServer(
 
     private async Task ImportAsync(SslStream tls, string busId, string clientId, CancellationToken cancellationToken)
     {
-        var host = usb.Host;
-        var device = UsbBusId.IsValid(busId) ? (await usb.ExportableAsync(cancellationToken)).FirstOrDefault(d => d.BusId == busId) : null;
-        if (device is null || await host.GetStatusAsync(busId, cancellationToken) != ExportStatus.Available)
+        if (!UsbBusId.IsValid(busId))
         {
             await tls.WriteAsync(UsbIpProtocol.ImportReply(null), cancellationToken);
             return;
         }
 
-        if (host.CanReset)
+        // The status check, the reset and the start of the export are one step per device. Without it, two
+        // imports can both see the device available, and the second one's reset hits the first one's session.
+        // The lock is let go as soon as the export has begun, when the device reads as in use.
+        var busLock = _busLocks.GetOrAdd(busId, _ => new SemaphoreSlim(1, 1));
+        await busLock.WaitAsync(cancellationToken);
+        var locked = 1;
+        void Unlock()
         {
-            try
+            if (Interlocked.Exchange(ref locked, 0) == 1)
             {
-                await host.ResetAsync(busId, cancellationToken);
-            }
-            catch (UsbHostException ex)
-            {
-                // Most devices work without it, so the attach goes ahead.
-                LogResetFailed(busId, ex.Message);
+                busLock.Release();
             }
         }
 
-        var clientName = secrets.NameOf(clientId) ?? clientId;
-        var deviceName = device.Product ?? busId;
-        var attached = false;
         try
         {
-            // Returns when the client detaches or the link drops; the host then frees the device.
-            await host.ExportAsync(device, tls, async token =>
+            var host = usb.Host;
+            var device = (await usb.ExportableAsync(cancellationToken)).FirstOrDefault(d => d.BusId == busId);
+            if (device is null || await host.GetStatusAsync(busId, cancellationToken) != ExportStatus.Available)
             {
-                await tls.WriteAsync(UsbIpProtocol.ImportReply(device), token);
-                attached = true;
-                LogAttached(busId, clientId);
-                await activity.RecordAsync(new EntityRef(busId, deviceName, "device"), ActivityReason.Attached, ActivityOutcome.Succeeded, $"{clientName} attached {deviceName}", clientId);
-                await usb.SetAttachedAsync(busId, clientId);
-            }, cancellationToken);
-        }
-        catch (UsbHostException ex) when (!attached)
-        {
-            LogExportFailed(busId, ex.Message);
-            await tls.WriteAsync(UsbIpProtocol.ImportReply(null), CancellationToken.None);
+                await tls.WriteAsync(UsbIpProtocol.ImportReply(null), cancellationToken);
+                return;
+            }
+
+            if (host.CanReset)
+            {
+                try
+                {
+                    await host.ResetAsync(busId, cancellationToken);
+                }
+                catch (UsbHostException ex)
+                {
+                    // Most devices work without it, so the attach goes ahead.
+                    LogResetFailed(busId, ex.Message);
+                }
+            }
+
+            var clientName = secrets.NameOf(clientId) ?? clientId;
+            var deviceName = device.Product ?? busId;
+            var attached = false;
+            try
+            {
+                // Returns when the client detaches or the link drops; the host then frees the device.
+                await host.ExportAsync(device, tls, async token =>
+                {
+                    Unlock();
+                    await tls.WriteAsync(UsbIpProtocol.ImportReply(device), token);
+                    attached = true;
+                    LogAttached(busId, clientId);
+                    await activity.RecordAsync(new EntityRef(busId, deviceName, "device"), ActivityReason.Attached, ActivityOutcome.Succeeded, $"{clientName} attached {deviceName}", clientId);
+                    await usb.SetAttachedAsync(busId, clientId);
+                }, cancellationToken);
+            }
+            catch (UsbHostException ex) when (!attached)
+            {
+                LogExportFailed(busId, ex.Message);
+                await tls.WriteAsync(UsbIpProtocol.ImportReply(null), CancellationToken.None);
+            }
+            finally
+            {
+                if (attached)
+                {
+                    LogDetached(busId, clientId);
+                    await activity.RecordAsync(new EntityRef(busId, deviceName, "device"), ActivityReason.Detached, ActivityOutcome.Succeeded, $"{clientName} released {deviceName}", clientId);
+                    await usb.SetAttachedAsync(busId, null);
+                }
+            }
         }
         finally
         {
-            if (attached)
-            {
-                LogDetached(busId, clientId);
-                await activity.RecordAsync(new EntityRef(busId, deviceName, "device"), ActivityReason.Detached, ActivityOutcome.Succeeded, $"{clientName} released {deviceName}", clientId);
-                await usb.SetAttachedAsync(busId, null);
-            }
+            Unlock();
         }
     }
 
@@ -454,32 +463,6 @@ internal sealed partial class UsbIpTlsServer(
             ? address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address
             : IPAddress.None;
 
-    private bool TryEnterPreAuth(IPAddress address)
-    {
-        if (Interlocked.Increment(ref _preAuth) > MaxPreAuth)
-        {
-            Interlocked.Decrement(ref _preAuth);
-            return false;
-        }
-
-        if (_preAuthByAddress.AddOrUpdate(address, 1, (_, count) => count + 1) > MaxPreAuthPerAddress)
-        {
-            LeavePreAuth(address);
-            return false;
-        }
-
-        return true;
-    }
-
-    private void LeavePreAuth(IPAddress address)
-    {
-        Interlocked.Decrement(ref _preAuth);
-        if (_preAuthByAddress.AddOrUpdate(address, 0, (_, count) => count - 1) <= 0)
-        {
-            _preAuthByAddress.TryRemove(new KeyValuePair<IPAddress, int>(address, 0));
-        }
-    }
-
     /// <summary>
     /// Low latency, and TCP keepalive so a client that vanished (a sleeping laptop, a pulled cable) is noticed
     /// in about a minute and the device is freed, instead of staying in use until Koppel restarts.
@@ -515,9 +498,6 @@ internal sealed partial class UsbIpTlsServer(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "A USB session failed")]
     private partial void LogSessionFailed(Exception exception);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a connection from {Address}: too many handshakes are waiting")]
-    private partial void LogTooManyHandshakes(IPAddress address);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Count} USB sessions were still running when the listener stopped")]
     private partial void LogSessionsStillRunning(int count);

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Threading.Channels;
 using Koppel.Core.Activity;
 using Koppel.Core.Configuration;
 using Koppel.Core.Usb;
@@ -43,6 +44,12 @@ public sealed record ServerDevices(IReadOnlyList<DeviceView> Devices, string? Un
 /// kernel, and raises <see cref="Changed"/> whenever what the kernel reports changes. Polls the host
 /// every two seconds, which also catches plugging and unplugging.
 /// </summary>
+/// <remarks>
+/// A snapshot is taken, and given a sequence number, under a lock. It is delivered to the handlers outside
+/// that lock, by one pump, in order, and a snapshot that a newer one overtook while the handlers were busy is
+/// dropped. Handlers push to the network, so a slow or stuck peer holds up only the pump, never an import,
+/// a share or the poll.
+/// </remarks>
 internal sealed partial class UsbServer(
     IUsbHost host,
     KoppelPaths paths,
@@ -68,6 +75,10 @@ internal sealed partial class UsbServer(
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private readonly Channel<Delivery> _deliveries = Channel.CreateUnbounded<Delivery>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly WakeSignal _refreshRequested = new();
+    private readonly BackgroundTasks _tasks = new(logger);
+    private long _sequence;
     private KoppelRole _role;
     private HashSet<string>? _present;
     private string _lastJson = "";
@@ -88,8 +99,17 @@ internal sealed partial class UsbServer(
         await _shared.StartAsync(cancellationToken);
         _role = settings.Current.Role;
         settings.Changed += OnSettingsAsync;
-        await ReconcileAsync(cancellationToken);
-        await RefreshAsync(cancellationToken);
+        try
+        {
+            await ReconcileAsync(cancellationToken);
+            await RefreshAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A sysfs hiccup at start-up is no reason to stay down. The poll applies the saved shares and looks again.
+            LogStartUpFailed(ex);
+        }
+
         await base.StartAsync(cancellationToken);
     }
 
@@ -98,6 +118,7 @@ internal sealed partial class UsbServer(
         settings.Changed -= OnSettingsAsync;
         _shared.Stop();
         await base.StopAsync(cancellationToken);
+        await _tasks.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     /// <summary>
@@ -143,7 +164,7 @@ internal sealed partial class UsbServer(
         }
     }
 
-    /// <summary>Called by the data plane when a client imports or releases a device.</summary>
+    /// <summary>Called by the data plane when a client imports or releases a device. The UI hears about it a moment later, and nobody waits for that.</summary>
     public Task SetAttachedAsync(string busId, string? clientId)
     {
         if (clientId is null)
@@ -155,7 +176,8 @@ internal sealed partial class UsbServer(
             _attachedTo[busId] = (clientId, time.GetUtcNow());
         }
 
-        return RefreshAsync(CancellationToken.None, force: true);
+        _refreshRequested.Set();
+        return Task.CompletedTask;
     }
 
     public override void Dispose()
@@ -168,9 +190,29 @@ internal sealed partial class UsbServer(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await Task.WhenAll(PollAsync(stoppingToken), DeliverAsync(stoppingToken), RefreshWhenRequestedAsync(stoppingToken));
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Stopping.
+        }
+    }
+
+    private async Task PollAsync(CancellationToken stoppingToken)
+    {
         using var timer = new PeriodicTimer(PollInterval);
+        var failures = 0;
+        var skip = 0;
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            if (skip > 0)
+            {
+                skip--;
+                continue;
+            }
+
             try
             {
                 // A shared device that comes back after unplugging needs binding again.
@@ -190,7 +232,65 @@ internal sealed partial class UsbServer(
 
                 await RefreshAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is IOException or UsbHostException)
+            catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
+            {
+                // Whatever the host throws, the poll goes on: it is what notices a plugged device and re-shares one.
+                // A host that keeps failing is asked less often, up to every fifteenth tick.
+                LogPollFailed(ex);
+                skip = Math.Min(1 << Math.Min(failures++, 4), 14);
+                continue;
+            }
+
+            failures = 0;
+        }
+    }
+
+    /// <summary>Takes snapshots off the queue in order and hands the newest to the handlers. Snapshots overtaken while the handlers ran are dropped.</summary>
+    private async Task DeliverAsync(CancellationToken stoppingToken)
+    {
+        long delivered = 0;
+        while (await _deliveries.Reader.WaitToReadAsync(stoppingToken))
+        {
+            Delivery? latest = null;
+            var plugs = new List<PlugEvent>();
+            while (_deliveries.Reader.TryRead(out var next))
+            {
+                plugs.AddRange(next.Plugs);
+                latest = next.Sequence > (latest?.Sequence ?? delivered) ? next : latest;
+            }
+
+            if (latest is null)
+            {
+                continue;
+            }
+
+            delivered = latest.Sequence;
+            try
+            {
+                await Changed.RaiseAsync(latest.Devices, logger);
+                foreach (var plug in plugs)
+                {
+                    await activity.RecordAsync(new EntityRef(plug.BusId, plug.Name, "device"), plug.Reason, ActivityOutcome.Succeeded, plug.Summary);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogDeliveryFailed(ex);
+            }
+        }
+    }
+
+    /// <summary>Refreshes for the callers that only ask for it, so none of them waits on the host.</summary>
+    private async Task RefreshWhenRequestedAsync(CancellationToken stoppingToken)
+    {
+        while (true)
+        {
+            await _refreshRequested.WaitAsync(stoppingToken);
+            try
+            {
+                await RefreshAsync(stoppingToken, force: true);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 LogPollFailed(ex);
             }
@@ -281,18 +381,35 @@ internal sealed partial class UsbServer(
             return;
         }
 
+        if (was)
+        {
+            // Giving every device back can take a while. The settings change is confirmed to the UI without it.
+            _tasks.Run("unshare on leaving the server role", async () =>
+            {
+                await _applyGate.WaitAsync();
+                try
+                {
+                    // The role came back while this waited: the handler for that change shares again.
+                    if (!Serves(_role))
+                    {
+                        await UnshareEverythingAsync();
+                    }
+                }
+                finally
+                {
+                    _applyGate.Release();
+                }
+
+                await RefreshAsync(CancellationToken.None, force: true);
+            });
+            return;
+        }
+
         await _applyGate.WaitAsync();
         try
         {
-            if (was)
-            {
-                await UnshareEverythingAsync();
-            }
-            else
-            {
-                ActivateSaved(next);
-                await ApplyIntentAsync(unshareStrays: false, CancellationToken.None);
-            }
+            ActivateSaved(next);
+            await ApplyIntentAsync(unshareStrays: false, CancellationToken.None);
         }
         finally
         {
@@ -406,8 +523,7 @@ internal sealed partial class UsbServer(
 
     private async Task RefreshAsync(CancellationToken cancellationToken, bool force = false)
     {
-        // The event is raised with the gate held, so two refreshes never deliver their snapshots out of order.
-        // A handler must not call back into a refresh.
+        // Only the snapshot and its place in the queue are taken under the gate. Handlers run in the pump.
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -420,8 +536,7 @@ internal sealed partial class UsbServer(
 
             _lastJson = json;
             Volatile.Write(ref _current, next);
-            await Changed.RaiseAsync(next, logger);
-            await RecordPlugChangesAsync(next);
+            _deliveries.Writer.TryWrite(new Delivery(++_sequence, next, PlugChanges(next)));
         }
         finally
         {
@@ -429,27 +544,30 @@ internal sealed partial class UsbServer(
         }
     }
 
-    /// <summary>Logs devices that appeared or disappeared since the last look. The first look only remembers.</summary>
-    private async Task RecordPlugChangesAsync(ServerDevices devices)
+    /// <summary>Devices that appeared or disappeared since the last look. The first look only remembers.</summary>
+    private List<PlugEvent> PlugChanges(ServerDevices devices)
     {
         var present = devices.Devices.Where(d => d.State != "offline").Select(d => d.BusId).ToHashSet(StringComparer.Ordinal);
         var previous = Interlocked.Exchange(ref _present, present);
         if (previous is null)
         {
-            return;
+            return [];
         }
 
+        var changes = new List<PlugEvent>();
         foreach (var busId in present.Except(previous))
         {
             var name = _names.GetValueOrDefault(busId, busId);
-            await activity.RecordAsync(new EntityRef(busId, name, "device"), ActivityReason.Plugged, ActivityOutcome.Succeeded, $"{name} was plugged in on bus {busId}");
+            changes.Add(new PlugEvent(busId, name, ActivityReason.Plugged, $"{name} was plugged in on bus {busId}"));
         }
 
         foreach (var busId in previous.Except(present))
         {
             var name = _names.GetValueOrDefault(busId, busId);
-            await activity.RecordAsync(new EntityRef(busId, name, "device"), ActivityReason.Unplugged, ActivityOutcome.Succeeded, $"{name} was unplugged from bus {busId}");
+            changes.Add(new PlugEvent(busId, name, ActivityReason.Unplugged, $"{name} was unplugged from bus {busId}"));
         }
+
+        return changes;
     }
 
     private async Task<ServerDevices> BuildAsync(CancellationToken cancellationToken)
@@ -526,4 +644,14 @@ internal sealed partial class UsbServer(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Reading USB devices failed")]
     private partial void LogPollFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Setting up the shared devices at start-up failed; the next poll tries again")]
+    private partial void LogStartUpFailed(Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Telling listeners about the device list failed")]
+    private partial void LogDeliveryFailed(Exception exception);
+
+    private sealed record Delivery(long Sequence, ServerDevices Devices, IReadOnlyList<PlugEvent> Plugs);
+
+    private sealed record PlugEvent(string BusId, string Name, ActivityReason Reason, string Summary);
 }

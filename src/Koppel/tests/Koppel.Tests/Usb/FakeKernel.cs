@@ -76,6 +76,21 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
     /// <summary>While set, a reset blocks, so the server stalls an import after the client authenticated.</summary>
     public ManualResetEventSlim? ResetGate { get; set; }
 
+    /// <summary>Released each time a reset starts, so a test can wait for one without a sleep.</summary>
+    public SemaphoreSlim ResetStarted { get; } = new(0);
+
+    /// <summary>While set, an unshare blocks, so a test can see that the caller of a settings change does not wait for it.</summary>
+    public ManualResetEventSlim? UnshareGate { get; set; }
+
+    /// <summary>Set to make the next listings throw this, so a test can break the host under the poll loop. It is cleared once it has thrown <see cref="ListFailures"/> times.</summary>
+    public Exception? ListFailure { get; set; }
+
+    /// <summary>How many more listings throw <see cref="ListFailure"/>.</summary>
+    public int ListFailures { get; set; }
+
+    /// <summary>Completes the first time a listing throws <see cref="ListFailure"/>.</summary>
+    public TaskCompletionSource ListFailed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     /// <summary>How many times the client kernel attached a device.</summary>
     public int Attaches => _attaches;
 
@@ -103,6 +118,13 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
     {
         lock (_state)
         {
+            if (ListFailure is { } failure && ListFailures > 0)
+            {
+                ListFailures--;
+                ListFailed.TrySetResult();
+                throw failure;
+            }
+
             return Task.FromResult<IReadOnlyList<UsbDevice>>([.. _devices.Select(d => d with { Driver = _bound.Contains(d.BusId) ? "usbip-host" : "ftdi_sio" })]);
         }
     }
@@ -127,15 +149,18 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
         return Task.CompletedTask;
     }
 
-    public Task UnshareAsync(string busId, CancellationToken cancellationToken)
+    public async Task UnshareAsync(string busId, CancellationToken cancellationToken)
     {
+        if (UnshareGate is { } gate)
+        {
+            await Task.Run(() => gate.Wait(cancellationToken), CancellationToken.None);
+        }
+
         lock (_state)
         {
             Unshared.Add(busId);
             _bound.Remove(busId);
         }
-
-        return Task.CompletedTask;
     }
 
     public Task<ExportStatus> GetStatusAsync(string busId, CancellationToken cancellationToken) =>
@@ -143,6 +168,7 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
 
     public async Task ResetAsync(string busId, CancellationToken cancellationToken)
     {
+        ResetStarted.Release();
         if (ResetGate is { } gate)
         {
             await Task.Run(() => gate.Wait(cancellationToken), CancellationToken.None);

@@ -1,14 +1,16 @@
 using System.Collections.Concurrent;
 using Koppel.Server;
+using Koppel.Settings;
 
 namespace Koppel.Usb;
 
 /// <summary>
 /// The live sessions of remote clients: USB connections and remote hub connections. When the client
 /// list changes and a client is gone, or its credentials were rotated, its sessions are aborted, so
-/// revoking a client ends what it is doing now and not only what it asks for next.
+/// revoking a client ends what it is doing now and not only what it asks for next. When the role leaves
+/// the server side, the remote hub connections are aborted too, because the role is only checked when a request starts.
 /// </summary>
-internal sealed partial class LiveSessions(ServerSecretsStore secrets, ILogger<LiveSessions> logger) : IHostedService
+internal sealed partial class LiveSessions(ServerSecretsStore secrets, SettingsStore settings, ILogger<LiveSessions> logger) : IHostedService
 {
     private readonly ConcurrentDictionary<long, Session> _sessions = new();
     private long _next;
@@ -16,12 +18,14 @@ internal sealed partial class LiveSessions(ServerSecretsStore secrets, ILogger<L
     public Task StartAsync(CancellationToken cancellationToken)
     {
         secrets.ClientsChanged += OnClientsChanged;
+        settings.Changed += OnSettingsChanged;
         return Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
         secrets.ClientsChanged -= OnClientsChanged;
+        settings.Changed -= OnSettingsChanged;
         return Task.CompletedTask;
     }
 
@@ -59,6 +63,19 @@ internal sealed partial class LiveSessions(ServerSecretsStore secrets, ILogger<L
         return Task.CompletedTask;
     }
 
+    private Task OnSettingsChanged(KoppelSettings next)
+    {
+        if (next.Role is not (KoppelRole.Server or KoppelRole.Both))
+        {
+            foreach (var session in _sessions.Values.Where(s => s.ConnectionId is not null))
+            {
+                Abort(session);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     private void Abort(Session session)
     {
         LogAborted(session.ClientId);
@@ -72,7 +89,7 @@ internal sealed partial class LiveSessions(ServerSecretsStore secrets, ILogger<L
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Ending a session of client {ClientId}: it was revoked or its secret was rotated")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ending a session of client {ClientId}: it was revoked, its secret was rotated or this machine is no longer a server")]
     private partial void LogAborted(string clientId);
 
     private sealed record Session(string ClientId, int Generation, Action Abort, string? ConnectionId);

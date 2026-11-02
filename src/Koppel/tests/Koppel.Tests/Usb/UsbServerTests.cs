@@ -117,6 +117,64 @@ public sealed class UsbServerTests : IDisposable
     }
 
     [Fact]
+    public async Task The_poll_survives_a_host_that_throws_something_unexpected_and_picks_up_changes_afterwards()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _host = new KoppelFactory(services: s => s.AddSingleton<IUsbHost>(_kernel), shareDongle: true);
+        using var ui = _host.CreateUiClient();
+        await ui.GetAsync("/api/server/devices", ct);
+        var usb = _host.Services.GetRequiredService<Koppel.Usb.UsbServer>();
+        var plugged = new TaskCompletionSource();
+        usb.Changed += devices =>
+        {
+            if (devices.Devices.Any(d => d.BusId == "2-1"))
+            {
+                plugged.TrySetResult();
+            }
+
+            return Task.CompletedTask;
+        };
+
+        _kernel.ListFailure = new UnauthorizedAccessException("sysfs said no");
+        _kernel.ListFailures = 1;
+        await _kernel.ListFailed.Task.WaitAsync(TimeSpan.FromSeconds(10), ct);
+        _kernel.Plug(FakeKernel.Dongle, FakeKernel.Dongle with { BusId = "2-1" });
+
+        await plugged.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
+    }
+
+    [Fact]
+    public async Task A_sysfs_error_at_start_up_does_not_stop_the_host_and_the_saved_share_is_applied_by_the_poll()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _kernel.Bind("1-1.4", false);
+        _kernel.ListFailure = new IOException("sysfs is busy");
+        _kernel.ListFailures = 1;
+        _host = new KoppelFactory(services: s => s.AddSingleton<IUsbHost>(_kernel), shareDongle: true);
+
+        // Reaching the host starts it. It must come up although the first look at the kernel failed.
+        using var ui = _host.CreateUiClient();
+        var usb = _host.Services.GetRequiredService<Koppel.Usb.UsbServer>();
+        var shared = new TaskCompletionSource();
+        usb.Changed += devices =>
+        {
+            if (devices.Devices.Any(d => d.State == "shared"))
+            {
+                shared.TrySetResult();
+            }
+
+            return Task.CompletedTask;
+        };
+        if (usb.Current.Devices.Any(d => d.State == "shared"))
+        {
+            shared.TrySetResult();
+        }
+
+        await shared.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
+        _kernel.IsBound("1-1.4").Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Start_up_keeps_what_was_shared_and_saved()
     {
         var ct = TestContext.Current.CancellationToken;

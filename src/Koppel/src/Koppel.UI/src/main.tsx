@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import '@koppel/react-ui/styles.css';
 import './app.css';
+import { AuthGate } from './auth/auth-gate';
 import { App } from './app';
 import { HubProvider } from './hub/hub-provider';
 import { HubPushes } from './hub/hub-pushes';
@@ -19,14 +20,16 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <HubProvider>
-        <HubPushes />
-        <ActivityProvider>
-          <PendingProvider>
-            <App />
-          </PendingProvider>
-        </ActivityProvider>
-      </HubProvider>
+      <AuthGate>
+        <HubProvider>
+          <HubPushes />
+          <ActivityProvider>
+            <PendingProvider>
+              <App />
+            </PendingProvider>
+          </ActivityProvider>
+        </HubProvider>
+      </AuthGate>
     </QueryClientProvider>
   </StrictMode>,
 );

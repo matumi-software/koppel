@@ -7,6 +7,7 @@ import { getSettings } from '@/api/settings';
 import { ClientDevicesPage } from '@/devices/client-devices';
 import { ServerDevicesPage } from '@/devices/server-devices';
 import { hostOf, useClientDevices, useServerDevices } from '@/devices/use-devices';
+import { useAuth } from '@/auth/auth-context';
 import { useHub } from '@/hub/hub-context';
 import { OverviewPage } from '@/overview/overview-page';
 import { ClientsPage } from '@/server/clients-page';
@@ -22,6 +23,7 @@ import { useMachineName } from '@/shared/use-machine-name';
 export function App() {
   const host = useMachineName();
   const { state: link, retry } = useHub();
+  const { signOut } = useAuth();
   const { items } = useActivity();
   const [page, go] = usePageFromHash();
   const [isMenuOpen, setMenuOpen] = useState(false);
@@ -101,6 +103,9 @@ export function App() {
           </Button>
         }
       />
+      <Button variant="ghost" onPress={() => void signOut()}>
+        Sign out
+      </Button>
       {isClient && client.data && (
         <span className="kp-type-caption" style={{ color: client.data.link === 'connected' ? 'var(--text-tertiary)' : 'var(--pending-text)' }}>
           {client.data.link === 'connected'

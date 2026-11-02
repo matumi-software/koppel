@@ -17,7 +17,9 @@ export interface ServerActivity {
     | 'secretRotated'
     | 'reconfigured'
     | 'linkUp'
-    | 'linkDown';
+    | 'linkDown'
+    | 'signInFailed'
+    | 'passwordChanged';
   outcome: 'succeeded' | 'failed';
   summary: string;
   detail: string | null;

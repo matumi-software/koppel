@@ -9,3 +9,4 @@ export const pairingRequestsKey = ['pairing-requests'] as const;
 export const pairingStatusKey = ['pairing-status'] as const;
 export const discoveredServersKey = ['discovered-servers'] as const;
 export const systemInfoKey = ['system-info'] as const;
+export const authKey = ['auth-state'] as const;

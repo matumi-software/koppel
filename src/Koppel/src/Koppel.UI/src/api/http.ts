@@ -19,14 +19,30 @@ export async function rejection(response: Response): Promise<RejectedError> {
  * Sends a request to Koppel's API. Anything that changes state carries X-Koppel-UI, which a
  * page on another site cannot add without the server's say-so, so the server can refuse those.
  */
-export function uiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+export async function uiFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set('X-Koppel-UI', '1');
-  return fetch(url, { ...init, headers });
+  const response = await fetch(url, { ...init, headers });
+  if (response.status === 401) unauthorized?.();
+  return response;
+}
+
+let unauthorized: (() => void) | undefined;
+
+/**
+ * Registers what happens when the server answers 401 to an API request: the session ended, so the
+ * login screen shows. Returns the way to unregister.
+ */
+export function onUnauthorized(handler: () => void): () => void {
+  unauthorized = handler;
+  return () => {
+    if (unauthorized === handler) unauthorized = undefined;
+  };
 }
 
 export async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
+  if (response.status === 401) unauthorized?.();
   if (!response.ok) {
     throw new Error(`Could not load ${url} (${response.status}).`);
   }

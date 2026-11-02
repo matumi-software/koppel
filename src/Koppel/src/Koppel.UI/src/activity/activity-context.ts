@@ -45,6 +45,8 @@ const glyphs: Record<ServerActivity['reason'], GlyphState> = {
   reconfigured: 'live',
   linkUp: 'live',
   linkDown: 'fault',
+  signInFailed: 'fault',
+  passwordChanged: 'live',
 };
 
 export function fromServer(event: ServerActivity): ActivityItem {

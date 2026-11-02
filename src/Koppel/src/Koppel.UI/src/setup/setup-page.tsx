@@ -36,7 +36,7 @@ export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: 
       </header>
       <main style={{ display: 'flex', justifyContent: 'center', padding: '40px 16px' }}>
         <div style={{ width: '100%', maxWidth: 920, display: 'flex', flexDirection: 'column', gap: 28 }}>
-          <Steps steps={['What this machine does', chosen === 'client' ? 'Server connection' : 'Clients']} current={0} />
+          <Steps steps={['Admin password', 'What this machine does', chosen === 'client' ? 'Server connection' : 'Clients']} current={1} />
           <div className="kp-page-head">
             <h1>Set up {host}</h1>
             <p>Pick what this machine does. You can change it later under Configuration.</p>

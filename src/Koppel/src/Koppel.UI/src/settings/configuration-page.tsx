@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button, Field, Panel, RoleCards, Setting, SettingList, Switch } from '@koppel/react-ui';
+import { ChangePassword } from './change-password';
 import { ConnectionSection } from '@/client/connection-section';
 import { Frame } from '@/shell/frame';
 import { useMachineName } from '@/shared/use-machine-name';
@@ -75,6 +76,8 @@ export function ConfigurationPage() {
       )}
 
       {isClientRole(role.confirmed) && <ConnectionSection locked={locked} />}
+
+      <ChangePassword locked={locked} />
     </Frame>
   );
 }

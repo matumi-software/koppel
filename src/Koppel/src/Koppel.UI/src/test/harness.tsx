@@ -4,6 +4,7 @@ import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
 import { ActivityProvider } from '@/activity/activity-provider';
+import { AuthContext } from '@/auth/auth-context';
 import { HubContext } from '@/hub/hub-context';
 import { HubPushes } from '@/hub/hub-pushes';
 import { PendingProvider } from '@/pending/pending-provider';
@@ -37,12 +38,14 @@ export const newQueryClient = () =>
 export function renderApp(ui: ReactElement, hub = new FakeHub(), queryClient = newQueryClient()) {
   const tree = (node: ReactElement) => (
     <QueryClientProvider client={queryClient}>
-      <HubContext.Provider value={{ connection: hub as unknown as HubConnection, state: 'live', retry: () => {} }}>
-        <HubPushes />
-        <ActivityProvider>
-          <PendingProvider>{node}</PendingProvider>
-        </ActivityProvider>
-      </HubContext.Provider>
+      <AuthContext.Provider value={{ recheck: () => {}, signOut: async () => {} }}>
+        <HubContext.Provider value={{ connection: hub as unknown as HubConnection, state: 'live', retry: () => {} }}>
+          <HubPushes />
+          <ActivityProvider>
+            <PendingProvider>{node}</PendingProvider>
+          </ActivityProvider>
+        </HubContext.Provider>
+      </AuthContext.Provider>
     </QueryClientProvider>
   );
   const result = render(tree(ui));

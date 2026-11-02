@@ -2,6 +2,7 @@ import { HubConnectionBuilder, HubConnectionState } from '@microsoft/signalr';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { LinkState } from '@koppel/react-ui';
+import { useAuth } from '@/auth/auth-context';
 import { HubContext } from './hub-context';
 
 const retryDelays = [0, 2000, 5000, 10000, 30000];
@@ -19,6 +20,7 @@ function createConnection() {
 /** Owns the UI's live link to the server and reports its state for LinkBanner. */
 export function HubProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const { recheck } = useAuth();
   const [connection] = useState(createConnection);
   const [state, setState] = useState<LinkState>('reconnecting');
   // A start must wait for the previous stop (StrictMode mounts, stops and mounts again).
@@ -40,18 +42,25 @@ export function HubProvider({ children }: { children: ReactNode }) {
         },
         () => {
           if (active.current) setState('down');
+          // A refused start may be a session that ended; the gate shows the login screen if so.
+          recheck();
         },
       );
 
   useEffect(() => {
     active.current = true;
-    connection.onreconnecting(() => setState('reconnecting'));
+    connection.onreconnecting(() => {
+      setState('reconnecting');
+      recheck();
+    });
     connection.onreconnected(() => {
       setState('live');
       void queryClient.invalidateQueries();
     });
     connection.onclose(() => {
       if (active.current) setState('down');
+      // The server closes the hub when the session ends (sign-out, password change).
+      recheck();
     });
     void start();
     return () => {
@@ -60,7 +69,7 @@ export function HubProvider({ children }: { children: ReactNode }) {
     };
     // start only reads refs and stable values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connection, queryClient]);
+  }, [connection, queryClient, recheck]);
 
   const retry = () => {
     setState('reconnecting');

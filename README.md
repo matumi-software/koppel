@@ -6,9 +6,10 @@ Koppel speaks the standard USB/IP protocol and adds a web UI, authentication and
 around it. A machine runs as a server (shares its devices), a client (attaches them) or both. Clients
 find servers on the local network and pair by typing a code, so nobody copies secrets around.
 
-Status: early development. A Linux server in Docker shares a real USB keyboard and mouse receiver
-to a Windows 11 client through the installed service. Storage, printers, keyboards and mice are the
-devices we aim to support first. Work happens on `dev`; `main` holds releases.
+Status: version 0.1.0, early. A Linux server in Docker shares a real USB keyboard and mouse receiver
+to a Windows 11 client through the installed service. Storage and printers are the devices we aim to support
+next, and are untried on real hardware. The newest USB changes are covered by tests with fakes and not yet
+re-run on real hardware. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`; `main` holds releases.
 
 | Platform | Server | Client |
 |---|---|---|
@@ -21,11 +22,15 @@ devices we aim to support first. Work happens on `dev`; `main` holds releases.
 The image is `matumisoftware/koppel` on Docker Hub (amd64 for now).
 
 1. Copy [src/Koppel/deploy/prepare-host.sh](src/Koppel/deploy/prepare-host.sh) to the machine and
-   run it once. It installs Docker and loads the kernel's USB/IP modules now and at every boot:
+   run it once. It installs Docker from Docker's apt repository (Debian and Ubuntu) and loads the kernel's USB/IP
+   modules now and at every boot:
 
    ```sh
-   sudo sh prepare-host.sh
+   sudo bash prepare-host.sh
    ```
+
+   If a module will not load, the script says so; on an Ubuntu cloud kernel the fix is usually
+   `sudo apt-get install linux-modules-extra-$(uname -r)`.
 
 2. Copy [src/Koppel/deploy/docker-compose.yml](src/Koppel/deploy/docker-compose.yml) to the machine
    and start Koppel next to it:
@@ -34,12 +39,14 @@ The image is `matumisoftware/koppel` on Docker Hub (amd64 for now).
    docker compose up -d
    ```
 
-3. Open `http://<machine>:5240` and choose the role.
+3. Find the one-time setup code with `docker logs <container>` (it reads `Koppel setup code: XXXX-XXXX`), open
+   `http://<machine>:5240`, set the password and choose the role.
 
 The container uses the host's network so clients can find it. It restarts after a crash, and comes
 back at the next reboot even if someone stopped it by hand.
 
-To upgrade:
+The compose file pins the image version (`matumisoftware/koppel:0.1.0`). To upgrade, change the tag to the new
+version, then:
 
 ```sh
 docker compose pull && docker compose up -d
@@ -61,7 +68,9 @@ Build the installer from `src/Koppel/installer`:
 
 That makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows service, usbip-win2's signed
 driver, the Visual C++ runtime, and a firewall rule that lets Koppel find servers. Open
-http://localhost:5240 afterwards.
+http://localhost:5240 afterwards. The first time, it asks for a setup code: it is in
+`%ProgramData%\Koppel\config\setup-code.txt`. The UI answers on this machine only. See
+[docs/windows.md](docs/windows.md) for what the installer does to `%ProgramData%\Koppel` and the driver.
 
 ## Pair a client
 
@@ -76,13 +85,21 @@ address under Configuration instead.
 
 | Port | What |
 |---|---|
-| 5240 TCP | Web UI (HTTP) |
+| 5240 TCP | Web UI (HTTP), behind the password. Native Windows binds it to this machine only |
 | 5241 TCP | Token endpoint, pairing and the API other Koppel machines call (HTTPS) |
 | 3240 TCP | USB traffic (TLS) |
+| 3242 TCP | Gateway for a USB/IP driver on the same machine (plain, no login). Native Windows client: on, 127.0.0.1 only. Windows Docker client: inside the container, published as 127.0.0.1:3240 on the host |
 | 5353 UDP | Finding servers (multicast DNS) |
 
-The UI on port 5240 has no login yet. Anyone who can reach it can manage the machine, so keep it on
-a trusted network.
+The UI is plain HTTP. On a network you do not trust, bind it to `127.0.0.1` or put a TLS proxy in front, because the
+password and the session cookie cross it unencrypted. If you forget the password:
+
+```sh
+docker compose exec koppel dotnet Koppel.dll --reset-password
+```
+
+On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then read
+a new setup code and set a new password.
 
 ## Develop
 

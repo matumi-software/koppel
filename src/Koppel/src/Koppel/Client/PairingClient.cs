@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Koppel.Core.Configuration;
 using Koppel.Core.Security;
 using Koppel.Server;
 
@@ -147,7 +148,7 @@ internal sealed partial class PairingClient(ConnectionStore connection, ILogger<
     private Task SetAsync(PairingStatus status)
     {
         _status = status;
-        return Changed?.Invoke(status) ?? Task.CompletedTask;
+        return Changed.RaiseAsync(status, logger);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Waiting for the code to be typed on {Server}")]

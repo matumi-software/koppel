@@ -23,7 +23,7 @@ internal sealed class ConnectionStore : IHostedService, IDisposable
     public ConnectionStore(KoppelPaths paths, SecretBox box, ILogger<ConnectionStore> logger)
     {
         _file = new JsonConfigFile<ClientConnection>(paths.ConnectionFile, ClientConnection.Empty, KoppelJson.Files, logger, box.AsFileCodec());
-        _file.Changed += connection => Changed?.Invoke(ToView(connection)) ?? Task.CompletedTask;
+        _file.Changed += connection => Changed.RaiseAsync(ToView(connection), logger);
     }
 
     public event Func<ConnectionView, Task>? Changed;

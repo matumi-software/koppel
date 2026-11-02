@@ -158,16 +158,7 @@ public sealed partial class JsonConfigFile<T> : IDisposable
         }
     }
 
-    private async Task RaiseChangedAsync(T value)
-    {
-        if (Changed is { } handlers)
-        {
-            foreach (var handler in handlers.GetInvocationList().Cast<Func<T, Task>>())
-            {
-                await handler(value);
-            }
-        }
-    }
+    private Task RaiseChangedAsync(T value) => Changed.RaiseAsync(value, _logger);
 
     private async Task<T?> ReadFileAsync(CancellationToken cancellationToken)
     {

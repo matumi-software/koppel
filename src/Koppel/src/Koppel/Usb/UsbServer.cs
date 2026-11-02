@@ -217,10 +217,7 @@ internal sealed partial class UsbServer(
             _gate.Release();
         }
 
-        if (Changed is { } handler)
-        {
-            await handler(next);
-        }
+        await Changed.RaiseAsync(next, logger);
 
         await RecordPlugChangesAsync(next);
     }

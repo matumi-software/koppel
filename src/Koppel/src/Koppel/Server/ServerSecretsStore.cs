@@ -40,7 +40,7 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
     {
         _time = time;
         _file = new JsonConfigFile<ServerSecrets>(paths.ServerSecretsFile, ServerSecrets.Empty, KoppelJson.Files, logger, box.AsFileCodec());
-        _file.Changed += secrets => ClientsChanged?.Invoke(ToViews(secrets)) ?? Task.CompletedTask;
+        _file.Changed += secrets => ClientsChanged.RaiseAsync(ToViews(secrets), logger);
     }
 
     /// <summary>Raised after the client list on disk changed.</summary>

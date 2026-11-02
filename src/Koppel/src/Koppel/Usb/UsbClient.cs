@@ -609,7 +609,7 @@ internal sealed partial class UsbClient(
 
     private string NameOf(string busId) => _remote.Devices.FirstOrDefault(d => d.BusId == busId)?.Name ?? busId;
 
-    private Task RaiseAsync() => Changed?.Invoke(Current) ?? Task.CompletedTask;
+    private Task RaiseAsync() => Changed.RaiseAsync(Current, logger);
 
     /// <param name="Port">The virtual port, or the driver's port for a driver attach; null for another gateway attach.</param>
     /// <param name="Via">Where another gateway attach came from.</param>

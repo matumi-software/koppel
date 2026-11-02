@@ -51,6 +51,8 @@ public sealed class KoppelFactory : IDisposable
             {
                 // Never the machine's own usbip-win2: a test that wants a driver brings a fake one.
                 s.AddSingleton<IUsbIpDriver>(new UnsupportedUsb("No USB/IP driver in tests."));
+                // Tests connect to the gateway from a user-mode process, which the Windows kernel-only check refuses.
+                s.AddSingleton<Koppel.Usb.IGatewayPeerCheck>(new Koppel.Usb.AnyPeer());
                 services?.Invoke(s);
             });
         });

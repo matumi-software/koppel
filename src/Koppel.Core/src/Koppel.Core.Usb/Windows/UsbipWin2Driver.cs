@@ -18,12 +18,13 @@ public sealed class UsbipWin2Driver(string usbipExe) : IUsbIpDriver
 
     public async Task<int> AttachAsync(string host, int port, string busId, CancellationToken cancellationToken)
     {
+        UsbBusId.Require(busId);
         // After a dropped connection the driver keeps trying to attach the device by itself. Stop that
         // first, so the device is not attached twice.
-        await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, "--bus-id", busId, "--stop");
+        await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, BusId(busId), "--stop");
 
         // --once: if the attach fails, fail now instead of retrying in the background.
-        var output = await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, "--bus-id", busId, "--terse", "--once");
+        var output = await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, BusId(busId), "--terse", "--once");
         return int.TryParse(output.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var driverPort)
             ? driverPort
             : throw new UsbHostException($"usbip.exe attached {busId} but did not say on which port: {output.Trim()}");
@@ -31,10 +32,14 @@ public sealed class UsbipWin2Driver(string usbipExe) : IUsbIpDriver
 
     public async Task DetachAsync(string host, int port, string busId, int driverPort, CancellationToken cancellationToken)
     {
+        UsbBusId.Require(busId);
         // The driver attaches again by itself after a dropped connection, so stop that first.
-        await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, "--bus-id", busId, "--stop");
+        await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, BusId(busId), "--stop");
         await RunAsync(cancellationToken, "detach", "-p", driverPort.ToString(CultureInfo.InvariantCulture));
     }
+
+    /// <summary>One token, so a value can never be read as an option of its own (usbip.exe takes <c>--bus-id=</c>).</summary>
+    private static string BusId(string busId) => $"--bus-id={busId}";
 
     private static string Port(int port) => port.ToString(CultureInfo.InvariantCulture);
 

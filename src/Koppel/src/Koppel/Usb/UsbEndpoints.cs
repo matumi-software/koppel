@@ -1,3 +1,4 @@
+using Koppel.Core.Usb;
 using Koppel.Settings;
 
 namespace Koppel.Usb;
@@ -45,13 +46,23 @@ internal static class UsbEndpoints
     {
         var group = app.MapGroup("/api/client/devices");
         group.MapGet("/", (UsbClient usb) => TypedResults.Ok(usb.Current));
-        group.MapPost("/{busId}/attach", async (string busId, UsbClient usb) =>
+        group.MapPost("/{busId}/attach", async Task<IResult> (string busId, UsbClient usb) =>
         {
+            if (!UsbBusId.IsValid(busId))
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["busId"] = ["That is not a USB bus ID."] });
+            }
+
             await usb.BeginAttachAsync(busId);
             return TypedResults.Accepted((string?)null);
         });
-        group.MapPost("/{busId}/detach", async (string busId, UsbClient usb) =>
+        group.MapPost("/{busId}/detach", async Task<IResult> (string busId, UsbClient usb) =>
         {
+            if (!UsbBusId.IsValid(busId))
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["busId"] = ["That is not a USB bus ID."] });
+            }
+
             await usb.DetachAsync(busId);
             return TypedResults.Accepted((string?)null);
         });

@@ -11,6 +11,8 @@ namespace Koppel.Core.Usb.Linux;
 /// <param name="sysRoot">Normally <c>/sys</c>; tests point it at a fake tree.</param>
 public sealed class SysfsVhci(string sysRoot = "/sys") : IUsbAttacher
 {
+    private readonly object _attachLock = new();
+
     /// <summary>
     /// The controller's attribute folder. Older kernels use the platform device; a 2026 change moved
     /// attach, detach and status under the driver, so both are tried.
@@ -57,20 +59,35 @@ public sealed class SysfsVhci(string sysRoot = "/sys") : IUsbAttacher
         var controller = Controller ?? throw new UsbHostException(Unavailable!);
         // SuperSpeed devices need a port on the SuperSpeed hub; everything else uses the high-speed hub.
         var hub = speed >= UsbSpeed.Super ? "ss" : "hs";
-        var port = Ports().FirstOrDefault(p => p.IsFree && p.Hub == hub)
-            ?? throw new UsbHostException("All virtual USB ports are in use. Detach a device first.");
+        var fd = UsbSockets.FileDescriptor(socket);
 
-        var line = string.Create(CultureInfo.InvariantCulture, $"{port.Port} {UsbSockets.FileDescriptor(socket)} {devId} {(int)speed}");
-        try
+        // Picking a free port and writing the attach line is one step: two attaches at once would
+        // otherwise pick the same port. If the kernel still refuses (someone outside Koppel took the
+        // port in between), the next free port gets one try.
+        lock (_attachLock)
         {
-            File.WriteAllText(Path.Combine(controller, "attach"), line);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            throw new UsbHostException($"The kernel refused to attach the device: {ex.Message}", ex);
-        }
+            var tried = new List<int>();
+            for (var attempt = 0; ; attempt++)
+            {
+                var port = Ports().FirstOrDefault(p => p.IsFree && p.Hub == hub && !tried.Contains(p.Port))
+                    ?? throw new UsbHostException("All virtual USB ports are in use. Detach a device first.");
+                var line = string.Create(CultureInfo.InvariantCulture, $"{port.Port} {fd} {devId} {(int)speed}");
+                try
+                {
+                    File.WriteAllText(Path.Combine(controller, "attach"), line);
+                    return port.Port;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    if (attempt >= 1 || ex is UnauthorizedAccessException)
+                    {
+                        throw new UsbHostException($"The kernel refused to attach the device: {ex.Message}", ex);
+                    }
 
-        return port.Port;
+                    tried.Add(port.Port);
+                }
+            }
+        }
     }
 
     public void Detach(int port)

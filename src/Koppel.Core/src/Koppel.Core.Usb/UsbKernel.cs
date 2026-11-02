@@ -117,6 +117,27 @@ public static class UsbSockets
         }
     }
 
+    /// <summary>
+    /// Has the OS probe an idle connection: after 30 s of silence, every 10 s, and drop it after 3
+    /// unanswered probes. A half-open link (a server that lost power, a NAT that forgot the flow) then
+    /// ends in about a minute instead of leaving a device attached to nothing.
+    /// </summary>
+    public static void EnableKeepAlive(Socket socket)
+    {
+        ArgumentNullException.ThrowIfNull(socket);
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 30);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 10);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
+        }
+        catch (Exception ex) when (ex is SocketException or PlatformNotSupportedException)
+        {
+            // An OS without these options keeps its own keepalive defaults.
+        }
+    }
+
     /// <summary>The socket's file descriptor, which the kernel's sysfs files take as text.</summary>
     public static int FileDescriptor(Socket socket)
     {

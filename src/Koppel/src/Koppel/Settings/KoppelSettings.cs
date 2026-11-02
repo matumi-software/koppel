@@ -47,13 +47,16 @@ internal sealed record SettingsPatch(
         return errors;
     }
 
-    /// <summary>The change in words for the activity log, such as "Role set to client".</summary>
-    public string Describe() => string.Join(". ", new[]
+    /// <summary>
+    /// What this patch changes in <paramref name="current"/>, in words for the activity log, such as
+    /// "Role set to client". Empty when it changes nothing.
+    /// </summary>
+    public string Describe(KoppelSettings current) => string.Join(". ", new[]
     {
-        Role is { } role ? $"Role set to {role.ToString().ToLowerInvariant()}" : null,
-        ShareOnStartup is { } share ? $"Share saved devices on startup turned {(share ? "on" : "off")}" : null,
-        ListenPort is { } port ? $"USB port set to {port}" : null,
-        SetupComplete is true ? "Setup finished" : null,
+        Role is { } role && role != current.Role ? $"Role set to {role.ToString().ToLowerInvariant()}" : null,
+        ShareOnStartup is { } share && share != current.ShareOnStartup ? $"Share saved devices on startup turned {(share ? "on" : "off")}" : null,
+        ListenPort is { } port && port != current.ListenPort ? $"USB port set to {port}" : null,
+        SetupComplete is true && !current.SetupComplete ? "Setup finished" : null,
     }.Where(part => part is not null));
 
     public KoppelSettings ApplyTo(KoppelSettings current) => current with

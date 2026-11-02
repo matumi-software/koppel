@@ -22,8 +22,10 @@ internal static class SettingsEndpoints
                 return TypedResults.ValidationProblem(errors);
             }
 
+            // A change that leaves everything as it is writes no activity, so repeating it cannot flood the log.
+            var summary = patch.Describe(store.Current);
             await store.ApplyAsync(patch, cancellationToken);
-            if (patch.Describe() is { Length: > 0 } summary)
+            if (summary.Length > 0)
             {
                 await activity.RecordAsync(new EntityRef("machine", Environment.MachineName, "machine"), ActivityReason.Reconfigured, ActivityOutcome.Succeeded, summary);
             }

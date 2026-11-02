@@ -22,14 +22,18 @@ public sealed class KoppelTokenClient(HttpClient http, TimeProvider time) : IDis
     private (string ClientId, string Token, DateTimeOffset ExpiresAt)? _cached;
 
     /// <param name="server">The server's HTTPS base address, such as <c>https://lab-rack-3:5241</c>.</param>
-    public async Task<string> GetAccessTokenAsync(Uri server, string clientId, string clientSecret, CancellationToken cancellationToken)
+    public async Task<string> GetAccessTokenAsync(Uri server, string clientId, string clientSecret, CancellationToken cancellationToken) =>
+        (await GetAccessTokenWithExpiryAsync(server, clientId, clientSecret, cancellationToken)).Token;
+
+    /// <summary>The same, with the moment the token stops working, for a caller that must renew a connection before then.</summary>
+    public async Task<(string Token, DateTimeOffset ExpiresAt)> GetAccessTokenWithExpiryAsync(Uri server, string clientId, string clientSecret, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
             if (_cached is { } cached && cached.ClientId == clientId && cached.ExpiresAt - RenewBefore > time.GetUtcNow())
             {
-                return cached.Token;
+                return (cached.Token, cached.ExpiresAt);
             }
 
             using var form = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -51,7 +55,7 @@ public sealed class KoppelTokenClient(HttpClient http, TimeProvider time) : IDis
             }
 
             _cached = (clientId, body.AccessToken, time.GetUtcNow().AddSeconds(body.ExpiresIn ?? 300));
-            return body.AccessToken;
+            return (body.AccessToken, _cached.Value.ExpiresAt);
         }
         finally
         {

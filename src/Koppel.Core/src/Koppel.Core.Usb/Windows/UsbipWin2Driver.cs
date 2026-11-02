@@ -21,7 +21,7 @@ public sealed class UsbipWin2Driver(string usbipExe) : IUsbIpDriver
         UsbBusId.Require(busId);
         // After a dropped connection the driver keeps trying to attach the device by itself. Stop that
         // first, so the device is not attached twice.
-        await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, BusId(busId), "--stop");
+        await StopAttemptsAsync(port, host, busId, cancellationToken);
 
         // --once: if the attach fails, fail now instead of retrying in the background.
         var output = await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, BusId(busId), "--terse", "--once");
@@ -34,8 +34,25 @@ public sealed class UsbipWin2Driver(string usbipExe) : IUsbIpDriver
     {
         UsbBusId.Require(busId);
         // The driver attaches again by itself after a dropped connection, so stop that first.
-        await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, BusId(busId), "--stop");
+        await StopAttemptsAsync(port, host, busId, cancellationToken);
         await RunAsync(cancellationToken, "detach", "-p", driverPort.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// Asks the driver to stop its attach attempts for the device. Its help does not say what <c>--stop</c>
+    /// exits with when there are none, and for a device that was never attached that is the usual case, so a
+    /// failed stop never fails the attach or the detach: the command after it reports what really went wrong.
+    /// </summary>
+    private async Task StopAttemptsAsync(int port, string host, string busId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, BusId(busId), "--stop");
+        }
+        catch (UsbHostException)
+        {
+            // Nothing to stop, or the driver would not say; carry on.
+        }
     }
 
     /// <summary>One token, so a value can never be read as an option of its own (usbip.exe takes <c>--bus-id=</c>).</summary>

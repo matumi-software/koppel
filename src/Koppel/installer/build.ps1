@@ -3,7 +3,8 @@
 Builds Koppel's Windows installer: bin\Koppel-Setup.exe.
 
 .DESCRIPTION
-1. Publishes Koppel self-contained for win-x64, UI included, so the machine needs no .NET.
+1. Publishes Koppel self-contained for win-x64, UI included, so the machine needs no .NET, and
+   compiled ahead of time (ReadyToRun), so the first requests after a start are not slow.
 2. Adds usbip-win2's driver and tools (from usbip-win2\<version>, see export-usbip-win2.ps1),
    driver.ps1 and the third-party notices.
 3. Builds the MSI, then setup.exe, which installs the VC++ runtime first.
@@ -32,7 +33,7 @@ Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $staging, $cache, $out | Out-Null
 
 Write-Host 'Publishing Koppel...'
-Invoke-Checked { dotnet publish (Join-Path $product 'src\Koppel\Koppel.csproj') -c Release -r win-x64 --self-contained -o $staging -p:Version=$Version -nologo -v q }
+Invoke-Checked { dotnet publish (Join-Path $product 'src\Koppel\Koppel.csproj') -c Release -r win-x64 --self-contained -o $staging -p:Version=$Version -p:PublishReadyToRun=true -nologo -v q }
 
 $usbipWin2 = Get-ChildItem (Join-Path $installer 'usbip-win2') -Directory | Sort-Object { [version]$_.Name } | Select-Object -Last 1
 if (-not $usbipWin2) { throw 'No usbip-win2 files. Run export-usbip-win2.ps1 first.' }

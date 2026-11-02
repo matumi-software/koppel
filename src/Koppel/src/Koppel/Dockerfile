@@ -27,8 +27,13 @@ COPY global.json Directory.Build.props Directory.Packages.props .editorconfig ./
 COPY Koppel.Core ./Koppel.Core
 COPY Koppel ./Koppel
 
-# PublishRunWebpack builds the SPA and stages dist/ into wwwroot/.
-RUN dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo -p:SkipSpaInstall=true
+# PublishRunWebpack builds the SPA and stages dist/ into wwwroot/. ReadyToRun compiles ahead of time:
+# without it a low-power thin client spends seconds compiling on its first request (8 to 14 s measured
+# on an AMD GX-212JC), long enough for a client's first token or pairing request to time out.
+ARG TARGETARCH
+RUN RID=$([ "$TARGETARCH" = "arm64" ] && echo linux-arm64 || echo linux-x64) \
+ && dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo \
+      -r $RID --self-contained false -p:PublishReadyToRun=true -p:SkipSpaInstall=true
 
 # -------- Stage 2: runtime -------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final

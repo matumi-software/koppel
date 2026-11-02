@@ -98,6 +98,13 @@ same Docker network can still reach it on port 3242.
 usbip-win2 has no documented option for another port, so the gateway takes 3240 on the host. A
 machine that also runs usbipd-win cannot use both at once.
 
+## Finding servers
+
+Koppel finds servers on the local network and pairs with a code typed on the server (see
+"Finding servers and pairing" in `docs/architecture.md`). In a container on Windows that does not
+work: Docker Desktop's network does not pass multicast DNS to or from the LAN. Enter the server's
+address by hand there, or use the native install, which finds servers and has its firewall rule.
+
 ## Configuration
 
 | Setting | Where | What |

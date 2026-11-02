@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -53,9 +54,11 @@ public static class KoppelAuthServer
                 options.SetAccessTokenLifetime(accessTokenLifetime ?? TimeSpan.FromMinutes(30));
 
                 // Only access tokens are issued, and they are signed, not encrypted. The encryption key
-                // OpenIddict insists on is never used, so an ephemeral one is enough.
+                // OpenIddict insists on is never used, so a random one per start is enough. It is
+                // symmetric: AddEphemeralEncryptionKey makes a 2048-bit RSA key on the first request,
+                // which took 8 to 14 seconds on a low-power thin client and timed out its first caller.
                 options.DisableAccessTokenEncryption();
-                options.AddEphemeralEncryptionKey();
+                options.AddEncryptionKey(new SymmetricSecurityKey(RandomNumberGenerator.GetBytes(32)));
 
                 options.UseAspNetCore();
 

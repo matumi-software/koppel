@@ -1,4 +1,5 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
   <Package Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="1CFA893C-6A76-421E-B40E-86B0F6A16154" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer version of Koppel is already installed." />
     <MediaTemplate EmbedCab="yes" />
@@ -19,7 +20,11 @@
 
     <ComponentGroup Id="App" Directory="INSTALLFOLDER">
       <Component Id="Service">
-        <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes" />
+        <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes">
+          <!-- Answers to "which Koppel servers are here?" arrive over multicast DNS. Windows' own mDNS rule
+               only covers its DNS client service, so Koppel needs its own, kept to the local subnet. -->
+          <fw:FirewallException Id="KoppelDiscovery" Name="Koppel: find servers on the local network" Protocol="udp" Port="5353" Scope="localSubnet" />
+        </File>
         <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on http://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes" />
         <ServiceControl Id="KoppelService" Name="Koppel" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
       </Component>

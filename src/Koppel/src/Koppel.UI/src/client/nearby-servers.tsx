@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { Button, MiniList, PairingCode, Panel, type MiniListItem } from '@koppel/react-ui';
+import { getConnection } from '@/api/client';
 import { cancelPairing, getDiscoveredServers, getPairingStatus, startPairing, type DiscoveredServer, type PairingStatus } from '@/api/pairing';
 import { useHubEvent } from '@/hub/hub-context';
 import { useMachineName } from '@/shared/use-machine-name';
@@ -17,6 +18,9 @@ export function NearbyServers({ locked }: { locked: boolean }) {
   const queryClient = useQueryClient();
   const me = useMachineName();
   const servers = useQuery({ queryKey: serversKey, queryFn: getDiscoveredServers });
+  // The same cache key ConnectionSection keeps current from ConnectionChanged.
+  const connection = useQuery({ queryKey: ['connection'], queryFn: getConnection });
+  const linkedTo = hex(connection.data?.serverFingerprint);
   const status = useQuery({ queryKey: pairingKey, queryFn: getPairingStatus });
   const [starting, setStarting] = useState<string>();
   const [failure, setFailure] = useState<string>();
@@ -48,11 +52,14 @@ export function NearbyServers({ locked }: { locked: boolean }) {
     id: server.fingerprint,
     name: server.name,
     sub: `${server.address}${server.version ? `, Koppel ${server.version}` : ''}`,
-    end: (
-      <Button variant="secondary" isSending={starting === server.fingerprint} isDisabled={locked || busy} onPress={() => pair(server)}>
-        Pair
-      </Button>
-    ),
+    end:
+      linkedTo && hex(server.fingerprint) === linkedTo ? (
+        <span className="kp-type-caption">Connected</span>
+      ) : (
+        <Button variant="secondary" isSending={starting === server.fingerprint} isDisabled={locked || busy} onPress={() => pair(server)}>
+          Pair
+        </Button>
+      ),
   }));
 
   return (
@@ -96,3 +103,6 @@ export function NearbyServers({ locked }: { locked: boolean }) {
     </Panel>
   );
 }
+
+/** Fingerprints compare by their hex digits alone. */
+const hex = (fingerprint: string | null | undefined) => (fingerprint ?? '').replace(/[^0-9a-f]/gi, '').toUpperCase() || undefined;

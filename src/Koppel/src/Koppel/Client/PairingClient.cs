@@ -23,6 +23,9 @@ internal sealed record PairStartRequest(string? ServerUrl, string? ServerFingerp
 internal sealed partial class PairingClient(ConnectionStore connection, ILogger<PairingClient> logger)
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+
+    /// <summary>Generous: a server on slow hardware can take many seconds over its first request after a start.</summary>
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(60);
     private readonly Lock _lock = new();
     private CancellationTokenSource? _run;
     private PairingStatus _status = PairingStatus.Idle;
@@ -59,7 +62,7 @@ internal sealed partial class PairingClient(ConnectionStore connection, ILogger<
     {
         var status = new PairingStatus("requesting", serverName, serverUrl);
         await SetAsync(status);
-        using var http = new HttpClient(ServerCertificate.CreatePinnedHandler(fingerprint)) { BaseAddress = new Uri(serverUrl), Timeout = TimeSpan.FromSeconds(15) };
+        using var http = new HttpClient(ServerCertificate.CreatePinnedHandler(fingerprint)) { BaseAddress = new Uri(serverUrl), Timeout = RequestTimeout };
         string? requestId = null;
         try
         {

@@ -75,9 +75,12 @@ EXPOSE 5240 5241 3240
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys
 
-# The anonymous GET /healthz on the UI port. The image has no curl, so bash opens the connection itself.
-# It checks the default UI port: if you move Ports__Http (or bind elsewhere), change this to match.
+# The anonymous GET /healthz on the UI port, probed at the configured Ports__HttpAddress and Ports__Http and then
+# at 127.0.0.1 (see healthcheck.sh). Plain Docker only reports "unhealthy": it does not restart the container
+# (restart: unless-stopped acts on exits, not on health). Swarm and Kubernetes act on it; with plain Docker,
+# something has to watch it, for example an autoheal container, or `docker ps --filter health=unhealthy`.
+COPY Koppel/src/Koppel/healthcheck.sh /app/healthcheck.sh
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5240 && printf 'GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && read -r status <&3 && [[ $status == *' 200 '* ]]"]
+  CMD ["bash", "/app/healthcheck.sh"]
 
 ENTRYPOINT ["dotnet", "Koppel.dll"]

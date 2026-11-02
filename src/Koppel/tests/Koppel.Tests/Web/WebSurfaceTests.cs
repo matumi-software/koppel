@@ -148,7 +148,7 @@ public sealed class WebSurfaceTests : IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         var host = Host();
-        var plain = Own(host.CreatePlainClient());
+        var plain = Own(host.CreateSignedInPlainClient());
         var ui = Own(host.CreateUiClient());
 
         (await plain.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK);

@@ -8,6 +8,7 @@ using Koppel.Core.Usb.Linux;
 using Koppel.Core.Usb.Windows;
 using Koppel.Discovery;
 using Koppel.Hubs;
+using Koppel.Login;
 using Koppel.Security;
 using Koppel.Server;
 using Koppel.Settings;
@@ -45,6 +46,14 @@ builder.Services.AddSignalR().AddJsonProtocol(options => KoppelJson.Configure(op
 
 var paths = KoppelPaths.FromConfiguration(builder.Configuration, builder.Environment);
 paths.Prepare();
+
+// A one-off command: clear the UI password and exit, before anything else starts.
+if (UiPasswordReset.Requested(args))
+{
+    using var resetBox = SecretBoxFactory.Create(paths, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+    return await UiPasswordReset.RunAsync(paths, resetBox, Console.Out);
+}
+
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, httpPort, httpsPort));
@@ -58,12 +67,19 @@ SecretBoxFactory.AddAppDataProtection(builder.Services, paths);
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<ServerSecretsStore>();
 builder.Services.AddSingleton<ConnectionStore>();
+builder.Services.AddSingleton<UiAuthStore>();
+builder.Services.AddSingleton<UiLoginThrottle>();
+builder.Services.AddSingleton<UiSignIn>();
+builder.Services.AddSingleton<UiConnections>();
+builder.Services.AddUiSession();
 builder.Services.AddSingleton<IClientCredentialValidator>(sp => sp.GetRequiredService<ServerSecretsStore>());
 builder.Services.AddSingleton<ISigningKeySource>(sp => sp.GetRequiredService<ServerSecretsStore>());
 builder.Services.AddSingleton<RemoteServer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SettingsStore>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerSecretsStore>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectionStore>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UiAuthStore>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UiConnections>());
 builder.Services.AddSingleton<UsbServer>();
 builder.Services.AddSingleton<UsbClient>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbServer>());
@@ -126,6 +142,10 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Last guard before the routes: every UI API route and the hub need the session cookie (Surface.RequiresSignIn).
+app.UseUiAuthGuard();
+
+app.MapUiAuthEndpoints();
 app.MapSettingsEndpoints();
 app.MapServerEndpoints(httpsPort);
 app.MapServerPairingEndpoints();
@@ -145,3 +165,4 @@ app.MapGet("/healthz", () => TypedResults.Text("ok"));
 app.MapFallbackToFile("index.html");
 
 app.Run();
+return 0;

@@ -40,6 +40,24 @@ internal sealed record Surface(string Prefix, Listener Listener, RoleScope Role)
         new("/api/client", Listener.Http, RoleScope.Client),
     ];
 
+    /// <summary>
+    /// The UI-port paths a person may reach without signing in. Everything else under <c>/api</c> on the
+    /// UI port, a route added tomorrow included, needs the session cookie. The SPA's files and
+    /// <c>/healthz</c> are not under <c>/api</c>, so they stay open.
+    /// </summary>
+    public static IReadOnlyList<string> Anonymous { get; } =
+    [
+        "/api/auth/state",
+        "/api/auth/setup",
+        "/api/auth/login",
+    ];
+
+    /// <summary>True when a request for this path needs a UI session: it is the UI port's API or hub and not listed as anonymous.</summary>
+    public static bool RequiresSignIn(PathString path) =>
+        For(path).Listener == Listener.Http
+        && path.StartsWithSegments("/api")
+        && !Anonymous.Any(anonymous => path.Equals(anonymous, StringComparison.OrdinalIgnoreCase));
+
     public static Surface For(PathString path)
     {
         foreach (var surface in Listed)

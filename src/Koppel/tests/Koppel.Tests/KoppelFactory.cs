@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Sockets;
 using Koppel.Core.Usb;
 using Microsoft.AspNetCore.Builder;
@@ -36,6 +37,8 @@ public sealed class KoppelFactory : IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly bool _kestrel;
+    private readonly object _session = new();
+    private string? _cookie;
 
     public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server", bool shareDongle = false, bool shareOnStartup = true)
     {
@@ -106,12 +109,57 @@ public sealed class KoppelFactory : IDisposable
 
     public string ConfigFile(string name) => Path.Combine(Directory, "config", name);
 
-    /// <summary>A client on the UI side (plain HTTP), sending the header the UI sends on every request.</summary>
+    /// <summary>The password the first signed-in client sets.</summary>
+    public const string Password = "correct horse battery";
+
+    /// <summary>
+    /// A client on the UI side (plain HTTP) that is signed in, sending the header the UI sends on every
+    /// request. The first one sets the password with the setup code; later ones share its session.
+    /// </summary>
     public HttpClient CreateUiClient()
+    {
+        var client = CreateAnonymousUiClient();
+        client.DefaultRequestHeaders.Add("Cookie", SessionCookie());
+        return client;
+    }
+
+    /// <summary>A signed-in client without the header, as another site's page would be if it could send the cookie.</summary>
+    public HttpClient CreateSignedInPlainClient()
+    {
+        var client = CreatePlainClient();
+        client.DefaultRequestHeaders.Add("Cookie", SessionCookie());
+        return client;
+    }
+
+    /// <summary>A UI-side client with the header but no session, as a visitor who has not signed in.</summary>
+    public HttpClient CreateAnonymousUiClient()
     {
         var client = CreatePlainClient();
         client.DefaultRequestHeaders.Add("X-Koppel-UI", "1");
         return client;
+    }
+
+    /// <summary>The setup code of a host that has no password yet.</summary>
+    public string SetupCode => Services.GetRequiredService<Koppel.Login.UiAuthStore>().SetupCode ?? throw new InvalidOperationException("A password is already set.");
+
+    private string SessionCookie()
+    {
+        lock (_session)
+        {
+            if (_cookie is null)
+            {
+                using var client = CreateAnonymousUiClient();
+                // A test that set the password itself leaves nothing to set up: sign in instead.
+                var passwordSet = Services.GetRequiredService<Koppel.Login.UiAuthStore>().SetupCode is null;
+                using var response = (passwordSet
+                    ? client.PostAsJsonAsync("/api/auth/login", new { password = Password })
+                    : client.PostAsJsonAsync("/api/auth/setup", new { setupCode = SetupCode, password = Password })).GetAwaiter().GetResult();
+                response.EnsureSuccessStatusCode();
+                _cookie = response.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
+            }
+
+            return _cookie;
+        }
     }
 
     /// <summary>A UI-side client without the header, as another site's page would be.</summary>
@@ -127,19 +175,37 @@ public sealed class KoppelFactory : IDisposable
         ? new HttpClient(new HttpClientHandler { ServerCertificateCustomValidationCallback = (_, _, _, _) => true }) { BaseAddress = new Uri($"https://localhost:{HttpsPort}") }
         : _factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost") });
 
+    /// <summary>The UI hub, signed in like <see cref="CreateUiClient"/>.</summary>
     public async Task<HubConnection> ConnectUiHubAsync(CancellationToken cancellationToken)
     {
-        var connection = _kestrel
-            ? new HubConnectionBuilder().WithUrl($"http://localhost:{HttpPort}/api/hubs/ui").Build()
+        var connection = BuildUiHub(SessionCookie());
+        await connection.StartAsync(cancellationToken);
+        return connection;
+    }
+
+    /// <summary>The UI hub without a session. Starting it fails with 401 once a password is set.</summary>
+    public HubConnection BuildAnonymousUiHub() => BuildUiHub(null);
+
+    private HubConnection BuildUiHub(string? cookie)
+    {
+        void Headers(Microsoft.AspNetCore.Http.Connections.Client.HttpConnectionOptions options)
+        {
+            if (cookie is not null)
+            {
+                options.Headers["Cookie"] = cookie;
+            }
+        }
+
+        return _kestrel
+            ? new HubConnectionBuilder().WithUrl($"http://localhost:{HttpPort}/api/hubs/ui", Headers).Build()
             : new HubConnectionBuilder()
                 .WithUrl(new Uri(_factory.Server.BaseAddress, "/api/hubs/ui"), options =>
                 {
                     options.HttpMessageHandlerFactory = _ => _factory.Server.CreateHandler();
                     options.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.LongPolling;
+                    Headers(options);
                 })
                 .Build();
-        await connection.StartAsync(cancellationToken);
-        return connection;
     }
 
     public void Dispose()

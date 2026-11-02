@@ -23,6 +23,8 @@ public enum ActivityReason
     Reconfigured,
     LinkUp,
     LinkDown,
+    SignInFailed,
+    PasswordChanged,
 }
 
 /// <summary>Whether the thing the event describes happened.</summary>

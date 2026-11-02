@@ -2,6 +2,7 @@ using Koppel.Client;
 using Koppel.Core.Activity;
 using Koppel.Core.Discovery;
 using Koppel.Discovery;
+using Koppel.Login;
 using Koppel.Server;
 using Koppel.Settings;
 using Koppel.Usb;
@@ -42,7 +43,20 @@ public interface IUiClient
 }
 
 /// <summary>The UI's live link, mapped at <c>/api/hubs/ui</c>. Push only; commands go over REST.</summary>
-internal sealed class UiHub : Hub<IUiClient>;
+internal sealed class UiHub(UiConnections connections) : Hub<IUiClient>
+{
+    public override Task OnConnectedAsync()
+    {
+        connections.Add(Context);
+        return base.OnConnectedAsync();
+    }
+
+    public override Task OnDisconnectedAsync(Exception? exception)
+    {
+        connections.Remove(Context.ConnectionId);
+        return base.OnDisconnectedAsync(exception);
+    }
+}
 
 /// <summary>Forwards every confirmed change from the stores to all connected UIs.</summary>
 internal sealed class UiHubRelay(

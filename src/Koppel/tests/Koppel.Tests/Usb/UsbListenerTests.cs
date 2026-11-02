@@ -114,6 +114,21 @@ public sealed class UsbListenerTests : IDisposable
         await refused.Should().ThrowAsync<SocketException>("the old port is closed");
     }
 
+    [Theory]
+    [InlineData("http")]
+    [InlineData("https")]
+    public async Task A_usb_port_equal_to_the_web_ports_is_rejected(string which)
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var ui = _server.CreateUiClient();
+
+        using var response = await ui.PatchAsJsonAsync("/api/settings", new { listenPort = which == "http" ? _server.HttpPort : _server.HttpsPort }, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("errors").TryGetProperty("listenPort", out _).Should().BeTrue();
+        (await ui.GetFromJsonAsync<JsonElement>("/api/settings", ct)).GetProperty("listenPort").GetInt32().Should().Be(_server.UsbPort);
+    }
+
     [Fact]
     public async Task A_usb_port_that_is_taken_is_reported_as_a_system_check()
     {

@@ -195,6 +195,76 @@ public sealed class UpstreamHostTests : IDisposable
         (await host.GetStatusAsync("2-3", ct)).Should().Be(ExportStatus.Available);
     }
 
+    [Fact]
+    public async Task A_second_export_of_a_device_in_use_is_refused_without_connecting_to_the_server()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var device = Device("2-3");
+        var imports = 0;
+        _serve = async tcp =>
+        {
+            var stream = tcp.GetStream();
+            var request = await UsbIpProtocol.ReadHeaderAsync(stream, _stop.Token);
+            if (request.Code == UsbIpProtocol.OpReqDevList)
+            {
+                await stream.WriteAsync(UsbIpProtocol.DevListReply([device]), _stop.Token);
+                return;
+            }
+
+            Interlocked.Increment(ref imports);
+            await UsbIpProtocol.ReadBusIdAsync(stream, _stop.Token);
+            await stream.WriteAsync(UsbIpProtocol.ImportReply(device), _stop.Token);
+            await Task.Delay(Timeout.Infinite, _stop.Token);
+        };
+        var host = new UsbIpUpstreamHost("127.0.0.1", Port, _time, Deadline);
+        await host.ListDevicesAsync(ct);
+        var (client, network) = await UsbSockets.CreateLoopbackPairAsync(ct);
+        using var clientSocket = client;
+        await using var networkStream = new NetworkStream(network, ownsSocket: true);
+        var exported = new TaskCompletionSource();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var first = host.ExportAsync(device, networkStream, _ =>
+        {
+            exported.SetResult();
+            return Task.CompletedTask;
+        }, stop.Token);
+        await exported.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+        var second = () => host.ExportAsync(device, new MemoryStream(), _ => Task.CompletedTask, ct);
+
+        await second.Should().ThrowAsync<UsbHostException>().WithMessage("*already being used*");
+        imports.Should().Be(1, "the claim comes before the connection, so the second import never reached the server");
+        await stop.CancelAsync();
+        await first.WaitAsync(TimeSpan.FromSeconds(5), ct).ContinueWith(_ => { }, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task An_export_the_server_refuses_gives_the_claim_back()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var device = Device("2-3");
+        _serve = async tcp =>
+        {
+            var stream = tcp.GetStream();
+            var request = await UsbIpProtocol.ReadHeaderAsync(stream, _stop.Token);
+            if (request.Code == UsbIpProtocol.OpReqDevList)
+            {
+                await stream.WriteAsync(UsbIpProtocol.DevListReply([device]), _stop.Token);
+                return;
+            }
+
+            await UsbIpProtocol.ReadBusIdAsync(stream, _stop.Token);
+            await stream.WriteAsync(UsbIpProtocol.ImportReply(null), _stop.Token);
+        };
+        var host = new UsbIpUpstreamHost("127.0.0.1", Port, _time, Deadline);
+        await host.ListDevicesAsync(ct);
+
+        var export = () => host.ExportAsync(device, new MemoryStream(), _ => Task.CompletedTask, ct);
+
+        await export.Should().ThrowAsync<UsbHostException>().WithMessage("*would not export*");
+        (await host.GetStatusAsync("2-3", ct)).Should().Be(ExportStatus.Available);
+    }
+
     private static UsbDevice Device(string busId) => new(
         BusId: busId, Path: "USB\\VID_064F&PID_2AF9\\0", BusNum: 2, DevNum: 3, Speed: UsbSpeed.Full,
         VendorId: 0x064f, ProductId: 0x2af9, BcdDevice: 0x0100, Class: 0, SubClass: 0, Protocol: 0,

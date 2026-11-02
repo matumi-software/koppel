@@ -89,7 +89,14 @@ public sealed class UsbIpUpstreamHost(string host, int port, TimeProvider time, 
         ArgumentNullException.ThrowIfNull(exported);
         var busId = UsbBusId.Require(device.BusId);
         NetworkStream? upstream = null;
-        var claimed = false;
+
+        // Claim first, so two imports of one device cannot both connect. The claim is released after the
+        // upstream stream is disposed, so a second import never meets a half-closed first one.
+        if (!_inUse.TryAdd(busId, device))
+        {
+            throw new UsbHostException($"{busId} is already being used through this server.");
+        }
+
         try
         {
             using (var handshake = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
@@ -107,12 +114,6 @@ public sealed class UsbIpUpstreamHost(string host, int port, TimeProvider time, 
             }
 
             // USB traffic can be quiet for a long time; only the handshake has a deadline.
-            claimed = _inUse.TryAdd(busId, device);
-            if (!claimed)
-            {
-                throw new UsbHostException($"{busId} is already being used through this server.");
-            }
-
             await exported(cancellationToken);
             await UsbSockets.RelayAsync(network, upstream, cancellationToken);
         }
@@ -127,10 +128,7 @@ public sealed class UsbIpUpstreamHost(string host, int port, TimeProvider time, 
                 await upstream.DisposeAsync();
             }
 
-            if (claimed)
-            {
-                _inUse.TryRemove(busId, out _);
-            }
+            _inUse.TryRemove(busId, out _);
         }
     }
 

@@ -89,14 +89,31 @@ public sealed class SysfsUsbHost(string sysRoot = "/sys", string devRoot = "/dev
         RequireModule();
         var device = Path.Combine(Devices, ValidBusId(busId));
         Write(Path.Combine(UsbipHost, "match_busid"), $"add {busId}");
-        if (DriverOf(device) is { } driver && driver != "usbip-host")
+        try
         {
-            Write(Path.Combine(device, "driver", "unbind"), busId);
-        }
+            if (DriverOf(device) is { } driver && driver != "usbip-host")
+            {
+                Write(Path.Combine(device, "driver", "unbind"), busId);
+            }
 
-        if (DriverOf(device) != "usbip-host")
+            if (DriverOf(device) != "usbip-host")
+            {
+                Write(Path.Combine(UsbipHost, "bind"), busId);
+            }
+        }
+        catch (UsbHostException)
         {
-            Write(Path.Combine(UsbipHost, "bind"), busId);
+            // A share that did not take must not leave the bus ID on the match list, or the device binds by itself later.
+            try
+            {
+                Write(Path.Combine(UsbipHost, "match_busid"), $"del {busId}");
+            }
+            catch (UsbHostException)
+            {
+                // The first failure is the one to report.
+            }
+
+            throw;
         }
     }
 
@@ -213,7 +230,7 @@ public sealed class SysfsUsbHost(string sysRoot = "/sys", string devRoot = "/dev
         {
             return File.Exists(file) ? File.ReadAllText(file).Trim() : null;
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return null;
         }

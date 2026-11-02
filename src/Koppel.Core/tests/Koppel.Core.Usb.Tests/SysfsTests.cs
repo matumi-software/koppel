@@ -71,6 +71,52 @@ public sealed class SysfsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_share_whose_bind_fails_takes_the_bus_id_off_the_match_list_again()
+    {
+        AddDevice("1-1.4", "0403", "6001", "00", "12", "usbip-host");
+        var usbipHost = Directory.CreateDirectory(Path.Combine(_sys, "bus", "usb", "drivers", "usbip-host")).FullName;
+        File.WriteAllText(Path.Combine(Devices, "1-1.4", "usbip_status"), "0");
+        // The driver is not usbip-host yet, so the share has to bind, and the kernel refuses that.
+        Directory.CreateDirectory(Path.Combine(usbipHost, "bind"));
+        File.WriteAllText(Path.Combine(Devices, "1-1.4", "driver", "name"), "ftdi_sio");
+        var host = new SysfsUsbHost(_sys);
+
+        var share = () => host.ShareAsync("1-1.4", TestContext.Current.CancellationToken);
+
+        await share.Should().ThrowAsync<UsbHostException>().WithMessage("*bind*");
+        File.ReadAllText(Path.Combine(usbipHost, "match_busid")).Should().Be("del 1-1.4");
+    }
+
+    [Fact]
+    public async Task An_attribute_the_process_may_not_read_counts_as_missing()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Denies read access with an ACL; the Linux case runs as root in the container and cannot be denied.");
+        AddDevice("1-1.4", "0403", "6001", "00", "12", "ftdi_sio", product: "FT232R USB UART");
+        var file = Path.Combine(Devices, "1-1.4", "serial");
+        File.WriteAllText(file, "A1");
+        if (OperatingSystem.IsWindows())
+        {
+            DenyRead(file);
+        }
+
+        var host = new SysfsUsbHost(_sys);
+
+        var devices = await host.ListDevicesAsync(TestContext.Current.CancellationToken);
+
+        devices.Should().ContainSingle().Which.Serial.Should().BeNull();
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void DenyRead(string file)
+    {
+        var info = new FileInfo(file);
+        var security = info.GetAccessControl();
+        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            System.Security.Principal.WindowsIdentity.GetCurrent().User!, System.Security.AccessControl.FileSystemRights.Read, System.Security.AccessControl.AccessControlType.Deny));
+        info.SetAccessControl(security);
+    }
+
+    [Fact]
     public async Task Share_without_the_module_explains_what_to_load()
     {
         AddDevice("1-1.4", "0403", "6001", "00", "12", "ftdi_sio");

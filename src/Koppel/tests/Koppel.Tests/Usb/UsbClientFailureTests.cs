@@ -34,7 +34,8 @@ public sealed class UsbClientFailureTests : IDisposable
             {
                 ["Gateway:Port"] = KoppelFactory.FreePort().ToString(CultureInfo.InvariantCulture),
                 ["Usb:AttachTimeoutSeconds"] = "3",
-            });
+            },
+            role: "client");
     }
 
     public void Dispose()

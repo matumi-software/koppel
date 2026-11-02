@@ -4,7 +4,8 @@ namespace Koppel.Server;
 
 internal sealed record PairOpenRequest(string? ClientName, string? Commitment);
 
-internal sealed record PairOpened(string RequestId, string ServerNonce, DateTimeOffset ExpiresAt);
+/// <param name="PollToken">Only the opener gets it. Poll and withdraw need it, in the <c>X-Pair-Token</c> header.</param>
+internal sealed record PairOpened(string RequestId, string ServerNonce, DateTimeOffset ExpiresAt, string PollToken);
 
 internal sealed record PairRevealRequest(string? ClientNonce);
 
@@ -12,6 +13,8 @@ internal sealed record PairApproveRequest(string? Code);
 
 internal static class PairingEndpoints
 {
+    public const string TokenHeader = "X-Pair-Token";
+
     /// <summary>
     /// Endpoints a client calls to pair, before it has credentials: no token, but HTTPS only, so the
     /// client has pinned the certificate it will derive the code from. See <see cref="PairingStore"/>.
@@ -35,9 +38,8 @@ internal static class PairingEndpoints
                 return TypedResults.BadRequest();
             }
 
-            var from = http.Connection.RemoteIpAddress is { } ip ? (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip).ToString() : "unknown";
-            return pairing.Open(name, commitment, from) is { } opened
-                ? TypedResults.Ok(new PairOpened(opened.Id, opened.ServerNonce, opened.ExpiresAt))
+            return pairing.Open(name, commitment, http.Connection.RemoteIpAddress) is { } opened
+                ? TypedResults.Ok(new PairOpened(opened.Id, opened.ServerNonce, opened.ExpiresAt, opened.PollToken))
                 : TypedResults.StatusCode(StatusCodes.Status429TooManyRequests);
         });
 
@@ -46,11 +48,11 @@ internal static class PairingEndpoints
                 ? TypedResults.NoContent()
                 : TypedResults.NotFound());
 
-        pair.MapGet("/{requestId}", IResult (string requestId, PairingStore pairing) =>
-            pairing.Poll(requestId) is { } poll ? TypedResults.Ok(poll) : TypedResults.NotFound());
+        pair.MapGet("/{requestId}", async Task<IResult> (string requestId, PairingStore pairing, HttpContext http) =>
+            await pairing.PollAsync(requestId, http.Request.Headers[TokenHeader]) is { } poll ? TypedResults.Ok(poll) : TypedResults.NotFound());
 
-        pair.MapDelete("/{requestId}", async Task<IResult> (string requestId, PairingStore pairing) =>
-            await pairing.WithdrawAsync(requestId) ? TypedResults.NoContent() : TypedResults.NotFound());
+        pair.MapDelete("/{requestId}", async Task<IResult> (string requestId, PairingStore pairing, HttpContext http) =>
+            await pairing.WithdrawAsync(requestId, http.Request.Headers[TokenHeader]) ? TypedResults.NoContent() : TypedResults.NotFound());
 
         return app;
     }

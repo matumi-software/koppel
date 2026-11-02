@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Koppel.Client;
 
-/// <summary>A change to the connection. A null or empty secret keeps the stored one.</summary>
+/// <summary>A change to the connection. A null or empty secret keeps the stored one, but only while the server stays the same.</summary>
 internal sealed record ConnectionUpdate(string? ServerUrl, string? ServerFingerprint, string? ClientId, string? ClientSecret)
 {
     public Dictionary<string, string[]> Validate()
@@ -27,13 +27,28 @@ internal sealed record ConnectionUpdate(string? ServerUrl, string? ServerFingerp
         return errors;
     }
 
+    /// <summary>True when the update points at the server the connection already has: same address and same fingerprint.</summary>
+    public bool KeepsServer(ClientConnection current) =>
+        string.Equals(current.ServerUrl, new Uri(ServerUrl!).GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase)
+        && SameFingerprint(current.ServerFingerprint, ServerFingerprint);
+
+    /// <summary>
+    /// The stored secret was issued by the stored server, so it carries over only when the server is
+    /// unchanged. For another server it never does: the secret would go to a server that did not issue it.
+    /// </summary>
     public ClientConnection ApplyTo(ClientConnection current) => current with
     {
         ServerUrl = new Uri(ServerUrl!).GetLeftPart(UriPartial.Authority),
         ServerFingerprint = Normalize(ServerFingerprint!),
         ClientId = ClientId!.Trim(),
-        ClientSecret = string.IsNullOrEmpty(ClientSecret) ? current.ClientSecret : ClientSecret,
+        ClientSecret = !string.IsNullOrEmpty(ClientSecret) ? ClientSecret : KeepsServer(current) ? current.ClientSecret : null,
     };
+
+    /// <summary>Fingerprints compare by their hex digits alone.</summary>
+    public static bool SameFingerprint(string? a, string? b) =>
+        string.Equals(Digits(a), Digits(b), StringComparison.OrdinalIgnoreCase);
+
+    private static string Digits(string? fingerprint) => new((fingerprint ?? "").Where(Uri.IsHexDigit).ToArray());
 
     private static string Normalize(string fingerprint)
     {
@@ -63,6 +78,14 @@ internal static class ClientEndpoints
                 return TypedResults.ValidationProblem(errors);
             }
 
+            if (string.IsNullOrEmpty(update.ClientSecret) && !update.KeepsServer(store.Current))
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["clientSecret"] = ["Enter the client secret. The stored one only carries over while the server address and fingerprint stay the same."],
+                });
+            }
+
             await store.UpdateAsync(update.ApplyTo, cancellationToken);
             return TypedResults.Accepted((string?)null);
         });
@@ -88,6 +111,12 @@ internal static class ClientEndpoints
             pairing.Begin(new Uri(request.ServerUrl!).GetLeftPart(UriPartial.Authority), request.ServerFingerprint!, request.ServerName);
             return TypedResults.Accepted((string?)null);
         });
+
+        // The server approved, but saving replaces the connection to another server: the person confirms.
+        group.MapPost("/pairing/confirm", async Task<IResult> (PairingClient pairing, CancellationToken cancellationToken) =>
+            await pairing.ConfirmAsync(cancellationToken)
+                ? TypedResults.Accepted((string?)null)
+                : TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["pairing"] = ["There is nothing to confirm. Start pairing again."] }));
 
         group.MapDelete("/pairing", async (PairingClient pairing) =>
         {

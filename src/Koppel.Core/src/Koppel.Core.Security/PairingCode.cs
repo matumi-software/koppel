@@ -15,7 +15,9 @@ namespace Koppel.Core.Security;
 /// </list>
 /// Both ends then derive the code from the certificate the client pinned and both nonces. A man in
 /// the middle has its own certificate and must fix each nonce before it sees the other side's, so it
-/// cannot steer the two codes to match: it gets one guess in a million. The code is never sent.
+/// cannot steer the two codes to match: for each request it gets one guess in a million. That odds
+/// holds per request, not overall, so the server must also limit how many requests it takes. The code
+/// is never sent.
 /// </summary>
 public static class PairingCode
 {

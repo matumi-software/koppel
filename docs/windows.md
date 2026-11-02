@@ -23,7 +23,7 @@ From `src\Koppel` in the repo:
 docker compose build
 ```
 
-That builds `matumi/koppel:latest`, which both Windows compose files use.
+That builds `matumisoftware/koppel:latest`, which both Windows compose files use.
 
 ## Windows server
 

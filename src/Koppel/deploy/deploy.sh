@@ -21,7 +21,7 @@ echo "Building the image..."
 docker compose -f "$src/Koppel/docker-compose.yml" build
 
 echo "Copying the image to $target..."
-docker save matumi/koppel:latest | gzip | ssh "$target" 'gunzip | docker load'
+docker save matumisoftware/koppel:latest | gzip | ssh "$target" 'gunzip | docker load'
 
 echo "Starting Koppel on $target..."
 ssh "$target" 'mkdir -p ~/koppel'

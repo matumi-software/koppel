@@ -1,12 +1,15 @@
-# Runs a Koppel image that is already on this machine (see deploy.sh). No build here.
+# Runs Koppel from Docker Hub, or the image deploy.sh copied here. No build here.
 #   docker compose up -d
 # Then browse http://<this machine>:5240/
+#
+# Upgrade with `docker compose pull && docker compose up -d`. Config and keys live in the koppel
+# volume, not the image, so an upgrade keeps them.
 
 name: koppel
 
 services:
   koppel:
-    image: matumi/koppel:latest
+    image: matumisoftware/koppel:latest
     # The host's network: clients find the server through multicast DNS, which does not cross Docker's
     # bridge. Koppel listens on the host's ports directly (5240 UI, 5241 HTTPS, 3240 USB over TLS) and
     # takes the host's name, which it shows and puts in its certificate.

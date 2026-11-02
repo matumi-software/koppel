@@ -66,12 +66,17 @@ empty when the process restarts. A change the UI sent shows as Waiting until the
 
 ## Running on another machine
 
-`src/Koppel/deploy` runs Koppel on a Debian or Ubuntu machine without a registry:
+`src/Koppel/deploy` runs Koppel on a Debian or Ubuntu machine:
 
 1. Copy `prepare-host.sh` to the machine and run it once with sudo. It installs Docker, loads
    `usbip-host` and `vhci-hcd` and keeps them loaded at boot.
-2. From this repo, with SSH access to the machine: `bash src/Koppel/deploy/deploy.sh user@host`. It
-   builds the image here, copies it over SSH, and starts it with `deploy/docker-compose.yml`.
+2. Copy `deploy/docker-compose.yml` there and run `docker compose up -d`. It pulls
+   `matumisoftware/koppel` from Docker Hub. To upgrade, `docker compose pull && docker compose up -d`;
+   config and keys stay in the `koppel` volume.
+
+To run your own build instead, with SSH access to the machine: `bash src/Koppel/deploy/deploy.sh
+user@host`. It builds the image here, copies it over SSH, and starts it with
+`deploy/docker-compose.yml`.
 
 The image is built for this machine's architecture; the script stops if the target's differs.
 

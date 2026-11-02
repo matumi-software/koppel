@@ -1,7 +1,7 @@
 namespace Koppel;
 
 /// <summary>Where Koppel keeps its files on disk.</summary>
-/// <param name="ConfigDirectory">Config files: <c>settings.json</c> (plain) and the encrypted <c>secrets.json</c> and <c>connection.json</c>.</param>
+/// <param name="ConfigDirectory">Config files: the plain <c>settings.json</c>, <c>devices.json</c> and <c>attached.json</c>, and the encrypted <c>secrets.json</c> and <c>connection.json</c>.</param>
 /// <param name="KeysDirectory">The key ring that encrypts the secret files. Kept apart from them.</param>
 /// <param name="KeyCertificatePath">Optional PFX that protects the key ring itself, such as a Docker secret.</param>
 internal sealed record KoppelPaths(string ConfigDirectory, string KeysDirectory, string? KeyCertificatePath = null)

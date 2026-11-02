@@ -64,6 +64,34 @@ public sealed class UsbEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task Client_attaches_a_device_again_after_its_link_drops()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await AttachAsync(ct);
+        var first = await _clientKernel.AttachedSocket.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+        // The link to the server drops, as when the server restarts.
+        first.Dispose();
+
+        var again = await _clientKernel.Reattached.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
+        again.Should().NotBeSameAs(first);
+    }
+
+    [Fact]
+    public async Task Client_remembers_what_it_attached_until_it_is_detached()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await AttachAsync(ct);
+        File.ReadAllText(_client.ConfigFile("attached.json")).Should().Contain("1-1.4");
+
+        using var ui = _client.CreateUiClient();
+        using var detach = await ui.PostAsync("/api/client/devices/1-1.4/detach", null, ct);
+
+        detach.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        File.ReadAllText(_client.ConfigFile("attached.json")).Should().NotContain("1-1.4");
+    }
+
+    [Fact]
     public async Task Server_resets_the_device_before_a_client_gets_it()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -178,6 +206,23 @@ public sealed class UsbEndToEndTests : IDisposable
         var answer = await reader.ReadLineAsync(ct);
 
         answer.Should().StartWith("DENIED");
+    }
+
+    /// <summary>Links the client to the server and attaches the dongle from the client's UI, as a person would.</summary>
+    private async Task AttachAsync(CancellationToken ct)
+    {
+        await using var clientHub = await _client.ConnectUiHubAsync(ct);
+        var linked = Link.Waiter(clientHub, "ClientDevicesChanged", d =>
+            d.GetProperty("link").GetString() == "connected" && d.GetProperty("devices").GetArrayLength() == 1);
+        var attached = Link.Waiter(clientHub, "ClientDevicesChanged", d =>
+            d.GetProperty("devices").EnumerateArray().Any(x => x.GetProperty("attachedHere").GetBoolean()));
+        await Link.ConnectAsync(_server, _client, ct);
+        await Link.WithLastAsync(linked, clientHub, ct);
+
+        using var ui = _client.CreateUiClient();
+        using var attach = await ui.PostAsync("/api/client/devices/1-1.4/attach", null, ct);
+        attach.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await attached.WaitAsync(TimeSpan.FromSeconds(20), ct);
     }
 
     /// <summary>Sends a fake URB as the USB driver would and expects the fake server kernel to echo it.</summary>

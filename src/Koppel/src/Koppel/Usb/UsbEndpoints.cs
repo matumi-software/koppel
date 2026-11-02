@@ -37,16 +37,17 @@ internal static class UsbEndpoints
     }
 
     /// <summary>
-    /// Client role. Attach and detach answer 202; the device shows as attached (or with its fault) when
+    /// Client role. Attach remembers the device, so it is attached again after a restart; detach forgets
+    /// it. Both answer 202; the device shows as attached (or with its fault) when
     /// <c>ClientDevicesChanged</c> arrives.
     /// </summary>
     public static IEndpointRouteBuilder MapUsbClientEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/client/devices");
         group.MapGet("/", (UsbClient usb) => TypedResults.Ok(usb.Current));
-        group.MapPost("/{busId}/attach", (string busId, UsbClient usb) =>
+        group.MapPost("/{busId}/attach", async (string busId, UsbClient usb) =>
         {
-            usb.BeginAttach(busId);
+            await usb.BeginAttachAsync(busId);
             return TypedResults.Accepted((string?)null);
         });
         group.MapPost("/{busId}/detach", async (string busId, UsbClient usb) =>

@@ -18,6 +18,10 @@ public sealed class UsbipWin2Driver(string usbipExe) : IUsbIpDriver
 
     public async Task<int> AttachAsync(string host, int port, string busId, CancellationToken cancellationToken)
     {
+        // After a dropped connection the driver keeps trying to attach the device by itself. Stop that
+        // first, so the device is not attached twice.
+        await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, "--bus-id", busId, "--stop");
+
         // --once: if the attach fails, fail now instead of retrying in the background.
         var output = await RunAsync(cancellationToken, "--tcp-port", Port(port), "attach", "--remote", host, "--bus-id", busId, "--terse", "--once");
         return int.TryParse(output.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var driverPort)

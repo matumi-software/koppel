@@ -20,8 +20,12 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
     private readonly ConcurrentDictionary<int, Socket> _attached = new();
     private volatile bool _used;
     private volatile bool _reset;
+    private int _attaches;
 
     public TaskCompletionSource<Socket> AttachedSocket { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>The socket of the second attach, once the client attached the device again.</summary>
+    public TaskCompletionSource<Socket> Reattached { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Whether the device was reset before the last export.</summary>
     public bool ResetBeforeExport { get; private set; }
@@ -75,6 +79,11 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
     {
         _attached[8] = socket;
         AttachedSocket.TrySetResult(socket);
+        if (Interlocked.Increment(ref _attaches) > 1)
+        {
+            Reattached.TrySetResult(socket);
+        }
+
         return 8;
     }
 

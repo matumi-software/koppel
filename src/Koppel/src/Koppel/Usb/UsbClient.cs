@@ -6,6 +6,7 @@ using System.Text;
 using Koppel.Client;
 using Koppel.Core.Activity;
 using Koppel.Core.Auth;
+using Koppel.Core.Configuration;
 using Koppel.Core.Security;
 using Koppel.Core.Usb;
 using Koppel.Settings;
@@ -25,12 +26,29 @@ public sealed record ClientDeviceView(DeviceView Device, bool AttachedHere, int?
 public sealed record ClientDevices(string Link, string? LinkMessage, IReadOnlyList<ClientDeviceView> Devices, string? Unavailable, bool Gateway = false);
 
 /// <summary>
+/// The devices this client attached, kept in the plain <c>attached.json</c>. The client attaches them
+/// again whenever the server offers them and they are not attached here: after a restart, an upgrade,
+/// a dropped link, or the device being plugged back in on the server. Detaching forgets the device.
+/// </summary>
+/// <param name="ServerFingerprint">The server the bus IDs belong to. Another server starts a new list.</param>
+/// <param name="VidPids">The VID:PID each bus ID had when it was attached. A bus ID is a port on the
+/// server, so a different device plugged into that port is not attached without asking.</param>
+internal sealed record AttachedDevices(string? ServerFingerprint, IReadOnlyList<string> BusIds, IReadOnlyDictionary<string, string>? VidPids = null)
+{
+    public static AttachedDevices Empty { get; } = new(null, []);
+
+    public bool Expects(DeviceView device) =>
+        BusIds.Contains(device.BusId) && (VidPids?.GetValueOrDefault(device.BusId) is not { } vidPid || vidPid == device.VidPid);
+}
+
+/// <summary>
 /// Client role: keeps a live SignalR link to the configured server for its device list, and attaches
 /// and detaches devices. An attach opens a TLS connection to the server's USB port, authenticates with
 /// the bearer token, imports the device over USB/IP, then hands one end of a loopback pair to the
 /// kernel's virtual host controller and relays the other end through TLS.
 /// </summary>
 internal sealed partial class UsbClient(
+    KoppelPaths paths,
     ConnectionStore connection,
     SettingsStore settings,
     IUsbAttacher attacher,
@@ -39,7 +57,15 @@ internal sealed partial class UsbClient(
     IActivityRecorder activity,
     ILogger<UsbClient> logger) : BackgroundService
 {
+    /// <summary>How often a remembered device that is not attached yet is tried again.</summary>
+    private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(5);
+
+    private readonly JsonConfigFile<AttachedDevices> _remembered = new(
+        Path.Combine(paths.ConfigDirectory, "attached.json"), AttachedDevices.Empty, KoppelJson.Files, logger);
+
     private readonly ConcurrentDictionary<string, Attachment> _attachments = new();
+    private readonly ConcurrentDictionary<string, bool> _attaching = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastTry = new();
     private readonly ConcurrentDictionary<string, string> _faults = new();
     private readonly ConcurrentDictionary<string, bool> _driverAttaching = new();
     private RemoteDevices _remote = new([], 0);
@@ -74,28 +100,38 @@ internal sealed partial class UsbClient(
         return RaiseAsync();
     }
 
-    /// <summary>Starts attaching in the background. The outcome reaches the UI through <see cref="Changed"/>.</summary>
-    public void BeginAttach(string busId)
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
+        await _remembered.StartAsync(cancellationToken);
+        await base.StartAsync(cancellationToken);
+    }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _remembered.Stop();
+        await base.StopAsync(cancellationToken);
+    }
+
+    public override void Dispose()
+    {
+        _remembered.Dispose();
+        base.Dispose();
+    }
+
+    /// <summary>
+    /// Remembers the device, then starts attaching it in the background. The outcome reaches the UI
+    /// through <see cref="Changed"/>.
+    /// </summary>
+    public async Task BeginAttachAsync(string busId)
+    {
+        await RememberAsync(busId, attached: true);
         _faults.TryRemove(busId, out _);
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await (UsesDriver ? AttachThroughDriverAsync(busId) : AttachAsync(busId));
-            }
-            catch (Exception ex) when (ex is UsbHostException or IOException or SocketException or TokenRequestException or System.Security.Authentication.AuthenticationException or OperationCanceledException or InvalidOperationException)
-            {
-                _faults[busId] = ex.Message;
-                LogAttachFailed(busId, ex.Message);
-                await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Failed, $"{NameOf(busId)} was not attached", ex.Message);
-                await RaiseAsync();
-            }
-        });
+        StartAttach(busId, automatic: false);
     }
 
     public async Task DetachAsync(string busId)
     {
+        await RememberAsync(busId, attached: false);
         _faults.TryRemove(busId, out _);
         if (_attachments.TryRemove(busId, out var attachment))
         {
@@ -205,6 +241,7 @@ internal sealed partial class UsbClient(
         {
             _remote = devices;
             await RaiseAsync();
+            AttachRemembered();
         });
         hub.Reconnecting += _ => SetLinkAsync("connecting", null);
         hub.Reconnected += _ => SetLinkAsync("connected", null);
@@ -216,9 +253,98 @@ internal sealed partial class UsbClient(
 
         await hub.StartAsync(cancellationToken);
         await SetLinkAsync("connected", null);
-        await closed.Task.WaitAsync(cancellationToken);
+
+        // A remembered device that could not be attached yet, because it was in use or the server was
+        // still starting, is tried again until the link closes.
+        using var retry = new PeriodicTimer(RetryInterval, time);
+        while (!closed.Task.IsCompleted)
+        {
+            AttachRemembered();
+            await Task.WhenAny(closed.Task, retry.WaitForNextTickAsync(cancellationToken).AsTask());
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
         await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
     }
+
+    /// <summary>
+    /// Attaches in the background. A failed automatic attach is tried again later, and only a new reason
+    /// for failing goes to the activity log.
+    /// </summary>
+    private void StartAttach(string busId, bool automatic)
+    {
+        if (!_attaching.TryAdd(busId, true))
+        {
+            return;
+        }
+
+        _lastTry[busId] = time.GetUtcNow();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await (UsesDriver ? AttachThroughDriverAsync(busId) : AttachAsync(busId));
+            }
+            catch (Exception ex) when (ex is UsbHostException or IOException or SocketException or TokenRequestException or System.Security.Authentication.AuthenticationException or OperationCanceledException or InvalidOperationException)
+            {
+                // The driver may have attached it by itself in the meantime, which is what was wanted.
+                if (!_attachments.ContainsKey(busId))
+                {
+                    var repeated = automatic && _faults.GetValueOrDefault(busId) == ex.Message;
+                    _faults[busId] = ex.Message;
+                    LogAttachFailed(busId, ex.Message);
+                    if (!repeated)
+                    {
+                        await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Failed, $"{NameOf(busId)} was not attached", ex.Message);
+                    }
+
+                    await RaiseAsync();
+                }
+            }
+            finally
+            {
+                _attaching.TryRemove(busId, out _);
+            }
+        });
+    }
+
+    /// <summary>Attaches the remembered devices that the server offers and nobody is using.</summary>
+    private void AttachRemembered()
+    {
+        var remembered = _remembered.Current;
+        if (_link != "connected" || remembered.ServerFingerprint is null || remembered.ServerFingerprint != connection.Current.ServerFingerprint)
+        {
+            return;
+        }
+
+        var now = time.GetUtcNow();
+        foreach (var device in _remote.Devices.Where(d => d.State == "shared" && remembered.Expects(d)))
+        {
+            if (!_attachments.ContainsKey(device.BusId) && (!_lastTry.TryGetValue(device.BusId, out var last) || now - last >= RetryInterval))
+            {
+                StartAttach(device.BusId, automatic: true);
+            }
+        }
+    }
+
+    /// <summary>Adds the device to <c>attached.json</c>, or takes it out.</summary>
+    private Task<AttachedDevices> RememberAsync(string busId, bool attached) => _remembered.UpdateAsync(current =>
+    {
+        var fingerprint = connection.Current.ServerFingerprint;
+        if (current.ServerFingerprint != fingerprint)
+        {
+            current = AttachedDevices.Empty with { ServerFingerprint = fingerprint };
+        }
+
+        var vidPid = _remote.Devices.FirstOrDefault(d => d.BusId == busId)?.VidPid;
+        return current with
+        {
+            BusIds = attached ? [.. current.BusIds.Append(busId).Distinct()] : [.. current.BusIds.Where(b => b != busId)],
+            VidPids = attached && vidPid is not null
+                ? new Dictionary<string, string>(current.VidPids ?? new Dictionary<string, string>()) { [busId] = vidPid }
+                : current.VidPids?.Where(p => p.Key != busId).ToDictionary(p => p.Key, p => p.Value),
+        };
+    }, CancellationToken.None);
 
     /// <summary>
     /// Serves one plain USB/IP connection from a USB/IP driver on this machine, such as usbip-win2 on the
@@ -418,6 +544,7 @@ internal sealed partial class UsbClient(
             }
 
             var stop = new CancellationTokenSource();
+            _faults.TryRemove(busId, out _);
             _attachments[busId] = new Attachment(port, stop, time.GetUtcNow());
             LogAttached(busId, port);
             await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Succeeded, $"{NameOf(busId)} is attached here on virtual port {port}");

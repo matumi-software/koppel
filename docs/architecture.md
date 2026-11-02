@@ -89,6 +89,7 @@ The config directory holds:
 - `secrets.json` (server role): signing key, HTTPS certificate, registered clients. Encrypted.
 - `connection.json` (client role): server address, pinned fingerprint, client ID and secret. Encrypted.
 - `devices.json` (server role): the bus IDs the user chose to share. Plain.
+- `attached.json` (client role): the devices this client attached, with the server they belong to. The client attaches them again whenever the server offers them and nobody is using them: after a restart, an upgrade, a dropped link, or a replug on the server. Detaching forgets the device. Plain.
 
 The encrypted files use ASP.NET Core Data Protection with a key ring in a separate keys directory
 (`Paths:Keys`, chmod 700 or a restricted ACL). On Windows the key ring is protected with machine

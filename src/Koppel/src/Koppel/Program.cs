@@ -166,5 +166,23 @@ app.MapGet("/healthz", () => TypedResults.Text("ok"));
 
 app.MapFallbackToFile("index.html");
 
+// A background service that dies stops the host, which would otherwise end as a clean stop and the service
+// manager would not restart it. Say it failed: ServiceBase.ExitCode is what the manager is told when the
+// service stops itself, Environment.ExitCode is the process exit code (a console, a container).
+app.Lifetime.ApplicationStopping.Register(() =>
+{
+    var faulted = app.Services.GetServices<IHostedService>().OfType<BackgroundService>().Any(service => service.ExecuteTask?.IsFaulted == true);
+    if (!faulted)
+    {
+        return;
+    }
+
+    Environment.ExitCode = 1;
+    if (OperatingSystem.IsWindows() && app.Services.GetService<IHostLifetime>() is System.ServiceProcess.ServiceBase lifetime)
+    {
+        lifetime.ExitCode = 1;
+    }
+});
+
 app.Run();
-return 0;
+return Environment.ExitCode;

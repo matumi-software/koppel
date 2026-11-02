@@ -6,7 +6,9 @@
           IconSourceFile="$(var.Logos)\koppel-app-icon.ico">
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" ThemeFile="KoppelTheme.xml" LocalizationFile="KoppelTheme.wxl"
-                                              LogoFile="$(var.Logos)\koppel-app-icon-64.png" LicenseUrl="https://opensource.org/license/mit" />
+                                              LogoFile="$(var.Logos)\koppel-app-icon-64.png" LicenseUrl="THIRD-PARTY-NOTICES.txt" />
+      <!-- The licence link opens this file: Koppel's own licence first, then everything it ships. -->
+      <Payload SourceFile="$(var.Notices)" Name="THIRD-PARTY-NOTICES.txt" />
       <!-- The setup window's title-bar icon (IconFile in KoppelTheme.xml). -->
       <Payload SourceFile="$(var.Logos)\koppel-app-icon.ico" Name="koppel.ico" />
     </BootstrapperApplication>

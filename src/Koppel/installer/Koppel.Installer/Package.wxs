@@ -31,7 +31,8 @@
           <fw:FirewallException Id="KoppelDiscoveryPrivate" Name="Koppel: find servers on the local network" Protocol="udp" Port="5353" Scope="localSubnet" Profile="private" />
         </File>
         <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on http://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes">
-          <!-- Restart after a crash: after 5 s, again after 5 s, then every 30 s. The count resets after a day without one. -->
+          <!-- Restart after a failure: after 5 s each time, for the first, second and every later one. The count resets after a day
+               without one. What counts as a failure is set below (SetServiceFailureFlag). -->
           <util:ServiceConfig ServiceName="Koppel" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart"
                               RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
         </ServiceInstall>
@@ -56,7 +57,8 @@
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Install" />
     <CustomAction Id="InstallUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
-    <!-- If the install fails after the driver went in, take it out again. Not on an upgrade: the old version stays. -->
+    <!-- If a first install fails after the driver went in, take it out again. Not on an upgrade (the old version stays) and not
+         on a repair or modify (Installed is set), which would otherwise remove a working driver. -->
     <SetProperty Id="RollbackUsbDriver" Sequence="execute" Before="RollbackUsbDriver"
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Uninstall" />
     <CustomAction Id="RollbackUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="rollback" Impersonate="no" Return="ignore" />
@@ -67,17 +69,27 @@
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Uninstall" />
     <CustomAction Id="RemoveUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
 
-    <!-- pnputil can answer 3010 (a restart finishes the driver install). WixQuietExec reads that as a failure, so
+    <!-- util:ServiceConfig has no way to say that a stop with a non-zero exit code is a failure too, and the core ServiceConfig
+         table is documented not to work. Without the flag a service that stops itself with an error (the host does that
+         when a background service dies) is a clean stop and no recovery acts on it. sc failureflag 1 sets it. It is not
+         vital: if it fails, only that recovery is lost, and WixQuietExec puts the reason in the MSI log. -->
+    <SetProperty Id="SetServiceFailureFlag" Sequence="execute" Before="SetServiceFailureFlag"
+                 Value="&quot;[System64Folder]sc.exe&quot; failureflag Koppel 1" />
+    <CustomAction Id="SetServiceFailureFlag" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- pnputil can answer 3010 (a restart finishes the driver install or removal). WixQuietExec reads that as a failure, so
          driver.ps1 leaves a registry value and restart-flag.js (kept to one line, the Target column is short)
-         turns it into the DRIVER_RESTART property, which ScheduleReboot acts on. -->
-    <CustomAction Id="ReadDriverRestart" Script="jscript" ScriptSourceFile="restart-flag.js" Execute="immediate" Return="check" />
+         turns it into the DRIVER_RESTART property, which ScheduleReboot acts on. Return="ignore": it is after InstallFinalize,
+         so there is nothing left to fail, and a script error must not turn a finished install into a failed one. -->
+    <CustomAction Id="ReadDriverRestart" Script="jscript" ScriptSourceFile="restart-flag.js" Execute="immediate" Return="ignore" />
 
     <InstallExecuteSequence>
       <Custom Action="PrepareDataFolder" After="InstallFiles" Condition="NOT REMOVE" />
-      <Custom Action="RollbackUsbDriver" Before="InstallUsbDriver" Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
+      <Custom Action="RollbackUsbDriver" Before="InstallUsbDriver" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED" />
       <Custom Action="InstallUsbDriver" After="PrepareDataFolder" Condition="NOT REMOVE" />
       <Custom Action="RemoveUsbDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
-      <Custom Action="ReadDriverRestart" After="InstallFinalize" Condition="NOT REMOVE" />
+      <Custom Action="SetServiceFailureFlag" After="InstallServices" Condition="NOT REMOVE" />
+      <Custom Action="ReadDriverRestart" After="InstallFinalize" />
       <ScheduleReboot After="ReadDriverRestart" Condition="DRIVER_RESTART" />
     </InstallExecuteSequence>
   </Package>

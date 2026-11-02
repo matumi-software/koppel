@@ -11,6 +11,7 @@ and authentication are next. Work happens on `dev`; `main` holds releases.
 ## Run it
 
 ```sh
+cd src/Koppel
 docker compose up --build
 ```
 

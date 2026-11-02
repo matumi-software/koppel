@@ -5,6 +5,6 @@
   "packageManager": "pnpm@9.15.0",
   "engines": { "node": ">=20" },
   "scripts": {
-    "design:sync": "node tools/sync-design-system.mjs"
+    "design:sync": "node Koppel.Core/tools/sync-design-system.mjs"
   }
 }

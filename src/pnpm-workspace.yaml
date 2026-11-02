@@ -1,0 +1,3 @@
+packages:
+  - 'Koppel.Core/src/Koppel.Core.React.UI'
+  - 'Koppel/src/Koppel.UI'

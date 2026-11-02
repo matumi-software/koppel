@@ -1,4 +1,4 @@
-# Multi-stage build for Koppel. Build context = repo root (see docker-compose.yml).
+# Multi-stage build for Koppel. Build context = src/ (see Koppel/docker-compose.yml).
 #
 # One image serves both roles; the role is a setting. USB access (privileged mode,
 # /dev/bus/usb, host kernel modules) is added in compose when the USB layer lands.
@@ -19,15 +19,16 @@ WORKDIR /build
 
 # Workspace and .NET props first, so dependency layers cache across source edits.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY src/Koppel.React.UI/package.json src/Koppel.React.UI/
-COPY src/Koppel.UI/package.json src/Koppel.UI/
+COPY Koppel.Core/src/Koppel.Core.React.UI/package.json Koppel.Core/src/Koppel.Core.React.UI/
+COPY Koppel/src/Koppel.UI/package.json Koppel/src/Koppel.UI/
 RUN pnpm install --frozen-lockfile
 
 COPY global.json Directory.Build.props Directory.Packages.props .editorconfig ./
-COPY src ./src
+COPY Koppel.Core ./Koppel.Core
+COPY Koppel ./Koppel
 
 # PublishRunWebpack builds the SPA and stages dist/ into wwwroot/.
-RUN dotnet publish src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo -p:SkipSpaInstall=true
+RUN dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo -p:SkipSpaInstall=true
 
 # -------- Stage 2: runtime -------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final

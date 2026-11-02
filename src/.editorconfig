@@ -37,6 +37,6 @@ dotnet_style_collection_initializer = true:suggestion
 dotnet_style_null_propagation = true:warning
 dotnet_style_coalesce_expression = true:warning
 
-[tests/**.cs]
+[**/tests/**.cs]
 # Tests use the xUnit convention `Method_does_thing()`, as in Matumi.
 dotnet_diagnostic.CA1707.severity = silent

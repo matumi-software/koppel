@@ -25,15 +25,15 @@ Hand edits to the config file are picked up by a file watcher and pushed the sam
 SignalR link is down, every control that sends a change is disabled, and the UI refetches over
 REST after reconnecting.
 
-Code: `src/Koppel/Settings/SettingsStore.cs` (write, then raise), `src/Koppel/Hubs/UiHub.cs`
-(relay to the hub), `src/Koppel.UI/src/settings/use-settings.ts` (pending, confirm, fail).
-The end-to-end test is `tests/Koppel.Tests/Settings/SettingsConfirmFlowTests.cs`.
+Code (under `src/Koppel/`): `src/Koppel/Settings/SettingsStore.cs` (write, then raise),
+`src/Koppel/Hubs/UiHub.cs` (relay to the hub), `src/Koppel.UI/src/settings/use-settings.ts`
+(pending, confirm, fail). The end-to-end test is `tests/Koppel.Tests/Settings/SettingsConfirmFlowTests.cs`.
 
 ## Config on disk
 
 `settings.json` lives in the config directory:
 
-- Development: `.koppel/config` at the repo root (gitignored), from `appsettings.Development.json`.
+- Development: `src/Koppel/.koppel/config` (gitignored), from `appsettings.Development.json`.
 - Docker: `/koppel/config` inside the `koppel` volume (`Paths__Config`).
 - Otherwise: `%ProgramData%\Koppel\config` on Windows, `/var/lib/koppel/config` elsewhere, unless `Paths:Config` is set.
 

@@ -1,21 +1,22 @@
 // Copies the design system in resources/design-system into the React UI library, so the
 // design system stays the one source for every token and component style.
 //
-//   tokens.json            -> src/Koppel.React.UI/src/styles/tokens.css
-//   components/bundle.css  -> src/Koppel.React.UI/src/styles/components.css
+//   tokens.json            -> Koppel.Core.React.UI/src/styles/tokens.css
+//   components/bundle.css  -> Koppel.Core.React.UI/src/styles/components.css
 //
-// Run from the repo root: pnpm design:sync. Commit the generated files.
+// Run from src/: pnpm design:sync. Commit the generated files.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+// This file sits in src/Koppel.Core/tools; the repo root is three levels up.
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const source = join(root, 'resources', 'design-system');
-const target = join(root, 'src', 'Koppel.React.UI', 'src', 'styles');
+const target = join(root, 'src', 'Koppel.Core', 'src', 'Koppel.Core.React.UI', 'src', 'styles');
 
 const header = (from) =>
-  `/* Generated from resources/design-system/${from} by tools/sync-design-system.mjs. Do not edit. */\n`;
+  `/* Generated from resources/design-system/${from} by src/Koppel.Core/tools/sync-design-system.mjs. Do not edit. */\n`;
 
 const tokens = JSON.parse(readFileSync(join(source, 'tokens.json'), 'utf8'));
 const [primary, ...others] = tokens.color.themes.map((t) => t.id);
@@ -87,4 +88,4 @@ const components = readFileSync(join(source, 'components', 'bundle.css'), 'utf8'
   .replace(/^@import url\("https:\/\/fonts\.googleapis\.com[^\n]*\n+/m, '');
 writeFileSync(join(target, 'components.css'), header('components/bundle.css') + components);
 
-console.log(`Wrote ${join('src', 'Koppel.React.UI', 'src', 'styles')}/tokens.css and components.css`);
+console.log(`Wrote ${target}: tokens.css and components.css`);

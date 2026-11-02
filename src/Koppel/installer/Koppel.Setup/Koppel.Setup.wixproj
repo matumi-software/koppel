@@ -6,7 +6,9 @@
     <OutputType>Bundle</OutputType>
     <OutputName>Koppel-Setup</OutputName>
     <InstallerPlatform>x64</InstallerPlatform>
-    <DefineConstants>Version=$(Version);Msi=$(Msi);VCRedist=$(VCRedist);VCRedistBuild=$(VCRedistBuild)</DefineConstants>
+    <!-- The app icon and logo come from the design system (pnpm design:icons renders them). -->
+    <Logos>$(MSBuildThisFileDirectory)..\..\..\..\resources\design-system\assets\Logos</Logos>
+    <DefineConstants>Version=$(Version);Msi=$(Msi);VCRedist=$(VCRedist);VCRedistBuild=$(VCRedistBuild);Logos=$(Logos)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

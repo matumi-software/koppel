@@ -3,6 +3,10 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Koppel is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- Shows in the Apps list when the MSI is installed on its own; setup.exe's entry carries the same icon. -->
+    <Icon Id="KoppelIcon" SourceFile="$(var.Logos)\koppel-app-icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="KoppelIcon" />
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="CompanyFolder" Name="Matumi">
         <Directory Id="INSTALLFOLDER" Name="Koppel" />

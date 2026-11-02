@@ -6,6 +6,16 @@
     <SpaProxyServerUrl>https://localhost:61040</SpaProxyServerUrl>
   </PropertyGroup>
 
+  <!-- The Windows icon for Koppel.exe. The Docker build only sees src/, and Linux has no use for it. -->
+  <PropertyGroup Condition="Exists('$(MSBuildThisFileDirectory)..\..\..\..\resources\design-system\assets\Logos\koppel-app-icon.ico')">
+    <ApplicationIcon>$(MSBuildThisFileDirectory)..\..\..\..\resources\design-system\assets\Logos\koppel-app-icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Development settings point at a repo folder; an installed or published Koppel must not carry them. -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SpaProxy" />
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />

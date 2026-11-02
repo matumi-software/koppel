@@ -4,7 +4,8 @@
   <PropertyGroup>
     <OutputName>Koppel</OutputName>
     <InstallerPlatform>x64</InstallerPlatform>
-    <DefineConstants>StagingDir=$(StagingDir);Version=$(Version)</DefineConstants>
+    <Logos>$(MSBuildThisFileDirectory)..\..\..\..\resources\design-system\assets\Logos</Logos>
+    <DefineConstants>StagingDir=$(StagingDir);Version=$(Version);Logos=$(Logos)</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

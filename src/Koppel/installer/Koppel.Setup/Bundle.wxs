@@ -1,9 +1,14 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
-  <Bundle Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="5B42E92B-C631-47B4-A17F-9692A0871516">
+  <!-- The bundle is what the Apps list shows, so its icon is the one people see there. -->
+  <Bundle Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="5B42E92B-C631-47B4-A17F-9692A0871516"
+          IconSourceFile="$(var.Logos)\koppel-app-icon.ico">
     <BootstrapperApplication>
-      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" LicenseUrl="https://opensource.org/license/mit" />
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" ThemeFile="KoppelTheme.xml" LocalizationFile="KoppelTheme.wxl"
+                                              LogoFile="$(var.Logos)\koppel-app-icon-64.png" LicenseUrl="https://opensource.org/license/mit" />
+      <!-- The setup window's title-bar icon (IconFile in KoppelTheme.xml). -->
+      <Payload SourceFile="$(var.Logos)\koppel-app-icon.ico" Name="koppel.ico" />
     </BootstrapperApplication>
 
     <!-- Skip the runtime when this build of it, or a newer one, is already installed. -->

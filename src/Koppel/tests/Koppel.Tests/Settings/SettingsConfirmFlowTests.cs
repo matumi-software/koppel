@@ -2,10 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Koppel.Settings;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.AspNetCore.TestHost;
 
 namespace Koppel.Tests.Settings;
 
@@ -15,34 +12,16 @@ namespace Koppel.Tests.Settings;
 /// </summary>
 public sealed class SettingsConfirmFlowTests : IDisposable
 {
-    private readonly string _directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly KoppelFactory _koppel = new();
 
-    public SettingsConfirmFlowTests()
-    {
-        _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
-        {
-            builder.UseEnvironment("Testing");
-            builder.UseSetting("Paths:Config", _directory);
-            builder.UseSetting("Paths:Keys", Path.Combine(_directory, "keys"));
-        });
-    }
-
-    public void Dispose()
-    {
-        _factory.Dispose();
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _koppel.Dispose();
 
     [Fact]
     public async Task Patch_is_confirmed_over_SignalR_after_the_file_is_written()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var client = _factory.CreateClient();
-        await using var hub = await ConnectAsync(ct);
+        using var client = _koppel.CreateUiClient();
+        await using var hub = await _koppel.ConnectUiHubAsync(ct);
         var confirmed = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         hub.On<JsonElement>("SettingsChanged", settings => confirmed.TrySetResult(settings));
 
@@ -52,8 +31,7 @@ public sealed class SettingsConfirmFlowTests : IDisposable
         (await response.Content.ReadAsStringAsync(ct)).Should().BeEmpty();
         var pushed = await confirmed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
         pushed.GetProperty("shareOnStartup").GetBoolean().Should().BeFalse();
-        var onDisk = JsonSerializer.Deserialize<KoppelSettings>(
-            await File.ReadAllTextAsync(Path.Combine(_directory, "settings.json"), ct), KoppelJson.Files)!;
+        var onDisk = JsonSerializer.Deserialize<KoppelSettings>(await File.ReadAllTextAsync(_koppel.ConfigFile("settings.json"), ct), KoppelJson.Files)!;
         onDisk.ShareOnStartup.Should().BeFalse();
     }
 
@@ -61,30 +39,35 @@ public sealed class SettingsConfirmFlowTests : IDisposable
     public async Task Patch_with_a_bad_port_is_rejected_and_nothing_is_pushed()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var client = _factory.CreateClient();
-        await using var hub = await ConnectAsync(ct);
-        var pushes = 0;
-        hub.On<JsonElement>("SettingsChanged", _ => Interlocked.Increment(ref pushes));
+        using var client = _koppel.CreateUiClient();
+        await using var hub = await _koppel.ConnectUiHubAsync(ct);
+        var pushes = new System.Collections.Concurrent.ConcurrentQueue<JsonElement>();
+        hub.On<JsonElement>("SettingsChanged", pushes.Enqueue);
 
-        using var response = await client.PatchAsJsonAsync("/api/settings", new { listenPort = 70000 }, ct);
+        using var rejected = await client.PatchAsJsonAsync("/api/settings", new { listenPort = 70000 }, ct);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        await Task.Delay(300, ct);
-        pushes.Should().Be(0);
-        (await client.GetFromJsonAsync<JsonElement>("/api/settings", ct)).GetProperty("listenPort").GetInt32().Should().Be(3240);
+        rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        // A valid patch afterwards is the sentinel: pushes arrive in order, so once it is
+        // here a push from the rejected patch would be too, with no sleep to guess at.
+        using var sentinel = await client.PatchAsJsonAsync("/api/settings", new { shareOnStartup = false }, ct);
+        await WaitForAsync(() => !pushes.IsEmpty, ct);
+
+        pushes.Should().ContainSingle().Which.GetProperty("listenPort").GetInt32().Should().Be(_koppel.UsbPort);
+        (await client.GetFromJsonAsync<JsonElement>("/api/settings", ct)).GetProperty("listenPort").GetInt32().Should().Be(_koppel.UsbPort);
     }
 
-    private async Task<HubConnection> ConnectAsync(CancellationToken cancellationToken)
+    private static async Task WaitForAsync(Func<bool> condition, CancellationToken cancellationToken)
     {
-        var server = _factory.Server;
-        var connection = new HubConnectionBuilder()
-            .WithUrl(new Uri(server.BaseAddress, "/api/hubs/ui"), options =>
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
             {
-                options.HttpMessageHandlerFactory = _ => server.CreateHandler();
-                options.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.LongPolling;
-            })
-            .Build();
-        await connection.StartAsync(cancellationToken);
-        return connection;
+                throw new TimeoutException("The push did not arrive.");
+            }
+
+            await Task.Delay(20, cancellationToken);
+        }
     }
 }

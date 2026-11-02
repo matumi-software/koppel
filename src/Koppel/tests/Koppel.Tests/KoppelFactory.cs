@@ -108,10 +108,25 @@ public sealed class KoppelFactory : IDisposable
         }
     }
 
+    // Ports are handed out once per process, so parallel hosts never get the same one even when the
+    // first host has not bound it yet. The OS picks each one (port 0); another process can still take
+    // it before the host binds, which a fixed port in Program cannot avoid.
+    private static readonly HashSet<int> Taken = [];
+
     public static int FreePort()
     {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
+        lock (Taken)
+        {
+            while (true)
+            {
+                using var listener = new TcpListener(IPAddress.Loopback, 0);
+                listener.Start();
+                var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                if (Taken.Add(port))
+                {
+                    return port;
+                }
+            }
+        }
     }
 }

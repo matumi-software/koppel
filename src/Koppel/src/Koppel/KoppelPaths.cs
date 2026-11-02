@@ -1,3 +1,5 @@
+using Koppel.Core.Security;
+
 namespace Koppel;
 
 /// <summary>Where Koppel keeps its files on disk.</summary>
@@ -13,6 +15,16 @@ internal sealed record KoppelPaths(string ConfigDirectory, string KeysDirectory,
 
     /// <summary>Client role: server address, pinned fingerprint, client ID and secret. Encrypted.</summary>
     public string ConnectionFile => Path.Combine(ConfigDirectory, "connection.json");
+
+    /// <summary>Creates the config and keys directories and restricts both to administrators, before anything is written to them.</summary>
+    public void Prepare()
+    {
+        foreach (var directory in new[] { ConfigDirectory, KeysDirectory })
+        {
+            Directory.CreateDirectory(directory);
+            DirectoryHardening.Harden(directory);
+        }
+    }
 
     /// <summary>
     /// Reads <c>Paths:Config</c>, <c>Paths:Keys</c> and <c>Paths:KeyCertificate</c>, resolving relative

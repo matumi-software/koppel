@@ -19,6 +19,9 @@ public sealed record KoppelSettings(
     bool SetupComplete = false)
 {
     public static KoppelSettings Default { get; } = new(KoppelRole.Server, ShareOnStartup: true, ListenPort: 3240);
+
+    /// <summary>The same rules a patch is held to, so a hand-edited file is checked like a REST change.</summary>
+    public Dictionary<string, string[]> Validate() => new SettingsPatch(Role, ShareOnStartup, ListenPort, SetupComplete).Validate();
 }
 
 /// <summary>A partial change to <see cref="KoppelSettings"/>. Null means "leave as is".</summary>

@@ -41,7 +41,7 @@ public sealed class SecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task Encrypted_config_file_round_trips_and_is_unreadable_without_the_key_ring()
+    public async Task Encrypted_config_file_round_trips_and_is_refused_without_the_key_ring()
     {
         var ct = TestContext.Current.CancellationToken;
         var path = Path.Combine(_directory, "config", "secret.json");
@@ -66,9 +66,12 @@ public sealed class SecurityTests : IDisposable
         using (var otherKeys = new SecretBox(Path.Combine(_directory, "other-keys"), "test"))
         using (var file = new JsonConfigFile<Sample>(path, new Sample("start"), JsonSerializerOptions.Web, NullLogger.Instance, otherKeys.AsFileCodec()))
         {
-            await file.StartAsync(ct);
-            file.Current.Value.Should().Be("start");
-            file.Stop();
+            var before = await File.ReadAllBytesAsync(path, ct);
+
+            var start = () => file.StartAsync(ct);
+
+            await start.Should().ThrowAsync<ConfigFileException>();
+            (await File.ReadAllBytesAsync(path, ct)).Should().Equal(before);
         }
     }
 

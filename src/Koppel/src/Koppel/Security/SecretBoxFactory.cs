@@ -12,7 +12,17 @@ internal static partial class SecretBoxFactory
         var certificate = paths.KeyCertificatePath is { } path
             ? X509CertificateLoader.LoadPkcs12FromFile(path, password: null)
             : null;
-        var box = new SecretBox(paths.KeysDirectory, "Koppel.Secrets.v1", certificate);
+        SecretBox box;
+        try
+        {
+            box = new SecretBox(paths.KeysDirectory, "Koppel.Secrets.v1", certificate);
+        }
+        catch
+        {
+            certificate?.Dispose();
+            throw;
+        }
+
         if (!box.KeysProtectedAtRest)
         {
             LogKeysUnprotected(logger, paths.KeysDirectory);
@@ -34,12 +44,24 @@ internal static partial class SecretBoxFactory
             .PersistKeysToFileSystem(new DirectoryInfo(directory));
         if (paths.KeyCertificatePath is { } path)
         {
-            builder.ProtectKeysWithCertificate(X509CertificateLoader.LoadPkcs12FromFile(path, password: null));
+            var certificate = X509CertificateLoader.LoadPkcs12FromFile(path, password: null);
+            builder.ProtectKeysWithCertificate(certificate);
+            services.AddHostedService(_ => new CertificateLifetime(certificate));
         }
         else if (OperatingSystem.IsWindows())
         {
             builder.ProtectKeysWithDpapi(protectToLocalMachine: true);
         }
+    }
+
+    // Data Protection keeps using the certificate for as long as the host runs; this releases it at shutdown.
+    private sealed class CertificateLifetime(X509Certificate2 certificate) : IHostedService, IDisposable
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public void Dispose() => certificate.Dispose();
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "The key ring in {Directory} is not encrypted at rest. Anyone who can read it can decrypt the secret files. Set Paths:KeyCertificate to a certificate kept outside the data volume (for example a Docker secret).")]

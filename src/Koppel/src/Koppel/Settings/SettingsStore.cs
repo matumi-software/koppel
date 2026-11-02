@@ -13,7 +13,8 @@ internal sealed class SettingsStore(KoppelPaths paths, IConfiguration configurat
         paths.SettingsFile,
         KoppelSettings.Default with { ListenPort = configuration.GetValue("Usb:ListenPort", KoppelSettings.Default.ListenPort) },
         KoppelJson.Files,
-        logger);
+        logger,
+        validate: Check);
 
     /// <summary>Raised after a change is on disk, with the settings as written.</summary>
     public event Func<KoppelSettings, Task>? Changed
@@ -23,6 +24,9 @@ internal sealed class SettingsStore(KoppelPaths paths, IConfiguration configurat
     }
 
     public KoppelSettings Current => _file.Current;
+
+    /// <summary>Why a hand edit of <c>settings.json</c> was not applied, or null. <see cref="Current"/> is the last good value.</summary>
+    public string? Problem => _file.Problem;
 
     public Task StartAsync(CancellationToken cancellationToken) => _file.StartAsync(cancellationToken);
 
@@ -37,4 +41,12 @@ internal sealed class SettingsStore(KoppelPaths paths, IConfiguration configurat
         _file.UpdateAsync(patch.ApplyTo, cancellationToken);
 
     public void Dispose() => _file.Dispose();
+
+    private static string? Check(KoppelSettings settings)
+    {
+        var errors = settings.Validate();
+        return errors.Count == 0
+            ? null
+            : string.Join("; ", errors.SelectMany(error => error.Value.Select(message => $"{error.Key}: {message}")));
+    }
 }

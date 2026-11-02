@@ -33,6 +33,7 @@ builder.Services.ConfigureHttpJsonOptions(options => KoppelJson.Configure(option
 builder.Services.AddSignalR().AddJsonProtocol(options => KoppelJson.Configure(options.PayloadSerializerOptions));
 
 var paths = KoppelPaths.FromConfiguration(builder.Configuration, builder.Environment);
+paths.Prepare();
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, httpPort, httpsPort));

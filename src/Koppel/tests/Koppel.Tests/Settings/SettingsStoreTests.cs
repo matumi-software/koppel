@@ -44,7 +44,7 @@ public sealed class SettingsStoreTests : IDisposable
         onDiskWhenRaised.Should().NotBeNull();
         onDiskWhenRaised!.ShareOnStartup.Should().BeFalse();
         store.Current.ShareOnStartup.Should().BeFalse();
-        File.Exists(SettingsFile + ".tmp").Should().BeFalse();
+        Directory.GetFiles(_directory, "*.tmp").Should().BeEmpty();
     }
 
     [Fact]
@@ -65,6 +65,32 @@ public sealed class SettingsStoreTests : IDisposable
         var result = await raised.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         result.ListenPort.Should().Be(4000);
         store.Current.ListenPort.Should().Be(4000);
+    }
+
+    [Fact]
+    public async Task Start_refuses_a_settings_file_with_a_port_out_of_range_and_leaves_it_alone()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(SettingsFile, """{ "role": "server", "shareOnStartup": true, "listenPort": 70000 }""", TestContext.Current.CancellationToken);
+        var before = await File.ReadAllBytesAsync(SettingsFile, TestContext.Current.CancellationToken);
+        using var store = CreateStore();
+
+        var start = () => store.StartAsync(TestContext.Current.CancellationToken);
+
+        (await start.Should().ThrowAsync<Koppel.Core.Configuration.ConfigFileException>()).Which.Message.Should().Contain("listenPort");
+        (await File.ReadAllBytesAsync(SettingsFile, TestContext.Current.CancellationToken)).Should().Equal(before);
+    }
+
+    [Fact]
+    public async Task Start_refuses_a_role_written_as_a_number()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(SettingsFile, """{ "role": 7, "shareOnStartup": true, "listenPort": 3240 }""", TestContext.Current.CancellationToken);
+        using var store = CreateStore();
+
+        var start = () => store.StartAsync(TestContext.Current.CancellationToken);
+
+        await start.Should().ThrowAsync<Koppel.Core.Configuration.ConfigFileException>();
     }
 
     private string SettingsFile => Path.Combine(_directory, "settings.json");

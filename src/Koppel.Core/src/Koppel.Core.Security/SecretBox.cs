@@ -22,12 +22,14 @@ public sealed class SecretBox : IDisposable
 {
     private readonly IDataProtectionProvider _provider;
     private readonly IDataProtector _protector;
+    private readonly X509Certificate2? _keyCertificate;
 
     public SecretBox(string keyRingDirectory, string purpose, X509Certificate2? keyCertificate = null)
     {
         Directory.CreateDirectory(keyRingDirectory);
         DirectoryHardening.Harden(keyRingDirectory);
 
+        _keyCertificate = keyCertificate;
         KeysProtectedAtRest = keyCertificate is not null || OperatingSystem.IsWindows();
         _provider = DataProtectionProvider.Create(new DirectoryInfo(keyRingDirectory), builder =>
         {
@@ -54,7 +56,12 @@ public sealed class SecretBox : IDisposable
     /// <summary>A codec that encrypts a <see cref="JsonConfigFile{T}"/> with this box.</summary>
     public IFileCodec AsFileCodec() => new ProtectedFileCodec(this);
 
-    public void Dispose() => (_provider as IDisposable)?.Dispose();
+    /// <summary>Also disposes the key certificate: the box takes ownership of it.</summary>
+    public void Dispose()
+    {
+        (_provider as IDisposable)?.Dispose();
+        _keyCertificate?.Dispose();
+    }
 
     private sealed class ProtectedFileCodec(SecretBox box) : IFileCodec
     {

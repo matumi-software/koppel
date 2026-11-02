@@ -23,7 +23,7 @@ internal static class SystemEndpoints
     /// <summary>What this machine can do: share (usbip-host) and attach (vhci-hcd). Read-only.</summary>
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher) => TypedResults.Ok(new[]
+        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher, SettingsStore settings) => TypedResults.Ok(new[]
         {
             host.Unavailable is { } shareProblem
                 ? new SystemCheck("share", false, "Sharing is not available.", shareProblem)
@@ -31,7 +31,9 @@ internal static class SystemEndpoints
             attacher.Unavailable is { } attachProblem
                 ? new SystemCheck("attach", false, "Attaching is not available.", attachProblem)
                 : new SystemCheck("attach", true, "vhci-hcd is loaded.", "This machine can attach devices."),
-        }));
+        }.Concat(settings.Problem is { } problem
+            ? [new SystemCheck("settings", false, "settings.json was not applied.", problem)]
+            : []).ToArray()));
         app.MapGet("/api/system/info", (HostInfo info, SettingsStore settings, ServerSecretsStore secrets) => TypedResults.Ok(new SystemInfo(
             Environment.MachineName,
             Version,

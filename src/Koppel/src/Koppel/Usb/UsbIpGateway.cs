@@ -20,7 +20,8 @@ internal sealed class AnyPeer : IGatewayPeerCheck
 
 /// <summary>
 /// Serves only connections the Windows kernel owns, which is how usbip-win2's driver connects. Any
-/// other process on the machine that reaches the loopback port is turned away.
+/// other process on the machine that reaches the loopback port is turned away. The kernel also connects
+/// for another user's <c>usbip attach</c>, so <see cref="UsbClient"/> still decides which imports it serves.
 /// </summary>
 internal sealed class KernelPeer(KernelPeerCheck check) : IGatewayPeerCheck
 {
@@ -41,8 +42,11 @@ internal sealed class KernelPeer(KernelPeerCheck check) : IGatewayPeerCheck
 /// Anyone who reaches this port gets this client's access to the server, with no login. It listens on
 /// <c>Gateway:Address</c> (127.0.0.1 unless set) and <c>Gateway:Port</c>. In a container, listen on all
 /// addresses and publish the port on the host's 127.0.0.1 only. On native Windows with a loopback
-/// address, only connections the kernel owns (PID 4, the driver) are served. A port that cannot be
-/// bound is tried again with a growing wait, and the reason shows in the client's device list.
+/// address, only connections the kernel owns (PID 4, the driver) are served, and of those only the
+/// imports Koppel itself asked the driver for (see <see cref="UsbClient"/>). At most
+/// <c>Gateway:MaxSessions</c> connections (64 unless set) are served at once; more are closed at once. A
+/// port that cannot be bound is tried again with a growing wait, and the reason shows in the client's
+/// device list.
 /// </remarks>
 internal sealed partial class UsbIpGateway(
     UsbClient client,
@@ -54,11 +58,16 @@ internal sealed partial class UsbIpGateway(
     /// <summary>On Windows the gateway is how Koppel's own Attach reaches the driver, so it is on by default.</summary>
     public const int WindowsDefaultPort = 3242;
 
+    public const int DefaultMaxSessions = 64;
+
+    private static readonly TimeSpan StopWait = TimeSpan.FromSeconds(5);
+
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(60);
 
     private readonly BackgroundTasks _tasks = new(logger);
-    private TaskCompletionSource _roleChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private CancellationTokenSource _roleChanged = new();
+    private SemaphoreSlim? _slots;
     private volatile bool _running;
 
     private bool Wanted => settings.Current.Role != KoppelRole.Server;
@@ -79,12 +88,13 @@ internal sealed partial class UsbIpGateway(
         }
 
         var check = peerCheck ?? ChoosePeerCheck(address);
+        _slots = new SemaphoreSlim(Math.Max(1, configuration.GetValue("Gateway:MaxSessions", DefaultMaxSessions)));
         Task OnSettings(KoppelSettings _)
         {
             // Wake the loop when the role starts or stops wanting the gateway.
             if (Wanted != _running)
             {
-                Interlocked.Exchange(ref _roleChanged, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+                Interlocked.Exchange(ref _roleChanged, new CancellationTokenSource()).Cancel();
             }
 
             return Task.CompletedTask;
@@ -96,9 +106,8 @@ internal sealed partial class UsbIpGateway(
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                var signal = _roleChanged.Task;
-                using var iteration = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                _ = signal.ContinueWith(_ => Cancel(iteration), TaskScheduler.Default);
+                // Linked to the signal, so the registration goes with the iteration.
+                using var iteration = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, _roleChanged.Token);
                 try
                 {
                     if (!Wanted)
@@ -149,19 +158,9 @@ internal sealed partial class UsbIpGateway(
         finally
         {
             settings.Changed -= OnSettings;
+            // Sessions end with the token; give them a moment to let go of their sockets.
+            await _tasks.WaitAsync(StopWait);
             await client.SetGatewayAsync(null);
-        }
-    }
-
-    private static void Cancel(CancellationTokenSource source)
-    {
-        try
-        {
-            source.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-            // The iteration ended first.
         }
     }
 
@@ -173,13 +172,31 @@ internal sealed partial class UsbIpGateway(
         LogListening(address, port);
         await client.SetGatewayAsync(port);
         var gateway = new IPEndPoint(address, port);
+        var slots = _slots!;
         try
         {
             while (true)
             {
                 var socket = await listener.AcceptAsync(cancellationToken);
                 socket.NoDelay = true;
-                _tasks.Run("gateway session", () => ServeAsync(socket, gateway, check, cancellationToken));
+                if (!slots.Wait(0, CancellationToken.None))
+                {
+                    LogTooMany(socket.RemoteEndPoint?.ToString() ?? "unknown");
+                    socket.Dispose();
+                    continue;
+                }
+
+                _tasks.Run("gateway session", async () =>
+                {
+                    try
+                    {
+                        await ServeAsync(socket, gateway, check, cancellationToken);
+                    }
+                    finally
+                    {
+                        slots.Release();
+                    }
+                });
             }
         }
         finally
@@ -239,6 +256,9 @@ internal sealed partial class UsbIpGateway(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway connection from {Peer}: it is not the USB/IP driver (the kernel)")]
     private partial void LogRejected(string peer);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway connection from {Peer}: too many sessions are open")]
+    private partial void LogTooMany(string peer);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "The gateway on {Address} accepts every connection: the check for the driver's process only applies to a loopback address on Windows outside a container")]
     private partial void LogNoPeerCheck(IPAddress address);

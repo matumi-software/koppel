@@ -121,13 +121,14 @@ public sealed class UsbClientFailureTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         await using var hub = await LinkAsync(ct);
         await AttachAsync(hub, ct);
-        var restarted = Link.Waiter(hub, "ClientDevicesChanged", d => d.GetProperty("link").GetString() == "connecting");
+        var usb = _client.Services.GetRequiredService<UsbClient>();
+        var applied = usb.ChangesApplied;
 
         using var ui = _client.CreateUiClient();
         (await ui.PatchAsJsonAsync("/api/settings", new { shareOnStartup = false }, ct)).EnsureSuccessStatusCode();
-        await Task.Delay(TimeSpan.FromSeconds(1.5), ct);
 
-        restarted.IsCompleted.Should().BeFalse("the link keeps running when neither the role nor the connection changed");
+        // The update returns after every handler has run, so an applied change would be counted by now.
+        usb.ChangesApplied.Should().Be(applied, "the link keeps running when neither the role nor the connection changed");
         _clientKernel.DetachedPorts.Should().BeEmpty();
         var devices = await ui.GetFromJsonAsync<JsonElement>("/api/client/devices", ct);
         devices.GetProperty("devices")[0].GetProperty("attachedHere").GetBoolean().Should().BeTrue();
@@ -164,6 +165,47 @@ public sealed class UsbClientFailureTests : IDisposable
     }
 
     [Fact]
+    public async Task Stopping_the_client_does_not_wait_for_its_relays_and_keeps_the_device_remembered()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var hub = await LinkAsync(ct);
+        await AttachAsync(hub, ct);
+        var usb = _client.Services.GetRequiredService<UsbClient>();
+
+        var started = DateTime.UtcNow;
+        await usb.StopAsync(ct);
+
+        // A relay nobody stopped made the stop wait out its five seconds.
+        (DateTime.UtcNow - started).Should().BeLessThan(TimeSpan.FromSeconds(3));
+        _clientKernel.DetachedPorts.Should().Contain(8);
+        File.ReadAllText(_client.ConfigFile("attached.json")).Should().Contain("1-1.4");
+    }
+
+    [Fact]
+    public async Task A_detach_that_cannot_be_saved_is_a_fault_on_the_device_and_the_device_is_detached()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var hub = await LinkAsync(ct);
+        await AttachAsync(hub, ct);
+        var path = _client.ConfigFile("attached.json");
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+        try
+        {
+            using var ui = _client.CreateUiClient();
+            (await ui.PostAsync("/api/client/devices/1-1.4/detach", null, ct)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+            _clientKernel.DetachedPorts.Should().Contain(8);
+            var devices = await ui.GetFromJsonAsync<JsonElement>("/api/client/devices", ct);
+            devices.GetProperty("devices")[0].GetProperty("attachedHere").GetBoolean().Should().BeFalse();
+            devices.GetProperty("devices")[0].GetProperty("fault").GetString().Should().Contain("could not save");
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+    }
+
+    [Fact]
     public async Task Attaching_a_device_that_is_attached_or_on_its_way_does_nothing()
     {
         var ct = TestContext.Current.CancellationToken;
@@ -177,8 +219,9 @@ public sealed class UsbClientFailureTests : IDisposable
         await Task.WhenAll(first, second);
         await Link.WithLastAsync(attached, hub, ct);
         (await ui.PostAsync("/api/client/devices/1-1.4/attach", null, ct)).StatusCode.Should().Be(HttpStatusCode.Accepted);
-        await Task.Delay(TimeSpan.FromSeconds(1.5), ct);
 
+        // The request has been answered, so an attach it started would be counted by now.
+        _client.Services.GetRequiredService<UsbClient>().AttachStarts.Should().Be(1);
         _clientKernel.Attaches.Should().Be(1);
         var devices = await ui.GetFromJsonAsync<JsonElement>("/api/client/devices", ct);
         devices.GetProperty("devices")[0].GetProperty("fault").ValueKind.Should().Be(JsonValueKind.Null);
@@ -201,8 +244,8 @@ public sealed class UsbClientFailureTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         _serverKernel.Devices = [FakeKernel.Dongle, FakeKernel.Dongle with { BusId = "1-1.5 --stop" }];
 
+        // The list the link waits for has one device in it: the server sent two, and the bad one was dropped.
         await using var hub = await LinkAsync(ct);
-        await Task.Delay(TimeSpan.FromSeconds(1), ct);
 
         using var ui = _client.CreateUiClient();
         var devices = await ui.GetFromJsonAsync<JsonElement>("/api/client/devices", ct);

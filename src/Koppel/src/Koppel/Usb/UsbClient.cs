@@ -71,6 +71,12 @@ internal sealed partial class UsbClient(
     private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(60);
 
+    /// <summary>How long before its token ends the link is made again.</summary>
+    private static readonly TimeSpan RefreshAhead = TimeSpan.FromSeconds(30);
+
+    /// <summary>A close this near the end of the token is the server's expiry. It allows for the server's clock and the trip.</summary>
+    private static readonly TimeSpan ExpiryGrace = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// One deadline for everything before USB traffic flows: connecting, TLS, the token, the preface, the
     /// import reply and the device record. A server that accepts and then says nothing ends here.
@@ -86,7 +92,9 @@ internal sealed partial class UsbClient(
     private readonly BackgroundTasks _tasks = new(logger);
     private readonly ConcurrentDictionary<AttachKey, Attachment> _attachments = new();
     private readonly ConcurrentDictionary<AttachKey, bool> _attaching = new();
-    private readonly ConcurrentDictionary<AttachKey, bool> _driverAttaching = new();
+    private readonly ConcurrentDictionary<AttachKey, PendingImport> _pending = new();
+    private readonly ConcurrentDictionary<AttachKey, CancellationTokenSource> _inFlight = new();
+    private readonly ConcurrentDictionary<string, bool> _detaching = new();
     private readonly ConcurrentDictionary<AttachKey, DriverAttachment> _driverPorts = new();
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastTry = new();
     private readonly ConcurrentDictionary<string, string> _faults = new();
@@ -98,11 +106,23 @@ internal sealed partial class UsbClient(
     private CancellationTokenSource _epoch = new();
     private ServerLink? _serverLink;
     private (bool Client, ClientConnection Connection) _applied;
+    private Task _releasing = Task.CompletedTask;
+    private int _attachStarts;
+    private int _changesApplied;
     private CancellationToken _stopping;
     private int? _gatewayPort;
     private string? _gatewayFault;
 
     public event Func<ClientDevices, Task>? Changed;
+
+    /// <summary>How many attaches actually started, for tests that prove a repeated request starts none.</summary>
+    internal int AttachStarts => Volatile.Read(ref _attachStarts);
+
+    /// <summary>The port the gateway listens on, or null while it does not.</summary>
+    internal int? GatewayPort => _gatewayPort;
+
+    /// <summary>How many role or connection changes were applied, for tests that prove an unrelated setting applies none.</summary>
+    internal int ChangesApplied => Volatile.Read(ref _changesApplied);
 
     public ClientDevices Current
     {
@@ -157,6 +177,12 @@ internal sealed partial class UsbClient(
         _remembered.Stop();
         await EndEpochAsync();
         await base.StopAsync(cancellationToken);
+        // Relays end on their own once told to, so shutdown does not wait for them. The devices stay remembered.
+        foreach (var attachment in _attachments.Values)
+        {
+            await StopRelayAsync(attachment);
+        }
+
         foreach (var key in _driverPorts.Keys)
         {
             try
@@ -196,18 +222,56 @@ internal sealed partial class UsbClient(
         StartAttach(busId, automatic: false);
     }
 
+    /// <summary>
+    /// Releases the device first and forgets it after, so a failed save of <c>attached.json</c> is a fault
+    /// on the device and never leaves it attached. Until it is forgotten the retry skips it.
+    /// </summary>
     public async Task DetachAsync(string busId)
     {
-        await RememberAsync(busId, attached: false);
-        _faults.TryRemove(busId, out _);
-        var key = KeyOf(busId);
-        _attachments.TryRemove(key, out var attachment);
-        if (attachment is not null || _driverPorts.ContainsKey(key))
+        _detaching[busId] = true;
+        try
         {
-            await ReleaseAsync(key, attachment, CancellationToken.None);
+            _faults.TryRemove(busId, out _);
+            var key = KeyOf(busId);
+            // An attach still on its way notices this once the driver returns, and releases what it made.
+            CancelInFlight(key);
+            _attachments.TryRemove(key, out var attachment);
+            if (attachment is not null || _driverPorts.ContainsKey(key))
+            {
+                await ReleaseAsync(key, attachment, CancellationToken.None);
+            }
+
+            try
+            {
+                await RememberAsync(busId, attached: false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _faults[busId] = $"The device was detached, but Koppel could not save that, so it may attach again after a restart: {ex.Message}";
+                LogDetachFailed(busId, ex.Message);
+            }
+        }
+        finally
+        {
+            _detaching.TryRemove(busId, out _);
         }
 
         await RaiseAsync();
+    }
+
+    private void CancelInFlight(AttachKey key)
+    {
+        if (_inFlight.TryGetValue(key, out var attach))
+        {
+            try
+            {
+                attach.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The attach finished first.
+            }
+        }
     }
 
     /// <summary>
@@ -239,27 +303,42 @@ internal sealed partial class UsbClient(
 
         if (attachment is not null)
         {
-            try
-            {
-                await attachment.Stop.CancelAsync();
-            }
-            catch (ObjectDisposedException)
-            {
-                // The session ended by itself first, as it does once a driver lets go of the device.
-            }
+            await StopRelayAsync(attachment);
+        }
+    }
+
+    private static async Task StopRelayAsync(Attachment attachment)
+    {
+        try
+        {
+            await attachment.Stop.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The session ended by itself first, as it does once a driver lets go of the device.
         }
     }
 
     /// <summary>Stops the driver's attempts to attach the device and detaches its port. False when the driver holds none.</summary>
     private async Task<bool> ReleaseDriverAsync(AttachKey key, CancellationToken cancellationToken)
     {
-        if (!_driverPorts.TryGetValue(key, out var held))
+        // Taking the entry first means a detach and an attach that finds itself unwanted never both release it.
+        if (!_driverPorts.TryRemove(key, out var held))
         {
             return false;
         }
 
-        await driver.DetachAsync(IPAddress.Loopback.ToString(), held.GatewayPort, key.BusId, held.DriverPort, cancellationToken);
-        _driverPorts.TryRemove(key, out _);
+        try
+        {
+            await driver.DetachAsync(IPAddress.Loopback.ToString(), held.GatewayPort, key.BusId, held.DriverPort, cancellationToken);
+        }
+        catch
+        {
+            // Still attached, so the next release tries again.
+            _driverPorts.TryAdd(key, held);
+            throw;
+        }
+
         return true;
     }
 
@@ -282,36 +361,74 @@ internal sealed partial class UsbClient(
 
     private (bool Client, ClientConnection Connection) Settled() => (settings.Current.Role != KoppelRole.Server, connection.Current);
 
+    /// <summary>What the next attach waits for: the release that a role or connection change started.</summary>
+    private Task Releasing()
+    {
+        lock (_gate)
+        {
+            return _releasing;
+        }
+    }
+
     /// <summary>
     /// A new server, new credentials, or a role that is no longer Client or Both ends every attachment
     /// first, so nothing stays attached to a server the user moved away from, and then restarts the link.
-    /// A change that touches neither (the listen port, say) leaves the link alone.
+    /// A change that touches neither (the listen port, say) leaves the link alone. The release runs in the
+    /// background, because the driver's own command may take 30 seconds and the settings update, and with it
+    /// the UI's confirmation, waits for this handler. An attach that starts meanwhile waits for the release.
     /// </summary>
     private async Task OnChangedAsync()
     {
-        var now = Settled();
+        Task previous;
+        TaskCompletionSource done;
         lock (_gate)
         {
+            // Read inside the lock, so two changes at once cannot store each other's stale state.
+            var now = Settled();
             if (_applied == now)
             {
                 return;
             }
 
             _applied = now;
+            previous = _releasing;
+            done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _releasing = done.Task;
         }
 
+        Interlocked.Increment(ref _changesApplied);
         try
         {
             await EndEpochAsync();
-            await ReleaseAllAsync();
-            _faults.Clear();
-            _lastTry.Clear();
-            _remote = new([], 0);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogChangeFailed(ex);
         }
+
+        _faults.Clear();
+        _lastTry.Clear();
+        var before = _remote;
+        _tasks.Run("release after a change", async () =>
+        {
+            try
+            {
+                await previous;
+                await ReleaseAllAsync();
+                // The new link may have listed its devices by now; only the old list is dropped.
+                Interlocked.CompareExchange(ref _remote, new RemoteDevices([], 0), before);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogChangeFailed(ex);
+            }
+            finally
+            {
+                done.SetResult();
+            }
+
+            await RaiseAsync();
+        });
 
         CancelSession();
         await RaiseAsync();
@@ -367,6 +484,7 @@ internal sealed partial class UsbClient(
         connection.Changed += Restart;
         settings.Changed += Restart;
         var backoff = MinBackoff;
+        var refreshing = false;
         try
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -379,7 +497,7 @@ internal sealed partial class UsbClient(
 
                 try
                 {
-                    await RunLinkAsync(session.Token);
+                    refreshing = await RunLinkAsync(refreshing, session.Token);
                     backoff = MinBackoff;
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -390,10 +508,12 @@ internal sealed partial class UsbClient(
                 {
                     // Settings or connection changed; start over with the new values.
                     backoff = MinBackoff;
+                    refreshing = false;
                 }
                 catch (Exception ex)
                 {
                     // Whatever went wrong, the host keeps running and the UI says what happened.
+                    refreshing = false;
                     var reason = RemoteFailure.Describe(ex);
                     LogLinkFailed(reason, ex);
                     try
@@ -428,7 +548,14 @@ internal sealed partial class UsbClient(
         }
     }
 
-    private async Task RunLinkAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The link ends one of three ways: it throws, it closes (and is tried again after a pause), or its
+    /// token is about to run out. The server closes a hub at its token's expiry, so the link is made again
+    /// a little before that, with a fresh token, and neither the UI nor the activity log hears of it.
+    /// </summary>
+    /// <param name="refreshing">This link replaces one that ended because its token was about to expire.</param>
+    /// <returns>True when the link ended for that reason, so the next one is a refresh.</returns>
+    private async Task<bool> RunLinkAsync(bool refreshing, CancellationToken cancellationToken)
     {
         var c = connection.Current;
         if (settings.Current.Role == KoppelRole.Server || !c.IsComplete)
@@ -436,18 +563,39 @@ internal sealed partial class UsbClient(
             _remote = new([], 0);
             await SetLinkAsync("unconfigured", null);
             await Task.Delay(Timeout.Infinite, cancellationToken);
-            return;
+            return false;
         }
 
-        await SetLinkAsync("connecting", null);
+        if (!refreshing)
+        {
+            await SetLinkAsync("connecting", null);
+        }
+
         // The same token client serves the hub, every attach and every gateway session, so a token is
         // fetched once and reused until shortly before it expires.
         var serverLink = ServerLinkFor();
         var server = serverLink.Server;
+        long expiresAt = 0;
+        long refreshAt = 0;
+        var planned = false;
+        var retiring = false;
+
+        // A close or a reconnect this close to the token's end is the server's expiry, not a failure.
+        bool Expiring() => Volatile.Read(ref expiresAt) is var ends and > 0 && time.GetUtcNow().UtcTicks >= ends - ExpiryGrace.Ticks;
+
         await using var hub = new HubConnectionBuilder()
             .WithUrl(new Uri(server, "/api/hubs/remote"), options =>
             {
-                options.AccessTokenProvider = async () => await serverLink.Tokens.GetAccessTokenAsync(server, c.ClientId!, c.ClientSecret!, cancellationToken);
+                options.AccessTokenProvider = async () =>
+                {
+                    var (token, ends) = await serverLink.Tokens.GetAccessTokenWithExpiryAsync(server, c.ClientId!, c.ClientSecret!, cancellationToken);
+                    var now = time.GetUtcNow();
+                    // Renew half a minute ahead; a token with less than a minute left is renewed on the spot.
+                    var margin = TimeSpan.FromTicks(Math.Min(RefreshAhead.Ticks, (ends - now).Ticks / 2));
+                    Volatile.Write(ref refreshAt, (ends - margin).UtcTicks);
+                    Volatile.Write(ref expiresAt, ends.UtcTicks);
+                    return token;
+                };
                 options.HttpMessageHandlerFactory = _ => ServerCertificate.CreatePinnedHandler(c.ServerFingerprint!);
                 options.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback =
                     (_, certificate, _, _) => ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, c.ServerFingerprint);
@@ -463,28 +611,76 @@ internal sealed partial class UsbClient(
             await RaiseAsync();
             AttachRemembered();
         });
-        hub.Reconnecting += _ => SetLinkAsync("connecting", null);
+        hub.Reconnecting += _ => retiring || Expiring() ? Task.CompletedTask : SetLinkAsync("connecting", null);
         hub.Reconnected += _ => SetLinkAsync("connected", null);
         hub.Closed += ex =>
         {
+            if (retiring || Expiring())
+            {
+                planned |= !retiring;
+                closed.TrySetResult();
+                return Task.CompletedTask;
+            }
+
             closed.TrySetResult();
             return SetLinkAsync("error", ex is null ? "The server closed the link." : RemoteFailure.Describe(ex));
         };
 
-        await hub.StartAsync(cancellationToken);
-        await SetLinkAsync("connected", null);
-
-        // A remembered device that could not be attached yet, because it was in use or the server was
-        // still starting, is tried again until the link closes.
-        using var retry = new PeriodicTimer(RetryInterval, time);
-        while (!closed.Task.IsCompleted)
+        try
         {
-            AttachRemembered();
-            await Task.WhenAny(closed.Task, retry.WaitForNextTickAsync(cancellationToken).AsTask());
-            cancellationToken.ThrowIfCancellationRequested();
-        }
+            await hub.StartAsync(cancellationToken);
+            await SetLinkAsync("connected", null);
 
-        await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            // A remembered device that could not be attached yet, because it was in use or the server was
+            // still starting, is tried again until the link closes.
+            using var retry = new PeriodicTimer(RetryInterval, time);
+            CancellationTokenSource? armed = null;
+            Task refresh = new TaskCompletionSource().Task;
+            var armedFor = 0L;
+            try
+            {
+                while (!closed.Task.IsCompleted)
+                {
+                    AttachRemembered();
+                    var due = Volatile.Read(ref refreshAt);
+                    if (due != armedFor)
+                    {
+                        // A new token (the hub reconnected) moves the end, so the wait for it starts again.
+                        armedFor = due;
+                        armed?.Cancel();
+                        armed?.Dispose();
+                        armed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                        var wait = new DateTimeOffset(due, TimeSpan.Zero) - time.GetUtcNow();
+                        refresh = Task.Delay(wait > TimeSpan.Zero ? wait : TimeSpan.Zero, time, armed.Token);
+                    }
+
+                    var finished = await Task.WhenAny(closed.Task, retry.WaitForNextTickAsync(cancellationToken).AsTask(), refresh);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (finished == refresh && refresh.IsCompletedSuccessfully)
+                    {
+                        planned = true;
+                        break;
+                    }
+                }
+            }
+            finally
+            {
+                armed?.Dispose();
+            }
+
+            if (planned)
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return false;
+        }
+        finally
+        {
+            // Disposing the hub raises Closed, which is not a failure.
+            retiring = true;
+        }
     }
 
     /// <summary>
@@ -515,13 +711,18 @@ internal sealed partial class UsbClient(
             return;
         }
 
+        Interlocked.Increment(ref _attachStarts);
         _lastTry[busId] = time.GetUtcNow();
         var epoch = EpochToken();
+        var releasing = Releasing();
         _tasks.Run($"attach {busId}", async () =>
         {
             using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_stopping, epoch);
+            _inFlight[key] = cancellation;
             try
             {
+                // A change that came first is still releasing what it ended; do not attach under its feet.
+                await releasing.WaitAsync(cancellation.Token);
                 await (UsesDriver ? AttachThroughDriverAsync(key, cancellation.Token) : AttachAsync(key, cancellation.Token));
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -534,6 +735,7 @@ internal sealed partial class UsbClient(
             }
             finally
             {
+                _inFlight.TryRemove(new KeyValuePair<AttachKey, CancellationTokenSource>(key, cancellation));
                 _attaching.TryRemove(key, out _);
             }
         });
@@ -581,7 +783,7 @@ internal sealed partial class UsbClient(
         var now = time.GetUtcNow();
         foreach (var device in _remote.Devices.Where(d => d.State == "shared" && remembered.Expects(d)))
         {
-            if (!_attachments.ContainsKey(KeyOf(device.BusId)) && (!_lastTry.TryGetValue(device.BusId, out var last) || now - last >= RetryInterval))
+            if (!_detaching.ContainsKey(device.BusId) && !_attachments.ContainsKey(KeyOf(device.BusId)) && (!_lastTry.TryGetValue(device.BusId, out var last) || now - last >= RetryInterval))
             {
                 StartAttach(device.BusId, automatic: true);
             }
@@ -650,6 +852,17 @@ internal sealed partial class UsbClient(
             return;
         }
 
+        // With a driver on this machine the gateway serves only what Koppel itself asked the driver for: one
+        // import of one device per request. Another local user's "usbip attach" and the driver's own attempts
+        // to attach again after a drop are turned away; Koppel attaches again itself while it is wanted.
+        PendingImport? booked = null;
+        if (UsesDriver && (busId is null || !_pending.TryGetValue(KeyOf(busId), out booked) || !booked.TryClaim()))
+        {
+            LogGatewayFailed(busId ?? "the device list", "Koppel did not ask the driver for it");
+            await plain.WriteAsync(UsbIpProtocol.Header(replyCode, UsbIpProtocol.StatusError), stoppingToken);
+            return;
+        }
+
         RemoteImport? import = null;
         try
         {
@@ -695,7 +908,7 @@ internal sealed partial class UsbClient(
             var key = KeyOf(busId!);
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             // An import this client's own Attach asked the driver for is "attached here", not a visitor.
-            var mine = _driverAttaching.ContainsKey(key);
+            var mine = booked is not null;
             var attachment = new Attachment(null, stop, time.GetUtcNow(), mine ? null : from, mine);
             if (!_attachments.TryAdd(key, attachment))
             {
@@ -883,7 +1096,8 @@ internal sealed partial class UsbClient(
             throw new InvalidOperationException(_gatewayFault ?? "The local USB/IP gateway is not running.");
         }
 
-        _driverAttaching[key] = true;
+        var booking = new PendingImport();
+        _pending[key] = booking;
         try
         {
             // The driver's own command has a time limit, and killing it half way could leave the attach
@@ -896,10 +1110,13 @@ internal sealed partial class UsbClient(
                 LogAttached(key.BusId, driverPort);
             }
 
+            // Detached, or the connection changed, while the driver was at it: give back what it made. The
+            // release takes the driver's entry out, and if it fails the entry stays so a later release tries again.
             if (cancellationToken.IsCancellationRequested)
             {
-                _attachments.TryRemove(key, out _);
-                await ReleaseAsync(key, attachment, CancellationToken.None);
+                _attachments.TryRemove(key, out var current);
+                await ReleaseAsync(key, current ?? attachment, CancellationToken.None);
+                await RaiseAsync();
                 return;
             }
 
@@ -907,7 +1124,7 @@ internal sealed partial class UsbClient(
         }
         finally
         {
-            _driverAttaching.TryRemove(key, out _);
+            _pending.TryRemove(new KeyValuePair<AttachKey, PendingImport>(key, booking));
         }
     }
 
@@ -1096,6 +1313,14 @@ internal sealed partial class UsbClient(
         public string? Via { get; } = via;
 
         public bool Driver { get; } = driver;
+    }
+
+    /// <summary>Koppel's request to the driver to import one device, which the gateway accepts exactly once.</summary>
+    private sealed class PendingImport
+    {
+        private int _claimed;
+
+        public bool TryClaim() => Interlocked.CompareExchange(ref _claimed, 1, 0) == 0;
     }
 
     /// <summary>What the driver holds for one device: the gateway port it was pointed at, and its own port number.</summary>

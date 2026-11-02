@@ -13,6 +13,7 @@ internal sealed class FakeUsbIpDriver : IUsbIpDriver, IDisposable
     public const int DriverPort = 1;
 
     private TcpClient? _tcp;
+    private int _attaches;
 
     public void Dispose() => _tcp?.Dispose();
 
@@ -22,8 +23,21 @@ internal sealed class FakeUsbIpDriver : IUsbIpDriver, IDisposable
 
     public List<string> Detached { get; } = [];
 
+    /// <summary>How many times Koppel asked this driver to attach.</summary>
+    public int Attaches => Volatile.Read(ref _attaches);
+
+    /// <summary>When set, an attach returns only once this completes, as usbip.exe does when it takes a while.</summary>
+    public TaskCompletionSource? AttachGate { get; set; }
+
+    /// <summary>When set, a detach returns only once this completes.</summary>
+    public TaskCompletionSource? DetachGate { get; set; }
+
+    /// <summary>The device goes away on the network side, as when the link drops.</summary>
+    public void DropConnection() => _tcp?.Dispose();
+
     public async Task<int> AttachAsync(string host, int port, string busId, CancellationToken cancellationToken)
     {
+        Interlocked.Increment(ref _attaches);
         _tcp = new TcpClient();
         await _tcp.ConnectAsync(host, port, cancellationToken);
         var stream = _tcp.GetStream();
@@ -36,6 +50,11 @@ internal sealed class FakeUsbIpDriver : IUsbIpDriver, IDisposable
 
         await UsbIpProtocol.ReadImportedDeviceAsync(stream, cancellationToken);
         Connection.TrySetResult(stream);
+        if (AttachGate is { } gate)
+        {
+            await gate.Task.WaitAsync(cancellationToken);
+        }
+
         return DriverPort;
     }
 
@@ -43,6 +62,11 @@ internal sealed class FakeUsbIpDriver : IUsbIpDriver, IDisposable
     {
         Detached.Add($"{busId}@{driverPort}");
         _tcp?.Dispose();
+        if (DetachGate is { } gate)
+        {
+            await gate.Task.WaitAsync(cancellationToken);
+        }
+
         // usbip.exe returns once the device is gone, by which time the gateway session has ended too.
         await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
     }

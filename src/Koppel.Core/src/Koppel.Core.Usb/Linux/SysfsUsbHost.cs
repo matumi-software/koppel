@@ -28,7 +28,7 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys") : IUsbHost
 
         return [.. Directory.EnumerateDirectories(Devices)
             .Select(Path.GetFileName)
-            .Where(name => name is not null && BusIdPattern().IsMatch(name))
+            .Where(name => name is not null && BusIdPattern().IsMatch(name) && !IsImported(name))
             .Select(name => ReadDevice(name!))
             .Where(device => device is not null && !device.IsHub)
             .Cast<UsbDevice>()
@@ -83,6 +83,13 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys") : IUsbHost
 
         Write(Path.Combine(device, "usbip_sockfd"), UsbSockets.FileDescriptor(socket).ToString(CultureInfo.InvariantCulture));
     }
+
+    /// <summary>
+    /// Devices attached from another server sit under vhci-hcd. They are on loan to this machine, so they
+    /// are never offered for sharing here.
+    /// </summary>
+    private bool IsImported(string busId) =>
+        new DirectoryInfo(Path.Combine(Devices, busId)).LinkTarget?.Contains("vhci_hcd", StringComparison.Ordinal) == true;
 
     private UsbDevice? ReadDevice(string busId)
     {

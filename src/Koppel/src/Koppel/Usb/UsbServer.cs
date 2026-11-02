@@ -8,9 +8,14 @@ using Koppel.Settings;
 namespace Koppel.Usb;
 
 /// <summary>The bus IDs the user chose to share, kept in the plain <c>devices.json</c>.</summary>
-internal sealed record SharedDevices(IReadOnlyList<string> BusIds)
+/// <param name="VidPids">The VID:PID each bus ID had when it was shared. A bus ID is a port, so a different
+/// device plugged into the same port is not shared without asking.</param>
+internal sealed record SharedDevices(IReadOnlyList<string> BusIds, IReadOnlyDictionary<string, string>? VidPids = null)
 {
     public static SharedDevices Empty { get; } = new([]);
+
+    public bool Expects(UsbDevice device) =>
+        BusIds.Contains(device.BusId) && (VidPids?.GetValueOrDefault(device.BusId) is not { } vidPid || vidPid == device.VidPid);
 }
 
 /// <summary>A device as the UI sees it. <see cref="State"/> uses the design system's state words.</summary>
@@ -72,11 +77,11 @@ internal sealed partial class UsbServer(
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         await _shared.StartAsync(cancellationToken);
-        if (host.Unavailable is null && settings.Current.ShareOnStartup)
+        if (host.Unavailable is null && settings.Current.ShareOnStartup && settings.Current.Role != KoppelRole.Client)
         {
-            foreach (var busId in _shared.Current.BusIds)
+            foreach (var device in host.ListDevices().Where(_shared.Current.Expects))
             {
-                TryApply(busId, share: true);
+                TryApply(device.BusId, share: true);
             }
         }
 
@@ -99,6 +104,9 @@ internal sealed partial class UsbServer(
         await _shared.UpdateAsync(current => current with
         {
             BusIds = share ? [.. current.BusIds.Append(busId).Distinct()] : [.. current.BusIds.Where(b => b != busId)],
+            VidPids = share && host.ListDevices().FirstOrDefault(d => d.BusId == busId) is { } device
+                ? new Dictionary<string, string>(current.VidPids ?? new Dictionary<string, string>()) { [busId] = device.VidPid }
+                : current.VidPids?.Where(p => p.Key != busId).ToDictionary(p => p.Key, p => p.Value),
         }, cancellationToken);
         TryApply(busId, share);
         await RefreshAsync(cancellationToken, force: true);
@@ -145,14 +153,14 @@ internal sealed partial class UsbServer(
             try
             {
                 // A shared device that comes back after unplugging needs binding again.
-                if (host.Unavailable is null)
+                // Only a server re-shares. A pure client never binds anything to usbip-host.
+                if (host.Unavailable is null && settings.Current.Role != KoppelRole.Client)
                 {
-                    var present = host.ListDevices().ToDictionary(d => d.BusId);
-                    foreach (var busId in _shared.Current.BusIds)
+                    foreach (var device in host.ListDevices().Where(_shared.Current.Expects))
                     {
-                        if (present.TryGetValue(busId, out var device) && device.Driver != "usbip-host" && !_faults.ContainsKey(busId))
+                        if (device.Driver != "usbip-host" && !_faults.ContainsKey(device.BusId))
                         {
-                            TryApply(busId, share: true);
+                            TryApply(device.BusId, share: true);
                         }
                     }
                 }

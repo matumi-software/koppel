@@ -39,6 +39,23 @@ public sealed class SysfsTests : IDisposable
     }
 
     [Fact]
+    public void Devices_attached_from_another_server_are_not_listed()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Needs real symlinks, as sysfs has; runs in the Linux container.");
+        var real = Directory.CreateDirectory(Path.Combine(_sys, "devices", "platform", "vhci_hcd.0", "usb1", "1-1")).FullName;
+        Directory.CreateDirectory(Devices);
+        Directory.CreateSymbolicLink(Path.Combine(Devices, "1-1"), real);
+        File.WriteAllText(Path.Combine(real, "idVendor"), "046d");
+        File.WriteAllText(Path.Combine(real, "idProduct"), "c548");
+        File.WriteAllText(Path.Combine(real, "bDeviceClass"), "00");
+        AddDevice("3-2", "0403", "6001", "00", "12", "ftdi_sio");
+
+        var devices = new SysfsUsbHost(_sys).ListDevices();
+
+        devices.Select(d => d.BusId).Should().Equal("3-2");
+    }
+
+    [Fact]
     public void Share_claims_the_bus_id_unbinds_the_old_driver_and_binds_usbip_host()
     {
         AddDevice("1-1.4", "0403", "6001", "00", "12", "ftdi_sio");

@@ -25,10 +25,19 @@ internal sealed record KoppelPaths(string ConfigDirectory, string KeysDirectory,
     /// </summary>
     public string SetupCodeFile => Path.Combine(ConfigDirectory, "setup-code.txt");
 
-    /// <summary>Creates the config and keys directories and restricts both to administrators, before anything is written to them.</summary>
+    /// <summary>
+    /// Creates the config and keys directories and restricts both to administrators, before anything is written to them.
+    /// On Windows the data root above them (<c>%ProgramData%\Koppel</c>, which also holds the installer's driver record) is
+    /// restricted too, so a standard user cannot plant files in it or swap what is under it.
+    /// </summary>
     public void Prepare()
     {
-        foreach (var directory in new[] { ConfigDirectory, KeysDirectory })
+        var root = Path.GetDirectoryName(ConfigDirectory);
+        var dataRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Koppel");
+        var directories = OperatingSystem.IsWindows() && string.Equals(root, dataRoot, StringComparison.OrdinalIgnoreCase)
+            ? new[] { root!, ConfigDirectory, KeysDirectory }
+            : [ConfigDirectory, KeysDirectory];
+        foreach (var directory in directories)
         {
             Directory.CreateDirectory(directory);
             DirectoryHardening.Harden(directory);

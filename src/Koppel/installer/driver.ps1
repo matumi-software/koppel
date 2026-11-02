@@ -14,7 +14,7 @@ installed on its own is detected, left alone and used as it is.
 Everything goes to standard output, which the MSI log captures. It writes no log file on purpose:
 %ProgramData% is a place a standard user can pre-create files in, and this runs as SYSTEM.
 Exit codes: 0 done, anything else failed. WixQuietExec turns 3010 (restart needed) into a failure,
-so a needed restart is left in HKLM\SOFTWARE\Matumi\Koppel (DriverRestartRequired) for the MSI to
+so a needed restart, after an install or an uninstall, is left in HKLM\SOFTWARE\Matumi\Koppel (DriverRestartRequired) for the MSI to
 read; see Koppel.Installer/restart-flag.js.
 #>
 [CmdletBinding()]
@@ -49,12 +49,44 @@ function Get-Controller {
     Get-CimInstance Win32_PnPEntity | Where-Object { $_.HardwareID -contains $hardwareId }
 }
 
+function Get-DriverStorePackages {
+    # Every package in the driver store as @{ Published = 'oemNN.inf'; Original = 'usbip2_ude.inf' }. Windows
+    # names a package oemNN.inf once it is stored, and reuses the number after a package is deleted. Read
+    # without parsing English: pnputil's XML output first (Windows 11 and newer builds of 10), then DISM's.
+    try {
+        $xml = [xml](& $pnputil /enum-drivers /format xml | Out-String)
+        $found = @($xml.PnpUtil.Driver | ForEach-Object { @{ Published = [string]$_.DriverName; Original = [string]$_.OriginalName } })
+        if ($found.Count -gt 0) { return $found }
+    }
+    catch { Write-Host "pnputil could not list drivers as XML ($_); asking Windows another way." }
+    try {
+        @(Get-WindowsDriver -Online -All -ErrorAction Stop | ForEach-Object {
+            @{ Published = [string]$_.Driver; Original = [IO.Path]::GetFileName([string]$_.OriginalFileName) }
+        })
+    }
+    catch {
+        # Last resort, and only right on an English Windows.
+        Write-Host "Get-WindowsDriver failed ($_); reading pnputil's text output."
+        $current = @{}
+        foreach ($line in (& $pnputil /enum-drivers)) {
+            if ($line -match '^\s*Published Name:\s*(\S+)') { $current = @{ Published = $Matches[1] } }
+            elseif ($line -match '^\s*Original Name:\s*(\S+)') { $current.Original = $Matches[1]; $current }
+        }
+    }
+}
+
 function Get-PublishedDriver([string[]]$names) {
-    # pnputil names packages oemNN.inf once they are in the driver store.
-    $current = @{}
-    foreach ($line in (& $pnputil /enum-drivers)) {
-        if ($line -match '^\s*Published Name:\s*(\S+)') { $current = @{ Published = $Matches[1] } }
-        elseif ($line -match '^\s*Original Name:\s*(\S+)' -and $Matches[1] -in $names) { $current.Published }
+    Get-DriverStorePackages | Where-Object { $_.Original -in $names } | ForEach-Object { $_.Published }
+}
+
+function Select-OwnPackages([string[]]$published) {
+    # Of the recorded names, the ones Windows still lists as one of usbip-win2's own packages. A number
+    # can be handed to some other driver after Koppel's package left the store, and that one is not ours to delete.
+    $listed = @(Get-DriverStorePackages | Where-Object { $_.Original -like 'usbip2_*.inf' } | ForEach-Object { $_.Published })
+    foreach ($name in $published) {
+        if (-not (Test-PackageName $name)) { Write-Host "Skipping '$name': it is not a driver package name." }
+        elseif ($name -notin $listed) { Write-Host "Skipping ${name}: Windows no longer lists it as a usbip-win2 package (already removed, or the number was reused)." }
+        else { $name }
     }
 }
 
@@ -70,13 +102,36 @@ function Get-StandaloneUsbip {
 }
 
 function Test-DataFolder {
+    # Write-Host, not Write-Output: the result of this function is the boolean, a message in the output would make it always true.
     # The state file is read and written only in a folder that data-folder.ps1 accepts.
     try { & (Join-Path $here 'data-folder.ps1') -Check; $true }
-    catch { Write-Output "The data folder is not safe to use: $_"; $false }
+    catch { Write-Host "The data folder is not safe to use: $_"; $false }
+}
+
+function Test-StateFile {
+    # The state file steers what a SYSTEM process deletes, so it is trusted only if an administrator owns it,
+    # it is not a link, and nobody else can write to it or change who may.
+    $item = Get-Item -LiteralPath $statePath -Force
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+    $acl = Get-Acl -LiteralPath $statePath
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) { return $false }
+    $write = [Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, WriteAttributes, Delete, ChangePermissions, TakeOwnership'
+    foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -and $rule.IdentityReference.Value -notin $trusted) { return $false }
+    }
+    $true
+}
+
+function Test-PackageName([string]$name) {
+    $name -match '^oem\d+\.inf\z'
 }
 
 function Read-State {
-    if (Test-Path $statePath) { Get-Content $statePath -Raw | ConvertFrom-Json }
+    # $null when there is no file. Throws if there is one that cannot be trusted.
+    if (-not (Test-Path $statePath)) { return }
+    if (-not (Test-StateFile)) { throw "$statePath is not owned and protected by administrators." }
+    Get-Content $statePath -Raw | ConvertFrom-Json
 }
 
 function Write-State([string[]]$packages, [bool]$deviceNode) {
@@ -126,22 +181,33 @@ function Register-ShutdownTask {
 
 function Install-Driver {
     if (-not (Test-DataFolder)) { throw 'The data folder check failed, so the install cannot record what it adds.' }
-    $state = Read-State
+    # A standalone usbip-win2 is looked for first, whatever the state file says: the first standalone run writes
+    # an empty record, and a later upgrade or repair must not put Koppel's packages in over it.
     $standalone = Get-StandaloneUsbip
-
-    if ($standalone -and -not $state) {
+    if ($standalone) {
         # Not Koppel's: leave its driver and device node exactly as they are, and never remove them.
         Write-Output "Found a usbip-win2 that was installed on its own ($standalone). Koppel will use its driver and device node and will not change or remove them."
         Write-Output 'If that usbip-win2 is a different version from the one Koppel ships, Koppel may not work with it. Uninstalling it removes the driver Koppel relies on.'
-        Write-State @() $false
+        if (-not (Test-Path $statePath)) { Write-State @() $false }
         return
+    }
+
+    try { $state = Read-State }
+    catch {
+        Write-Output "WARNING: ignoring the record of an earlier install: $_"
+        Remove-Item $statePath -Force
+        $state = $null
+    }
+    if ($state -and @(@($state.packages) | Where-Object { -not (Test-PackageName $_) }).Count) {
+        Write-Output 'WARNING: ignoring the record of an earlier install: it lists a name that is not a driver package.'
+        $state = $null
     }
 
     $before = @(Get-PublishedDriver $driverNames)
     $controllerBefore = [bool](Get-Controller)
     if ($state) {
         # An upgrade or a repair: keep what the first install recorded.
-        $known = @($state.packages)
+        $known = @(Select-OwnPackages @($state.packages))
         $node = [bool]$state.deviceNode
     }
     else {
@@ -189,7 +255,11 @@ function Uninstall-Driver {
         Write-Output 'WARNING: the record of what Koppel installed cannot be trusted, so the driver was left in place. Remove it with pnputil /delete-driver if you want it gone.'
         return $false
     }
-    $state = Read-State
+    try { $state = Read-State }
+    catch {
+        Write-Output "WARNING: the record of what Koppel installed cannot be trusted ($_), so the driver was left in place. Remove it with pnputil /delete-driver if you want it gone."
+        return $false
+    }
     if (-not $state) {
         Write-Output 'WARNING: there is no record of what Koppel installed (an install from before records were kept), so its driver packages and device node were left in place.'
         return $false
@@ -200,7 +270,7 @@ function Uninstall-Driver {
         Write-Output "devnode remove exited with $LASTEXITCODE"
         if ($LASTEXITCODE -ne 0) { $failed = $true; Write-Output "WARNING: the device node $hardwareId was not removed." }
     }
-    foreach ($published in @($state.packages)) {
+    foreach ($published in @(Select-OwnPackages @($state.packages))) {
         & $pnputil /delete-driver $published /uninstall /force
         Write-Output "pnputil /delete-driver $published exited with $LASTEXITCODE"
         if ($LASTEXITCODE -notin 0, 3010) { $failed = $true; Write-Output "WARNING: the driver package $published was not removed. Remove it with: pnputil /delete-driver $published /uninstall /force" }
@@ -210,6 +280,14 @@ function Uninstall-Driver {
     -not $failed
 }
 
+function Save-RestartFlag {
+    # pnputil said 3010. The MSI asks for the restart, so the install or uninstall itself still succeeds.
+    if (-not $rebootRequired) { return }
+    Write-Output 'A restart is needed to finish. Asking the installer for one.'
+    New-Item -Path $restartKey -Force | Out-Null
+    New-ItemProperty -Path $restartKey -Name DriverRestartRequired -Value 1 -PropertyType DWord -Force | Out-Null
+}
+
 try {
     if ($Install) {
         Remove-ItemProperty -Path $restartKey -Name DriverRestartRequired -ErrorAction SilentlyContinue
@@ -217,7 +295,7 @@ try {
     }
     if ($Uninstall) {
         Remove-Item -Path $restartKey -Recurse -ErrorAction SilentlyContinue
-        if (-not (Uninstall-Driver)) { exit 1 }
+        if (-not (Uninstall-Driver)) { Save-RestartFlag; exit 1 }
     }
 }
 catch {
@@ -225,10 +303,5 @@ catch {
     exit 1
 }
 
-if ($rebootRequired -and $Install) {
-    # pnputil said 3010. The MSI asks for the restart, so the install still succeeds.
-    Write-Output 'A restart is needed to finish. Asking the installer for one.'
-    New-Item -Path $restartKey -Force | Out-Null
-    New-ItemProperty -Path $restartKey -Name DriverRestartRequired -Value 1 -PropertyType DWord -Force | Out-Null
-}
+Save-RestartFlag
 exit 0

@@ -14,7 +14,8 @@ directly or through a group it belongs to. The last case matters: on many machin
 administrator creates is owned by that administrator, so an earlier install may have left the folder
 owned by one. Such a folder is taken over: its owner is set to Administrators and its ACL, and the ACL
 of everything under it, is replaced with a protected one that grants only SYSTEM and Administrators
-full control. A link found under it is deleted (the link only, never what it points to). A missing
+full control. A link found under it is deleted (the link only, never what it points to), and a file or folder under
+it that is not owned by an administrator is renamed aside (not-admin-owned-<time>) and left as it is. A missing
 folder is created the same way.
 
 With -Check it only verifies, and never changes anything.
@@ -90,6 +91,14 @@ function Protect-Tree([string]$folder) {
             # Deleting a link removes the link and not its target. Never follow it.
             Write-Output "Removing the link $($child.FullName) (it points somewhere else; Koppel does not use links)."
             if ($child.PSIsContainer) { [IO.Directory]::Delete($child.FullName) } else { [IO.File]::Delete($child.FullName) }
+        }
+        elseif ($child.Name -like '*.not-admin-owned-*') { continue }
+        elseif (-not (Test-Administrator (Get-Acl -LiteralPath $child.FullName).GetOwner([Security.Principal.SecurityIdentifier]))) {
+            # Something a standard user made (or was handed) inside the folder. Re-owning it would hand its content to
+            # SYSTEM as if it were ours, so it is moved out of Koppel's way instead, and its ACL is left alone.
+            $aside = "$($child.Name).not-admin-owned-$(Get-Date -Format yyyyMMddHHmmss)"
+            Write-Output "$($child.FullName) is not owned by an administrator. Renaming it to $aside; Koppel does not use it."
+            Rename-Item -LiteralPath $child.FullName -NewName $aside
         }
         elseif ($child.PSIsContainer) { Protect-Tree $child.FullName }
         else { Protect-Item $child.FullName $false }

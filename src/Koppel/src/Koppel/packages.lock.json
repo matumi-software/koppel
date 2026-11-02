@@ -384,6 +384,7 @@
       "koppel.core.discovery": {
         "type": "Project",
         "dependencies": {
+          "Koppel.Core.Configuration": "[0.1.0, )",
           "Makaretu.Dns.Multicast.New": "[0.38.0, )",
           "Tmds.MDns": "[0.10.1, )"
         }

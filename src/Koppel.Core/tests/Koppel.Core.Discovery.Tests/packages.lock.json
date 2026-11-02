@@ -198,9 +198,13 @@
           "xunit.v3.runner.common": "[3.2.2]"
         }
       },
+      "koppel.core.configuration": {
+        "type": "Project"
+      },
       "koppel.core.discovery": {
         "type": "Project",
         "dependencies": {
+          "Koppel.Core.Configuration": "[0.1.0, )",
           "Makaretu.Dns.Multicast.New": "[0.38.0, )",
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.14, )",
           "Tmds.MDns": "[0.10.1, )"

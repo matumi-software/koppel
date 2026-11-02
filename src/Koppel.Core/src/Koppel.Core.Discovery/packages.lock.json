@@ -49,6 +49,9 @@
         "type": "Transitive",
         "resolved": "10.0.14",
         "contentHash": "QtpQzuSZVyTPCuHW058yCs9Nj0394uUkNyFHS813nOmK9UgUdBdaprJ5PPsBgsQIpxADTsTkbaMMonykem6qdw=="
+      },
+      "koppel.core.configuration": {
+        "type": "Project"
       }
     },
     "net10.0/linux-arm64": {},

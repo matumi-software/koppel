@@ -1,0 +1,49 @@
+{
+  "v": 3,
+  "layout": "files",
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-02T09:38:05Z"
+  },
+  "title": "Koppel",
+  "namespace": "Koppel",
+  "libraries": [],
+  "sections": {},
+  "groups": [
+    "Logos"
+  ],
+  "assetGroups": {
+    "Logos": {
+      "name": "Logos",
+      "tile": "m",
+      "order": [
+        "koppel-mark.svg",
+        "koppel-mark-on-dark.svg"
+      ],
+      "files": {
+        "koppel-mark.svg": {
+          "name": "koppel-mark.svg",
+          "blob": "4365252fd27ee69e37d29584a177947e",
+          "size": 504,
+          "type": "image/svg+xml"
+        },
+        "koppel-mark-on-dark.svg": {
+          "name": "koppel-mark-on-dark.svg",
+          "blob": "76272efbdc10f8524c438e51259e4ae8",
+          "size": 504,
+          "type": "image/svg+xml"
+        }
+      }
+    }
+  },
+  "blobs": {},
+  "docs": {
+    "sections": []
+  },
+  "lastChange": {
+    "by": "Rikus van Rensburg",
+    "at": "2026-11-02T10:05:00Z",
+    "via": "Claude Code",
+    "note": "Recoloured to the Matumi family: canopy accent on warm stone, river for Attached."
+  }
+}

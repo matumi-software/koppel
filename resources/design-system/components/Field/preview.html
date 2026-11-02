@@ -1,0 +1,24 @@
+<!-- @dsCard group="Inputs" height=300 subtitle="Address, client ID, stored secret, invalid" -->
+<div class="kp-root" style="padding: 16px; display: grid; gap: 16px; max-width: 440px;">
+  <div class="kp-field">
+    <label class="kp-field__label" for="f-server">Server address</label>
+    <div class="kp-field__control"><input class="kp-input" id="f-server" data-mono="true" value="lab-rack-3:3240"></div>
+    <span class="kp-field__help">Host name or IP, with the port.</span>
+  </div>
+  <div class="kp-field" data-state="pending">
+    <label class="kp-field__label" for="f-client">Client ID</label>
+    <div class="kp-field__control"><input class="kp-input" id="f-client" data-mono="true" value="bench-2"></div>
+    <span class="kp-field__help">Saving…</span>
+  </div>
+  <div class="kp-field">
+    <label class="kp-field__label" for="f-secret">Client secret</label>
+    <div class="kp-field__control"><input class="kp-input" id="f-secret" type="password" placeholder="Stored, enter a new one to replace it"><button class="kp-button" data-variant="ghost">Show</button></div>
+    <span class="kp-field__help">Encrypted on disk.</span>
+  </div>
+  <div class="kp-field" data-state="invalid">
+    <label class="kp-field__label" for="f-port">Listen port</label>
+    <div class="kp-field__control"><input class="kp-input" id="f-port" data-mono="true" value="70000" aria-invalid="true"></div>
+    <span class="kp-field__help">Use a port from 1 to 65535.</span>
+  </div>
+</div>
+<script></script>

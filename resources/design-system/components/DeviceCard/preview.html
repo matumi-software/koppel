@@ -1,0 +1,42 @@
+<!-- @dsCard group="Devices" height=300 subtitle="Server view, client view and a pending change" -->
+<div class="kp-root" style="padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px;">
+  <article class="kp-device">
+    <div class="kp-device__head">
+      <h3 class="kp-device__name">FTDI USB Serial Converter</h3>
+      <span class="kp-badge" data-state="shared">Shared</span>
+    </div>
+    <div class="kp-device__ids"><span class="kp-id">0403:6001</span><span class="kp-id">bus 1-1.4</span></div>
+    <p class="kp-device__where">Plugged into <b>lab-rack-3</b></p>
+    <div class="kp-device__foot">
+      <div class="kp-switch" data-state="on" role="switch" aria-checked="true">
+        <span class="kp-switch__track"><span class="kp-switch__thumb"></span></span>
+        <span>Share this device</span>
+      </div>
+    </div>
+  </article>
+  <article class="kp-device" data-selected="true">
+    <div class="kp-device__head">
+      <h3 class="kp-device__name">CodeMeter license dongle</h3>
+      <span class="kp-badge" data-state="attached">Attached</span>
+    </div>
+    <div class="kp-device__ids"><span class="kp-id">064f:2af9</span><span class="kp-id">bus 2-1</span></div>
+    <p class="kp-device__where">Attached to <b>bench-2</b> since 09:14</p>
+    <div class="kp-device__foot">
+      <span class="kp-switch__note">On lab-rack-3</span>
+      <button class="kp-button" data-variant="secondary">Detach</button>
+    </div>
+  </article>
+  <article class="kp-device">
+    <div class="kp-device__head">
+      <h3 class="kp-device__name">Logitech BRIO</h3>
+      <span class="kp-badge" data-state="pending">Pending</span>
+    </div>
+    <div class="kp-device__ids"><span class="kp-id">046d:085e</span><span class="kp-id">bus 3-2</span></div>
+    <p class="kp-device__where">Plugged into <b>studio-pc</b></p>
+    <div class="kp-device__foot">
+      <span class="kp-switch__note">Waiting for the server</span>
+      <button class="kp-button" data-variant="primary" data-state="sending">Attaching</button>
+    </div>
+  </article>
+</div>
+<script></script>

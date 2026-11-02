@@ -1,0 +1,40 @@
+<!-- @dsCard height=288 -->
+<style>
+  .cv { position: relative; width: 960px; height: 288px; background: var(--bg-page); overflow: hidden; font-family: var(--font-sans); }
+  .cv svg { position: absolute; inset: 0; }
+  .cv .canopy { fill: var(--accent); }
+  .cv .river { fill: var(--attached); }
+  .cv .ink { fill: var(--text-primary); }
+  .cv .tint { fill: var(--accent-subtle); }
+  .cv .cut { fill: var(--bg-page); }
+  .cv .r-lg { rx: var(--radius-lg); }
+  .cv .r-md { rx: var(--radius-md); }
+  .cv .r-sm { rx: var(--radius-sm); }
+  .cv .text { position: absolute; left: 48px; bottom: 40px; max-width: 420px; display: grid; gap: 8px; }
+  .cv h1 { margin: 0; font-size: 120px; line-height: 0.92; font-weight: 600; letter-spacing: -0.02em; color: var(--text-primary); }
+  .cv p { margin: 0; font-size: 14px; line-height: 20px; color: var(--text-secondary); }
+</style>
+<div class="cv">
+  <svg viewBox="0 0 960 288" width="960" height="288" aria-hidden="true">
+    <!--
+      blocks: canopy accent 128x240 (bleeds top), river attached 232x112 (bleeds right), ink text-primary 152x80, tint accent-subtle 88x144 (bleeds bottom); corners radius-lg / radius-md
+      arrangement: one tall canopy slab with satellites, staggered, all right of x=496
+      pattern: literal motif, the mark's two terminals (circle = Shared, square = Attached) as a pin field cut into the river block, because the brand's state glyphs are that circle and square
+      scales: pin 12px at a space-6 (24px) pitch, squares radius-sm, gaps space-4 (16px) between blocks
+    -->
+    <rect class="tint r-md" x="496" y="160" width="88" height="144"/>
+    <rect class="canopy r-lg" x="600" y="-16" width="128" height="240"/>
+    <rect class="ink r-md" x="744" y="0" width="152" height="80"/>
+    <rect class="river r-lg" x="744" y="96" width="232" height="112"/>
+    <g class="cut">
+      <circle cx="774" cy="122" r="6"/><rect class="r-sm" x="792" y="116" width="12" height="12"/><circle cx="822" cy="122" r="6"/><rect class="r-sm" x="840" y="116" width="12" height="12"/><circle cx="870" cy="122" r="6"/><rect class="r-sm" x="888" y="116" width="12" height="12"/><circle cx="918" cy="122" r="6"/>
+      <rect class="r-sm" x="768" y="140" width="12" height="12"/><circle cx="798" cy="146" r="6"/><rect class="r-sm" x="816" y="140" width="12" height="12"/><circle cx="846" cy="146" r="6"/><rect class="r-sm" x="864" y="140" width="12" height="12"/><circle cx="894" cy="146" r="6"/><rect class="r-sm" x="912" y="140" width="12" height="12"/>
+      <circle cx="774" cy="170" r="6"/><rect class="r-sm" x="792" y="164" width="12" height="12"/><circle cx="822" cy="170" r="6"/><rect class="r-sm" x="840" y="164" width="12" height="12"/><circle cx="870" cy="170" r="6"/><rect class="r-sm" x="888" y="164" width="12" height="12"/><circle cx="918" cy="170" r="6"/>
+    </g>
+  </svg>
+  <div class="text">
+    <h1>Koppel</h1>
+    <p>USB devices, shared across the network.</p>
+  </div>
+</div>
+<script></script>

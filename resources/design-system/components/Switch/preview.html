@@ -1,0 +1,51 @@
+<!-- @dsCard group="Inputs" height=220 subtitle="Click the first switch to watch the confirm round trip" -->
+<div class="kp-root" style="padding: 16px; display: grid; gap: 14px;">
+  <div id="demo" class="kp-switch" data-state="off" role="switch" aria-checked="false" tabindex="0">
+    <span class="kp-switch__track"><span class="kp-switch__thumb"></span></span>
+    <span>Share this device</span>
+    <span class="kp-switch__note" id="demo-note">Not shared</span>
+  </div>
+  <div class="kp-switch" data-state="on" role="switch" aria-checked="true">
+    <span class="kp-switch__track"><span class="kp-switch__thumb"></span></span>
+    <span>Auto-attach on connect</span>
+    <span class="kp-switch__note">Saved</span>
+  </div>
+  <div class="kp-switch" data-state="pending-on" role="switch" aria-checked="true">
+    <span class="kp-switch__track"><span class="kp-switch__thumb"></span></span>
+    <span>Require TLS</span>
+    <span class="kp-switch__note">Saving…</span>
+  </div>
+  <div class="kp-switch" data-state="pending-off" role="switch" aria-checked="false">
+    <span class="kp-switch__track"><span class="kp-switch__thumb"></span></span>
+    <span>Allow anonymous clients</span>
+    <span class="kp-switch__note">Saving…</span>
+  </div>
+  <div class="kp-switch" data-state="failed" role="switch" aria-checked="true">
+    <span class="kp-switch__track"><span class="kp-switch__thumb"></span></span>
+    <span>Share on startup</span>
+    <span class="kp-switch__note">Not saved: config file is read-only</span>
+  </div>
+</div>
+<script>
+  (function () {
+    var sw = document.getElementById('demo');
+    var note = document.getElementById('demo-note');
+    var confirmed = false;
+    function flip() {
+      if (sw.dataset.state.indexOf('pending') === 0) return;
+      var target = !confirmed;
+      sw.dataset.state = target ? 'pending-on' : 'pending-off';
+      sw.setAttribute('aria-checked', String(target));
+      note.textContent = 'Saving…';
+      setTimeout(function () {
+        confirmed = target;
+        sw.dataset.state = confirmed ? 'on' : 'off';
+        note.textContent = confirmed ? 'Saved' : 'Not shared';
+      }, 1400);
+    }
+    sw.addEventListener('click', flip);
+    sw.addEventListener('keydown', function (e) {
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); }
+    });
+  })();
+</script>

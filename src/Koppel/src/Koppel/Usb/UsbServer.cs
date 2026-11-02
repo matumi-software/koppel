@@ -40,7 +40,7 @@ public sealed record ServerDevices(IReadOnlyList<DeviceView> Devices, string? Un
 
 /// <summary>
 /// Server role: tracks the USB devices on this machine, applies the user's share choices to the
-/// kernel, and raises <see cref="Changed"/> whenever what the kernel reports changes. Polls sysfs
+/// kernel, and raises <see cref="Changed"/> whenever what the kernel reports changes. Polls the host
 /// every two seconds, which also catches plugging and unplugging.
 /// </summary>
 internal sealed partial class UsbServer(
@@ -58,8 +58,14 @@ internal sealed partial class UsbServer(
 
     private readonly ConcurrentDictionary<string, string> _faults = new();
     private readonly ConcurrentDictionary<string, (string ClientId, DateTimeOffset Since)> _attachedTo = new();
-    private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ConcurrentDictionary<string, string> _names = new();
+
+    /// <summary>The bus IDs Koppel means to have shared right now. Saved shares come back into it at start-up only when <c>ShareOnStartup</c> is on.</summary>
+    private readonly ConcurrentDictionary<string, byte> _active = new();
+
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private KoppelRole _role;
     private HashSet<string>? _present;
     private string _lastJson = "";
     private ServerDevices _current = new([], null);
@@ -68,54 +74,65 @@ internal sealed partial class UsbServer(
 
     public ServerDevices Current => Volatile.Read(ref _current);
 
-    /// <summary>Devices a client may import: shared and present.</summary>
-    public IReadOnlyList<UsbDevice> Exportable() =>
-        [.. host.ListDevices().Where(host.IsShared)];
+    /// <summary>Devices a client may import: bound for export and the ones the user shared.</summary>
+    public async Task<IReadOnlyList<UsbDevice>> ExportableAsync(CancellationToken cancellationToken) =>
+        [.. (await host.ListDevicesAsync(cancellationToken)).Where(IsExportable)];
 
     public IUsbHost Host => host;
 
     public override async Task StartAsync(CancellationToken cancellationToken)
     {
         await _shared.StartAsync(cancellationToken);
-        if (host.Unavailable is null && settings.Current.ShareOnStartup && settings.Current.Role != KoppelRole.Client)
-        {
-            foreach (var device in host.ListDevices().Where(_shared.Current.Expects))
-            {
-                TryApply(device.BusId, share: true);
-            }
-        }
-
+        _role = settings.Current.Role;
+        settings.Changed += OnSettingsAsync;
+        await ReconcileAsync(cancellationToken);
         await RefreshAsync(cancellationToken);
         await base.StartAsync(cancellationToken);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
+        settings.Changed -= OnSettingsAsync;
         _shared.Stop();
         await base.StopAsync(cancellationToken);
     }
 
     /// <summary>
-    /// Records the choice in <c>devices.json</c>, applies it to the kernel, then raises
-    /// <see cref="Changed"/> with what the kernel now reports. A kernel refusal shows as the device's fault.
+    /// Applies the choice to the kernel, and only when that worked records it in <c>devices.json</c>, then
+    /// raises <see cref="Changed"/> with what the kernel now reports. A kernel refusal shows as the device's
+    /// fault and nothing is saved, so a share that never took effect is not applied by surprise at the next start.
     /// </summary>
+    /// <exception cref="ArgumentException">The bus ID is not a USB bus ID. Nothing is changed.</exception>
     public async Task SetSharedAsync(string busId, bool share, CancellationToken cancellationToken)
     {
-        await _shared.UpdateAsync(current => current with
+        if (!UsbBusId.IsValid(busId))
         {
-            BusIds = share ? [.. current.BusIds.Append(busId).Distinct()] : [.. current.BusIds.Where(b => b != busId)],
-            VidPids = share && host.ListDevices().FirstOrDefault(d => d.BusId == busId) is { } device
-                ? new Dictionary<string, string>(current.VidPids ?? new Dictionary<string, string>()) { [busId] = device.VidPid }
-                : current.VidPids?.Where(p => p.Key != busId).ToDictionary(p => p.Key, p => p.Value),
-        }, cancellationToken);
-        TryApply(busId, share);
+            throw new ArgumentException("That is not a USB bus ID.", nameof(busId));
+        }
+
+        string? failure;
+        await _applyGate.WaitAsync(cancellationToken);
+        try
+        {
+            var device = (await host.ListDevicesAsync(cancellationToken)).FirstOrDefault(d => d.BusId == busId);
+            failure = await ApplyChoiceAsync(busId, share, device, cancellationToken);
+            if (failure is null)
+            {
+                await SaveChoiceAsync(busId, share, device, cancellationToken);
+            }
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+
         await RefreshAsync(cancellationToken, force: true);
 
         var name = _names.GetValueOrDefault(busId, busId);
         var entity = new EntityRef(busId, name, "device");
-        if (_faults.TryGetValue(busId, out var fault))
+        if (failure is not null)
         {
-            await activity.RecordAsync(entity, share ? ActivityReason.Shared : ActivityReason.Unshared, ActivityOutcome.Failed, $"{name} was not {(share ? "shared" : "unshared")}", fault);
+            await activity.RecordAsync(entity, share ? ActivityReason.Shared : ActivityReason.Unshared, ActivityOutcome.Failed, $"{name} was not {(share ? "shared" : "unshared")}", failure);
         }
         else
         {
@@ -142,6 +159,7 @@ internal sealed partial class UsbServer(
     {
         _shared.Dispose();
         _gate.Dispose();
+        _applyGate.Dispose();
         base.Dispose();
     }
 
@@ -154,14 +172,16 @@ internal sealed partial class UsbServer(
             {
                 // A shared device that comes back after unplugging needs binding again.
                 // Only a server re-shares. A pure client never binds anything to usbip-host.
-                if (host.Unavailable is null && settings.Current.Role != KoppelRole.Client)
+                if (Serves(_role))
                 {
-                    foreach (var device in host.ListDevices().Where(_shared.Current.Expects))
+                    await _applyGate.WaitAsync(stoppingToken);
+                    try
                     {
-                        if (!host.IsShared(device) && !_faults.ContainsKey(device.BusId))
-                        {
-                            TryApply(device.BusId, share: true);
-                        }
+                        await ApplyIntentAsync(unshareStrays: false, stoppingToken);
+                    }
+                    finally
+                    {
+                        _applyGate.Release();
                     }
                 }
 
@@ -174,35 +194,221 @@ internal sealed partial class UsbServer(
         }
     }
 
-    private void TryApply(string busId, bool share)
+    private static bool Serves(KoppelRole role) => role is KoppelRole.Server or KoppelRole.Both;
+
+    /// <summary>Bound for export, and the device the user shared on that port.</summary>
+    private bool IsExportable(UsbDevice device) =>
+        host.IsShared(device) && (!host.CanShare || _shared.Current.Expects(device));
+
+    /// <summary>
+    /// At start-up: shares what the user saved (when <c>ShareOnStartup</c> is on and this is a server), and
+    /// unbinds whatever else is bound to usbip-host, such as a share a crash or an earlier run left behind.
+    /// </summary>
+    private async Task ReconcileAsync(CancellationToken cancellationToken)
+    {
+        await _applyGate.WaitAsync(cancellationToken);
+        try
+        {
+            ActivateSaved(settings.Current);
+            await ApplyIntentAsync(unshareStrays: true, cancellationToken);
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+    }
+
+    /// <summary>Makes the saved shares the ones Koppel means to have, when this machine is a server that re-shares on start.</summary>
+    private void ActivateSaved(KoppelSettings current)
+    {
+        _active.Clear();
+        if (!Serves(current.Role) || !current.ShareOnStartup)
+        {
+            return;
+        }
+
+        foreach (var busId in _shared.Current.BusIds)
+        {
+            _active[busId] = 0;
+        }
+    }
+
+    /// <summary>
+    /// Brings the kernel in line with what Koppel means to share. A device that is bound but is not the one the
+    /// user shared on that port is unbound, and says so. With <paramref name="unshareStrays"/>, so is every
+    /// other bound device Koppel does not mean to share. Call with the apply gate held.
+    /// </summary>
+    private async Task ApplyIntentAsync(bool unshareStrays, CancellationToken cancellationToken)
+    {
+        var devices = await host.ListDevicesAsync(cancellationToken);
+        if (host.Unavailable is not null || !host.CanShare)
+        {
+            return;
+        }
+
+        var saved = _shared.Current;
+        foreach (var device in devices)
+        {
+            if (_active.ContainsKey(device.BusId) && saved.Expects(device))
+            {
+                if (!host.IsShared(device) && !_faults.ContainsKey(device.BusId))
+                {
+                    await TryApplyAsync(device.BusId, share: true, cancellationToken);
+                }
+            }
+            else if (host.IsShared(device) && host.CanUnshare && (unshareStrays || saved.BusIds.Contains(device.BusId)))
+            {
+                var wrongDevice = saved.BusIds.Contains(device.BusId) && !saved.Expects(device);
+                var failure = await TryApplyAsync(device.BusId, share: false, cancellationToken);
+                if (failure is null && wrongDevice)
+                {
+                    _faults[device.BusId] = "A different device is plugged into this port now, so it is not shared. Share it again to use it.";
+                }
+            }
+        }
+    }
+
+    /// <summary>A settings change that moves the role in or out of the server side shares or unshares to match.</summary>
+    private async Task OnSettingsAsync(KoppelSettings next)
+    {
+        var was = Serves(_role);
+        _role = next.Role;
+        if (was == Serves(next.Role))
+        {
+            return;
+        }
+
+        await _applyGate.WaitAsync();
+        try
+        {
+            if (was)
+            {
+                await UnshareEverythingAsync();
+            }
+            else
+            {
+                ActivateSaved(next);
+                await ApplyIntentAsync(unshareStrays: false, CancellationToken.None);
+            }
+        }
+        finally
+        {
+            _applyGate.Release();
+        }
+
+        await RefreshAsync(CancellationToken.None, force: true);
+    }
+
+    /// <summary>A machine that is no longer a server gives back every device Koppel shared. Call with the apply gate held.</summary>
+    private async Task UnshareEverythingAsync()
+    {
+        var saved = _shared.Current;
+        var devices = await host.ListDevicesAsync(CancellationToken.None);
+        _active.Clear();
+        if (host.Unavailable is not null || !host.CanUnshare)
+        {
+            return;
+        }
+
+        foreach (var device in devices.Where(d => host.IsShared(d) && saved.BusIds.Contains(d.BusId)))
+        {
+            await TryApplyAsync(device.BusId, share: false, CancellationToken.None);
+        }
+    }
+
+    /// <summary>What the host can do for the choice. Returns why it failed, or null when it took effect.</summary>
+    private async Task<string?> ApplyChoiceAsync(string busId, bool share, UsbDevice? device, CancellationToken cancellationToken)
+    {
+        if (host.Unavailable is { } unavailable)
+        {
+            return Fail(busId, unavailable);
+        }
+
+        if (share ? host.CanShare : host.CanUnshare)
+        {
+            return await TryApplyAsync(busId, share, cancellationToken);
+        }
+
+        // The host shares by its own tools. A choice that already matches what it exports is nothing to apply.
+        if (share != (device is not null && host.IsShared(device)))
+        {
+            return Fail(busId, host.SharingAdvice(busId, share));
+        }
+
+        _faults.TryRemove(busId, out _);
+        return null;
+    }
+
+    /// <summary>Writes the choice to <c>devices.json</c> after it took effect. If the file cannot be written, the kernel change is undone.</summary>
+    private async Task SaveChoiceAsync(string busId, bool share, UsbDevice? device, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _shared.UpdateAsync(current => current with
+            {
+                BusIds = share ? [.. current.BusIds.Append(busId).Distinct()] : [.. current.BusIds.Where(b => b != busId)],
+                VidPids = share && device is not null
+                    ? new Dictionary<string, string>(current.VidPids ?? new Dictionary<string, string>()) { [busId] = device.VidPid }
+                    : current.VidPids?.Where(p => p.Key != busId).ToDictionary(p => p.Key, p => p.Value),
+            }, cancellationToken);
+        }
+        catch
+        {
+            if (share ? host.CanUnshare : host.CanShare)
+            {
+                await TryApplyAsync(busId, !share, CancellationToken.None);
+            }
+
+            throw;
+        }
+
+        if (share)
+        {
+            _active[busId] = 0;
+        }
+        else
+        {
+            _active.TryRemove(busId, out _);
+        }
+    }
+
+    private async Task<string?> TryApplyAsync(string busId, bool share, CancellationToken cancellationToken)
     {
         try
         {
             if (share)
             {
-                host.Share(busId);
+                await host.ShareAsync(busId, cancellationToken);
             }
             else
             {
-                host.Unshare(busId);
+                await host.UnshareAsync(busId, cancellationToken);
             }
 
             _faults.TryRemove(busId, out _);
+            return null;
         }
         catch (UsbHostException ex)
         {
-            _faults[busId] = ex.Message;
-            LogApplyFailed(busId, ex.Message);
+            return Fail(busId, ex.Message);
         }
+    }
+
+    private string Fail(string busId, string reason)
+    {
+        _faults[busId] = reason;
+        LogApplyFailed(busId, reason);
+        return reason;
     }
 
     private async Task RefreshAsync(CancellationToken cancellationToken, bool force = false)
     {
-        ServerDevices next;
+        // The event is raised with the gate held, so two refreshes never deliver their snapshots out of order.
+        // A handler must not call back into a refresh.
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            next = Build();
+            var next = await BuildAsync(cancellationToken);
             var json = JsonSerializer.Serialize(next, KoppelJson.Files);
             if (!force && json == _lastJson)
             {
@@ -211,15 +417,13 @@ internal sealed partial class UsbServer(
 
             _lastJson = json;
             Volatile.Write(ref _current, next);
+            await Changed.RaiseAsync(next, logger);
+            await RecordPlugChangesAsync(next);
         }
         finally
         {
             _gate.Release();
         }
-
-        await Changed.RaiseAsync(next, logger);
-
-        await RecordPlugChangesAsync(next);
     }
 
     /// <summary>Logs devices that appeared or disappeared since the last look. The first look only remembers.</summary>
@@ -245,17 +449,18 @@ internal sealed partial class UsbServer(
         }
     }
 
-    private ServerDevices Build()
+    private async Task<ServerDevices> BuildAsync(CancellationToken cancellationToken)
     {
         var intent = _shared.Current.BusIds.ToHashSet(StringComparer.Ordinal);
-        var devices = host.ListDevices();
-        var views = devices.Select(d =>
+        var devices = await host.ListDevicesAsync(cancellationToken);
+        var views = new List<DeviceView>();
+        foreach (var d in devices)
         {
             _names[d.BusId] = d.Product ?? "Unknown device";
-            var state = host.IsShared(d)
-                ? host.GetStatus(d.BusId) == ExportStatus.Used ? "attached" : "shared"
+            var state = IsExportable(d)
+                ? await host.GetStatusAsync(d.BusId, cancellationToken) == ExportStatus.Used ? "attached" : "shared"
                 : "local";
-            return new DeviceView(
+            views.Add(new DeviceView(
                 d.BusId,
                 d.VidPid,
                 d.Product ?? "Unknown device",
@@ -267,8 +472,8 @@ internal sealed partial class UsbServer(
                 _faults.GetValueOrDefault(d.BusId),
                 d.Serial,
                 d.Driver,
-                [.. d.Interfaces.Select(i => InterfaceClassName(i.Class)).Distinct()]);
-        }).ToList();
+                [.. d.Interfaces.Select(i => InterfaceClassName(i.Class)).Distinct()]));
+        }
 
         // Shared devices that are unplugged stay visible, so the user knows they come back shared.
         views.AddRange(intent

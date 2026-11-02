@@ -90,7 +90,8 @@ internal static class ServerEndpoints
 
     /// <summary>
     /// Endpoints remote Koppel clients call with a bearer token, over HTTPS only. A revoked client is
-    /// refused at once, even while an earlier token has not expired.
+    /// refused at once, even while an earlier token has not expired, and so is a token issued before the
+    /// client's secret was rotated.
     /// </summary>
     public static RouteGroupBuilder MapRemoteEndpoints(this IEndpointRouteBuilder app)
     {
@@ -98,7 +99,7 @@ internal static class ServerEndpoints
         group.AddEndpointFilter(async (context, next) =>
         {
             var secrets = context.HttpContext.RequestServices.GetRequiredService<ServerSecretsStore>();
-            return secrets.IsRegistered(context.HttpContext.User.GetClientId())
+            return secrets.IsCurrent(context.HttpContext.User)
                 ? await next(context)
                 : TypedResults.Unauthorized();
         });

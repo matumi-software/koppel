@@ -25,7 +25,7 @@ public sealed class UsbEndToEndTests : IDisposable
 
     public UsbEndToEndTests()
     {
-        _server = new KoppelFactory(kestrel: true, services: s => s.AddSingleton<IUsbHost>(_serverKernel));
+        _server = new KoppelFactory(kestrel: true, services: s => s.AddSingleton<IUsbHost>(_serverKernel), shareDongle: true);
         _client = new KoppelFactory(
             kestrel: true,
             services: s => s.AddSingleton<IUsbAttacher>(_clientKernel),

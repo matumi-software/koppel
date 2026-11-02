@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Koppel.Core.Auth;
@@ -11,7 +12,7 @@ namespace Koppel.Server;
 /// A client allowed to use this server. The secret is kept, inside the encrypted file, so an admin can
 /// copy it again later, as Timebase Pulse does. Clients made before that have only the hash.
 /// </summary>
-internal sealed record RegisteredClient(string Id, string Name, string SecretHash, DateTimeOffset CreatedAt, string? Secret = null);
+internal sealed record RegisteredClient(string Id, string Name, string SecretHash, DateTimeOffset CreatedAt, string? Secret = null, int Generation = 1);
 
 /// <summary>The contents of the encrypted <c>secrets.json</c> (server role).</summary>
 internal sealed record ServerSecrets(string? SigningKey, string? CertificatePfx, IReadOnlyList<RegisteredClient> Clients)
@@ -94,7 +95,10 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
 
     public string? NameOf(string? clientId) => _file.Current.Clients.FirstOrDefault(c => c.Id == clientId)?.Name;
 
-    /// <summary>Replaces the secret. The old one stops working for new tokens at once.</summary>
+    /// <summary>
+    /// Replaces the secret. The old one stops working for new tokens at once, and every token issued before
+    /// stops being accepted, because the client gets a new generation.
+    /// </summary>
     public async Task<string?> RotateSecretAsync(string clientId, CancellationToken cancellationToken)
     {
         if (_file.Current.Clients.All(c => c.Id != clientId))
@@ -105,7 +109,7 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
         var secret = Secrets.NewSecret();
         await _file.UpdateAsync(current => current with
         {
-            Clients = [.. current.Clients.Select(c => c.Id == clientId ? c with { SecretHash = Secrets.Hash(secret), Secret = secret } : c)],
+            Clients = [.. current.Clients.Select(c => c.Id == clientId ? c with { SecretHash = Secrets.Hash(secret), Secret = secret, Generation = c.Generation + 1 } : c)],
         }, cancellationToken);
         return secret;
     }
@@ -123,6 +127,15 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
     }
 
     public bool IsRegistered(string? clientId) => clientId is not null && _file.Current.Clients.Any(c => c.Id == clientId);
+
+    /// <summary>The client is registered and its credentials have not been rotated since the token was issued.</summary>
+    public bool IsCurrent(string? clientId, int? generation) =>
+        clientId is not null && generation is not null && _file.Current.Clients.Any(c => c.Id == clientId && c.Generation == generation);
+
+    /// <summary>Whether a validated bearer token belongs to a registered client at its current generation.</summary>
+    public bool IsCurrent(ClaimsPrincipal? principal) => principal is not null && IsCurrent(principal.GetClientId(), principal.GetGeneration());
+
+    public int GenerationOf(string clientId) => _file.Current.Clients.FirstOrDefault(c => c.Id == clientId)?.Generation ?? 0;
 
     public async ValueTask<bool> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken)
     {

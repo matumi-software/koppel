@@ -8,8 +8,8 @@ internal sealed record ShareRequest(bool Shared);
 internal static class UsbEndpoints
 {
     /// <summary>
-    /// Server role. PUT writes the choice to <c>devices.json</c>, applies it to the kernel and answers
-    /// 202; the outcome reaches the UI as <c>DevicesChanged</c>.
+    /// Server role. PUT applies the choice to the kernel, saves it in <c>devices.json</c> once it took effect and
+    /// answers 202; the outcome reaches the UI as <c>DevicesChanged</c>. A bus ID that is not one answers 400.
     /// </summary>
     public static IEndpointRouteBuilder MapUsbServerEndpoints(this IEndpointRouteBuilder app)
     {
@@ -17,6 +17,11 @@ internal static class UsbEndpoints
         group.MapGet("/", (UsbServer usb) => TypedResults.Ok(usb.Current));
         group.MapPut("/{busId}/shared", async Task<IResult> (string busId, ShareRequest request, UsbServer usb, CancellationToken cancellationToken) =>
         {
+            if (!UsbBusId.IsValid(busId))
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["busId"] = ["That is not a USB bus ID, such as 1-1.4."] });
+            }
+
             if (usb.Current.Unavailable is { } reason)
             {
                 return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["device"] = [reason] });

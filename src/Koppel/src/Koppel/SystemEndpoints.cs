@@ -2,6 +2,7 @@ using System.Reflection;
 using Koppel.Core.Usb;
 using Koppel.Server;
 using Koppel.Settings;
+using Koppel.Usb;
 
 namespace Koppel;
 
@@ -23,7 +24,7 @@ internal static class SystemEndpoints
     /// <summary>What this machine can do: share (usbip-host) and attach (vhci-hcd). Read-only.</summary>
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher, SettingsStore settings) => TypedResults.Ok(new[]
+        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher, SettingsStore settings, UsbIpTlsServer listener) => TypedResults.Ok(new[]
         {
             host.Unavailable is { } shareProblem
                 ? new SystemCheck("share", false, "Sharing is not available.", shareProblem)
@@ -31,6 +32,9 @@ internal static class SystemEndpoints
             attacher.Unavailable is { } attachProblem
                 ? new SystemCheck("attach", false, "Attaching is not available.", attachProblem)
                 : new SystemCheck("attach", true, "vhci-hcd is loaded.", "This machine can attach devices."),
+            listener.Status.Error is { } listenProblem
+                ? new SystemCheck("listen", false, "The USB port is not open.", listenProblem)
+                : new SystemCheck("listen", true, "The USB port is ready.", listener.Status.Listening ? $"Clients connect on port {listener.Status.Port}." : "This machine is not a server, so the USB port is closed."),
         }.Concat(settings.Problem is { } problem
             ? [new SystemCheck("settings", false, "settings.json was not applied.", problem)]
             : []).ToArray()));

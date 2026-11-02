@@ -51,6 +51,8 @@ internal sealed class UiHubRelay(
     ConnectionStore connection,
     UsbServer usbServer,
     UsbClient usbClient,
+    UsbIpTlsServer usbListener,
+    LiveSessions live,
     InMemoryActivityStore activity,
     ServerFinder finder,
     PairingClient pairingClient,
@@ -64,6 +66,7 @@ internal sealed class UiHubRelay(
         secrets.ClientsChanged += PushClientsAsync;
         connection.Changed += PushConnectionAsync;
         usbServer.Changed += PushServerDevicesAsync;
+        usbListener.StatusChanged += PushListenerAsync;
         usbClient.Changed += PushClientDevicesAsync;
         activity.Recorded += PushActivityAsync;
         finder.Changed += PushServersAsync;
@@ -78,6 +81,7 @@ internal sealed class UiHubRelay(
         secrets.ClientsChanged -= PushClientsAsync;
         connection.Changed -= PushConnectionAsync;
         usbServer.Changed -= PushServerDevicesAsync;
+        usbListener.StatusChanged -= PushListenerAsync;
         usbClient.Changed -= PushClientDevicesAsync;
         activity.Recorded -= PushActivityAsync;
         finder.Changed -= PushServersAsync;
@@ -95,8 +99,16 @@ internal sealed class UiHubRelay(
     private async Task PushServerDevicesAsync(ServerDevices value)
     {
         await hub.Clients.All.DevicesChanged(value);
-        await remote.Clients.All.DevicesChanged(value.ForRemote(settings.Current.ListenPort));
+        await PushRemoteDevicesAsync(value, settings.Current.ListenPort);
     }
+
+    /// <summary>The listener bound a port. Clients learn it from the device list, which carries the USB port, so a port change reaches them here.</summary>
+    private Task PushListenerAsync(UsbListenerStatus status) =>
+        status.Listening ? PushRemoteDevicesAsync(usbServer.Current, status.Port) : Task.CompletedTask;
+
+    /// <summary>Only clients that are still registered at their current generation get the list.</summary>
+    private Task PushRemoteDevicesAsync(ServerDevices devices, int usbPort) =>
+        remote.Clients.Clients(live.RemoteConnectionIds()).DevicesChanged(devices.ForRemote(usbPort));
 
     private Task PushClientDevicesAsync(ClientDevices value) => hub.Clients.All.ClientDevicesChanged(value);
 

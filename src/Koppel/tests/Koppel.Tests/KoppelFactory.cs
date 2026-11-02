@@ -30,14 +30,14 @@ public sealed class TestListenerPorts(int httpPort, int httpsPort) : IStartupFil
 /// <summary>
 /// A Koppel host with its own temporary config and key directories. By default it runs on a test
 /// server. With <c>kestrel: true</c> it listens on real free ports, so two hosts can talk as server
-/// and client, and the TLS USB port can be reached.
+/// and client, and the TLS USB port can be reached. With <c>shareDongle</c> the test device's share is already saved.
 /// </summary>
 public sealed class KoppelFactory : IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly bool _kestrel;
 
-    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server")
+    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server", bool shareDongle = false, bool shareOnStartup = true)
     {
         _kestrel = kestrel;
         Directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
@@ -47,7 +47,12 @@ public sealed class KoppelFactory : IDisposable
 
         // Seed settings so parallel hosts never fight over the default USB port.
         System.IO.Directory.CreateDirectory(Path.Combine(Directory, "config"));
-        File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "{{role}}", "shareOnStartup": true, "listenPort": {{UsbPort}} }""");
+        File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "{{role}}", "shareOnStartup": {{(shareOnStartup ? "true" : "false")}}, "listenPort": {{UsbPort}} }""");
+        if (shareDongle)
+        {
+            // What a person saved by sharing the device in the UI; the share is applied when the host starts.
+            File.WriteAllText(ConfigFile("devices.json"), """{ "busIds": ["1-1.4"], "vidPids": { "1-1.4": "064f:2af9" } }""");
+        }
 
         var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {

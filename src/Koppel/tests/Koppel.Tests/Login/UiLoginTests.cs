@@ -221,6 +221,7 @@ public sealed class UiLoginTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var host = Host();
         await SetPasswordAsync(host);
+        var ui = Own(host.CreateUiClient());
         var anonymous = Own(host.CreateAnonymousUiClient());
 
         for (var i = 0; i < UiLoginThrottle.FreeFailures; i++)
@@ -233,7 +234,6 @@ public sealed class UiLoginTests : IDisposable
         locked.Headers.RetryAfter!.Delta.Should().BeGreaterThan(TimeSpan.FromSeconds(30));
         (await ErrorOf(locked, ct)).Should().Contain("Wait");
 
-        var ui = Own(host.CreateUiClient());
         var activity = await ui.GetFromJsonAsync<JsonElement>("/api/activity?max=50", ct);
         activity.EnumerateArray().Count(e => e.GetProperty("reason").GetString() == "signInFailed" && e.GetProperty("outcome").GetString() == "failed")
             .Should().Be(UiLoginThrottle.FreeFailures, "the locked attempt is not logged again");

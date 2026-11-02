@@ -13,46 +13,24 @@ public sealed record KoppelSettings(
     KoppelRole Role,
     /// <summary>Re-share the devices that were shared before a restart.</summary>
     bool ShareOnStartup,
-    /// <summary>The TLS port for USB traffic. USB/IP's usual port, encrypted and behind auth.</summary>
-    int ListenPort,
     /// <summary>False until the user finishes the first-run setup in the UI.</summary>
     bool SetupComplete = false)
 {
-    public static KoppelSettings Default { get; } = new(KoppelRole.Server, ShareOnStartup: true, ListenPort: 3240);
+    public static KoppelSettings Default { get; } = new(KoppelRole.Server, ShareOnStartup: true);
 
     /// <summary>The same rules a patch is held to, so a hand-edited file is checked like a REST change.</summary>
-    public Dictionary<string, string[]> Validate() => Validate(null);
-
-    /// <summary>The same rules, and the USB port must not be one of Koppel's other ports.</summary>
-    internal Dictionary<string, string[]> Validate(ReservedPorts? reserved) => new SettingsPatch(Role, ShareOnStartup, ListenPort, SetupComplete).Validate(reserved);
-}
-
-/// <summary>The ports Koppel's other listeners use, which the USB port must not take.</summary>
-/// <param name="Gateway">0 when the gateway is off.</param>
-internal sealed record ReservedPorts(int Http, int Https, int Gateway)
-{
-    public bool Contains(int port) => port == Http || port == Https || (Gateway != 0 && port == Gateway);
+    public Dictionary<string, string[]> Validate() => new SettingsPatch(Role, ShareOnStartup, SetupComplete).Validate();
 }
 
 /// <summary>A partial change to <see cref="KoppelSettings"/>. Null means "leave as is".</summary>
 internal sealed record SettingsPatch(
     KoppelRole? Role,
     bool? ShareOnStartup,
-    int? ListenPort,
     bool? SetupComplete = null)
 {
-    public Dictionary<string, string[]> Validate(ReservedPorts? reserved = null)
+    public Dictionary<string, string[]> Validate()
     {
         var errors = new Dictionary<string, string[]>();
-        if (ListenPort is < 1 or > 65535)
-        {
-            errors["listenPort"] = ["Use a port from 1 to 65535."];
-        }
-        else if (ListenPort is { } port && reserved?.Contains(port) == true)
-        {
-            errors["listenPort"] = ["That port is used by Koppel's web UI, its HTTPS port or its gateway. Use another."];
-        }
-
         if (Role is { } role && !Enum.IsDefined(role))
         {
             errors["role"] = ["Use server, client or both."];
@@ -69,7 +47,6 @@ internal sealed record SettingsPatch(
     {
         Role is { } role && role != current.Role ? $"Role set to {role.ToString().ToLowerInvariant()}" : null,
         ShareOnStartup is { } share && share != current.ShareOnStartup ? $"Share saved devices on startup turned {(share ? "on" : "off")}" : null,
-        ListenPort is { } port && port != current.ListenPort ? $"USB port set to {port}" : null,
         SetupComplete is true && !current.SetupComplete ? "Setup finished" : null,
     }.Where(part => part is not null));
 
@@ -77,7 +54,6 @@ internal sealed record SettingsPatch(
     {
         Role = Role ?? current.Role,
         ShareOnStartup = ShareOnStartup ?? current.ShareOnStartup,
-        ListenPort = ListenPort ?? current.ListenPort,
         SetupComplete = SetupComplete ?? current.SetupComplete,
     };
 }

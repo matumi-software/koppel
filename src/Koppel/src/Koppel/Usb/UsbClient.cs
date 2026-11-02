@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Net.Security;
 using System.Net.Sockets;
-using System.Text;
+using System.Net.WebSockets;
 using Koppel.Client;
 using Koppel.Core.Activity;
 using Koppel.Core.Auth;
@@ -78,7 +77,7 @@ internal sealed partial class UsbClient(
     private static readonly TimeSpan ExpiryGrace = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// One deadline for everything before USB traffic flows: connecting, TLS, the token, the preface, the
+    /// One deadline for everything before USB traffic flows: the token, connecting, TLS, the WebSocket, the
     /// import reply and the device record. A server that accepts and then says nothing ends here.
     /// </summary>
     private readonly TimeSpan _handshakeTimeout = TimeSpan.FromSeconds(configuration.GetValue("Usb:AttachTimeoutSeconds", 20));
@@ -99,7 +98,10 @@ internal sealed partial class UsbClient(
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastTry = new();
     private readonly ConcurrentDictionary<string, string> _faults = new();
     private readonly object _gate = new();
-    private RemoteDevices _remote = new([], 0);
+    private RemoteDevices _remote = new([]);
+
+    /// <summary>True once the server sent its device list on this link, so its USB data plane is worth trying.</summary>
+    private volatile bool _listed;
     private string _link = "unconfigured";
     private string? _linkMessage;
     private CancellationTokenSource? _session;
@@ -416,7 +418,10 @@ internal sealed partial class UsbClient(
                 await previous;
                 await ReleaseAllAsync();
                 // The new link may have listed its devices by now; only the old list is dropped.
-                Interlocked.CompareExchange(ref _remote, new RemoteDevices([], 0), before);
+                if (ReferenceEquals(Interlocked.CompareExchange(ref _remote, new RemoteDevices([]), before), before))
+                {
+                    _listed = false;
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -560,7 +565,8 @@ internal sealed partial class UsbClient(
         var c = connection.Current;
         if (settings.Current.Role == KoppelRole.Server || !c.IsComplete)
         {
-            _remote = new([], 0);
+            _remote = new([]);
+            _listed = false;
             await SetLinkAsync("unconfigured", null);
             await Task.Delay(Timeout.Infinite, cancellationToken);
             return false;
@@ -608,6 +614,7 @@ internal sealed partial class UsbClient(
         hub.On<RemoteDevices>("DevicesChanged", async devices =>
         {
             _remote = Sanitize(devices);
+            _listed = true;
             await RaiseAsync();
             AttachRemembered();
         });
@@ -696,7 +703,7 @@ internal sealed partial class UsbClient(
             LogInvalidDevices(devices.Count - valid.Count);
         }
 
-        return new RemoteDevices(valid, received?.UsbPort is > 0 and <= 65535 ? received.UsbPort : 0);
+        return new RemoteDevices(valid);
     }
 
     /// <summary>
@@ -875,12 +882,10 @@ internal sealed partial class UsbClient(
             {
                 await UnderDeadlineAsync(async token =>
                 {
-                    var (tcp, tls) = await OpenSessionAsync(token);
-                    using (tcp)
-                    await using (tls)
+                    await using (var session = await OpenSessionAsync(token))
                     {
-                        await tls.WriteAsync(UsbIpProtocol.DevListRequest(), token);
-                        await tls.CopyToAsync(plain, token);
+                        await session.WriteAsync(UsbIpProtocol.DevListRequest(), token);
+                        await session.CopyToAsync(plain, token);
                     }
 
                     return true;
@@ -929,7 +934,7 @@ internal sealed partial class UsbClient(
                     ? $"{NameOf(busId!)} is attached here"
                     : $"{NameOf(busId!)} is attached through the gateway for {from}");
                 await RaiseAsync();
-                await UsbSockets.RelayAsync(import.Tls, plain, stop.Token);
+                await UsbSockets.RelayAsync(import.Session, plain, stop.Token);
             }
             finally
             {
@@ -986,13 +991,15 @@ internal sealed partial class UsbClient(
     }
 
     /// <summary>
-    /// Opens a TLS connection to the server's USB port and proves who this client is. USB/IP follows.
-    /// The caller sets the deadline through <paramref name="cancellationToken"/>.
+    /// Opens the USB data plane: a WebSocket on the server's HTTPS port, pinned to its certificate and
+    /// carrying this client's bearer token. USB/IP follows inside it. Both ends ping, so a server that
+    /// vanishes without a goodbye ends the session in under a minute, not never. The caller sets the
+    /// deadline through <paramref name="cancellationToken"/>.
     /// </summary>
-    private async Task<(TcpClient Tcp, SslStream Tls)> OpenSessionAsync(CancellationToken cancellationToken)
+    private async Task<Stream> OpenSessionAsync(CancellationToken cancellationToken)
     {
         var link = ServerLinkFor();
-        if (_remote.UsbPort == 0)
+        if (!_listed)
         {
             throw new InvalidOperationException("Not connected to a server.");
         }
@@ -1000,37 +1007,25 @@ internal sealed partial class UsbClient(
         var c = link.Connection;
         var token = await link.Tokens.GetAccessTokenAsync(link.Server, c.ClientId!, c.ClientSecret!, cancellationToken);
 
-        var tcp = new TcpClient { NoDelay = true };
-        SslStream? tls = null;
+        var socket = new ClientWebSocket();
         try
         {
-            await tcp.ConnectAsync(link.Server.Host, _remote.UsbPort, cancellationToken);
-            // A server that vanishes without a goodbye ends the session in about a minute, not never.
-            UsbSockets.EnableKeepAlive(tcp.Client);
-            tls = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false);
-            await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
-            {
-                TargetHost = link.Server.Host,
-                RemoteCertificateValidationCallback = (_, certificate, _, _) =>
-                    ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, c.ServerFingerprint),
-            }, cancellationToken);
-            await tls.WriteAsync(Encoding.ASCII.GetBytes($"{UsbIpTlsServer.Preface}{token}\n"), cancellationToken);
-            var answer = await UsbIpTlsServer.ReadLineAsync(tls, cancellationToken);
-            if (answer != "OK")
-            {
-                throw new InvalidOperationException($"The server refused the connection: {answer ?? "no answer"}.");
-            }
-
-            return (tcp, tls);
+            socket.Options.SetRequestHeader("Authorization", $"Bearer {token}");
+            socket.Options.KeepAliveInterval = UsbDataPlane.KeepAliveInterval;
+            socket.Options.KeepAliveTimeout = UsbDataPlane.KeepAliveTimeout;
+            socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
+                ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, c.ServerFingerprint);
+            await socket.ConnectAsync(new UriBuilder(link.Server) { Scheme = "wss", Path = "/api/remote/usb" }.Uri, cancellationToken);
+            return WebSocketStream.Create(socket, WebSocketMessageType.Binary, closeTimeout: TimeSpan.FromSeconds(2));
+        }
+        catch (WebSocketException ex)
+        {
+            socket.Dispose();
+            throw new InvalidOperationException($"The server refused the USB connection: {ex.Message}", ex);
         }
         catch
         {
-            if (tls is not null)
-            {
-                await tls.DisposeAsync();
-            }
-
-            tcp.Dispose();
+            socket.Dispose();
             throw;
         }
     }
@@ -1038,24 +1033,23 @@ internal sealed partial class UsbClient(
     /// <summary>Connects and imports <paramref name="busId"/>, all within one deadline. Returns the session and the server's device record.</summary>
     private Task<RemoteImport> ImportAsync(string busId, CancellationToken cancellationToken) => UnderDeadlineAsync(async token =>
     {
-        var (tcp, tls) = await OpenSessionAsync(token);
+        var session = await OpenSessionAsync(token);
         try
         {
-            await tls.WriteAsync(UsbIpProtocol.ImportRequest(busId), token);
-            var header = await UsbIpProtocol.ReadHeaderAsync(tls, token);
+            await session.WriteAsync(UsbIpProtocol.ImportRequest(busId), token);
+            var header = await UsbIpProtocol.ReadHeaderAsync(session, token);
             if (header.Code != UsbIpProtocol.OpRepImport || header.Status != UsbIpProtocol.StatusOk)
             {
                 throw new InvalidOperationException("The server could not export the device. Someone else may be using it.");
             }
 
             var record = new byte[UsbIpProtocol.DeviceSize];
-            await tls.ReadExactlyAsync(record, token);
-            return new RemoteImport(tcp, tls, record);
+            await session.ReadExactlyAsync(record, token);
+            return new RemoteImport(session, record);
         }
         catch
         {
-            await tls.DisposeAsync();
-            tcp.Dispose();
+            await session.DisposeAsync();
             throw;
         }
     }, cancellationToken);
@@ -1086,7 +1080,7 @@ internal sealed partial class UsbClient(
     /// </summary>
     private async Task AttachThroughDriverAsync(AttachKey key, CancellationToken cancellationToken)
     {
-        if (!connection.Current.IsComplete || _remote.UsbPort == 0)
+        if (!connection.Current.IsComplete || !_listed)
         {
             throw new InvalidOperationException("Not connected to a server.");
         }
@@ -1186,7 +1180,7 @@ internal sealed partial class UsbClient(
                 await using var relay = new NetworkStream(relayEnd, ownsSocket: true);
                 try
                 {
-                    await UsbSockets.RelayAsync(import.Tls, relay, stop.Token);
+                    await UsbSockets.RelayAsync(import.Session, relay, stop.Token);
                 }
                 finally
                 {
@@ -1255,18 +1249,14 @@ internal sealed partial class UsbClient(
 
     private Task RaiseAsync() => Changed.RaiseAsync(Current, logger);
 
-    /// <summary>The TLS session to the server for one imported device, and the device record it sent.</summary>
-    private sealed class RemoteImport(TcpClient tcp, SslStream tls, byte[] record) : IAsyncDisposable
+    /// <summary>The WebSocket session to the server for one imported device, and the device record it sent.</summary>
+    private sealed class RemoteImport(Stream session, byte[] record) : IAsyncDisposable
     {
-        public SslStream Tls { get; } = tls;
+        public Stream Session { get; } = session;
 
         public byte[] Record { get; } = record;
 
-        public async ValueTask DisposeAsync()
-        {
-            await Tls.DisposeAsync();
-            tcp.Dispose();
-        }
+        public ValueTask DisposeAsync() => Session.DisposeAsync();
     }
 
     /// <summary>

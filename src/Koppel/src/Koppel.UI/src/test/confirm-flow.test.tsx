@@ -8,7 +8,7 @@ import { settingsKey } from '@/query-keys';
 import { useSettings } from '@/settings/use-settings';
 import { accepted, deferred, json, mockFetch, renderApp } from './harness';
 
-const settings: KoppelSettings = { role: 'server', shareOnStartup: false, listenPort: 3240, setupComplete: true };
+const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true };
 
 /** A page that changes one setting and shows what the confirm rule says about it. */
 function SettingsPage() {
@@ -75,7 +75,7 @@ describe('the confirm rule', () => {
     fireEvent.click(screen.getByText('Turn on'));
     await waitFor(() => expect(text('pending')).toBe('true'));
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, listenPort: 4000 }));
+    await act(async () => hub.emit('SettingsChanged', { ...settings, role: 'both' }));
 
     expect(text('pending')).toBe('true');
     expect(text('confirmed')).toBe('false');

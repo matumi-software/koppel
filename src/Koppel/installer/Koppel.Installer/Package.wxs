@@ -1,5 +1,4 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="1CFA893C-6A76-421E-B40E-86B0F6A16154" Scope="perMachine">
     <!-- Same-version upgrades keep a rebuilt dev installer from installing next to the last one
@@ -23,13 +22,9 @@
 
     <ComponentGroup Id="App" Directory="INSTALLFOLDER">
       <Component Id="Service">
-        <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes">
-          <!-- Answers to "which Koppel servers are here?" arrive over multicast DNS. Windows' own mDNS rule
-               only covers its DNS client service, so Koppel needs its own, kept to the local subnet and to
-               domain and private networks: a laptop on a public network does not announce or browse. -->
-          <fw:FirewallException Id="KoppelDiscoveryDomain" Name="Koppel: find servers on the local network" Protocol="udp" Port="5353" Scope="localSubnet" Profile="domain" />
-          <fw:FirewallException Id="KoppelDiscoveryPrivate" Name="Koppel: find servers on the local network" Protocol="udp" Port="5353" Scope="localSubnet" Profile="private" />
-        </File>
+        <!-- No firewall rule: a client only receives answers to its own discovery broadcast, which
+             Windows lets in, and nothing on this machine needs to be reached from the network. -->
+        <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes" />
         <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on http://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes">
           <!-- Restart after a failure: after 5 s each time, for the first, second and every later one. The count resets after a day
                without one. What counts as a failure is set below (SetServiceFailureFlag). -->

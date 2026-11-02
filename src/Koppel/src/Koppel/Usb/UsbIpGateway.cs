@@ -218,7 +218,7 @@ internal sealed partial class UsbIpGateway(
 
             await client.ServeGatewayAsync(socket, cancellationToken);
         }
-        catch (Exception ex) when (ex is IOException or SocketException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception ex) when (ex is IOException or SocketException or System.Net.WebSockets.WebSocketException or OperationCanceledException or ObjectDisposedException)
         {
             LogSessionEnded(ex.Message);
         }

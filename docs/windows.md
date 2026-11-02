@@ -54,9 +54,6 @@ Both compose files publish the UI as `127.0.0.1:5240:5240`, so it answers on thi
 Docker Desktop's network translation makes every caller look like the same address, so a UI open
 to the LAN would let one wrong-password caller lock the admin out. Open it from this machine.
 
-Koppel's USB port on this machine is 3241, because usbipd-win holds 3240. Clients learn the port
-from the server, so nothing changes on their side.
-
 **Close usbipd-win to the network.** Its installer adds a firewall rule named `usbipd` that lets
 every machine on the local subnet connect to port 3240. That is plain USB/IP with no login, so
 anyone on the subnet could attach a shared device without going through Koppel. Look at the rule:
@@ -143,15 +140,14 @@ The installer is not code signed.
 
 Koppel finds servers on the local network and pairs with a code typed on the server (see
 "Finding servers and pairing" in `docs/architecture.md`). In a container on Windows that does not
-work: Docker Desktop's network does not pass multicast DNS to or from the LAN. Enter the server's
-address by hand there, or use the native install, which finds servers and has its firewall rule.
+work: Docker Desktop's network does not pass broadcasts to or from the LAN. Enter the server's
+address by hand there, or use the native install, which finds servers.
 
 ## Configuration
 
 | Setting | Where | What |
 |---|---|---|
 | `Usb:Upstream` | server | `host:port` of a USB/IP server to share from, instead of this kernel |
-| `Usb:ListenPort` | server | The USB port a new install starts with. After that, the Machine page sets it |
 | `Gateway:Port` | client | Port of the plain USB/IP gateway. 3242 on native Windows, off elsewhere unless set. The Windows client compose file sets it |
 | `Gateway:Address` | client | Address it listens on. `127.0.0.1` unless set. The compose file sets `0.0.0.0` inside the container |
 | `Usb:AttachTimeoutSeconds` | client | How long an attach may take before it fails with a readable error. 20 |

@@ -6,15 +6,14 @@ namespace Koppel.Settings;
 /// Owns <c>settings.json</c>, a plain file people may edit by hand. A change is written first; only
 /// a write that landed raises <see cref="Changed"/>, which is what the UI waits for.
 /// </summary>
-/// <remarks><c>Usb:ListenPort</c> in configuration sets the USB port a new install starts with, for hosts where 3240 is taken.</remarks>
-internal sealed class SettingsStore(KoppelPaths paths, IConfiguration configuration, ILogger<SettingsStore> logger, ReservedPorts? reserved = null) : IHostedService, IDisposable
+internal sealed class SettingsStore(KoppelPaths paths, ILogger<SettingsStore> logger) : IHostedService, IDisposable
 {
     private readonly JsonConfigFile<KoppelSettings> _file = new(
         paths.SettingsFile,
-        KoppelSettings.Default with { ListenPort = configuration.GetValue("Usb:ListenPort", KoppelSettings.Default.ListenPort) },
+        KoppelSettings.Default,
         KoppelJson.Files,
         logger,
-        validate: settings => Check(settings, reserved));
+        validate: Check);
 
     /// <summary>Raised after a change is on disk, with the settings as written.</summary>
     public event Func<KoppelSettings, Task>? Changed
@@ -42,9 +41,9 @@ internal sealed class SettingsStore(KoppelPaths paths, IConfiguration configurat
 
     public void Dispose() => _file.Dispose();
 
-    private static string? Check(KoppelSettings settings, ReservedPorts? reserved)
+    private static string? Check(KoppelSettings settings)
     {
-        var errors = settings.Validate(reserved);
+        var errors = settings.Validate();
         return errors.Count == 0
             ? null
             : string.Join("; ", errors.SelectMany(error => error.Value.Select(message => $"{error.Key}: {message}")));

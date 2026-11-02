@@ -46,11 +46,10 @@ public sealed class KoppelFactory : IDisposable
         Directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
         HttpPort = FreePort();
         HttpsPort = FreePort();
-        UsbPort = FreePort();
 
         // Seed settings so parallel hosts never fight over the default USB port.
         System.IO.Directory.CreateDirectory(Path.Combine(Directory, "config"));
-        File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "{{role}}", "shareOnStartup": {{(shareOnStartup ? "true" : "false")}}, "listenPort": {{UsbPort}} }""");
+        File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "{{role}}", "shareOnStartup": {{(shareOnStartup ? "true" : "false")}} }""");
         if (shareDongle)
         {
             // What a person saved by sharing the device in the UI; the share is applied when the host starts.
@@ -102,8 +101,6 @@ public sealed class KoppelFactory : IDisposable
     public int HttpPort { get; }
 
     public int HttpsPort { get; }
-
-    public int UsbPort { get; }
 
     public IServiceProvider Services => _factory.Services;
 

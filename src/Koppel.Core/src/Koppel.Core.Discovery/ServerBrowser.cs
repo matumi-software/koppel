@@ -1,21 +1,21 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.Json;
 using System.Threading.Channels;
 using Koppel.Core.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Tmds.MDns;
 
 namespace Koppel.Core.Discovery;
 
 /// <summary>
-/// Finds Koppel servers on the local network with multicast DNS and keeps the list current as they
-/// come and go. Built on Tmds.MDns (MIT). Anyone on the network can announce anything, so what it
-/// keeps is bounded: a fixed number of entries with a share per source address, fingerprints that
-/// are really fingerprints, short names, and entries that go when nobody refreshes them. Entries
-/// are told apart by instance name and fingerprint, so a server that copies a name sits beside the
-/// real one instead of replacing it, and the UI can warn about the two.
+/// Finds Koppel servers on the local network: broadcasts a probe every few seconds on every network
+/// this machine is on, and lists the servers that answer (see <see cref="KoppelService"/>). Anyone on
+/// the network can answer anything, so what it keeps is bounded: a fixed number of entries with a
+/// share per source address, fingerprints that are really fingerprints, short names, and entries that
+/// go when they stop answering. Entries are told apart by fingerprint and address, so a server that
+/// copies a name sits beside the real one instead of replacing it, and the UI can warn about the two.
 /// </summary>
 public sealed partial class ServerBrowser : IDisposable
 {
@@ -24,49 +24,48 @@ public sealed partial class ServerBrowser : IDisposable
     public const int MaxNameLength = 63;
     public const int MaxVersionLength = 32;
 
-    /// <summary>An entry nobody refreshed for this long goes. The browse restarts well within it, which makes every live server answer again.</summary>
-    public static readonly TimeSpan EntryLifetime = TimeSpan.FromMinutes(10);
-    public static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(3);
-    public static readonly TimeSpan SweepEvery = TimeSpan.FromMinutes(1);
+    /// <summary>How often a probe goes out while browsing, and expired entries are dropped.</summary>
+    public static readonly TimeSpan ProbeEvery = TimeSpan.FromSeconds(10);
 
-    private readonly ServiceBrowser _browser = new();
     private readonly IBrowseControl _control;
+    private readonly TimeSpan _probeEvery;
     private readonly Dictionary<EntryKey, Seen> _seen = [];
     private IReadOnlyList<DiscoveredServer> _published = [];
     private readonly Lock _gate = new();
-    // Held around every start and stop of the browse. The browser's own threads take _gate, never this, so a stop can wait for them.
+    // Held around every start, stop and probe. The control's own threads take _gate, never this, so a stop can wait for them.
     private readonly Lock _browseLock = new();
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
     // Only the latest list matters to anyone listening, so a slow listener skips the ones in between.
     private readonly Channel<IReadOnlyList<DiscoveredServer>> _changes = Channel.CreateBounded<IReadOnlyList<DiscoveredServer>>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
-    private readonly ITimer _sweeper;
+    private readonly ITimer _prober;
     private readonly Task _raising;
-    private DateTimeOffset _browseStarted;
     private bool _wanted;
 
-    public ServerBrowser(TimeProvider? time = null, ILogger<ServerBrowser>? logger = null)
-        : this(time, logger, null)
+    /// <param name="port">The UDP port servers answer on: Koppel's HTTPS port number.</param>
+    public ServerBrowser(TimeProvider? time = null, ILogger<ServerBrowser>? logger = null, int port = KoppelService.DefaultPort)
+        : this(time, logger, Udp(port))
     {
     }
 
-    internal ServerBrowser(TimeProvider? time, ILogger<ServerBrowser>? logger, IBrowseControl? control)
+    internal ServerBrowser(TimeProvider? time, ILogger<ServerBrowser>? logger, IBrowseControl control, TimeSpan? probeEvery = null)
     {
         _time = time ?? TimeProvider.System;
         _logger = logger ?? NullLogger<ServerBrowser>.Instance;
-        _control = control ?? new ServiceBrowserControl(_browser);
-        _browser.ServiceAdded += (_, e) => Update(e.Announcement);
-        _browser.ServiceChanged += (_, e) => Update(e.Announcement);
-        _browser.ServiceRemoved += (_, e) => Remove(e.Announcement);
+        _control = control;
+        _probeEvery = probeEvery ?? ProbeEvery;
         _raising = Task.Run(RaiseInOrderAsync);
-        _sweeper = _time.CreateTimer(_ => SweepSafely(), null, SweepEvery, SweepEvery);
+        _prober = _time.CreateTimer(_ => TickSafely(), null, _probeEvery, _probeEvery);
     }
 
     /// <summary>Raised when a server appears, changes or goes away. One list at a time, in the order the changes happened.</summary>
     public event Func<IReadOnlyList<DiscoveredServer>, Task>? Changed;
 
-    /// <summary>One entry per server, however many network interfaces it was seen on.</summary>
+    /// <summary>An entry that missed three probes in a row, and a little more, is gone.</summary>
+    public TimeSpan EntryLifetime => _probeEvery * 3.5;
+
+    /// <summary>One entry per server, however many of its addresses answered.</summary>
     public IReadOnlyList<DiscoveredServer> Servers
     {
         get
@@ -87,12 +86,8 @@ public sealed partial class ServerBrowser : IDisposable
             _wanted = true;
             if (!_control.IsBrowsing)
             {
-                lock (_gate)
-                {
-                    _browseStarted = _time.GetUtcNow();
-                }
-
-                _control.StartBrowse();
+                _control.StartBrowse(Add);
+                _control.Probe();
             }
         }
     }
@@ -118,32 +113,44 @@ public sealed partial class ServerBrowser : IDisposable
     public void Dispose()
     {
         Stop();
-        _sweeper.Dispose();
+        _prober.Dispose();
+        (_control as IDisposable)?.Dispose();
         _changes.Writer.TryComplete();
         _raising.GetAwaiter().GetResult();
     }
 
-    /// <summary>Reads a server out of an announcement, or null when it is not a Koppel server we understand.</summary>
-    public static DiscoveredServer? Read(IEnumerable<string> txt, IEnumerable<IPAddress> addresses, int port, NetworkInterface? arrivedOn = null)
+    /// <summary>Reads a server out of an answer, or null when it is not a Koppel answer we understand.</summary>
+    /// <param name="from">Where the answer came from, which is the address to reach the server on.</param>
+    public static DiscoveredServer? Read(ReadOnlySpan<byte> answer, IPAddress from)
     {
-        var values = (txt ?? [])
-            .Select(entry => entry.Split('=', 2))
-            .Where(parts => parts.Length == 2)
-            .GroupBy(parts => parts[0], StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First()[1], StringComparer.OrdinalIgnoreCase);
-        if (values.GetValueOrDefault(KoppelService.ProtocolKey) != KoppelService.Protocol
-            || NormalizeFingerprint(values.GetValueOrDefault(KoppelService.FingerprintKey)) is not { } fingerprint
-            || PickAddress(addresses, arrivedOn) is not { } address)
+        ArgumentNullException.ThrowIfNull(from);
+        if (!answer.StartsWith(KoppelService.ReplyLine))
         {
             return null;
         }
 
+        KoppelService.ReplyBody? body;
+        try
+        {
+            body = JsonSerializer.Deserialize<KoppelService.ReplyBody>(answer[KoppelService.ReplyLine.Length..], KoppelService.Json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+
+        if (body is not { Port: >= 1 and <= 65535 } || NormalizeFingerprint(body.Fingerprint) is not { } fingerprint)
+        {
+            return null;
+        }
+
+        var address = (from.IsIPv4MappedToIPv6 ? from.MapToIPv4() : from).ToString();
         return new DiscoveredServer(
-            Bound(values.GetValueOrDefault(KoppelService.NameKey), MaxNameLength) ?? address.ToString(),
-            address.ToString(),
-            port,
+            Bound(body.Name, MaxNameLength) ?? address,
+            address,
+            body.Port,
             fingerprint,
-            Bound(values.GetValueOrDefault(KoppelService.VersionKey), MaxVersionLength));
+            Bound(body.Version, MaxVersionLength));
     }
 
     /// <summary>
@@ -162,7 +169,7 @@ public sealed partial class ServerBrowser : IDisposable
     }
 
     /// <summary>Text from the network, without control characters and cut to length. Null when nothing is left.</summary>
-    private static string? Bound(string? text, int maxLength)
+    internal static string? Bound(string? text, int maxLength)
     {
         var clean = new string((text ?? "").Where(c => !char.IsControl(c)).ToArray()).Trim();
         if (clean.Length > maxLength)
@@ -174,45 +181,13 @@ public sealed partial class ServerBrowser : IDisposable
     }
 
     /// <summary>
-    /// An IPv4 address on the subnet the announcement arrived on, when there is one. A server in a
-    /// container on the host network also announces Docker's bridge addresses, which a client cannot reach.
-    /// </summary>
-    private static IPAddress? PickAddress(IEnumerable<IPAddress> addresses, NetworkInterface? arrivedOn)
-    {
-        var candidates = (addresses ?? []).Where(a => !IPAddress.IsLoopback(a)).ToList();
-        var local = arrivedOn?.GetIPProperties().UnicastAddresses
-            .Where(u => u.Address.AddressFamily == AddressFamily.InterNetwork)
-            .ToList() ?? [];
-        return candidates.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork && local.Any(u => SameSubnet(a, u)))
-            ?? candidates.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)
-            ?? candidates.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetworkV6 && !a.IsIPv6LinkLocal)
-            ?? candidates.FirstOrDefault();
-    }
-
-    private static bool SameSubnet(IPAddress address, UnicastIPAddressInformation local)
-    {
-        var a = address.GetAddressBytes();
-        var b = local.Address.GetAddressBytes();
-        var mask = local.IPv4Mask.GetAddressBytes();
-        return a.Length == 4 && Enumerable.Range(0, 4).All(i => (a[i] & mask[i]) == (b[i] & mask[i]));
-    }
-
-    private void Update(ServiceAnnouncement announcement)
-    {
-        if (Read(announcement.Txt, announcement.Addresses, announcement.Port, announcement.NetworkInterface) is { } server)
-        {
-            Add(announcement.Instance, announcement.NetworkInterface?.Id, server, Rank(announcement.NetworkInterface));
-        }
-    }
-
-    /// <summary>
     /// Keeps or refreshes an entry. When one address already holds its share, its stalest entry goes to
     /// make room. When the whole list is full, the stalest entry of the address holding the most goes,
     /// so a flood from one address pushes out its own entries and not other servers'.
     /// </summary>
-    internal void Add(string instance, string? networkInterface, DiscoveredServer server, int rank)
+    internal void Add(DiscoveredServer server, int rank)
     {
-        var key = new EntryKey(instance, server.Fingerprint, networkInterface);
+        var key = new EntryKey(server.Fingerprint, server.Address);
         lock (_gate)
         {
             if (!_seen.ContainsKey(key))
@@ -227,40 +202,19 @@ public sealed partial class ServerBrowser : IDisposable
                 }
             }
 
-            _seen[key] = new Seen(instance, networkInterface, server, rank, _time.GetUtcNow());
+            _seen[key] = new Seen(server, rank, _time.GetUtcNow());
             Publish();
         }
     }
 
-    /// <summary>Drops the entry from this address that nobody has refreshed for longest, with the gate held.</summary>
+    /// <summary>Drops the entry from this address that answered longest ago, with the gate held.</summary>
     private void EvictStalest(string address)
     {
         var stalest = _seen.Where(e => e.Value.Server.Address == address).MinBy(e => e.Value.LastSeen).Key;
         _seen.Remove(stalest);
     }
 
-    private void Remove(ServiceAnnouncement announcement)
-    {
-        // A goodbye may not carry the record, so without a fingerprint it removes every entry of that instance on that interface.
-        var fingerprint = Read(announcement.Txt, announcement.Addresses, announcement.Port, announcement.NetworkInterface)?.Fingerprint;
-        lock (_gate)
-        {
-            var gone = _seen.Where(e => e.Value.Instance == announcement.Instance
-                && e.Value.Interface == announcement.NetworkInterface?.Id
-                && (fingerprint is null || e.Key.Fingerprint == fingerprint)).Select(e => e.Key).ToList();
-            foreach (var key in gone)
-            {
-                _seen.Remove(key);
-            }
-
-            if (gone.Count > 0)
-            {
-                Publish();
-            }
-        }
-    }
-
-    /// <summary>Drops what nobody refreshed, and restarts the browse now and then so live servers answer again.</summary>
+    /// <summary>Drops the entries that stopped answering.</summary>
     internal void Sweep()
     {
         lock (_gate)
@@ -276,44 +230,35 @@ public sealed partial class ServerBrowser : IDisposable
             {
                 Publish();
             }
-
         }
+    }
 
-        // Outside the gate: the browser raises its events on its own threads, and they take the gate.
-        // Under the same lock as Start and Stop, so a role change cannot slip in between the check and the restart.
+    /// <summary>
+    /// Drops what stopped answering, then probes again. Under the same lock as Start and Stop, so a role
+    /// change cannot slip in between the check and the probe.
+    /// </summary>
+    private void Tick()
+    {
+        Sweep();
         lock (_browseLock)
         {
-            if (!_wanted || !_control.IsBrowsing)
+            if (_wanted && _control.IsBrowsing)
             {
-                return;
+                _control.Probe();
             }
-
-            var now = _time.GetUtcNow();
-            lock (_gate)
-            {
-                if (_browseStarted + RefreshEvery > now)
-                {
-                    return;
-                }
-
-                _browseStarted = now;
-            }
-
-            _control.StopBrowse();
-            _control.StartBrowse();
         }
     }
 
     /// <summary>The timer's callback. An exception that leaves a timer thread ends the process, so nothing leaves.</summary>
-    private void SweepSafely()
+    private void TickSafely()
     {
         try
         {
-            Sweep();
+            Tick();
         }
         catch (Exception ex)
         {
-            LogSweepFailed(ex);
+            LogTickFailed(ex);
         }
     }
 
@@ -342,38 +287,176 @@ public sealed partial class ServerBrowser : IDisposable
         }
     }
 
-    /// <summary>Prefers wired and wireless interfaces over virtual ones, such as Hyper-V switches.</summary>
-    private static int Rank(NetworkInterface? arrivedOn) =>
-        arrivedOn?.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211
-        && !arrivedOn.Description.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
-        && !arrivedOn.Description.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase)
-            ? 0
-            : 1;
+    /// <summary>The real network: probes to <paramref name="targets"/>, or to every network's broadcast address.</summary>
+    internal static IBrowseControl Udp(int port, IReadOnlyList<IPEndPoint>? targets = null) => new UdpBrowse(port, targets);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not sweep the list of servers or restart the browse")]
-    private partial void LogSweepFailed(Exception exception);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not sweep the list of servers or send a probe")]
+    private partial void LogTickFailed(Exception exception);
 
-    /// <summary>One announcement: the instance name and fingerprint tell servers apart, the interface tells the copies of one server apart.</summary>
-    private readonly record struct EntryKey(string Instance, string Fingerprint, string? Interface);
+    /// <summary>One server at one address: the fingerprint tells servers apart, the address tells the copies of one server apart.</summary>
+    private readonly record struct EntryKey(string Fingerprint, string Address);
 
-    private sealed record Seen(string Instance, string? Interface, DiscoveredServer Server, int Rank, DateTimeOffset LastSeen);
+    private sealed record Seen(DiscoveredServer Server, int Rank, DateTimeOffset LastSeen);
 
-    /// <summary>Starting and stopping the browse, so a test can stand in for the network.</summary>
+    /// <summary>Starting and stopping the browse and sending probes, so a test can stand in for the network.</summary>
     internal interface IBrowseControl
     {
         bool IsBrowsing { get; }
 
-        void StartBrowse();
+        /// <summary>Starts listening for answers. <paramref name="found"/> gets each server and its rank (0 for a physical network).</summary>
+        void StartBrowse(Action<DiscoveredServer, int> found);
 
         void StopBrowse();
+
+        void Probe();
     }
 
-    private sealed class ServiceBrowserControl(ServiceBrowser browser) : IBrowseControl
+    private sealed class UdpBrowse(int port, IReadOnlyList<IPEndPoint>? targets) : IBrowseControl, IDisposable
     {
-        public bool IsBrowsing => browser.IsBrowsing;
+        private readonly Lock _lock = new();
+        private Socket? _socket;
+        private CancellationTokenSource? _stop;
 
-        public void StartBrowse() => browser.StartBrowse(KoppelService.Type, useSynchronizationContext: false);
+        public bool IsBrowsing
+        {
+            get
+            {
+                lock (_lock)
+                {
+                    return _socket is not null;
+                }
+            }
+        }
 
-        public void StopBrowse() => browser.StopBrowse();
+        public void StartBrowse(Action<DiscoveredServer, int> found)
+        {
+            lock (_lock)
+            {
+                var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp) { EnableBroadcast = true };
+                try
+                {
+                    socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+
+                _socket = socket;
+                _stop = new CancellationTokenSource();
+                _ = ListenAsync(socket, found, _stop.Token);
+            }
+        }
+
+        public void StopBrowse()
+        {
+            lock (_lock)
+            {
+                _stop?.Cancel();
+                _stop?.Dispose();
+                _socket?.Dispose();
+                _stop = null;
+                _socket = null;
+            }
+        }
+
+        public void Dispose() => StopBrowse();
+
+        public void Probe()
+        {
+            Socket? socket;
+            lock (_lock)
+            {
+                socket = _socket;
+            }
+
+            var probe = KoppelService.CreateProbe();
+            foreach (var target in targets ?? BroadcastTargets(port))
+            {
+                try
+                {
+                    socket?.SendTo(probe, target);
+                }
+                catch (SocketException)
+                {
+                    // That network is down or refuses broadcasts; the others still get the probe.
+                }
+            }
+        }
+
+        private static async Task ListenAsync(Socket socket, Action<DiscoveredServer, int> found, CancellationToken cancellationToken)
+        {
+            var buffer = new byte[2048];
+            var anyone = new IPEndPoint(IPAddress.Any, 0);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                SocketReceiveFromResult received;
+                try
+                {
+                    received = await socket.ReceiveFromAsync(buffer, SocketFlags.None, anyone, cancellationToken);
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+                {
+                    return;
+                }
+                catch (SocketException)
+                {
+                    // Windows reports a probe nobody received on the next receive. Keep listening.
+                    continue;
+                }
+
+                var from = ((IPEndPoint)received.RemoteEndPoint).Address;
+                if (Read(buffer.AsSpan(0, received.ReceivedBytes), from) is { } server)
+                {
+                    found(server, Rank(from));
+                }
+            }
+        }
+
+        /// <summary>
+        /// The limited broadcast address and each IPv4 network's own broadcast address. On a machine with
+        /// several networks the limited one only leaves through one of them.
+        /// </summary>
+        private static IEnumerable<IPEndPoint> BroadcastTargets(int port) =>
+            LocalNetworks()
+                .Where(u => !u.IPv4Mask.Equals(IPAddress.Broadcast))
+                .Select(u =>
+                {
+                    var address = u.Address.GetAddressBytes();
+                    var mask = u.IPv4Mask.GetAddressBytes();
+                    return new IPAddress([.. address.Select((b, i) => (byte)(b | ~mask[i]))]);
+                })
+                .Prepend(IPAddress.Broadcast)
+                .Distinct()
+                .Select(address => new IPEndPoint(address, port));
+
+        private static IEnumerable<UnicastIPAddressInformation> LocalNetworks(Func<NetworkInterface, bool>? where = null) =>
+            NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                .Where(where ?? (_ => true))
+                .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+                .Where(u => u.Address.AddressFamily == AddressFamily.InterNetwork);
+
+        /// <summary>
+        /// Prefers an address on a wired or wireless network over one on a virtual network, such as a
+        /// Hyper-V switch or Docker's bridge, when a server answers on both.
+        /// </summary>
+        private static int Rank(IPAddress address)
+        {
+            var physical = LocalNetworks(n =>
+                n.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211
+                && !n.Description.Contains("Virtual", StringComparison.OrdinalIgnoreCase)
+                && !n.Description.Contains("Hyper-V", StringComparison.OrdinalIgnoreCase));
+            return physical.Any(u => SameSubnet(address, u)) ? 0 : 1;
+        }
+
+        private static bool SameSubnet(IPAddress address, UnicastIPAddressInformation local)
+        {
+            var a = address.GetAddressBytes();
+            var b = local.Address.GetAddressBytes();
+            var mask = local.IPv4Mask.GetAddressBytes();
+            return a.Length == 4 && Enumerable.Range(0, 4).All(i => (a[i] & mask[i]) == (b[i] & mask[i]));
+        }
     }
 }

@@ -20,15 +20,18 @@ First release. If you ran a development build, read Installer and deploy before 
 - Config changes reach the UI in the order they were written.
 - Writes use unique temp files and survive a briefly locked file.
 
+### Ports
+
+- Between machines Koppel needs only 5241, TCP and UDP. USB traffic runs as a WebSocket on the HTTPS port (`/api/remote/usb`), with the same certificate pinning and token as the rest, so port 3240 and the `listenPort` setting are gone. An existing `settings.json` with `listenPort` still loads.
+- Finding servers uses a small UDP probe and answer on the HTTPS port number instead of multicast DNS on 5353. An answer is never larger than its probe, so a server cannot be used to amplify traffic.
+
 ### USB
 
 - An attach that stalls now fails after 20 seconds (`Usb:AttachTimeoutSeconds`) with a readable reason, instead of hanging.
 - A saved-connection or role change detaches everything first. Remembered devices are kept and attach again.
-- A server only exports a device that is bound and is the device you shared on that port. At start it unshares anything it does not mean to share. Leaving the server role unshares and closes the USB port.
-- The USB port cannot be set to Koppel's own web or gateway ports.
+- A server only exports a device that is bound and is the device you shared on that port. At start it unshares anything it does not mean to share. Leaving the server role unshares and ends the USB sessions.
 - The gateway runs only in the Client or Both role and retries a taken port. On native Windows it serves only the kernel driver's connections.
-- Stopping Koppel detaches devices attached through the Windows driver. Bus IDs are validated everywhere. Connections use TCP keepalive.
-- The USB port's state shows as a `listen` system check.
+- Stopping Koppel detaches devices attached through the Windows driver. Bus IDs are validated everywhere. USB sessions ping both ways, so a vanished peer frees the device in under a minute.
 - Tested with fakes, not yet re-run on real hardware. The earlier real-hardware result (a Logitech receiver working as keyboard and mouse on a Windows 11 client) still stands.
 
 ### UI
@@ -42,7 +45,7 @@ First release. If you ran a development build, read Installer and deploy before 
 
 - Install fails, with instructions, if `%ProgramData%\Koppel` is a link or is owned by someone who is not an administrator. A folder owned by an administrator is taken over. A machine where an ordinary user owns the folder needs it renamed once.
 - The driver install writes to the MSI log, not to a file. Setup may ask for a restart. A usbip-win2 you installed yourself is used and left alone, and uninstall removes only what Koppel installed, and only packages Windows still lists as usbip-win2's. A restart needed by the uninstall is requested too. A file in the data folder that no administrator owns is renamed aside.
-- The service restarts after a crash, and after it stops with an error. Firewall rules are split into domain and private. The setup window's licence link opens `THIRD-PARTY-NOTICES.txt`.
+- The service restarts after a crash, and after it stops with an error. The installer adds no firewall rules. The setup window's licence link opens `THIRD-PARTY-NOTICES.txt`.
 - Docker deploy composes pin `matumisoftware/koppel:0.1.0`. To upgrade, edit the tag, then `docker compose pull && docker compose up -d`. `deploy.sh` images are never replaced by a pull.
 - Builds are pinned: base images, the vendored usbip-win2 files (hashes, signer certificates and the unsigned DLLs' hashes checked), and package lock files. `THIRD-PARTY-NOTICES.txt` ships in the installer and the image.
 - `prepare-host.sh` is run with `sudo bash`, installs Docker from Docker's apt repository and hints at `linux-modules-extra` when a module will not load.

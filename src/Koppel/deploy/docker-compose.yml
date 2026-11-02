@@ -14,9 +14,9 @@ services:
     # An image already here (one deploy.sh copied, or one you built) is used as it is and is never
     # replaced by a pull from Docker Hub. Only a missing image is pulled.
     pull_policy: missing
-    # The host's network: clients find the server through multicast DNS, which does not cross Docker's
-    # bridge. Koppel listens on the host's ports directly (5240 UI, 5241 HTTPS, 3240 USB over TLS) and
-    # takes the host's name, which it shows and puts in its certificate.
+    # The host's network: clients find the server by broadcasting on the local network, which does not
+    # cross Docker's bridge. Koppel listens on the host's ports directly (5240 UI; 5241 for everything
+    # other machines do, TCP and UDP) and takes the host's name, which it shows and puts in its certificate.
     network_mode: host
     volumes:
       - koppel:/koppel

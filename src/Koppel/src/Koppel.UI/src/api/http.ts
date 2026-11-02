@@ -82,7 +82,6 @@ export interface SystemInfo {
   role: 'server' | 'client' | 'both';
   uiPort: number;
   httpsPort: number;
-  usbPort: number;
   fingerprint: string;
   os: string;
 }

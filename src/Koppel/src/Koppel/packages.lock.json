@@ -27,24 +27,6 @@
           "System.ServiceProcess.ServiceController": "10.0.14"
         }
       },
-      "Common.Logging": {
-        "type": "Transitive",
-        "resolved": "3.4.1",
-        "contentHash": "5eZ/vgEOqzLg4PypZqnJ+wMhhgHyckicbZY4iDxqQ4FtOz0CpdYZ0xQ78aszMzeAJZiLLb5VdR9tPfunVQLz6g==",
-        "dependencies": {
-          "Common.Logging.Core": "3.4.1"
-        }
-      },
-      "Common.Logging.Core": {
-        "type": "Transitive",
-        "resolved": "3.4.1",
-        "contentHash": "wLHldZHvxsSD6Ahonfj00/SkfHfKqO+YT6jsUwVm8Rch1REL9IArHAcSLXxYxYfu5/4ydGtmXvOtaH3AkVPu0A=="
-      },
-      "Makaretu.Dns.New": {
-        "type": "Transitive",
-        "resolved": "3.1.2",
-        "contentHash": "lfIb0DccotDa52dVdim3KROZaxCqI1lkYdlTdxUxWaP2kkerQJm91udzQ9bGMjB+mL3V/OPpUwx3pRrsoKT47g=="
-      },
       "Microsoft.AspNetCore.Http.Connections.Client": {
         "type": "Transitive",
         "resolved": "10.0.14",
@@ -387,9 +369,7 @@
       "koppel.core.discovery": {
         "type": "Project",
         "dependencies": {
-          "Koppel.Core.Configuration": "[0.1.0, )",
-          "Makaretu.Dns.Multicast.New": "[0.38.0, )",
-          "Tmds.MDns": "[0.10.1, )"
+          "Koppel.Core.Configuration": "[0.1.0, )"
         }
       },
       "koppel.core.security": {
@@ -400,16 +380,6 @@
       },
       "koppel.core.usb": {
         "type": "Project"
-      },
-      "Makaretu.Dns.Multicast.New": {
-        "type": "CentralTransitive",
-        "requested": "[0.38.0, )",
-        "resolved": "0.38.0",
-        "contentHash": "03h8IaKplBxXP842jEnH+VT3JbpSjJ7jjfbaIXDVkd5kWlk+jt59T1P9I1vrnx0jDZzXK1VqzFoD+UZnJesKYg==",
-        "dependencies": {
-          "Common.Logging": "3.4.1",
-          "Makaretu.Dns.New": "3.1.2"
-        }
       },
       "OpenIddict.AspNetCore": {
         "type": "CentralTransitive",
@@ -425,12 +395,6 @@
           "OpenIddict.Validation.AspNetCore": "7.7.2",
           "OpenIddict.Validation.DataProtection": "7.7.2"
         }
-      },
-      "Tmds.MDns": {
-        "type": "CentralTransitive",
-        "requested": "[0.10.1, )",
-        "resolved": "0.10.1",
-        "contentHash": "xZZGpFVDVxPxBwqmwE0KEGQro5lBHwmxZr13xlq4TufS5MQj6lFi2bojm9xIl0nKijYrHyigy4AgYhR1H5hgBw=="
       }
     },
     "net10.0/linux-arm64": {

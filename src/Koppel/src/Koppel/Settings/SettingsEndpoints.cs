@@ -14,9 +14,9 @@ internal static class SettingsEndpoints
 
         group.MapGet("/", (SettingsStore store) => TypedResults.Ok(store.Current));
 
-        group.MapPatch("/", async Task<IResult> (SettingsPatch patch, SettingsStore store, ReservedPorts reserved, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapPatch("/", async Task<IResult> (SettingsPatch patch, SettingsStore store, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
-            var errors = patch.Validate(reserved);
+            var errors = patch.Validate();
             if (errors.Count > 0)
             {
                 return TypedResults.ValidationProblem(errors);

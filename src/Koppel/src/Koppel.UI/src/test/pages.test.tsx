@@ -11,7 +11,7 @@ import { SetupPage } from '@/setup/setup-page';
 import { FrameContext, type FrameApi } from '@/shell/frame-context';
 import { accepted, deferred, json, mockFetch, renderApp } from './harness';
 
-const settings: KoppelSettings = { role: 'server', shareOnStartup: false, listenPort: 3240, setupComplete: true };
+const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true };
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
 const connection: ConnectionView = { serverUrl: 'https://lab:5241', serverFingerprint: fingerprint, clientId: 'bench-1', hasSecret: true };
 
@@ -21,7 +21,7 @@ const baseRoutes = {
   'GET /api/server/identity': () => json({ name: 'bench-pc', fingerprint, httpsPort: 5241 }),
   'GET /api/system/checks': () => json([]),
   'GET /api/system/info': () =>
-    json({ name: 'bench-pc', version: '1.0.0', startedAt: '2026-01-01T00:00:00Z', role: 'server', uiPort: 5240, httpsPort: 5241, usbPort: 3240, fingerprint, os: 'test' }),
+    json({ name: 'bench-pc', version: '1.0.0', startedAt: '2026-01-01T00:00:00Z', role: 'server', uiPort: 5240, httpsPort: 5241, fingerprint, os: 'test' }),
   'GET /api/client/discovery': () => json([]),
   'GET /api/client/pairing': () => json({ state: 'idle', serverName: null, serverUrl: null, code: null, message: null, expiresAt: null }),
   'GET /api/client/connection': () => json(connection),
@@ -125,46 +125,6 @@ describe('sign out', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
 
     expect(await screen.findByText('Not signed out: the server answered 500.')).toBeTruthy();
-  });
-});
-
-describe('the listen port', () => {
-  const portField = () => screen.getByLabelText('Listen port') as HTMLInputElement;
-  const save = () => screen.getAllByRole('button', { name: 'Save' })[0] as HTMLButtonElement;
-
-  it.each(['', 'abc', '0', '65536', '70000', '12.5', '-1', '80 '])('does not allow saving %j', async (draft) => {
-    mockFetch(baseRoutes);
-    renderApp(configuration());
-    await screen.findByLabelText('Listen port');
-
-    await userEvent.clear(portField());
-    if (draft) await userEvent.type(portField(), draft);
-
-    expect(save().disabled).toBe(true);
-  });
-
-  it.each(['1', '5000', '65535'])('allows saving %j and sends a number', async (draft) => {
-    const { calls } = mockFetch({ ...baseRoutes, 'PATCH /api/settings': () => accepted() });
-    renderApp(configuration());
-    await screen.findByLabelText('Listen port');
-
-    await userEvent.clear(portField());
-    await userEvent.type(portField(), draft);
-    expect(save().disabled).toBe(false);
-    await userEvent.click(save());
-
-    expect(calls.find((c) => c.key === 'PATCH /api/settings')?.body).toEqual({ listenPort: Number(draft) });
-  });
-
-  it('says what is wrong with an invalid port', async () => {
-    mockFetch(baseRoutes);
-    renderApp(configuration());
-    await screen.findByLabelText('Listen port');
-
-    await userEvent.clear(portField());
-    await userEvent.type(portField(), '70000');
-
-    expect(screen.getByText('Enter a whole number from 1 to 65535.')).toBeTruthy();
   });
 });
 

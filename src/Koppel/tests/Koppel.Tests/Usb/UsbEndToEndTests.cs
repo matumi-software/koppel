@@ -190,22 +190,14 @@ public sealed class UsbEndToEndTests : IDisposable
     }
 
     [Fact]
-    public async Task Usb_port_refuses_a_connection_without_a_valid_token()
+    public async Task Usb_data_plane_refuses_a_connection_without_a_valid_token()
     {
         var ct = TestContext.Current.CancellationToken;
-        using var server = _server.CreateUiClient();
-        var fingerprint = (await server.GetFromJsonAsync<JsonElement>("/api/server/identity", ct)).GetProperty("fingerprint").GetString();
-        using var tcp = new TcpClient();
-        await tcp.ConnectAsync("localhost", _server.UsbPort, ct);
-        await using var tls = new SslStream(tcp.GetStream(), false, (_, certificate, _, _) =>
-            ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, fingerprint));
-        await tls.AuthenticateAsClientAsync("localhost");
 
-        await tls.WriteAsync(Encoding.ASCII.GetBytes("KOPPEL/1 not-a-token\n"), ct);
-        var reader = new StreamReader(tls);
-        var answer = await reader.ReadLineAsync(ct);
+        var (session, answer) = await RemoteAccess.OpenUsbAsync(_server, "not-a-token", ct);
+        await using var refused = session;
 
-        answer.Should().StartWith("DENIED");
+        answer.Should().Be("DENIED 401");
     }
 
     /// <summary>Links the client to the server and attaches the dongle from the client's UI, as a person would.</summary>

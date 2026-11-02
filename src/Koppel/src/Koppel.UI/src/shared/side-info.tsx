@@ -33,7 +33,7 @@ export function SideInfo() {
             { label: 'Role', value: roles[data.role] ?? 'Unknown' },
             { label: 'Up for', value: uptime(data.startedAt) },
             { label: 'Version', value: data.version, mono: true },
-            { label: 'Ports', value: `UI ${data.uiPort} · API ${data.httpsPort} · USB ${data.usbPort}`, mono: true },
+            { label: 'Ports', value: `UI ${data.uiPort} · Network ${data.httpsPort}`, mono: true },
             { label: 'Fingerprint', value: `${data.fingerprint.slice(0, 23)}…`, mono: true },
             { label: 'System', value: data.os },
           ]}

@@ -59,26 +59,26 @@ public sealed class SettingsStoreTests : IDisposable
             return Task.CompletedTask;
         };
 
-        var edited = KoppelSettings.Default with { ListenPort = 4000 };
+        var edited = KoppelSettings.Default with { ShareOnStartup = false };
         await File.WriteAllTextAsync(SettingsFile, JsonSerializer.Serialize(edited, KoppelJson.Files), TestContext.Current.CancellationToken);
 
         var result = await raised.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-        result.ListenPort.Should().Be(4000);
-        store.Current.ListenPort.Should().Be(4000);
+        result.ShareOnStartup.Should().BeFalse();
+        store.Current.ShareOnStartup.Should().BeFalse();
     }
 
     [Fact]
-    public async Task Start_refuses_a_settings_file_with_a_port_out_of_range_and_leaves_it_alone()
+    public async Task A_settings_file_from_before_usb_moved_to_the_https_port_still_loads()
     {
         Directory.CreateDirectory(_directory);
-        await File.WriteAllTextAsync(SettingsFile, """{ "role": "server", "shareOnStartup": true, "listenPort": 70000 }""", TestContext.Current.CancellationToken);
-        var before = await File.ReadAllBytesAsync(SettingsFile, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(SettingsFile, """{ "role": "client", "shareOnStartup": false, "listenPort": 3240 }""", TestContext.Current.CancellationToken);
         using var store = CreateStore();
 
-        var start = () => store.StartAsync(TestContext.Current.CancellationToken);
+        await store.StartAsync(TestContext.Current.CancellationToken);
 
-        (await start.Should().ThrowAsync<Koppel.Core.Configuration.ConfigFileException>()).Which.Message.Should().Contain("listenPort");
-        (await File.ReadAllBytesAsync(SettingsFile, TestContext.Current.CancellationToken)).Should().Equal(before);
+        store.Problem.Should().BeNull();
+        store.Current.Role.Should().Be(KoppelRole.Client);
+        store.Current.ShareOnStartup.Should().BeFalse();
     }
 
     [Fact]
@@ -95,19 +95,8 @@ public sealed class SettingsStoreTests : IDisposable
 
     private string SettingsFile => Path.Combine(_directory, "settings.json");
 
-    [Fact]
-    public async Task A_configured_usb_port_is_the_default_for_a_new_install()
-    {
-        using var store = CreateStore(new Dictionary<string, string?> { ["Usb:ListenPort"] = "3241" });
-
-        await store.StartAsync(TestContext.Current.CancellationToken);
-
-        ReadFile().ListenPort.Should().Be(3241);
-    }
-
-    private SettingsStore CreateStore(Dictionary<string, string?>? configuration = null) => new(
+    private SettingsStore CreateStore() => new(
         new KoppelPaths(_directory, Path.Combine(_directory, "keys")),
-        new ConfigurationBuilder().AddInMemoryCollection(configuration ?? []).Build(),
         NullLogger<SettingsStore>.Instance);
 
     private KoppelSettings ReadFile() =>

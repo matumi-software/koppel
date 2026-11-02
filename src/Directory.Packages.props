@@ -12,8 +12,6 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
 
     <!-- Discovery: mDNS. See Koppel.Core.Discovery.csproj for why two packages. -->
-    <PackageVersion Include="Makaretu.Dns.Multicast.New" Version="0.38.0" />
-    <PackageVersion Include="Tmds.MDns" Version="0.10.1" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
 
     <!-- Auth: OAuth server and token validation -->
@@ -26,7 +24,6 @@
     <!-- Windows installer. WiX 5, not 6: 6's binaries come under the Open Source Maintenance Fee EULA. -->
     <PackageVersion Include="WixToolset.Util.wixext" Version="5.0.2" />
     <PackageVersion Include="WixToolset.Bal.wixext" Version="5.0.2" />
-    <PackageVersion Include="WixToolset.Firewall.wixext" Version="5.0.2" />
 
     <!-- Tests -->
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />

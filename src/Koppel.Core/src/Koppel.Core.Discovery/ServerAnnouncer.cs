@@ -1,18 +1,18 @@
-using System.Text.RegularExpressions;
-using Makaretu.Dns;
+using System.Net;
+using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 
 namespace Koppel.Core.Discovery;
 
 /// <summary>
-/// Announces this server on the local network with multicast DNS, and answers clients that ask.
-/// Built on Makaretu.Dns.Multicast.New (MIT).
+/// Answers discovery probes for this server on UDP, on the same port number as its HTTPS. See
+/// <see cref="KoppelService"/>.
 /// </summary>
 public sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : IDisposable
 {
     private readonly Lock _lock = new();
-    private MulticastService? _mdns;
-    private ServiceDiscovery? _discovery;
+    private Socket? _socket;
+    private CancellationTokenSource? _stop;
 
     public bool IsAnnouncing
     {
@@ -20,37 +20,36 @@ public sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : I
         {
             lock (_lock)
             {
-                return _discovery is not null;
+                return _socket is not null;
             }
         }
     }
 
-    /// <summary>Starts announcing, or replaces what is announced.</summary>
+    /// <summary>Starts answering, or replaces what the answers say.</summary>
     public void Announce(ServerAnnouncement announcement)
     {
         ArgumentNullException.ThrowIfNull(announcement);
         lock (_lock)
         {
             StopLocked();
-            var profile = new ServiceProfile(
-                new DomainName(InstanceName(announcement.Name)),
-                new DomainName(KoppelService.Type),
-                checked((ushort)announcement.HttpsPort));
-            profile.AddProperty(KoppelService.ProtocolKey, KoppelService.Protocol);
-            profile.AddProperty(KoppelService.NameKey, announcement.Name);
-            profile.AddProperty(KoppelService.FingerprintKey, announcement.Fingerprint);
-            profile.AddProperty(KoppelService.VersionKey, announcement.Version);
+            var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                socket.Bind(new IPEndPoint(IPAddress.Any, announcement.HttpsPort));
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
 
-            _mdns = new MulticastService();
-            _discovery = new ServiceDiscovery(_mdns);
-            _mdns.Start();
-            _discovery.Advertise(profile);
-            _discovery.Announce(profile);
+            _socket = socket;
+            _stop = new CancellationTokenSource();
+            _ = AnswerAsync(socket, KoppelService.CreateReply(announcement), _stop.Token);
             LogAnnouncing(announcement.Name, announcement.HttpsPort);
         }
     }
 
-    /// <summary>Says goodbye on the network and stops answering.</summary>
     public void Stop()
     {
         lock (_lock)
@@ -63,33 +62,55 @@ public sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : I
 
     private void StopLocked()
     {
-        if (_discovery is null)
+        if (_socket is null)
         {
             return;
         }
 
-        _discovery.Unadvertise();
-        _discovery.Dispose();
-        _mdns?.Stop();
-        _mdns?.Dispose();
-        _discovery = null;
-        _mdns = null;
+        _stop?.Cancel();
+        _stop?.Dispose();
+        _socket.Dispose();
+        _stop = null;
+        _socket = null;
         LogStopped();
     }
 
-    /// <summary>A DNS label: letters, digits and hyphens, at most 63 characters.</summary>
-    private static string InstanceName(string name)
+    private async Task AnswerAsync(Socket socket, byte[] reply, CancellationToken cancellationToken)
     {
-        var label = NotLabel().Replace(name, "-").Trim('-');
-        return label.Length == 0 ? "koppel" : label[..Math.Min(label.Length, 63)];
+        var buffer = new byte[2048];
+        var anyone = new IPEndPoint(IPAddress.Any, 0);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var received = await socket.ReceiveFromAsync(buffer, SocketFlags.None, anyone, cancellationToken);
+                if (KoppelService.IsProbe(buffer.AsSpan(0, received.ReceivedBytes)) && reply.Length <= received.ReceivedBytes)
+                {
+                    await socket.SendToAsync(reply, SocketFlags.None, received.RemoteEndPoint, cancellationToken);
+                }
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+            {
+                return;
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+            {
+                // Windows reports an earlier answer that could not be delivered on the next receive.
+            }
+            catch (SocketException ex)
+            {
+                LogAnswerFailed(ex);
+                return;
+            }
+        }
     }
 
-    [GeneratedRegex("[^A-Za-z0-9-]+")]
-    private static partial Regex NotLabel();
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Announcing {Name} on the local network (HTTPS port {Port})")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Answering discovery on the local network as {Name} (UDP port {Port})")]
     private partial void LogAnnouncing(string name, int port);
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Stopped announcing on the local network")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "Stopped answering discovery on the local network")]
     private partial void LogStopped();
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Stopped answering discovery after a network error")]
+    private partial void LogAnswerFailed(Exception exception);
 }

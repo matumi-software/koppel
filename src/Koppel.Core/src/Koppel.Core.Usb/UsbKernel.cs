@@ -197,7 +197,7 @@ public static class UsbSockets
         {
             await Task.WhenAll(aToB, bToA);
         }
-        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException or System.Net.WebSockets.WebSocketException)
         {
             // One side closed; the other copy was cut off. That is the normal end of a session.
         }

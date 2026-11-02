@@ -20,8 +20,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Runs as a Windows service when the installer registers it as one; a no-op otherwise.
 builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
 
-// HTTP serves the UI. HTTPS, with the server's own self-signed certificate, serves the token
-// endpoint and the APIs remote clients call; clients pin the certificate's fingerprint.
+// HTTP serves the UI. HTTPS, with the server's own self-signed certificate, serves everything other
+// Koppel machines do, USB traffic included; clients pin the certificate's fingerprint. Discovery
+// answers on UDP at the HTTPS port number.
 var httpPort = builder.Configuration.GetValue("Ports:Http", 5240);
 var httpsPort = builder.Configuration.GetValue("Ports:Https", 5241);
 var httpAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting], builder.Environment.IsDevelopment());
@@ -57,7 +58,6 @@ if (UiPasswordReset.Requested(args))
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, httpPort, httpsPort));
-builder.Services.AddSingleton(new ReservedPorts(httpPort, httpsPort, builder.Configuration.GetValue("Gateway:Port", OperatingSystem.IsWindows() ? UsbIpGateway.WindowsDefaultPort : 0)));
 builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>(), logger: sp.GetRequiredService<ILogger<InMemoryActivityStore>>()));
 builder.Services.AddSingleton<IActivityRecorder>(sp => sp.GetRequiredService<InMemoryActivityStore>());
 builder.Services.AddSingleton<IActivityReader>(sp => sp.GetRequiredService<InMemoryActivityStore>());
@@ -88,13 +88,14 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbServer>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbClient>());
 builder.Services.AddSingleton<LiveSessions>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<LiveSessions>());
-builder.Services.AddSingleton<UsbIpTlsServer>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbIpTlsServer>());
+builder.Services.AddSingleton<UsbDataPlane>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbDataPlane>());
 builder.Services.AddHostedService<UsbIpGateway>();
 builder.Services.AddSingleton<PairingStore>();
 builder.Services.AddSingleton<PairingClient>();
 builder.Services.AddSingleton<ServerAnnouncer>();
-builder.Services.AddSingleton<ServerBrowser>();
+// Clients look for servers on the port number their own HTTPS uses, 5241 unless changed.
+builder.Services.AddSingleton(sp => new ServerBrowser(sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<ServerBrowser>>(), httpsPort));
 builder.Services.AddSingleton<ServerFinder>();
 builder.Services.AddHostedService<ServerAnnouncerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerFinder>());
@@ -138,6 +139,7 @@ if (app.Environment.IsDevelopment())
 app.UseSurfaceGuard();
 app.UseUiRequestGuard();
 app.UseRateLimiter();
+app.UseWebSockets();
 
 // Static files before routing, so the SPA assets never hit an endpoint.
 app.UseStaticFiles();

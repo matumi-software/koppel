@@ -36,7 +36,7 @@ public sealed class SettingsConfirmFlowTests : IDisposable
     }
 
     [Fact]
-    public async Task Patch_with_a_bad_port_is_rejected_and_nothing_is_pushed()
+    public async Task Patch_with_a_bad_role_is_rejected_and_nothing_is_pushed()
     {
         var ct = TestContext.Current.CancellationToken;
         using var client = _koppel.CreateUiClient();
@@ -44,7 +44,7 @@ public sealed class SettingsConfirmFlowTests : IDisposable
         var pushes = new System.Collections.Concurrent.ConcurrentQueue<JsonElement>();
         hub.On<JsonElement>("SettingsChanged", pushes.Enqueue);
 
-        using var rejected = await client.PatchAsJsonAsync("/api/settings", new { listenPort = 70000 }, ct);
+        using var rejected = await client.PatchAsJsonAsync("/api/settings", new { role = "admin" }, ct);
 
         rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
@@ -53,8 +53,8 @@ public sealed class SettingsConfirmFlowTests : IDisposable
         using var sentinel = await client.PatchAsJsonAsync("/api/settings", new { shareOnStartup = false }, ct);
         await WaitForAsync(() => !pushes.IsEmpty, ct);
 
-        pushes.Should().ContainSingle().Which.GetProperty("listenPort").GetInt32().Should().Be(_koppel.UsbPort);
-        (await client.GetFromJsonAsync<JsonElement>("/api/settings", ct)).GetProperty("listenPort").GetInt32().Should().Be(_koppel.UsbPort);
+        pushes.Should().ContainSingle().Which.GetProperty("role").GetString().Should().Be("server");
+        (await client.GetFromJsonAsync<JsonElement>("/api/settings", ct)).GetProperty("role").GetString().Should().Be("server");
     }
 
     private static async Task WaitForAsync(Func<bool> condition, CancellationToken cancellationToken)

@@ -26,7 +26,6 @@ export interface ConnectionTarget {
 const settingLabels: Record<keyof KoppelSettings, string> = {
   role: 'Role',
   shareOnStartup: 'Share saved devices on startup',
-  listenPort: 'Listen port',
   setupComplete: 'Setup',
 };
 

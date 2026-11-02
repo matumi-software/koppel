@@ -1,9 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Net.Security;
 using System.Net.Sockets;
-using System.Text;
+using System.Net.WebSockets;
 using System.Text.Json;
 using Koppel.Core.Security;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -13,8 +12,8 @@ namespace Koppel.Tests.Usb;
 
 /// <summary>
 /// Plays a remote client against a server host, below the level of Koppel's own client: it takes a
-/// token, opens the USB port and the remote hub, and trusts any certificate, so a test can watch what
-/// the server does to each connection.
+/// token, opens the USB data plane and the remote hub, pinned to the server's certificate, so a test can
+/// watch what the server does to each connection.
 /// </summary>
 internal static class RemoteAccess
 {
@@ -63,20 +62,31 @@ internal static class RemoteAccess
         return response.StatusCode;
     }
 
-    /// <summary>Opens the USB port, speaks TLS and sends the preface. Returns the stream and the server's one-line answer.</summary>
-    public static async Task<(SslStream Tls, string? Answer)> OpenUsbAsync(KoppelFactory server, string token, CancellationToken ct, int? port = null)
+    /// <summary>
+    /// Opens the USB data plane's WebSocket with this token. Answers <c>OK</c> and the session, or
+    /// <c>DENIED</c> with the HTTP status and an empty stream.
+    /// </summary>
+    public static async Task<(Stream Session, string Answer)> OpenUsbAsync(KoppelFactory server, string token, CancellationToken ct)
     {
-        var tcp = new TcpClient();
-        await tcp.ConnectAsync("localhost", port ?? server.UsbPort, ct);
-        var tls = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false, (_, certificate, _, _) => Pinned(server, certificate));
-        await tls.AuthenticateAsClientAsync("localhost");
-        await tls.WriteAsync(Encoding.ASCII.GetBytes($"KOPPEL/1 {token}\n"), ct);
-        var answer = await Koppel.Usb.UsbIpTlsServer.ReadLineAsync(tls, ct);
-        return (tls, answer);
+        var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Authorization", $"Bearer {token}");
+        socket.Options.CollectHttpResponseDetails = true;
+        socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) => Pinned(server, certificate);
+        try
+        {
+            await socket.ConnectAsync(new Uri($"wss://localhost:{server.HttpsPort}/api/remote/usb"), ct);
+            return (WebSocketStream.Create(socket, WebSocketMessageType.Binary, ownsWebSocket: true), "OK");
+        }
+        catch (WebSocketException)
+        {
+            var status = (int)socket.HttpStatusCode;
+            socket.Dispose();
+            return (Stream.Null, $"DENIED {status}");
+        }
     }
 
     /// <summary>Imports <paramref name="busId"/> on a session that was answered OK. The stream then carries USB traffic.</summary>
-    public static async Task ImportAsync(SslStream tls, string busId, CancellationToken ct)
+    public static async Task ImportAsync(Stream tls, string busId, CancellationToken ct)
     {
         await tls.WriteAsync(Koppel.Core.Usb.UsbIpProtocol.ImportRequest(busId), ct);
         var header = await Koppel.Core.Usb.UsbIpProtocol.ReadHeaderAsync(tls, ct);
@@ -142,7 +152,7 @@ internal static class RemoteAccess
 
             return true;
         }
-        catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+        catch (Exception ex) when (ex is IOException or SocketException or WebSocketException or ObjectDisposedException)
         {
             return true;
         }

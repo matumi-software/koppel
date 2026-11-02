@@ -1,5 +1,4 @@
-import { useState } from 'react';
-import { Button, Field, Panel, RoleCards, Setting, SettingList, Switch } from '@koppel/react-ui';
+import { Panel, RoleCards, Setting, SettingList, Switch } from '@koppel/react-ui';
 import { ChangePassword } from './change-password';
 import { ConnectionSection } from '@/client/connection-section';
 import { Frame } from '@/shell/frame';
@@ -65,12 +64,6 @@ export function ConfigurationPage() {
                 />
               }
             />
-            <ListenPortSetting
-              key={status('listenPort')!.confirmed}
-              locked={locked}
-              status={status('listenPort')!}
-              onSave={(port) => requestChange('listenPort', port)}
-            />
           </SettingList>
         </Panel>
       )}
@@ -97,38 +90,5 @@ function SavedNote({ status }: { status: SettingStatus<'role'> }) {
     <span className="kp-panel__note" data-state={state} role="status">
       {text}
     </span>
-  );
-}
-
-const validPort = (draft: string) => /^[0-9]{1,5}$/.test(draft) && Number(draft) >= 1 && Number(draft) <= 65535;
-
-function ListenPortSetting({ locked, status, onSave }: { locked: boolean; status: SettingStatus<'listenPort'>; onSave: (port: number) => void }) {
-  const [draft, setDraft] = useState(String(status.confirmed));
-  const isPending = status.pendingTarget !== undefined;
-  const isValid = validPort(draft);
-  const isInvalid = !isValid && draft !== String(status.confirmed);
-  const help = isInvalid ? 'Enter a whole number from 1 to 65535.' : status.failure ? `Not saved: ${status.failure}` : status.saved ? 'Saved' : undefined;
-  return (
-    <Setting
-      title="Listen port"
-      description="The port USB traffic arrives on. Encrypted, and only registered clients get in."
-      control={
-        <Field
-          label="Listen port"
-          labelHidden
-          mono
-          value={draft}
-          onChange={setDraft}
-          isDisabled={locked || isPending}
-          state={isPending ? 'pending' : isInvalid || status.failure ? 'invalid' : undefined}
-          help={help}
-          action={
-            <Button variant="secondary" isSending={isPending} isDisabled={locked || !isValid || draft === String(status.confirmed)} onPress={() => onSave(Number(draft))}>
-              Save
-            </Button>
-          }
-        />
-      }
-    />
   );
 }

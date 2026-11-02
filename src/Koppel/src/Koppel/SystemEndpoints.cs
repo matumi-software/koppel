@@ -13,7 +13,7 @@ internal sealed record SystemCheck(string Id, bool Ok, string Title, string Deta
 internal sealed record HostInfo(DateTimeOffset StartedAt, int UiPort, int HttpsPort);
 
 /// <summary>What the side panel shows about this machine.</summary>
-internal sealed record SystemInfo(string Name, string Version, DateTimeOffset StartedAt, KoppelRole Role, int UiPort, int HttpsPort, int UsbPort, string Fingerprint, string Os);
+internal sealed record SystemInfo(string Name, string Version, DateTimeOffset StartedAt, KoppelRole Role, int UiPort, int HttpsPort, string Fingerprint, string Os);
 
 internal static class SystemEndpoints
 {
@@ -24,7 +24,7 @@ internal static class SystemEndpoints
     /// <summary>What this machine can do: share (usbip-host) and attach (vhci-hcd). Read-only.</summary>
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher, SettingsStore settings, UsbIpTlsServer listener, UsbServer server, UsbClient client) => TypedResults.Ok(new[]
+        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher, SettingsStore settings, UsbServer server, UsbClient client) => TypedResults.Ok(new[]
         {
             host.Unavailable is { } shareProblem
                 ? new SystemCheck("share", false, "Sharing is not available.", shareProblem)
@@ -32,9 +32,6 @@ internal static class SystemEndpoints
             attacher.Unavailable is { } attachProblem
                 ? new SystemCheck("attach", false, "Attaching is not available.", attachProblem)
                 : new SystemCheck("attach", true, "vhci-hcd is loaded.", "This machine can attach devices."),
-            listener.Status.Error is { } listenProblem
-                ? new SystemCheck("listen", false, "The USB port is not open.", listenProblem)
-                : new SystemCheck("listen", true, "The USB port is ready.", listener.Status.Listening ? $"Clients connect on port {listener.Status.Port}." : "This machine is not a server, so the USB port is closed."),
         }.Concat(settings.Problem is { } problem
             ? [new SystemCheck("settings", false, "settings.json was not applied.", problem)]
             : [])
@@ -51,7 +48,6 @@ internal static class SystemEndpoints
             settings.Current.Role,
             info.UiPort,
             info.HttpsPort,
-            settings.Current.ListenPort,
             secrets.Fingerprint,
             OsLabel())));
         return app;

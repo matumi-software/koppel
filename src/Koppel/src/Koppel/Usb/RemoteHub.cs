@@ -1,13 +1,12 @@
 using Koppel.Core.Auth;
 using Koppel.Server;
-using Koppel.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Koppel.Usb;
 
 /// <summary>What a remote client sees of this server's devices: only the shared ones, without who holds them.</summary>
-public sealed record RemoteDevices(IReadOnlyList<DeviceView> Devices, int UsbPort);
+public sealed record RemoteDevices(IReadOnlyList<DeviceView> Devices);
 
 /// <summary>Messages the server pushes to remote Koppel clients.</summary>
 /// <remarks>Public, with the types it carries, because SignalR emits its proxy in another assembly.</remarks>
@@ -21,7 +20,7 @@ public interface IRemoteClient
 /// from a registered client. Push only.
 /// </summary>
 [Authorize(Policy = KoppelAuthServer.ClientPolicy)]
-internal sealed class RemoteHub(ServerSecretsStore secrets, UsbServer usb, SettingsStore settings, LiveSessions live) : Hub<IRemoteClient>
+internal sealed class RemoteHub(ServerSecretsStore secrets, UsbServer usb, LiveSessions live) : Hub<IRemoteClient>
 {
     private const string SessionKey = "koppel.session";
 
@@ -38,7 +37,7 @@ internal sealed class RemoteHub(ServerSecretsStore secrets, UsbServer usb, Setti
         }
 
         Context.Items[SessionKey] = live.Add(Context.User!.GetClientId()!, Context.User!.GetGeneration()!.Value, Context.Abort, Context.ConnectionId);
-        await Clients.Caller.DevicesChanged(usb.Current.ForRemote(settings.Current.ListenPort));
+        await Clients.Caller.DevicesChanged(usb.Current.ForRemote());
         await base.OnConnectedAsync();
     }
 
@@ -56,8 +55,8 @@ internal static class RemoteDevicesExtensions
     /// Who holds a device, the serial number, the driver and fault text stay on this machine. Another client
     /// learns only that the device is taken.
     /// </summary>
-    public static RemoteDevices ForRemote(this ServerDevices devices, int usbPort) =>
+    public static RemoteDevices ForRemote(this ServerDevices devices) =>
         new([.. devices.Devices
             .Where(d => d.State is "shared" or "attached")
-            .Select(d => new DeviceView(d.BusId, d.VidPid, d.Name, d.Manufacturer, d.Speed, d.State, null, null, null, null, null, d.Interfaces))], usbPort);
+            .Select(d => new DeviceView(d.BusId, d.VidPid, d.Name, d.Manufacturer, d.Speed, d.State, null, null, null, null, null, d.Interfaces))]);
 }

@@ -86,10 +86,11 @@ address under Configuration instead.
 | Port | What |
 |---|---|
 | 5240 TCP | Web UI (HTTP), behind the password. Native Windows binds it to this machine only |
-| 5241 TCP | Token endpoint, pairing and the API other Koppel machines call (HTTPS) |
-| 3240 TCP | USB traffic (TLS) |
+| 5241 TCP | Everything other Koppel machines do: tokens, pairing, the device list and USB traffic (HTTPS) |
+| 5241 UDP | Finding servers on the local network |
 | 3242 TCP | Gateway for a USB/IP driver on the same machine (plain, no login). Native Windows client: on, 127.0.0.1 only. Windows Docker client: inside the container, published as 127.0.0.1:3240 on the host |
-| 5353 UDP | Finding servers (multicast DNS) |
+
+Between machines, Koppel needs only 5241, TCP and UDP.
 
 The UI is plain HTTP. On a network you do not trust, bind it to `127.0.0.1` or put a TLS proxy in front, because the
 password and the session cookie cross it unencrypted. If you forget the password:

@@ -68,9 +68,9 @@ RUN mkdir -p /koppel/config /koppel/keys && chown -R $APP_UID /koppel
 VOLUME /koppel
 USER $APP_UID
 
-# 5240: the UI (HTTP). 5241: token endpoint and remote API (HTTPS, self-signed, pinned by clients).
-# 3240: USB traffic (TLS, token-authenticated).
-EXPOSE 5240 5241 3240
+# 5240: the UI (HTTP). 5241: everything other Koppel machines do, USB traffic included (HTTPS,
+# self-signed, pinned by clients), and discovery on UDP.
+EXPOSE 5240 5241 5241/udp
 
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys

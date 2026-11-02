@@ -26,10 +26,6 @@ SOFTWARE.
 
 == NuGet packages ==
 
-Common.Logging 3.4.1: Apache-2.0; http://net-commons.github.io/common-logging/
-Common.Logging.Core 3.4.1: Apache-2.0; http://net-commons.github.io/common-logging/
-Makaretu.Dns.Multicast.New 0.38.0: MIT; © 2018-2019 Richard Schneider, jdomnitz; https://github.com/jdomnitz/net-mdns
-Makaretu.Dns.New 3.1.2: MIT; © 2018-2019 Richard Schneider, 2023+ additions jdomnitz; https://github.com/jdomnitz/net-dns
 Microsoft.AspNetCore.Http.Connections.Client 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://asp.net/
 Microsoft.AspNetCore.SignalR.Client 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://asp.net/
 Microsoft.AspNetCore.SignalR.Client.Core 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://asp.net/
@@ -75,7 +71,6 @@ Polly.Extensions 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://git
 Polly.Extensions.Http 3.0.0: BSD-3-Clause; Copyright (c) 2019, App vNext; https://github.com/App-vNext/Polly.Extensions.Http
 Polly.RateLimiting 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://github.com/App-vNext/Polly
 System.ServiceProcess.ServiceController 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Tmds.MDns 0.10.1: MIT; Tom Deseyn
 
 == npm packages ==
 

@@ -12,40 +12,61 @@ public enum ExportStatus
     Error = 3,
 }
 
-/// <summary>The server side of USB/IP on this machine: list devices and hand them to the network.</summary>
+/// <summary>
+/// The server side of USB/IP on this machine: list devices and hand them to the network. What a host
+/// can do differs (the Linux kernel shares devices itself; usbipd-win on another machine shares them
+/// by its own command), so the interface says what each host can do and callers check before they ask.
+/// </summary>
 public interface IUsbHost
 {
     /// <summary>Null when this machine can share USB devices; otherwise why not, for the UI.</summary>
     string? Unavailable { get; }
 
-    IReadOnlyList<UsbDevice> ListDevices();
+    /// <summary>True when <see cref="ShareAsync"/> works: Koppel itself decides which devices are shared.</summary>
+    bool CanShare { get; }
+
+    /// <summary>True when <see cref="UnshareAsync"/> works.</summary>
+    bool CanUnshare { get; }
+
+    /// <summary>True when <see cref="ResetAsync"/> does something.</summary>
+    bool CanReset { get; }
+
+    Task<IReadOnlyList<UsbDevice>> ListDevicesAsync(CancellationToken cancellationToken);
 
     /// <summary>Whether a listed device is ready to export. The Linux kernel says so by binding it to usbip-host.</summary>
-    bool IsShared(UsbDevice device) => device?.Driver == "usbip-host";
+    bool IsShared(UsbDevice device);
 
-    /// <summary>Takes the device from its driver and gives it to usbip-host, so it can be exported.</summary>
-    void Share(string busId);
+    /// <summary>
+    /// What to tell the user when this host cannot share or unshare a device itself, such as the command
+    /// to run on the machine that does.
+    /// </summary>
+    string SharingAdvice(string busId, bool share);
 
-    /// <summary>Gives the device back to its normal driver.</summary>
-    void Unshare(string busId);
+    /// <summary>Takes the device from its driver and gives it to usbip-host, so it can be exported. Only where <see cref="CanShare"/>.</summary>
+    Task ShareAsync(string busId, CancellationToken cancellationToken);
 
-    ExportStatus GetStatus(string busId);
+    /// <summary>Gives the device back to its normal driver. Only where <see cref="CanUnshare"/>.</summary>
+    Task UnshareAsync(string busId, CancellationToken cancellationToken);
+
+    Task<ExportStatus> GetStatusAsync(string busId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Resets a shared device on its USB port, so a client gets it the way a fresh plug-in would. A
     /// driver on this machine may have changed the device before it was shared: Linux's Logitech
     /// receiver driver switches the receiver to a mode only that driver reads, and the mouse then
-    /// stays silent on the client. Does nothing where the host cannot reset devices.
+    /// stays silent on the client. Only where <see cref="CanReset"/>.
     /// </summary>
-    void Reset(string busId)
-    {
-    }
+    Task ResetAsync(string busId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Hands an open TCP socket to the kernel, which from then on carries the device's USB traffic over
-    /// it. The caller must keep <paramref name="socket"/> alive until the client goes away.
+    /// Exports <paramref name="device"/> over <paramref name="network"/> and carries its USB traffic
+    /// until the client goes away or <paramref name="cancellationToken"/> ends. The host owns the relay,
+    /// so the returned task completes when the session is over. <paramref name="exported"/> runs once the
+    /// device is exported and before any USB traffic flows, which is when the caller answers the
+    /// client's import request. Throws <see cref="UsbHostException"/> before that when the host cannot
+    /// export the device.
     /// </summary>
-    void Export(string busId, Socket socket);
+    Task ExportAsync(UsbDevice device, Stream network, Func<CancellationToken, Task> exported, CancellationToken cancellationToken);
 }
 
 /// <summary>A virtual host controller port on the client.</summary>
@@ -92,23 +113,42 @@ public interface IUsbIpDriver
 /// <summary>Plumbing shared by both ends.</summary>
 public static class UsbSockets
 {
+    /// <summary>How long <see cref="CreateLoopbackPairAsync"/> waits for its own connection to arrive.</summary>
+    private static readonly TimeSpan PairTimeout = TimeSpan.FromSeconds(5);
+
     /// <summary>
     /// Two connected loopback TCP sockets. The kernel gets one end as a plain socket; Koppel relays the
-    /// other end through TLS. That is how USB/IP traffic stays encrypted on the network.
+    /// other end through TLS. That is how USB/IP traffic stays encrypted on the network. Another process
+    /// on the machine may connect to the listener first, so a connection counts only when it comes from
+    /// the kernel end's own address; any other is closed and the wait goes on.
     /// </summary>
     public static async Task<(Socket KernelEnd, Socket RelayEnd)> CreateLoopbackPairAsync(CancellationToken cancellationToken)
     {
         using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
         listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        listener.Listen(1);
+        listener.Listen(8);
         var kernelEnd = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         try
         {
-            var accept = listener.AcceptAsync(cancellationToken).AsTask();
-            await kernelEnd.ConnectAsync(listener.LocalEndPoint!, cancellationToken);
-            var relayEnd = await accept;
-            relayEnd.NoDelay = true;
-            return (kernelEnd, relayEnd);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(PairTimeout);
+            await kernelEnd.ConnectAsync(listener.LocalEndPoint!, timeout.Token);
+            while (true)
+            {
+                var candidate = await listener.AcceptAsync(timeout.Token);
+                if (candidate.RemoteEndPoint is { } remote && remote.Equals(kernelEnd.LocalEndPoint))
+                {
+                    candidate.NoDelay = true;
+                    return (kernelEnd, candidate);
+                }
+
+                candidate.Dispose();
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            kernelEnd.Dispose();
+            throw new IOException("The loopback connection for the kernel never arrived.");
         }
         catch
         {
@@ -173,15 +213,27 @@ public sealed class UnsupportedUsb(string reason) : IUsbHost, IUsbAttacher, IUsb
 
     public string? Unavailable => reason;
 
-    public IReadOnlyList<UsbDevice> ListDevices() => [];
+    public bool CanShare => false;
 
-    public void Share(string busId) => throw new UsbHostException(reason);
+    public bool CanUnshare => false;
 
-    public void Unshare(string busId) => throw new UsbHostException(reason);
+    public bool CanReset => false;
 
-    public ExportStatus GetStatus(string busId) => ExportStatus.NotExported;
+    public Task<IReadOnlyList<UsbDevice>> ListDevicesAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<UsbDevice>>([]);
 
-    public void Export(string busId, Socket socket) => throw new UsbHostException(reason);
+    public bool IsShared(UsbDevice device) => false;
+
+    public string SharingAdvice(string busId, bool share) => reason;
+
+    public Task ShareAsync(string busId, CancellationToken cancellationToken) => throw new UsbHostException(reason);
+
+    public Task UnshareAsync(string busId, CancellationToken cancellationToken) => throw new UsbHostException(reason);
+
+    public Task<ExportStatus> GetStatusAsync(string busId, CancellationToken cancellationToken) => Task.FromResult(ExportStatus.NotExported);
+
+    public Task ResetAsync(string busId, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task ExportAsync(UsbDevice device, Stream network, Func<CancellationToken, Task> exported, CancellationToken cancellationToken) => throw new UsbHostException(reason);
 
     public IReadOnlyList<VhciPort> Ports() => [];
 

@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using Koppel.Core.Usb.Linux;
 
 namespace Koppel.Core.Usb.Tests;
@@ -16,14 +17,14 @@ public sealed class SysfsTests : IDisposable
     }
 
     [Fact]
-    public void Lists_devices_and_skips_hubs_root_hubs_and_interfaces()
+    public async Task Lists_devices_and_skips_hubs_root_hubs_and_interfaces()
     {
         AddDevice("1-1.4", "0403", "6001", "00", "12", "ftdi_sio", product: "FT232R USB UART");
         AddDevice("1-1", "05e3", "0610", "09", "480", "hub");
         Directory.CreateDirectory(Path.Combine(Devices, "usb1"));
         var host = new SysfsUsbHost(_sys);
 
-        var devices = host.ListDevices();
+        var devices = await host.ListDevicesAsync(TestContext.Current.CancellationToken);
 
         devices.Should().ContainSingle();
         var device = devices[0];
@@ -39,7 +40,7 @@ public sealed class SysfsTests : IDisposable
     }
 
     [Fact]
-    public void Devices_attached_from_another_server_are_not_listed()
+    public async Task Devices_attached_from_another_server_are_not_listed()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Needs real symlinks, as sysfs has; runs in the Linux container.");
         var real = Directory.CreateDirectory(Path.Combine(_sys, "devices", "platform", "vhci_hcd.0", "usb1", "1-1")).FullName;
@@ -50,19 +51,19 @@ public sealed class SysfsTests : IDisposable
         File.WriteAllText(Path.Combine(real, "bDeviceClass"), "00");
         AddDevice("3-2", "0403", "6001", "00", "12", "ftdi_sio");
 
-        var devices = new SysfsUsbHost(_sys).ListDevices();
+        var devices = await new SysfsUsbHost(_sys).ListDevicesAsync(TestContext.Current.CancellationToken);
 
         devices.Select(d => d.BusId).Should().Equal("3-2");
     }
 
     [Fact]
-    public void Share_claims_the_bus_id_unbinds_the_old_driver_and_binds_usbip_host()
+    public async Task Share_claims_the_bus_id_unbinds_the_old_driver_and_binds_usbip_host()
     {
         AddDevice("1-1.4", "0403", "6001", "00", "12", "ftdi_sio");
         var usbipHost = Directory.CreateDirectory(Path.Combine(_sys, "bus", "usb", "drivers", "usbip-host")).FullName;
         var host = new SysfsUsbHost(_sys);
 
-        host.Share("1-1.4");
+        await host.ShareAsync("1-1.4", TestContext.Current.CancellationToken);
 
         File.ReadAllText(Path.Combine(usbipHost, "match_busid")).Should().Be("add 1-1.4");
         File.ReadAllText(Path.Combine(Devices, "1-1.4", "driver", "unbind")).Should().Be("1-1.4");
@@ -70,41 +71,41 @@ public sealed class SysfsTests : IDisposable
     }
 
     [Fact]
-    public void Share_without_the_module_explains_what_to_load()
+    public async Task Share_without_the_module_explains_what_to_load()
     {
         AddDevice("1-1.4", "0403", "6001", "00", "12", "ftdi_sio");
         var host = new SysfsUsbHost(_sys);
 
-        var share = () => host.Share("1-1.4");
+        var share = () => host.ShareAsync("1-1.4", TestContext.Current.CancellationToken);
 
-        share.Should().Throw<UsbHostException>().WithMessage("*modprobe usbip-host*");
+        await share.Should().ThrowAsync<UsbHostException>().WithMessage("*modprobe usbip-host*");
     }
 
     [Fact]
-    public void Bus_ids_that_could_escape_sysfs_are_refused()
+    public async Task Bus_ids_that_could_escape_sysfs_are_refused()
     {
         Directory.CreateDirectory(Path.Combine(_sys, "bus", "usb", "drivers", "usbip-host"));
         var host = new SysfsUsbHost(_sys);
 
-        var share = () => host.Share("../../etc");
+        var share = () => host.ShareAsync("../../etc", TestContext.Current.CancellationToken);
 
-        share.Should().Throw<UsbHostException>();
+        await share.Should().ThrowAsync<UsbHostException>();
     }
 
     [Fact]
-    public void Reset_goes_through_the_usbfs_node_for_the_device_bus_and_number()
+    public async Task Reset_goes_through_the_usbfs_node_for_the_device_bus_and_number()
     {
         AddDevice("1-1.4", "046d", "c52b", "00", "12", "usbip-host");
         var dev = Path.Combine(_sys, "dev");
         var host = new SysfsUsbHost(_sys, dev);
 
-        var reset = () => host.Reset("1-1.4");
+        var reset = () => host.ResetAsync("1-1.4", TestContext.Current.CancellationToken);
 
-        reset.Should().Throw<UsbHostException>().WithMessage($"*{Path.Combine(dev, "bus", "usb", "001", "005")}*");
+        await reset.Should().ThrowAsync<UsbHostException>().WithMessage($"*{Path.Combine(dev, "bus", "usb", "001", "005")}*");
     }
 
     [Fact]
-    public void Reset_reports_a_node_the_kernel_will_not_reset()
+    public async Task Reset_reports_a_node_the_kernel_will_not_reset()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Calls the Linux ioctl; runs in the Linux container.");
         AddDevice("1-1.4", "046d", "c52b", "00", "12", "usbip-host");
@@ -112,9 +113,60 @@ public sealed class SysfsTests : IDisposable
         File.WriteAllText(Path.Combine(node, "005"), "");
         var host = new SysfsUsbHost(_sys, Path.Combine(_sys, "dev"));
 
-        var reset = () => host.Reset("1-1.4");
+        var reset = () => host.ResetAsync("1-1.4", TestContext.Current.CancellationToken);
 
-        reset.Should().Throw<UsbHostException>().WithMessage("*refused to reset*");
+        await reset.Should().ThrowAsync<UsbHostException>().WithMessage("*refused to reset*");
+    }
+
+    [Fact]
+    public async Task A_bus_id_with_a_trailing_newline_is_refused()
+    {
+        Directory.CreateDirectory(Path.Combine(_sys, "bus", "usb", "drivers", "usbip-host"));
+        var host = new SysfsUsbHost(_sys);
+
+        var share = () => host.ShareAsync("1-1\n", TestContext.Current.CancellationToken);
+
+        await share.Should().ThrowAsync<UsbHostException>();
+    }
+
+    [Fact]
+    public async Task Export_hands_the_kernel_a_socket_and_relays_the_network_stream_through_the_other_end()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        AddDevice("1-1.4", "0403", "6001", "00", "12", "usbip-host");
+        File.WriteAllText(Path.Combine(Devices, "1-1.4", "usbip_status"), "1");
+        var host = new SysfsUsbHost(_sys);
+        var device = (await host.ListDevicesAsync(ct)).Single();
+        var (client, network) = await UsbSockets.CreateLoopbackPairAsync(ct);
+        using var clientSocket = client;
+        await using var networkStream = new NetworkStream(network, ownsSocket: true);
+        var exported = false;
+
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var session = host.ExportAsync(device, networkStream, _ =>
+        {
+            exported = true;
+            return Task.CompletedTask;
+        }, cancel.Token);
+        await Task.Delay(300, ct);
+        await cancel.CancelAsync();
+        await session.WaitAsync(TimeSpan.FromSeconds(5), ct);
+
+        exported.Should().BeTrue();
+        File.ReadAllText(Path.Combine(Devices, "1-1.4", "usbip_sockfd")).Should().MatchRegex(@"^\d+$");
+    }
+
+    [Fact]
+    public async Task Export_refuses_a_device_that_is_in_use()
+    {
+        AddDevice("1-1.4", "0403", "6001", "00", "12", "usbip-host");
+        File.WriteAllText(Path.Combine(Devices, "1-1.4", "usbip_status"), "2");
+        var host = new SysfsUsbHost(_sys);
+        var device = (await host.ListDevicesAsync(TestContext.Current.CancellationToken)).Single();
+
+        var export = () => host.ExportAsync(device, new MemoryStream(), _ => Task.CompletedTask, TestContext.Current.CancellationToken);
+
+        await export.Should().ThrowAsync<UsbHostException>().WithMessage("*not available*");
     }
 
     [Fact]

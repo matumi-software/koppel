@@ -15,6 +15,12 @@ namespace Koppel.Core.Auth;
 public interface IClientCredentialValidator
 {
     ValueTask<bool> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The generation of a client's credentials, which goes into every token issued to it. A rotated secret
+    /// is a new generation, so tokens issued before the rotation stop working.
+    /// </summary>
+    int GenerationOf(string clientId) => 0;
 }
 
 /// <summary>Supplies the key the server signs access tokens with. It must survive restarts.</summary>
@@ -31,6 +37,9 @@ public static class KoppelAuthServer
 {
     /// <summary>The token endpoint path.</summary>
     public const string TokenPath = "/connect/token";
+
+    /// <summary>The claim that carries the client's credential generation (see <see cref="IClientCredentialValidator.GenerationOf"/>).</summary>
+    public const string GenerationClaim = "koppel_generation";
 
     /// <summary>The authorization policy for endpoints only registered clients may call.</summary>
     public const string ClientPolicy = "koppel-client";
@@ -65,7 +74,7 @@ public static class KoppelAuthServer
                 options.AddEventHandler<ValidateTokenRequestContext>(builder =>
                     builder.UseScopedHandler<ValidateClientCredentials>());
                 options.AddEventHandler<HandleTokenRequestContext>(builder =>
-                    builder.UseInlineHandler(IssueClientToken));
+                    builder.UseScopedHandler<IssueClientToken>());
             })
             .AddValidation(options =>
             {
@@ -95,13 +104,24 @@ public static class KoppelAuthServer
         return principal.FindFirst(Claims.Subject)?.Value;
     }
 
-    private static ValueTask IssueClientToken(HandleTokenRequestContext context)
+    /// <summary>The credential generation a validated bearer token was issued for; null when it carries none.</summary>
+    public static int? GetGeneration(this ClaimsPrincipal principal)
     {
-        var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
-        identity.SetClaim(Claims.Subject, context.Request.ClientId);
-        identity.SetDestinations(static _ => [Destinations.AccessToken]);
-        context.SignIn(new ClaimsPrincipal(identity));
-        return ValueTask.CompletedTask;
+        ArgumentNullException.ThrowIfNull(principal);
+        return int.TryParse(principal.FindFirst(GenerationClaim)?.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var generation) ? generation : null;
+    }
+
+    private sealed class IssueClientToken(IClientCredentialValidator validator) : IOpenIddictServerHandler<HandleTokenRequestContext>
+    {
+        public ValueTask HandleAsync(HandleTokenRequestContext context)
+        {
+            var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
+            identity.SetClaim(Claims.Subject, context.Request.ClientId);
+            identity.SetClaim(GenerationClaim, validator.GenerationOf(context.Request.ClientId!).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            identity.SetDestinations(static _ => [Destinations.AccessToken]);
+            context.SignIn(new ClaimsPrincipal(identity));
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class ValidateClientCredentials(IClientCredentialValidator validator) : IOpenIddictServerHandler<ValidateTokenRequestContext>

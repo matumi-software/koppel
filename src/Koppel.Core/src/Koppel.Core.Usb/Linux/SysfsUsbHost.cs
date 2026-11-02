@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Net.Sockets;
-using System.Text.RegularExpressions;
 
 namespace Koppel.Core.Usb.Linux;
 
@@ -10,7 +9,7 @@ namespace Koppel.Core.Usb.Linux;
 /// </summary>
 /// <param name="sysRoot">Normally <c>/sys</c>; tests point it at a fake tree.</param>
 /// <param name="devRoot">Normally <c>/dev</c>, where the usbfs device nodes are.</param>
-public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot = "/dev") : IUsbHost
+public sealed class SysfsUsbHost(string sysRoot = "/sys", string devRoot = "/dev") : IUsbHost
 {
     private string Devices => Path.Combine(sysRoot, "bus", "usb", "devices");
 
@@ -20,7 +19,56 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
         ? null
         : "The usbip-host kernel module is not loaded. Run 'modprobe usbip-host' on the host (add it to /etc/modules to keep it).";
 
-    public IReadOnlyList<UsbDevice> ListDevices()
+    public bool CanShare => true;
+
+    public bool CanUnshare => true;
+
+    public bool CanReset => true;
+
+    public bool IsShared(UsbDevice device) => device?.Driver == "usbip-host";
+
+    public string SharingAdvice(string busId, bool share) => Unavailable ?? "Koppel shares devices on this machine itself.";
+
+    // The sysfs reads and writes are small and local, but they are still file I/O: they run off the caller's thread.
+    public Task<IReadOnlyList<UsbDevice>> ListDevicesAsync(CancellationToken cancellationToken) =>
+        Task.Run(() => (IReadOnlyList<UsbDevice>)ListDevices(), cancellationToken);
+
+    public Task ShareAsync(string busId, CancellationToken cancellationToken) => Task.Run(() => Share(busId), cancellationToken);
+
+    public Task UnshareAsync(string busId, CancellationToken cancellationToken) => Task.Run(() => Unshare(busId), cancellationToken);
+
+    public Task<ExportStatus> GetStatusAsync(string busId, CancellationToken cancellationToken) =>
+        Task.Run(() => GetStatus(busId), cancellationToken);
+
+    public Task ResetAsync(string busId, CancellationToken cancellationToken) => Task.Run(() => Reset(busId), cancellationToken);
+
+    /// <summary>
+    /// Hands the kernel one end of a loopback socket pair, which from then on carries the device's USB
+    /// traffic, and relays the other end through <paramref name="network"/>.
+    /// </summary>
+    public async Task ExportAsync(UsbDevice device, Stream network, Func<CancellationToken, Task> exported, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentNullException.ThrowIfNull(network);
+        ArgumentNullException.ThrowIfNull(exported);
+        var busId = ValidBusId(device.BusId);
+        if (GetStatus(busId) != ExportStatus.Available)
+        {
+            throw new UsbHostException($"Device {busId} is not available to export. It may be in use by another client.");
+        }
+
+        var (kernelEnd, relayEnd) = await UsbSockets.CreateLoopbackPairAsync(cancellationToken);
+        using (kernelEnd)
+        await using (var relay = new NetworkStream(relayEnd, ownsSocket: true))
+        {
+            Write(Path.Combine(Devices, busId, "usbip_sockfd"), UsbSockets.FileDescriptor(kernelEnd).ToString(CultureInfo.InvariantCulture));
+            await exported(cancellationToken);
+            // Runs until the client detaches or the link drops; the kernel then frees the device.
+            await UsbSockets.RelayAsync(network, relay, cancellationToken);
+        }
+    }
+
+    private List<UsbDevice> ListDevices()
     {
         if (!Directory.Exists(Devices))
         {
@@ -29,14 +77,14 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
 
         return [.. Directory.EnumerateDirectories(Devices)
             .Select(Path.GetFileName)
-            .Where(name => name is not null && BusIdPattern().IsMatch(name) && !IsImported(name))
+            .Where(name => name is not null && UsbBusId.IsValid(name) && !IsImported(name))
             .Select(name => ReadDevice(name!))
             .Where(device => device is not null && !device.IsHub)
             .Cast<UsbDevice>()
             .OrderBy(device => device.BusId, StringComparer.Ordinal)];
     }
 
-    public void Share(string busId)
+    private void Share(string busId)
     {
         RequireModule();
         var device = Path.Combine(Devices, ValidBusId(busId));
@@ -52,7 +100,7 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
         }
     }
 
-    public void Unshare(string busId)
+    private void Unshare(string busId)
     {
         RequireModule();
         var device = Path.Combine(Devices, ValidBusId(busId));
@@ -66,7 +114,7 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
         Write(Path.Combine(sysRoot, "bus", "usb", "drivers_probe"), busId);
     }
 
-    public ExportStatus GetStatus(string busId)
+    private ExportStatus GetStatus(string busId)
     {
         var status = ReadAttribute(Path.Combine(Devices, ValidBusId(busId)), "usbip_status");
         return int.TryParse(status, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && Enum.IsDefined((ExportStatus)value)
@@ -74,7 +122,7 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
             : ExportStatus.NotExported;
     }
 
-    public void Reset(string busId)
+    private void Reset(string busId)
     {
         var device = Path.Combine(Devices, ValidBusId(busId));
         var node = Path.Combine(
@@ -89,17 +137,6 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
         }
 
         UsbDeviceFs.Reset(node);
-    }
-
-    public void Export(string busId, Socket socket)
-    {
-        var device = Path.Combine(Devices, ValidBusId(busId));
-        if (GetStatus(busId) != ExportStatus.Available)
-        {
-            throw new UsbHostException($"Device {busId} is not available to export. It may be in use by another client.");
-        }
-
-        Write(Path.Combine(device, "usbip_sockfd"), UsbSockets.FileDescriptor(socket).ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>
@@ -199,8 +236,7 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
         }
     }
 
-    private static string ValidBusId(string busId) =>
-        BusIdPattern().IsMatch(busId) ? busId : throw new UsbHostException($"'{busId}' is not a USB bus ID.");
+    private static string ValidBusId(string busId) => UsbBusId.Require(busId);
 
     private static void Write(string file, string value)
     {
@@ -213,8 +249,4 @@ public sealed partial class SysfsUsbHost(string sysRoot = "/sys", string devRoot
             throw new UsbHostException($"The kernel refused '{value}' on {file}: {ex.Message}", ex);
         }
     }
-
-    /// <summary>Device directories, such as <c>1-1</c> or <c>3-2.4.1</c>. Root hubs (<c>usb1</c>) and interfaces (<c>1-1:1.0</c>) do not match.</summary>
-    [GeneratedRegex(@"^\d+-\d+(\.\d+)*$")]
-    private static partial Regex BusIdPattern();
 }

@@ -63,6 +63,46 @@ public static class UsbIpProtocol
         return devices;
     }
 
+    /// <summary>
+    /// Reads the body of an OP_REP_DEVLIST from a server that is not trusted to keep it small: more than
+    /// <paramref name="maxDevices"/> devices, or more than <paramref name="maxBytes"/> bytes in all, is
+    /// an <see cref="InvalidDataException"/>.
+    /// </summary>
+    public static async Task<IReadOnlyList<UsbDevice>> ReadDevListAsync(Stream stream, int maxDevices, int maxBytes, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var count = new byte[4];
+        await stream.ReadExactlyAsync(count, cancellationToken);
+        var expected = BinaryPrimitives.ReadUInt32BigEndian(count);
+        if (expected > maxDevices)
+        {
+            throw new InvalidDataException($"The server listed {expected} devices; the limit is {maxDevices}.");
+        }
+
+        var read = count.Length;
+        var devices = new List<UsbDevice>((int)expected);
+        var buffer = new byte[DeviceSize];
+        for (var n = expected; n > 0; n--)
+        {
+            await stream.ReadExactlyAsync(buffer, cancellationToken);
+            var device = ReadDevice(buffer);
+            var interfaces = new byte[buffer[311] * InterfaceSize];
+            read += buffer.Length + interfaces.Length;
+            if (read > maxBytes)
+            {
+                throw new InvalidDataException($"The server's device list is longer than {maxBytes} bytes.");
+            }
+
+            await stream.ReadExactlyAsync(interfaces, cancellationToken);
+            devices.Add(device with
+            {
+                Interfaces = [.. interfaces.Chunk(InterfaceSize).Select(i => new UsbInterface(i[0], i[1], i[2]))],
+            });
+        }
+
+        return devices;
+    }
+
     /// <summary>The bus ID that follows an OP_REQ_IMPORT header.</summary>
     public static async Task<string> ReadBusIdAsync(Stream stream, CancellationToken cancellationToken)
     {

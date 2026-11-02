@@ -44,5 +44,6 @@ The sysfs tests create folders with `:` in their names, which Windows cannot, so
 runs on Linux. Run the Core USB tests in a Linux container as well:
 
 ```sh
-docker run --rm -v "$PWD:/repo:ro" mcr.microsoft.com/dotnet/sdk:10.0 bash -c \n  "cp -r /repo /work && find /work -type d \( -name bin -o -name obj -o -name node_modules \) -prune -exec rm -rf {} + && cd /work/Koppel.Core && dotnet test tests/Koppel.Core.Usb.Tests"
+docker run --rm -v "$PWD:/repo:ro" mcr.microsoft.com/dotnet/sdk:10.0 bash -c \
+  "cp -r /repo /work && find /work -type d \( -name bin -o -name obj -o -name node_modules \) -prune -exec rm -rf {} + && cd /work/Koppel.Core && dotnet test tests/Koppel.Core.Usb.Tests"
 ```

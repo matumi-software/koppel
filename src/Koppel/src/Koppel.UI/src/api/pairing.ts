@@ -47,7 +47,13 @@ export const confirmPairing = () => sendChange('/api/client/pairing/confirm', 'P
 
 export const cancelPairing = () => sendChange('/api/client/pairing', 'DELETE');
 
-export const getPairingRequests = () => getJson<PairingRequest[]>('/api/server/pairing');
+/** Mirrors Koppel.Server.PairingOverview. `budgetExhausted`: the server takes no new pairing requests until its window moves on. */
+export interface PairingOverview {
+  requests: PairingRequest[];
+  budgetExhausted: boolean;
+}
+
+export const getPairingRequests = () => getJson<PairingOverview>('/api/server/pairing');
 
 export const approvePairing = (id: string, code: string) => sendChange(`/api/server/pairing/${encodeURIComponent(id)}/approve`, 'POST', { code });
 

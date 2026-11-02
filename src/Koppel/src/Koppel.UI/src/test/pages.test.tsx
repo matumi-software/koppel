@@ -28,7 +28,7 @@ const baseRoutes = {
   'GET /api/client/devices': () => json({ link: 'connected', linkMessage: null, devices: [], unavailable: null, gateway: false }),
   'GET /api/server/devices': () => json({ devices: [], unavailable: null }),
   'GET /api/server/clients': () => json([]),
-  'GET /api/server/pairing': () => json([]),
+  'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [] }),
 };
 
 const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({

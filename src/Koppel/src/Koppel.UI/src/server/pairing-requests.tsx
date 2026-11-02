@@ -12,14 +12,21 @@ import { pairingRequestsKey } from '@/query-keys';
 export function PairingRequests({ locked }: { locked: boolean }) {
   const requests = useQuery({ queryKey: pairingRequestsKey, queryFn: getPairingRequests });
 
-  if (!requests.data || requests.data.length === 0) {
+  const list = requests.data?.requests ?? [];
+  const exhausted = requests.data?.budgetExhausted ?? false;
+  if (list.length === 0 && !exhausted) {
     return null;
   }
 
   return (
     <section className="kp-card" aria-label="Waiting to pair" style={{ gap: 12 }}>
-      <span className="kp-type-heading">{requests.data.some((r) => r.state === 'waiting') ? 'Waiting to pair' : 'Pairing refused'}</span>
-      {requests.data.map((request) => (
+      {exhausted && (
+        <p className="app-error" role="alert">
+          This server has had too many pairing requests and is turning new ones away. It takes them again in a few minutes. If you did not expect this, something on your network is sending them.
+        </p>
+      )}
+      {list.length > 0 && <span className="kp-type-heading">{list.some((r) => r.state === 'waiting') ? 'Waiting to pair' : 'Pairing refused'}</span>}
+      {list.map((request) => (
         <PairingRequestRow key={request.id} request={request} locked={locked} />
       ))}
     </section>

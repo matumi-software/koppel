@@ -13,6 +13,9 @@ namespace Koppel.Server;
 /// <param name="State"><c>waiting</c>, or <c>denied</c> for a short while after three wrong codes, so the UI can say why the request went.</param>
 public sealed record PairingRequestView(string Id, string ClientName, string From, DateTimeOffset RequestedAt, DateTimeOffset ExpiresAt, string State = "waiting", string? Message = null);
 
+/// <summary>What the server's UI shows: the requests, and whether the server stopped taking new ones because its budget of opens is spent.</summary>
+public sealed record PairingOverview(IReadOnlyList<PairingRequestView> Requests, bool BudgetExhausted);
+
 /// <summary>What a client learns when it polls its request.</summary>
 /// <param name="State"><c>waiting</c>, <c>approved</c> (with the credentials, once), <c>denied</c> or <c>expired</c>.</param>
 internal sealed record PairingPoll(string State, string? ClientId = null, string? ClientSecret = null);
@@ -27,8 +30,10 @@ internal sealed record PairingOpened(string Id, string ServerNonce, DateTimeOffs
 /// </summary>
 /// <remarks>
 /// A man in the middle gets a one in a million chance per request, so what bounds it is how many
-/// requests the server takes: a server-wide budget of opens per window that nothing refunds, a limit
-/// per address, and a cap on requests a person has to look at. A request that never reveals its
+/// requests the server takes: a budget of opens per window that nothing refunds, split into a small
+/// share per address and a higher ceiling for the whole server, a limit on live requests per address,
+/// and a cap on requests a person has to look at. The shares keep one address from spending what
+/// everyone else needs; the ceiling stops many addresses grinding. The UI is told when the ceiling is hit. A request that never reveals its
 /// nonce is dropped after a few seconds. Each request has its own gate, so approving, refusing and
 /// counting wrong codes on one request cannot overlap.
 /// </remarks>
@@ -39,7 +44,8 @@ internal sealed partial class PairingStore : IDisposable
     public static readonly TimeSpan DeniedVisibleFor = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan SweepInterval = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan OpenWindow = TimeSpan.FromMinutes(5);
-    public const int OpensPerWindow = 20;
+    public const int OpensPerWindow = 60;
+    public const int OpensPerAddressPerWindow = 5;
     public const int MaxOpen = 10;
     public const int MaxOpenPerAddress = 3;
     public const int MaxWrongCodes = 3;
@@ -50,7 +56,8 @@ internal sealed partial class PairingStore : IDisposable
     private const string Expired = "expired";
 
     private readonly ConcurrentDictionary<string, Request> _requests = new();
-    private readonly Queue<DateTimeOffset> _opens = new();
+    private readonly Queue<(DateTimeOffset At, string Key)> _opens = new();
+    private readonly Dictionary<string, int> _opensByAddress = [];
     private readonly Lock _admission = new();
     private readonly ServerSecretsStore _secrets;
     private readonly IActivityRecorder _activity;
@@ -69,7 +76,23 @@ internal sealed partial class PairingStore : IDisposable
         _sweeper = time.CreateTimer(_ => _ = SweepAsync(), null, SweepInterval, SweepInterval);
     }
 
-    public event Func<IReadOnlyList<PairingRequestView>, Task>? Changed;
+    public event Func<PairingOverview, Task>? Changed;
+
+    /// <summary>The pending requests with the state of the open budget, which is what the UI pushes and fetches.</summary>
+    public PairingOverview Overview => new(Pending, BudgetExhausted);
+
+    /// <summary>True while the server-wide ceiling of opens is spent, so every address is turned away until the window moves on.</summary>
+    public bool BudgetExhausted
+    {
+        get
+        {
+            lock (_admission)
+            {
+                ForgetOldOpens(_time.GetUtcNow());
+                return _opens.Count >= OpensPerWindow;
+            }
+        }
+    }
 
     /// <summary>Requests waiting for a person, newest first, and for a moment the ones that were just denied.</summary>
     public IReadOnlyList<PairingRequestView> Pending
@@ -94,19 +117,17 @@ internal sealed partial class PairingStore : IDisposable
         var key = AddressKey(from);
         lock (_admission)
         {
-            while (_opens.Count > 0 && _opens.Peek() + OpenWindow <= now)
-            {
-                _opens.Dequeue();
-            }
-
+            ForgetOldOpens(now);
             if (_opens.Count >= OpensPerWindow
+                || _opensByAddress.GetValueOrDefault(key) >= OpensPerAddressPerWindow
                 || _requests.Values.Count(r => IsRevealedAndWaiting(r, now)) >= MaxOpen
                 || _requests.Values.Count(r => r.AddressKey == key && IsLive(r, now)) >= MaxOpenPerAddress)
             {
                 return null;
             }
 
-            _opens.Enqueue(now);
+            _opens.Enqueue((now, key));
+            _opensByAddress[key] = _opensByAddress.GetValueOrDefault(key) + 1;
             // The ID is the client's handle on its request; the poll token is the proof that it is the one asking. Both are unguessable.
             var request = new Request(
                 Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
@@ -120,6 +141,23 @@ internal sealed partial class PairingStore : IDisposable
                 now + Lifetime);
             _requests[request.Id] = request;
             return new PairingOpened(request.Id, request.ServerNonce, request.ExpiresAt, request.PollToken);
+        }
+    }
+
+    /// <summary>Drops opens older than the window, with the admission lock held. The per-address counts never hold more keys than the queue holds opens.</summary>
+    private void ForgetOldOpens(DateTimeOffset now)
+    {
+        while (_opens.Count > 0 && _opens.Peek().At + OpenWindow <= now)
+        {
+            var (_, key) = _opens.Dequeue();
+            if (_opensByAddress[key] <= 1)
+            {
+                _opensByAddress.Remove(key);
+            }
+            else
+            {
+                _opensByAddress[key]--;
+            }
         }
     }
 
@@ -394,7 +432,7 @@ internal sealed partial class PairingStore : IDisposable
                 }
             }
 
-            if (Signature(Pending) != Volatile.Read(ref _pushed))
+            if (Signature(Overview) != Volatile.Read(ref _pushed))
             {
                 await RaiseAsync();
             }
@@ -409,13 +447,14 @@ internal sealed partial class PairingStore : IDisposable
         }
     }
 
-    private static string Signature(IReadOnlyList<PairingRequestView> list) => string.Join('|', list.Select(v => $"{v.Id}:{v.State}"));
+    private static string Signature(PairingOverview overview) =>
+        $"{overview.BudgetExhausted}|{string.Join('|', overview.Requests.Select(v => $"{v.Id}:{v.State}"))}";
 
     private Task RaiseAsync()
     {
-        var list = Pending;
-        Volatile.Write(ref _pushed, Signature(list));
-        return Changed.RaiseAsync(list, _logger);
+        var overview = Overview;
+        Volatile.Write(ref _pushed, Signature(overview));
+        return Changed.RaiseAsync(overview, _logger);
     }
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Sweeping pairing requests failed")]

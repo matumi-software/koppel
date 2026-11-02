@@ -88,6 +88,78 @@ public sealed class PairingStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task One_address_cannot_use_up_what_the_others_need()
+    {
+        var noisy = Address(1);
+        for (var i = 0; i < PairingStore.OpensPerAddressPerWindow; i++)
+        {
+            var opened = _store.Open("noisy", Commitment(), noisy);
+            opened.Should().NotBeNull();
+            await _store.WithdrawAsync(opened!.Id, opened.PollToken);
+        }
+
+        _store.Open("noisy", Commitment(), noisy).Should().BeNull("that address spent its share");
+        _store.Open("quiet", Commitment(), Address(2)).Should().NotBeNull("the others still have theirs");
+        _store.BudgetExhausted.Should().BeFalse("one address spending its share is not the server running out");
+
+        _time.Advance(PairingStore.OpenWindow);
+
+        _store.Open("noisy", Commitment(), noisy).Should().NotBeNull("the share comes back with the window");
+    }
+
+    [Fact]
+    public async Task An_ipv6_slash_64_shares_one_share_of_the_budget()
+    {
+        for (var i = 0; i < PairingStore.OpensPerAddressPerWindow; i++)
+        {
+            var opened = _store.Open("v6", Commitment(), IPAddress.Parse($"2001:db8:1:1::{i + 1}"));
+            opened.Should().NotBeNull();
+            await _store.WithdrawAsync(opened!.Id, opened.PollToken);
+        }
+
+        _store.Open("v6", Commitment(), IPAddress.Parse("2001:db8:1:1:ffff::1")).Should().BeNull();
+        _store.Open("v6", Commitment(), IPAddress.Parse("2001:db8:1:2::1")).Should().NotBeNull("another /64 has its own share");
+    }
+
+    [Fact]
+    public void The_ceiling_for_the_whole_server_holds_however_many_addresses_ask()
+    {
+        for (var i = 0; i < PairingStore.OpensPerWindow; i++)
+        {
+            _store.Open("grind", Commitment(), Address(i)).Should().NotBeNull();
+        }
+
+        _store.Open("one more", Commitment(), Address(500)).Should().BeNull("every address is fresh, the server is out");
+        _store.BudgetExhausted.Should().BeTrue();
+    }
+
+    [Fact]
+    public void The_ui_is_told_when_the_budget_runs_out_and_when_it_comes_back()
+    {
+        var pushed = new List<bool>();
+        _store.Changed += overview =>
+        {
+            pushed.Add(overview.BudgetExhausted);
+            return Task.CompletedTask;
+        };
+        _store.Overview.BudgetExhausted.Should().BeFalse();
+
+        for (var i = 0; i < PairingStore.OpensPerWindow; i++)
+        {
+            _store.Open("grind", Commitment(), Address(i));
+        }
+
+        _store.Overview.BudgetExhausted.Should().BeTrue();
+        _time.Advance(PairingStore.SweepInterval);
+        pushed.Should().EndWith(true);
+
+        _time.Advance(PairingStore.OpenWindow);
+
+        _store.Overview.BudgetExhausted.Should().BeFalse();
+        pushed.Should().EndWith(false);
+    }
+
+    [Fact]
     public void Expiry_does_not_give_opens_back_either()
     {
         for (var i = 0; i < PairingStore.OpensPerWindow; i++)
@@ -187,7 +259,7 @@ public sealed class PairingStoreTests : IAsyncLifetime
         var pushes = new List<int>();
         _store.Changed += list =>
         {
-            pushes.Add(list.Count);
+            pushes.Add(list.Requests.Count);
             return Task.CompletedTask;
         };
 
@@ -205,7 +277,7 @@ public sealed class PairingStoreTests : IAsyncLifetime
         var pushed = new List<IReadOnlyList<PairingRequestView>>();
         _store.Changed += list =>
         {
-            pushed.Add(list);
+            pushed.Add(list.Requests);
             return Task.CompletedTask;
         };
 

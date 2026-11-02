@@ -57,7 +57,7 @@ internal static class PairingEndpoints
     public static IEndpointRouteBuilder MapServerPairingEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/server/pairing");
-        group.MapGet("/", (PairingStore pairing) => TypedResults.Ok(pairing.Pending));
+        group.MapGet("/", (PairingStore pairing) => TypedResults.Ok(pairing.Overview));
 
         group.MapPost("/{requestId}/approve", async Task<IResult> (string requestId, PairApproveRequest request, PairingStore pairing, CancellationToken cancellationToken) =>
             await pairing.ApproveAsync(requestId, request.Code ?? "", cancellationToken) switch

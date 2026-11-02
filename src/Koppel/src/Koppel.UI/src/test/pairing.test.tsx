@@ -95,12 +95,33 @@ describe('pairing requests', () => {
   it('says why a request was refused', async () => {
     mockFetch({
       'GET /api/server/pairing': () =>
-        json([{ id: 'r1', clientName: 'bench-2', from: '10.0.0.9', requestedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:05:00Z', state: 'denied', message: 'The code was wrong three times.' }]),
+        json({ budgetExhausted: false, requests: [{ id: 'r1', clientName: 'bench-2', from: '10.0.0.9', requestedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:05:00Z', state: 'denied', message: 'The code was wrong three times.' }] }),
       'GET /api/activity?max=200': () => json([]),
     });
     renderApp(<PairingRequests locked={false} />);
 
     expect(await screen.findByText(/Refused bench-2 from 10.0.0.9: The code was wrong three times\./)).toBeTruthy();
+  });
+
+  it('tells the admin when the server is turning pairing requests away', async () => {
+    mockFetch({
+      'GET /api/server/pairing': () => json({ budgetExhausted: true, requests: [] }),
+      'GET /api/activity?max=200': () => json([]),
+    });
+    renderApp(<PairingRequests locked={false} />);
+
+    expect(await screen.findByText(/too many pairing requests and is turning new ones away/)).toBeTruthy();
+  });
+
+  it('shows nothing when there is nothing to say', async () => {
+    mockFetch({
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [] }),
+      'GET /api/activity?max=200': () => json([]),
+    });
+    const { container } = renderApp(<PairingRequests locked={false} />);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(container.textContent).toBe('');
   });
 });
 

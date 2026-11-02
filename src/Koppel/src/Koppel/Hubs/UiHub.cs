@@ -39,7 +39,7 @@ public interface IUiClient
     Task PairingStatusChanged(PairingStatus status);
 
     /// <summary>Server role: the pairing requests waiting for someone to type their code.</summary>
-    Task PairingRequestsChanged(IReadOnlyList<PairingRequestView> requests);
+    Task PairingRequestsChanged(PairingOverview pairing);
 }
 
 /// <summary>The UI's live link, mapped at <c>/api/hubs/ui</c>. Push only; commands go over REST.</summary>
@@ -132,5 +132,5 @@ internal sealed class UiHubRelay(
 
     private Task PushPairingStatusAsync(PairingStatus value) => hub.Clients.All.PairingStatusChanged(value);
 
-    private Task PushPairingRequestsAsync(IReadOnlyList<PairingRequestView> value) => hub.Clients.All.PairingRequestsChanged(value);
+    private Task PushPairingRequestsAsync(PairingOverview value) => hub.Clients.All.PairingRequestsChanged(value);
 }

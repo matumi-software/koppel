@@ -32,8 +32,8 @@ public sealed class PairingTests : IDisposable
         var paired = Link.Waiter(clientHub, "PairingStatusChanged", s => s.GetProperty("state").GetString() == "paired");
         var connected = Link.Waiter(clientHub, "ConnectionChanged", c => c.GetProperty("hasSecret").GetBoolean());
         var linked = Link.Waiter(clientHub, "ClientDevicesChanged", d => d.GetProperty("link").GetString() == "connected");
-        var requests = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetArrayLength() == 1);
-        var cleared = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetArrayLength() == 0);
+        var requests = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetProperty("requests").GetArrayLength() == 1);
+        var cleared = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetProperty("requests").GetArrayLength() == 0);
         var clients = Link.Waiter(serverHub, "ClientsChanged", c => c.GetArrayLength() == 1);
 
         using var clientUi = _client.CreateUiClient();
@@ -42,7 +42,7 @@ public sealed class PairingTests : IDisposable
 
         var code = (await waiting.WaitAsync(TimeSpan.FromSeconds(20), ct)).GetProperty("code").GetString()!;
         code.Should().MatchRegex("^[0-9]{6}$");
-        var request = (await requests.WaitAsync(TimeSpan.FromSeconds(10), ct))[0];
+        var request = (await requests.WaitAsync(TimeSpan.FromSeconds(10), ct)).GetProperty("requests")[0];
         request.GetProperty("clientName").GetString().Should().Be(Environment.MachineName);
         request.TryGetProperty("code", out _).Should().BeFalse("the server never shows the code; a person types it");
 
@@ -74,12 +74,12 @@ public sealed class PairingTests : IDisposable
         await using var serverHub = await _server.ConnectUiHubAsync(ct);
         var waiting = Link.Waiter(clientHub, "PairingStatusChanged", s => s.GetProperty("state").GetString() == "waiting");
         var denied = Link.Waiter(clientHub, "PairingStatusChanged", s => s.GetProperty("state").GetString() == "denied");
-        var requests = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetArrayLength() == 1);
+        var requests = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetProperty("requests").GetArrayLength() == 1);
 
         using var clientUi = _client.CreateUiClient();
         await StartPairingAsync(clientUi, ct);
         var code = (await waiting.WaitAsync(TimeSpan.FromSeconds(20), ct)).GetProperty("code").GetString()!;
-        var id = (await requests.WaitAsync(TimeSpan.FromSeconds(10), ct))[0].GetProperty("id").GetString();
+        var id = (await requests.WaitAsync(TimeSpan.FromSeconds(10), ct)).GetProperty("requests")[0].GetProperty("id").GetString();
 
         using var serverUi = _server.CreateUiClient();
         for (var i = 0; i < 3; i++)
@@ -101,8 +101,8 @@ public sealed class PairingTests : IDisposable
     {
         var ct = TestContext.Current.CancellationToken;
         await using var serverHub = await _server.ConnectUiHubAsync(ct);
-        var requests = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetArrayLength() == 1);
-        var withdrawn = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetArrayLength() == 0);
+        var requests = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetProperty("requests").GetArrayLength() == 1);
+        var withdrawn = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetProperty("requests").GetArrayLength() == 0);
 
         using var clientUi = _client.CreateUiClient();
         await StartPairingAsync(clientUi, ct);
@@ -124,7 +124,7 @@ public sealed class PairingTests : IDisposable
 
         revealed.StatusCode.Should().Be(HttpStatusCode.NotFound);
         using var serverUi = _server.CreateUiClient();
-        (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/pairing", ct)).GetArrayLength().Should().Be(0);
+        (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/pairing", ct)).GetProperty("requests").GetArrayLength().Should().Be(0);
     }
 
     [Fact]
@@ -149,7 +149,7 @@ public sealed class PairingTests : IDisposable
 
         (await SendAsync(https, HttpMethod.Get, requestId, token, ct)).StatusCode.Should().Be(HttpStatusCode.OK);
         (await SendAsync(https, HttpMethod.Delete, requestId, token, ct)).StatusCode.Should().Be(HttpStatusCode.NoContent);
-        (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/pairing", ct)).GetArrayLength().Should().Be(0);
+        (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/pairing", ct)).GetProperty("requests").GetArrayLength().Should().Be(0);
     }
 
     [Fact]

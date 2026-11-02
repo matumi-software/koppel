@@ -43,7 +43,7 @@ export function OverviewPage() {
     needs.push({ id: 'share-unavailable', name: 'This machine cannot share devices', sub: <span style={{ color: 'var(--fault-text)' }}>{server.data.unavailable}</span> });
   }
   if (isClient && client.data?.link === 'unconfigured') {
-    needs.push({ id: 'no-connection', name: 'No server connection yet', end: <Button variant="secondary" onPress={() => go('connection')}>Set up</Button>, sub: 'Add the server and the client ID and secret it gave you.' });
+    needs.push({ id: 'no-connection', name: 'No server connection yet', end: <Button variant="secondary" onPress={() => go('configuration')}>Set up</Button>, sub: 'Add the server and the client ID and secret it gave you.' });
   }
   if (isClient && client.data?.link === 'error') {
     needs.push({ id: 'link-error', name: `Cannot reach ${remote}`, sub: <span style={{ color: 'var(--fault-text)' }}>{client.data.linkMessage}</span> });

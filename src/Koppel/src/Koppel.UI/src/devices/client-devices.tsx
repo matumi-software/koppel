@@ -117,7 +117,7 @@ export function ClientDevicesPage() {
       {link === 'unconfigured' && (
         <div className="kp-row">
           <p className="kp-note">Set up the server connection to see its devices.</p>
-          <Button variant="secondary" onPress={() => go('connection')}>
+          <Button variant="secondary" onPress={() => go('configuration')}>
             Server connection
           </Button>
         </div>

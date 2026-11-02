@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 
-export type Page = 'overview' | 'devices' | 'clients' | 'attach' | 'machine' | 'connection';
+export type Page = 'overview' | 'devices' | 'clients' | 'attach' | 'configuration';
 
-const pages: readonly Page[] = ['overview', 'devices', 'clients', 'attach', 'machine', 'connection'];
+const pages: readonly Page[] = ['overview', 'devices', 'clients', 'attach', 'configuration'];
 
 const fromHash = (): Page => {
   const hash = window.location.hash.slice(1);

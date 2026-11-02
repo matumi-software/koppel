@@ -1,7 +1,7 @@
 import type { RoleOption } from '@koppel/react-ui';
 import type { KoppelRole } from '@/api/settings';
 
-/** The three roles, worded the same in the first run and under This machine. */
+/** The three roles, worded the same in the first run and under Configuration. */
 export const roleOptions: readonly RoleOption<KoppelRole>[] = [
   { value: 'server', title: 'Server', description: 'Shares the USB devices plugged into this machine with other machines on the network.' },
   { value: 'client', title: 'Client', description: 'Attaches devices from a Koppel server, so programs here see them as if they were plugged in.' },

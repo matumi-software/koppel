@@ -42,25 +42,8 @@
   margin: 0;
 }
 
-.app-section {
-  display: grid;
-  gap: var(--space-4);
-  padding: var(--space-4);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
-}
-
-.app-section__title {
-  margin: 0;
-}
-
 .app-row {
   max-width: 360px;
-}
-
-.app-note {
-  color: var(--text-secondary);
 }
 
 @media (max-width: 640px) {
@@ -69,10 +52,6 @@
   .app-main {
     padding-inline: var(--space-4);
   }
-}
-
-.app-flush {
-  margin: 0;
 }
 
 .app-inline {

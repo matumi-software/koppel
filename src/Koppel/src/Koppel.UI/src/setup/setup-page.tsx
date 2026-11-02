@@ -40,7 +40,7 @@ export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: 
           <Steps steps={['What this machine does', chosen === 'client' ? 'Server connection' : 'Clients']} current={0} />
           <div className="kp-page-head">
             <h1>Set up {host}</h1>
-            <p>Pick what this machine does. You can change it later under This machine.</p>
+            <p>Pick what this machine does. You can change it later under Configuration.</p>
           </div>
 
           <RoleCards label="Role" options={roleOptions} value={chosen} isDisabled={locked || pending} onChange={setRole} />

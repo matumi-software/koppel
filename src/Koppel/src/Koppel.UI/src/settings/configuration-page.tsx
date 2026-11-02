@@ -1,20 +1,24 @@
 import { useState } from 'react';
 import { Button, Field, Panel, RoleCards, Setting, SettingList, Switch } from '@koppel/react-ui';
+import { ConnectionSection } from '@/client/connection-section';
 import { Frame } from '@/shell/frame';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
 import { roleOptions } from './roles';
 import { useSettings, type SettingStatus } from './use-settings';
 
-/** What this machine does and how it starts. Every change waits for the server. */
-export function MachinePage() {
+/**
+ * Everything this machine is configured with: the role first, then the settings that role uses,
+ * the server's above the client's. Every change waits for the server.
+ */
+export function ConfigurationPage() {
   const host = useMachineName();
   const { locked } = useFrame();
   const { query, status, requestChange } = useSettings();
 
   if (!query.data) {
     return (
-      <Frame title="This machine">
+      <Frame title="Configuration">
         <p className="kp-note">{query.isError ? 'Could not load settings. Check that Koppel is running, then reload.' : 'Loading settings…'}</p>
       </Frame>
     );
@@ -24,7 +28,7 @@ export function MachinePage() {
   const share = status('shareOnStartup')!;
 
   return (
-    <Frame title="This machine" lede={`${host}: what it does on the network and how it starts.`}>
+    <Frame title="Configuration" lede={`${host}: what it does on the network and how it starts.`}>
       <Panel title="Role" meta={<SavedNote status={role} />}>
         <div className="kp-panel__body">
           <RoleCards
@@ -66,6 +70,8 @@ export function MachinePage() {
           </SettingList>
         </Panel>
       )}
+
+      {role.confirmed !== 'server' && <ConnectionSection locked={locked} />}
     </Frame>
   );
 }

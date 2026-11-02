@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Field } from '@koppel/react-ui';
+import { Button, Field, Panel } from '@koppel/react-ui';
 import { getConnection, putConnection, testConnection, type ConnectionTestResult, type ConnectionView } from '@/api/client';
 import { useHubEvent } from '@/hub/hub-context';
 
@@ -79,45 +79,46 @@ function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: bo
     secret !== '';
 
   return (
-    <section className="app-section">
-      <h2 className="kp-type-title app-section__title">Server connection</h2>
-      <p className="app-note app-flush">The Koppel server this machine attaches devices from. Ask its admin for a client.</p>
-      <Field label="Server address" mono placeholder="https://lab-rack-3:5241" value={serverUrl} onChange={setServerUrl} isDisabled={disabled} state={fieldState} />
-      <Field
-        label="Server fingerprint"
-        mono
-        placeholder="From the server's Clients section"
-        value={fingerprint}
-        onChange={setFingerprint}
-        isDisabled={disabled}
-        state={fieldState}
-        help="Koppel only talks to the server whose certificate has this fingerprint."
-      />
-      <Field label="Client ID" mono value={clientId} onChange={setClientId} isDisabled={disabled} state={fieldState} />
-      <Field
-        label="Client secret"
-        type="password"
-        placeholder={stored.hasSecret ? 'Stored, enter a new one to replace it' : ''}
-        value={secret}
-        onChange={setSecret}
-        isDisabled={disabled}
-        state={fieldState}
-        help="Encrypted on disk."
-      />
-      {failure && <p className="app-error">Not saved: {failure}</p>}
-      <div className="app-inline">
-        <Button variant="primary" isSending={pending} isDisabled={locked || !changed} onPress={save}>
-          Save connection
-        </Button>
-        <Button variant="secondary" isSending={testing} isDisabled={locked || pending || changed || !stored.hasSecret} onPress={runTest}>
-          Test connection
-        </Button>
+    <Panel title="Server connection">
+      <div className="kp-panel__body">
+        <p className="kp-note">The Koppel server this machine attaches devices from. Ask its admin for a client.</p>
+        <Field label="Server address" mono placeholder="https://lab-rack-3:5241" value={serverUrl} onChange={setServerUrl} isDisabled={disabled} state={fieldState} />
+        <Field
+          label="Server fingerprint"
+          mono
+          placeholder="From the server's Clients section"
+          value={fingerprint}
+          onChange={setFingerprint}
+          isDisabled={disabled}
+          state={fieldState}
+          help="Koppel only talks to the server whose certificate has this fingerprint."
+        />
+        <Field label="Client ID" mono value={clientId} onChange={setClientId} isDisabled={disabled} state={fieldState} />
+        <Field
+          label="Client secret"
+          type="password"
+          placeholder={stored.hasSecret ? 'Stored, enter a new one to replace it' : ''}
+          value={secret}
+          onChange={setSecret}
+          isDisabled={disabled}
+          state={fieldState}
+          help="Encrypted on disk."
+        />
+        {failure && <p className="app-error">Not saved: {failure}</p>}
+        <div className="app-inline">
+          <Button variant="primary" isSending={pending} isDisabled={locked || !changed} onPress={save}>
+            Save connection
+          </Button>
+          <Button variant="secondary" isSending={testing} isDisabled={locked || pending || changed || !stored.hasSecret} onPress={runTest}>
+            Test connection
+          </Button>
+        </div>
+        {test && (
+          <p className={test.ok ? 'app-ok' : 'app-error'} role="status">
+            {test.message}
+          </p>
+        )}
       </div>
-      {test && (
-        <p className={test.ok ? 'app-ok' : 'app-error'} role="status">
-          {test.message}
-        </p>
-      )}
-    </section>
+    </Panel>
   );
 }

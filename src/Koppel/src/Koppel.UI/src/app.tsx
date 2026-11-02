@@ -4,14 +4,13 @@ import { AppShell, Button, LinkBanner, NavGroup, NavItem } from '@koppel/react-u
 import { getClients } from '@/api/server';
 import { getConnection } from '@/api/client';
 import { getSettings } from '@/api/settings';
-import { ConnectionPage } from '@/client/connection-page';
 import { ClientDevicesPage } from '@/devices/client-devices';
 import { ServerDevicesPage } from '@/devices/server-devices';
 import { hostOf, useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { useHub } from '@/hub/hub-context';
 import { OverviewPage } from '@/overview/overview-page';
 import { ClientsPage } from '@/server/clients-page';
-import { MachinePage } from '@/settings/machine-page';
+import { ConfigurationPage } from '@/settings/configuration-page';
 import { SetupPage } from '@/setup/setup-page';
 import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
 import { FrameContext, usePageFromHash, type Page } from '@/shell/frame-context';
@@ -39,7 +38,7 @@ export function App() {
   const remote = hostOf(connection.data?.serverUrl);
 
   // A page that does not exist for this role falls back to the overview.
-  const allowed: Page[] = ['overview', 'machine', ...(isServer ? (['devices', 'clients'] as Page[]) : []), ...(isClient ? (['attach', 'connection'] as Page[]) : [])];
+  const allowed: Page[] = ['overview', 'configuration', ...(isServer ? (['devices', 'clients'] as Page[]) : []), ...(isClient ? (['attach'] as Page[]) : [])];
   const shown: Page = allowed.includes(page) ? page : 'overview';
 
   const pendingCount = items.filter((i) => i.state === 'pending').length;
@@ -81,14 +80,9 @@ export function App() {
         </NavGroup>
       )}
       <NavGroup label="Settings">
-        <NavItem isCurrent={shown === 'machine'} onPress={() => open('machine')}>
-          This machine
+        <NavItem isCurrent={shown === 'configuration'} onPress={() => open('configuration')}>
+          Configuration
         </NavItem>
-        {isClient && (
-          <NavItem isCurrent={shown === 'connection'} onPress={() => open('connection')}>
-            Server connection
-          </NavItem>
-        )}
       </NavGroup>
     </>
   );
@@ -136,7 +130,7 @@ export function App() {
   }
 
   if (!settings.data.setupComplete) {
-    return <SetupPage locked={locked} onDone={(chosen) => go(chosen === 'client' ? 'connection' : 'clients')} />;
+    return <SetupPage locked={locked} onDone={(chosen) => go(chosen === 'client' ? 'configuration' : 'clients')} />;
   }
 
   // One shell for every page, so the side panel is one panel too: pages swap its content, never its width.
@@ -158,8 +152,7 @@ export function App() {
         {shown === 'devices' && <ServerDevicesPage />}
         {shown === 'clients' && <ClientsPage />}
         {shown === 'attach' && <ClientDevicesPage />}
-        {shown === 'machine' && <MachinePage />}
-        {shown === 'connection' && <ConnectionPage />}
+        {shown === 'configuration' && <ConfigurationPage />}
       </AppShell>
     </FrameContext.Provider>
   );

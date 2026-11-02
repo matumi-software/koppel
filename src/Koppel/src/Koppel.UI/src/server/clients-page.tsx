@@ -283,7 +283,7 @@ function AddClient({ locked, onAdded }: { locked: boolean; onAdded: (id: string)
       <ModalDialog isOpen={!!created} onOpenChange={(open) => !open && setCreated(undefined)} title={`${created?.name ?? 'Client'} is added`}>
         {created && (
           <>
-            <p className="kp-note">Put the ID and secret on {created.name}, under Server connection, with the server fingerprint.</p>
+            <p className="kp-note">Put the ID and secret on {created.name}, under Configuration, Server connection, with the server fingerprint.</p>
             <div className="kp-field">
               <span className="kp-field__label">Client ID</span>
               <CopyValue value={created.clientId} />

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Koppel.Core.Configuration;
 using Koppel.Core.Security;
+using Microsoft.Extensions.Hosting.WindowsServices;
 
 namespace Koppel.Login;
 
@@ -199,7 +200,18 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
         if (issued is not null)
         {
             var shown = $"{issued[..4]}-{issued[4..]}";
-            LogSetupCode(shown, _paths.SetupCodeFile);
+            if (WindowsServiceHelpers.IsWindowsService())
+            {
+                // A Windows service logs to the Application event log, which every interactive user can
+                // read. The code would let any local user set the first password, so the log only says
+                // where the administrators-only file is.
+                LogSetupCodeInFile(_paths.SetupCodeFile);
+            }
+            else
+            {
+                LogSetupCode(shown, _paths.SetupCodeFile);
+            }
+
             WriteCodeFile(shown);
         }
         else if (HasPassword)
@@ -234,6 +246,9 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel setup code: {Code}. Enter it in the UI to set the admin password. It is also in {File} while no password is set.")]
     private partial void LogSetupCode(string code, string file);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel needs an admin password. The setup code to set it is in {File}, which only administrators can read.")]
+    private partial void LogSetupCodeInFile(string file);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not write or remove the setup code file {File} ({Reason}). The code in the log still works.")]
     private partial void LogCodeFileFailed(string file, string reason);

@@ -1,0 +1,41 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="1CFA893C-6A76-421E-B40E-86B0F6A16154" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Koppel is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="CompanyFolder" Name="Matumi">
+        <Directory Id="INSTALLFOLDER" Name="Koppel" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Koppel" Title="Koppel">
+      <ComponentGroupRef Id="App" />
+    </Feature>
+
+    <ComponentGroup Id="App" Directory="INSTALLFOLDER">
+      <Component Id="Service">
+        <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes" />
+        <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on http://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes" />
+        <ServiceControl Id="KoppelService" Name="Koppel" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+      </Component>
+      <Files Include="$(var.StagingDir)\**">
+        <Exclude Files="$(var.StagingDir)\Koppel.exe" />
+      </Files>
+    </ComponentGroup>
+
+    <!-- The driver goes in after the files and before the service starts; it comes out before the files go. -->
+    <SetProperty Id="InstallUsbDriver" Sequence="execute" Before="InstallUsbDriver"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Install" />
+    <CustomAction Id="InstallUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+
+    <SetProperty Id="RemoveUsbDriver" Sequence="execute" Before="RemoveUsbDriver"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Uninstall" />
+    <CustomAction Id="RemoveUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="InstallUsbDriver" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="RemoveUsbDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

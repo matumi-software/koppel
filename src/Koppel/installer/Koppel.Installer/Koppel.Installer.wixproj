@@ -1,0 +1,14 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!-- The MSI: Koppel as a Windows service, plus usbip-win2's driver. build.ps1 stages the files. -->
+  <PropertyGroup>
+    <OutputName>Koppel</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <DefineConstants>StagingDir=$(StagingDir);Version=$(Version)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" />
+  </ItemGroup>
+
+</Project>

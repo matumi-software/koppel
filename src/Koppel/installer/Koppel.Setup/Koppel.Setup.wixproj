@@ -1,0 +1,17 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!-- setup.exe: the VC++ runtime usbip-win2's tools need, then Koppel's MSI. An MSI cannot install
+       the runtime itself, because the runtime's installer is an MSI too. build.ps1 passes the paths. -->
+  <PropertyGroup>
+    <OutputType>Bundle</OutputType>
+    <OutputName>Koppel-Setup</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <DefineConstants>Version=$(Version);Msi=$(Msi);VCRedist=$(VCRedist);VCRedistBuild=$(VCRedistBuild)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Bal.wixext" />
+    <PackageReference Include="WixToolset.Util.wixext" />
+  </ItemGroup>
+
+</Project>

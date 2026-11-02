@@ -1,10 +1,13 @@
 using Koppel;
 using Koppel.Client;
 using Koppel.Core.Auth;
+using Koppel.Core.Usb;
+using Koppel.Core.Usb.Linux;
 using Koppel.Hubs;
 using Koppel.Security;
 using Koppel.Server;
 using Koppel.Settings;
+using Koppel.Usb;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -37,7 +40,26 @@ builder.Services.AddSingleton<RemoteServer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SettingsStore>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerSecretsStore>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectionStore>());
+builder.Services.AddSingleton<UsbServer>();
+builder.Services.AddSingleton<UsbClient>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbServer>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbClient>());
+builder.Services.AddHostedService<UsbIpTlsServer>();
 builder.Services.AddHostedService<UiHubRelay>();
+
+// USB goes through the Linux kernel's USB/IP drivers. Other platforms report why they cannot share yet.
+var sysRoot = builder.Configuration["Usb:SysRoot"] ?? "/sys";
+if (OperatingSystem.IsLinux())
+{
+    builder.Services.AddSingleton<IUsbHost>(new SysfsUsbHost(sysRoot));
+    builder.Services.AddSingleton<IUsbAttacher>(new SysfsVhci(sysRoot));
+}
+else
+{
+    var unsupported = new UnsupportedUsb("Sharing and attaching USB devices needs Linux for now. Run the Koppel Docker image on a Linux host; Windows support comes later.");
+    builder.Services.AddSingleton<IUsbHost>(unsupported);
+    builder.Services.AddSingleton<IUsbAttacher>(unsupported);
+}
 
 builder.Services.AddKoppelAuthServer();
 
@@ -55,9 +77,12 @@ app.UseAuthorization();
 
 app.MapSettingsEndpoints();
 app.MapServerEndpoints(httpsPort);
-app.MapRemoteEndpoints();
+app.MapRemoteEndpoints().MapUsbRemoteEndpoints();
 app.MapClientEndpoints();
+app.MapUsbServerEndpoints();
+app.MapUsbClientEndpoints();
 app.MapHub<UiHub>("/api/hubs/ui");
+app.MapHub<RemoteHub>("/api/hubs/remote");
 
 app.MapFallbackToFile("index.html");
 

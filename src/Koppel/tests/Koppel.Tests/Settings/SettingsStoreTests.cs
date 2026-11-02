@@ -38,11 +38,11 @@ public sealed class SettingsStoreTests : IDisposable
             return Task.CompletedTask;
         };
 
-        await store.ApplyAsync(new SettingsPatch(null, ShareOnStartup: true, null, null), TestContext.Current.CancellationToken);
+        await store.ApplyAsync(new SettingsPatch(null, ShareOnStartup: false, null), TestContext.Current.CancellationToken);
 
         onDiskWhenRaised.Should().NotBeNull();
-        onDiskWhenRaised!.ShareOnStartup.Should().BeTrue();
-        store.Current.ShareOnStartup.Should().BeTrue();
+        onDiskWhenRaised!.ShareOnStartup.Should().BeFalse();
+        store.Current.ShareOnStartup.Should().BeFalse();
         File.Exists(SettingsFile + ".tmp").Should().BeFalse();
     }
 

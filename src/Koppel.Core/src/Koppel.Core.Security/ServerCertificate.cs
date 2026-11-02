@@ -28,8 +28,12 @@ public static class ServerCertificate
         return certificate.Export(X509ContentType.Pfx);
     }
 
+    /// <remarks>
+    /// Windows' TLS stack cannot use an ephemeral private key for a server, so there the key goes into a
+    /// temporary key container that is removed when the certificate is disposed.
+    /// </remarks>
     public static X509Certificate2 Load(byte[] pfx) =>
-        X509CertificateLoader.LoadPkcs12(pfx, password: null, X509KeyStorageFlags.EphemeralKeySet);
+        X509CertificateLoader.LoadPkcs12(pfx, password: null, OperatingSystem.IsWindows() ? X509KeyStorageFlags.DefaultKeySet : X509KeyStorageFlags.EphemeralKeySet);
 
     /// <summary>Uppercase hex SHA-256 of the certificate, grouped in pairs: <c>3F:9A:…</c>.</summary>
     public static string Fingerprint(X509Certificate2 certificate)

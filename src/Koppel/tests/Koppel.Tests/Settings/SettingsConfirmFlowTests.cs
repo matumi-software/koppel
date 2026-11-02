@@ -46,15 +46,15 @@ public sealed class SettingsConfirmFlowTests : IDisposable
         var confirmed = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         hub.On<JsonElement>("SettingsChanged", settings => confirmed.TrySetResult(settings));
 
-        using var response = await client.PatchAsJsonAsync("/api/settings", new { requireTls = false }, ct);
+        using var response = await client.PatchAsJsonAsync("/api/settings", new { shareOnStartup = false }, ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         (await response.Content.ReadAsStringAsync(ct)).Should().BeEmpty();
         var pushed = await confirmed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
-        pushed.GetProperty("requireTls").GetBoolean().Should().BeFalse();
+        pushed.GetProperty("shareOnStartup").GetBoolean().Should().BeFalse();
         var onDisk = JsonSerializer.Deserialize<KoppelSettings>(
             await File.ReadAllTextAsync(Path.Combine(_directory, "settings.json"), ct), KoppelJson.Files)!;
-        onDisk.RequireTls.Should().BeFalse();
+        onDisk.ShareOnStartup.Should().BeFalse();
     }
 
     [Fact]

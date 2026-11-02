@@ -29,7 +29,6 @@ export function SettingsPage() {
   const isServer = role.confirmed !== 'client';
   const isClient = role.confirmed !== 'server';
   const roleNote = role.pendingTarget ? 'Saving…' : role.failure ? `Not saved: ${role.failure}` : role.saved ? 'Saved' : undefined;
-  const requireTls = status('requireTls')!;
 
   return (
     <div className="app-stack">
@@ -55,22 +54,13 @@ export function SettingsPage() {
         {isServer && (
           <>
             <Switch
-              label="Share devices on startup"
+              label="Share saved devices on startup"
               confirmed={shareOnStartup.confirmed}
               pendingTarget={shareOnStartup.pendingTarget}
               failure={shareOnStartup.failure}
               note={shareOnStartup.saved ? 'Saved' : undefined}
               isDisabled={locked}
               onRequestChange={(value) => requestChange('shareOnStartup', value)}
-            />
-            <Switch
-              label="Require TLS for clients"
-              confirmed={requireTls.confirmed}
-              pendingTarget={requireTls.pendingTarget}
-              failure={requireTls.failure}
-              note={requireTls.saved ? 'Saved' : undefined}
-              isDisabled={locked}
-              onRequestChange={(value) => requestChange('requireTls', value)}
             />
             <ListenPortField
               key={status('listenPort')!.confirmed}
@@ -97,7 +87,7 @@ interface ListenPortFieldProps {
 function ListenPortField({ locked, status, onSave }: ListenPortFieldProps) {
   const [draft, setDraft] = useState(String(status.confirmed));
   const isPending = status.pendingTarget !== undefined;
-  const help = status.failure ? `Not saved: ${status.failure}` : status.saved ? 'Saved' : 'Clients connect to this port.';
+  const help = status.failure ? `Not saved: ${status.failure}` : status.saved ? 'Saved' : 'USB traffic port. Encrypted, and only registered clients get in.';
 
   return (
     <div className="app-row">

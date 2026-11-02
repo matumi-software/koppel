@@ -6,7 +6,6 @@ export type KoppelRole = 'server' | 'client' | 'both';
 export interface KoppelSettings {
   role: KoppelRole;
   shareOnStartup: boolean;
-  requireTls: boolean;
   listenPort: number;
 }
 

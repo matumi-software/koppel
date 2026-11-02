@@ -11,18 +11,18 @@ public enum KoppelRole
 /// <summary>The settings stored in <c>settings.json</c>. The file is the source of truth.</summary>
 public sealed record KoppelSettings(
     KoppelRole Role,
+    /// <summary>Re-share the devices that were shared before a restart.</summary>
     bool ShareOnStartup,
-    bool RequireTls,
+    /// <summary>The TLS port for USB traffic. USB/IP's usual port, encrypted and behind auth.</summary>
     int ListenPort)
 {
-    public static KoppelSettings Default { get; } = new(KoppelRole.Server, ShareOnStartup: false, RequireTls: true, ListenPort: 3240);
+    public static KoppelSettings Default { get; } = new(KoppelRole.Server, ShareOnStartup: true, ListenPort: 3240);
 }
 
 /// <summary>A partial change to <see cref="KoppelSettings"/>. Null means "leave as is".</summary>
 internal sealed record SettingsPatch(
     KoppelRole? Role,
     bool? ShareOnStartup,
-    bool? RequireTls,
     int? ListenPort)
 {
     public Dictionary<string, string[]> Validate()
@@ -45,7 +45,6 @@ internal sealed record SettingsPatch(
     {
         Role = Role ?? current.Role,
         ShareOnStartup = ShareOnStartup ?? current.ShareOnStartup,
-        RequireTls = RequireTls ?? current.RequireTls,
         ListenPort = ListenPort ?? current.ListenPort,
     };
 }

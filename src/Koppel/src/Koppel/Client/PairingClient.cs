@@ -55,8 +55,8 @@ internal sealed partial class PairingClient : IDisposable
     /// <summary>How a run reaches the server. The default pins the server's fingerprint; tests bring a fake.</summary>
     internal Func<string, HttpMessageHandler> HandlerFactory { get; init; } = ServerCertificate.CreatePinnedHandler;
 
-    /// <summary>Starts pairing in the background, replacing one already under way.</summary>
-    public void Begin(string serverUrl, string fingerprint, string? serverName)
+    /// <summary>Starts pairing in the background, replacing one already under way. The task ends with the run.</summary>
+    public Task Begin(string serverUrl, string fingerprint, string? serverName)
     {
         var run = new Run(serverUrl, fingerprint, serverName ?? new Uri(serverUrl).Host, PairingStore.Lifetime + TimeSpan.FromSeconds(30), _time);
         lock (_lock)
@@ -65,7 +65,7 @@ internal sealed partial class PairingClient : IDisposable
             _run = run;
         }
 
-        run.Task = Task.Run(
+        return Task.Run(
             async () =>
             {
                 try
@@ -359,7 +359,6 @@ internal sealed partial class PairingClient : IDisposable
         public string Fingerprint { get; } = fingerprint;
         public string ServerName { get; } = serverName;
         public CancellationToken Token => _cts.Token;
-        public Task? Task { get; set; }
 
         /// <summary>What the server approved: held for a confirmation, or what was saved once paired.</summary>
         public ConnectionUpdate? Approved { get; set; }

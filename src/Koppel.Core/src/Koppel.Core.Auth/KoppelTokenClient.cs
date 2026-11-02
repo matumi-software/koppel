@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Koppel.Core.Auth;
@@ -38,12 +39,15 @@ public sealed class KoppelTokenClient(HttpClient http, TimeProvider time) : IDis
                 ["client_secret"] = clientSecret,
             });
             using var response = await http.PostAsync(new Uri(server, KoppelAuthServer.TokenPath), form, cancellationToken);
-            var body = await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken)
-                ?? throw new TokenRequestException("invalid_response", "The server sent an empty token response.");
-
-            if (!response.IsSuccessStatusCode || body.AccessToken is null)
+            var body = await ReadBodyAsync(response, cancellationToken);
+            if (!response.IsSuccessStatusCode)
             {
-                throw new TokenRequestException(body.Error ?? "invalid_response", body.ErrorDescription);
+                throw new TokenRequestException(body?.Error ?? $"http_{(int)response.StatusCode}", body?.ErrorDescription ?? $"The server answered {(int)response.StatusCode} {response.ReasonPhrase}.");
+            }
+
+            if (body?.AccessToken is not { Length: > 0 })
+            {
+                throw new TokenRequestException("invalid_response", "The server's token response had no access token.");
             }
 
             _cached = (clientId, body.AccessToken, time.GetUtcNow().AddSeconds(body.ExpiresIn ?? 300));
@@ -52,6 +56,19 @@ public sealed class KoppelTokenClient(HttpClient http, TimeProvider time) : IDis
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>The JSON body, or null when there is none or it is not JSON, such as a proxy's error page.</summary>
+    private static async Task<TokenResponse?> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken);
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            return null;
         }
     }
 

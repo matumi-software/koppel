@@ -1,8 +1,9 @@
 import type { ConnectionView } from '@/api/client';
 import type { ClientView } from '@/api/server';
 import type { KoppelRole, KoppelSettings } from '@/api/settings';
+import type { DiscoveredServer, PairingStatus } from '@/api/pairing';
 import type { ClientDevices, ServerDevices } from '@/api/usb';
-import { clientDevicesKey, clientsKey, connectionKey, serverDevicesKey, settingsKey } from '@/query-keys';
+import { clientDevicesKey, clientsKey, connectionKey, pairingStatusKey, serverDevicesKey, settingsKey } from '@/query-keys';
 import type { PendingDomain } from './pending-store';
 
 /** How long to wait for the server's confirmation before calling a change failed. */
@@ -105,6 +106,24 @@ export const pendingDomains = {
       view.clientId === sent.clientId.trim()
         ? 'confirmed'
         : 'waiting',
+  }),
+
+  /**
+   * Pairing buttons. A key is a server's fingerprint (Pair) or `cancel` / `confirm`. A pairing is
+   * confirmed once the request is under way, whatever it turns into: the outcome shows in the status.
+   */
+  pairing: domain<DiscoveredServer | null, PairingStatus>({
+    queryKey: pairingStatusKey,
+    timeoutMs: confirmTimeoutMs,
+    describe: (key, target) => ({
+      text: key === 'cancel' ? 'Cancel pairing' : key === 'confirm' ? 'Replace the server connection' : `Pair with ${target?.name ?? key}`,
+      subject: key,
+    }),
+    verdict: (key, target, status) => {
+      if (key === 'cancel') return status.state === 'idle' ? 'confirmed' : 'waiting';
+      if (key === 'confirm') return status.state === 'confirm' ? 'waiting' : 'confirmed';
+      return status.state !== 'idle' && status.serverUrl === target?.url ? 'confirmed' : 'waiting';
+    },
   }),
 };
 

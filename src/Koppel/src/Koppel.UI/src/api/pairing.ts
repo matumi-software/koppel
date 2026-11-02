@@ -10,7 +10,8 @@ export interface DiscoveredServer {
   url: string;
 }
 
-export type PairingState = 'idle' | 'requesting' | 'waiting' | 'paired' | 'denied' | 'expired' | 'failed';
+/** `confirm`: the server approved, but saving replaces the connection to another server, so the person decides. */
+export type PairingState = 'idle' | 'requesting' | 'waiting' | 'confirm' | 'paired' | 'denied' | 'expired' | 'failed';
 
 /** Mirrors Koppel.Client.PairingStatus. While waiting, `code` is what to type on the server. */
 export interface PairingStatus {
@@ -20,15 +21,18 @@ export interface PairingStatus {
   code: string | null;
   message: string | null;
   expiresAt: string | null;
+  serverFingerprint: string | null;
 }
 
-/** Mirrors Koppel.Server.PairingRequestView. The code is not in it: a person types it. */
+/** Mirrors Koppel.Server.PairingRequestView. The code is not in it: a person types it. `denied` shows for a moment after three wrong codes. */
 export interface PairingRequest {
   id: string;
   clientName: string;
   from: string;
   requestedAt: string;
   expiresAt: string;
+  state: 'waiting' | 'denied';
+  message: string | null;
 }
 
 export const getDiscoveredServers = () => getJson<DiscoveredServer[]>('/api/client/discovery');
@@ -37,6 +41,9 @@ export const getPairingStatus = () => getJson<PairingStatus>('/api/client/pairin
 
 export const startPairing = (server: DiscoveredServer) =>
   sendChange('/api/client/pairing', 'POST', { serverUrl: server.url, serverFingerprint: server.fingerprint, serverName: server.name });
+
+/** Saves the credentials the server approved, replacing the connection to another server. */
+export const confirmPairing = () => sendChange('/api/client/pairing/confirm', 'POST');
 
 export const cancelPairing = () => sendChange('/api/client/pairing', 'DELETE');
 

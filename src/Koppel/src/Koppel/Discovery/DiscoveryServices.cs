@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using Koppel.Core.Configuration;
 using Koppel.Core.Discovery;
 using Koppel.Server;
 using Koppel.Settings;
@@ -93,7 +94,7 @@ internal sealed partial class ServerFinder(
     {
         if (configuration.GetValue("Discovery:Enabled", true))
         {
-            browser.Changed += OnChanged;
+            browser.Changed += OnChangedAsync;
             settings.Changed += ApplyAsync;
             Apply(settings.Current);
         }
@@ -104,7 +105,7 @@ internal sealed partial class ServerFinder(
     public Task StopAsync(CancellationToken cancellationToken)
     {
         settings.Changed -= ApplyAsync;
-        browser.Changed -= OnChanged;
+        browser.Changed -= OnChangedAsync;
         browser.Stop();
         return Task.CompletedTask;
     }
@@ -134,7 +135,8 @@ internal sealed partial class ServerFinder(
         }
     }
 
-    private void OnChanged(IReadOnlyList<DiscoveredServer> servers) => _ = Changed?.Invoke(Others(servers));
+    /// <summary>The browser calls one list at a time, in order, and waits for this, so a push cannot overtake an earlier one.</summary>
+    private Task OnChangedAsync(IReadOnlyList<DiscoveredServer> servers) => Changed.RaiseAsync(Others(servers), logger);
 
     private IReadOnlyList<DiscoveredServer> Others(IReadOnlyList<DiscoveredServer> servers) =>
         [.. servers.Where(s => !string.Equals(s.Fingerprint, secrets.Fingerprint, StringComparison.OrdinalIgnoreCase))];

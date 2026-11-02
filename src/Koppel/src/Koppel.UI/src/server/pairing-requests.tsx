@@ -19,7 +19,7 @@ export function PairingRequests({ locked }: { locked: boolean }) {
 
   return (
     <section className="kp-card" aria-label="Waiting to pair" style={{ gap: 12 }}>
-      <span className="kp-type-heading">Waiting to pair</span>
+      <span className="kp-type-heading">{requests.data.some((r) => r.state === 'waiting') ? 'Waiting to pair' : 'Pairing refused'}</span>
       {requests.data.map((request) => (
         <PairingRequestRow key={request.id} request={request} locked={locked} />
       ))}
@@ -28,6 +28,19 @@ export function PairingRequests({ locked }: { locked: boolean }) {
 }
 
 function PairingRequestRow({ request, locked }: { request: PairingRequest; locked: boolean }) {
+  if (request.state === 'denied') {
+    // Shown for a moment, so the request does not just vanish: the server dropped it after wrong codes.
+    return (
+      <p className="app-error" role="status">
+        Refused {request.clientName} from {request.from}: {request.message ?? 'the request was refused.'}
+      </p>
+    );
+  }
+
+  return <WaitingRow request={request} locked={locked} />;
+}
+
+function WaitingRow({ request, locked }: { request: PairingRequest; locked: boolean }) {
   const [code, setCode] = useState('');
   const [pending, setPending] = useState<'approve' | 'deny'>();
   const [failure, setFailure] = useState<string>();

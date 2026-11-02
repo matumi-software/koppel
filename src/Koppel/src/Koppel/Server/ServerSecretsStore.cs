@@ -79,7 +79,7 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
         return Task.CompletedTask;
     }
 
-    /// <summary>Registers a client. The secret is returned once and only its hash is stored.</summary>
+    /// <summary>Registers a client. The secret is returned and also kept in the encrypted file, so an admin can copy it again; the hash is what tokens are checked against.</summary>
     public async Task<(ClientView Client, string Secret)> CreateClientAsync(string name, CancellationToken cancellationToken)
     {
         var secret = Secrets.NewSecret();
@@ -124,16 +124,37 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
 
     public bool IsRegistered(string? clientId) => clientId is not null && _file.Current.Clients.Any(c => c.Id == clientId);
 
-    public ValueTask<bool> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken)
+    public async ValueTask<bool> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken)
     {
         var client = _file.Current.Clients.FirstOrDefault(c => c.Id == clientId);
         var ok = client is not null && Secrets.Verify(clientSecret, client.SecretHash);
         if (ok)
         {
             _lastSeen[clientId] = _time.GetUtcNow();
+            if (Secrets.IsLegacy(client!.SecretHash))
+            {
+                await UpgradeHashAsync(client, clientSecret, cancellationToken);
+            }
         }
 
-        return ValueTask.FromResult(ok);
+        return ok;
+    }
+
+    /// <summary>Swaps an older hash format for the current one, now that the secret is at hand. The client stays valid if this fails.</summary>
+    private async Task UpgradeHashAsync(RegisteredClient client, string secret, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var upgraded = Secrets.Hash(secret);
+            await _file.UpdateAsync(current => current with
+            {
+                Clients = [.. current.Clients.Select(c => c.Id == client.Id && c.SecretHash == client.SecretHash ? c with { SecretHash = upgraded } : c)],
+            }, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Not fatal: the old hash still verifies, and the next token request tries again.
+        }
     }
 
     public void Dispose()

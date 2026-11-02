@@ -55,6 +55,8 @@ public sealed class DiscoveryTests
             {
                 gone.TrySetResult();
             }
+
+            return Task.CompletedTask;
         };
         browser.Start();
 

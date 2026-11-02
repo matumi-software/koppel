@@ -484,20 +484,10 @@ internal sealed partial class UsbIpTlsServer(
     /// Low latency, and TCP keepalive so a client that vanished (a sleeping laptop, a pulled cable) is noticed
     /// in about a minute and the device is freed, instead of staying in use until Koppel restarts.
     /// </summary>
-    private void Tune(Socket socket)
+    private static void Tune(Socket socket)
     {
         socket.NoDelay = true;
-        try
-        {
-            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, 30);
-            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, 10);
-            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, 3);
-        }
-        catch (Exception ex) when (ex is SocketException or PlatformNotSupportedException)
-        {
-            LogKeepAliveFailed(ex.Message);
-        }
+        UsbSockets.EnableKeepAlive(socket);
     }
 
     private sealed record SessionIdentity(string ClientId, int Generation);
@@ -528,9 +518,6 @@ internal sealed partial class UsbIpTlsServer(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a connection from {Address}: too many handshakes are waiting")]
     private partial void LogTooManyHandshakes(IPAddress address);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not set TCP keepalive on a USB connection: {Reason}")]
-    private partial void LogKeepAliveFailed(string reason);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Count} USB sessions were still running when the listener stopped")]
     private partial void LogSessionsStillRunning(int count);

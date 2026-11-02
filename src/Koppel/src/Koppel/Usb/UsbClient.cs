@@ -78,7 +78,10 @@ internal sealed partial class UsbClient(
     private readonly TimeSpan _handshakeTimeout = TimeSpan.FromSeconds(configuration.GetValue("Usb:AttachTimeoutSeconds", 20));
 
     private readonly JsonConfigFile<AttachedDevices> _remembered = new(
-        Path.Combine(paths.ConfigDirectory, "attached.json"), AttachedDevices.Empty, KoppelJson.Files, logger);
+        Path.Combine(paths.ConfigDirectory, "attached.json"), AttachedDevices.Empty, KoppelJson.Files, logger, startWithDefaultsWhenUnusable: true);
+
+    /// <summary>Why <c>attached.json</c> is not being used, or null. Koppel started with nothing remembered.</summary>
+    public string? RememberedProblem => _remembered.Problem;
 
     private readonly BackgroundTasks _tasks = new(logger);
     private readonly ConcurrentDictionary<AttachKey, Attachment> _attachments = new();

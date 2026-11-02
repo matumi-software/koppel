@@ -22,8 +22,17 @@ namespace Koppel.Core.Configuration;
 /// </para>
 /// <para>
 /// <see cref="Changed"/> reaches subscribers in write order, one change at a time. A handler may await
-/// an update of this same file: that nested change is delivered at once instead of waiting for the
-/// handler that is running.
+/// an update of this same file: that nested change is written and applied at once, and its delivery is
+/// queued behind the delivery that is running (and whatever is already queued), so every subscriber sees
+/// the writes in the order they happened. The nested call returns without waiting for that delivery,
+/// because the handler it was called from is part of it.
+/// </para>
+/// <para>
+/// A file opened with <c>startWithDefaultsWhenUnusable</c> is for plain, non-critical files only. An
+/// unusable file does not stop <see cref="StartAsync"/>: the defaults are used in memory, the file is left
+/// untouched and <see cref="Problem"/> says why. The first change after that moves the unusable file
+/// aside as <c>name.unreadable-yyyyMMddHHmmssfff</c> (UTC), logs it, and writes a fresh file. Never use it
+/// where the defaults would be unsafe.
 /// </para>
 /// </remarks>
 public sealed partial class JsonConfigFile<T> : IDisposable
@@ -43,7 +52,10 @@ public sealed partial class JsonConfigFile<T> : IDisposable
     private readonly Func<T, string?>? _validate;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly AsyncLocal<bool> _delivering = new();
+    private readonly bool _startWithDefaultsWhenUnusable;
+
+    // The delivery the current async flow is inside, so an update made by a handler can queue behind it.
+    private readonly AsyncLocal<TaskCompletionSource?> _delivering = new();
     private FileSystemWatcher? _watcher;
     private CancellationTokenSource? _pendingReload;
     private T _current;
@@ -53,8 +65,10 @@ public sealed partial class JsonConfigFile<T> : IDisposable
     private string? _problem;
 
     /// <param name="validate">Returns why a value is not acceptable, or null when it is.</param>
-    public JsonConfigFile(string path, T defaults, JsonSerializerOptions json, ILogger logger, IFileCodec? codec = null, Func<T, string?>? validate = null)
+    /// <param name="startWithDefaultsWhenUnusable">Start with the defaults, and the file untouched, when it exists but cannot be used. Only for plain files whose defaults are safe.</param>
+    public JsonConfigFile(string path, T defaults, JsonSerializerOptions json, ILogger logger, IFileCodec? codec = null, Func<T, string?>? validate = null, bool startWithDefaultsWhenUnusable = false)
     {
+        _startWithDefaultsWhenUnusable = startWithDefaultsWhenUnusable;
         _path = path;
         _defaults = defaults;
         _json = json;
@@ -73,15 +87,15 @@ public sealed partial class JsonConfigFile<T> : IDisposable
     public T Current => Volatile.Read(ref _current);
 
     /// <summary>
-    /// Why the file on disk is not being applied (a hand edit that is unreadable or invalid), or null.
-    /// <see cref="Current"/> is still the last good value.
+    /// Why the file on disk is not being applied (unreadable or invalid), or null.
+    /// <see cref="Current"/> is still the last good value, or the defaults when the file was bad at start.
     /// </summary>
     public string? Problem => Volatile.Read(ref _problem);
 
     /// <summary>
     /// Loads the file, writing the defaults if it does not exist yet, then starts watching it.
     /// </summary>
-    /// <exception cref="ConfigFileException">The file exists but cannot be used. It is not touched.</exception>
+    /// <exception cref="ConfigFileException">The file exists but cannot be used, and the file was not opened to start with defaults. It is not touched.</exception>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var directory = System.IO.Path.GetDirectoryName(_path)!;
@@ -89,7 +103,15 @@ public sealed partial class JsonConfigFile<T> : IDisposable
         DeleteStaleTempFiles(directory);
         if (File.Exists(_path))
         {
-            SetCurrent(await LoadAsync(cancellationToken));
+            try
+            {
+                SetCurrent(await LoadAsync(cancellationToken));
+            }
+            catch (ConfigFileException ex) when (_startWithDefaultsWhenUnusable)
+            {
+                Volatile.Write(ref _problem, ex.Reason);
+                LogStartedWithDefaults(_path, ex.Reason);
+            }
         }
         else
         {
@@ -124,6 +146,7 @@ public sealed partial class JsonConfigFile<T> : IDisposable
     public async Task<T> UpdateAsync(Func<T, T> change, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(change);
+        var nested = _delivering.Value is { Task.IsCompleted: false };
         T next;
         Task previous;
         TaskCompletionSource mine;
@@ -145,7 +168,16 @@ public sealed partial class JsonConfigFile<T> : IDisposable
             _gate.Release();
         }
 
-        await DeliverAsync(next, previous, mine);
+        if (nested)
+        {
+            // Called from a handler: the delivery it is part of cannot finish before this returns.
+            _ = DeliverAsync(next, previous, mine);
+        }
+        else
+        {
+            await DeliverAsync(next, previous, mine);
+        }
+
         return next;
     }
 
@@ -182,8 +214,31 @@ public sealed partial class JsonConfigFile<T> : IDisposable
         }
         catch (ConfigFileException ex)
         {
-            LogReplacingBadEdit(_path, ex.Reason);
+            if (_startWithDefaultsWhenUnusable)
+            {
+                MoveAside(ex.Reason);
+            }
+            else
+            {
+                LogReplacingBadEdit(_path, ex.Reason);
+            }
         }
+    }
+
+    // Keeps what the user had instead of overwriting it. The caller then writes a fresh file.
+    private void MoveAside(string reason)
+    {
+        var aside = $"{_path}.unreadable-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        try
+        {
+            File.Move(_path, aside);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ConfigFileException(_path, $"it is not usable ({reason}) and could not be moved aside ({ex.Message})", ex);
+        }
+
+        LogMovedAside(_path, reason, aside);
     }
 
     // The ticket is taken under the gate, so deliveries are in the same order as the writes.
@@ -199,16 +254,13 @@ public sealed partial class JsonConfigFile<T> : IDisposable
     {
         try
         {
-            if (!_delivering.Value)
-            {
-                await previous;
-            }
-
-            _delivering.Value = true;
+            await previous;
+            _delivering.Value = mine;
             await Changed.RaiseAsync(value, _logger);
         }
         finally
         {
+            _delivering.Value = null;
             mine.TrySetResult();
         }
     }
@@ -386,6 +438,12 @@ public sealed partial class JsonConfigFile<T> : IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Path} was not applied: {Reason}. Keeping the last good value")]
     private partial void LogNotApplied(string path, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Path} cannot be used ({Reason}). Starting with defaults and leaving the file as it is until something changes it")]
+    private partial void LogStartedWithDefaults(string path, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{Path} cannot be used ({Reason}); it was moved to {Aside} and this change writes a fresh file")]
+    private partial void LogMovedAside(string path, string reason, string aside);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "{Path} was edited by hand but is not usable ({Reason}); this update replaces it")]
     private partial void LogReplacingBadEdit(string path, string reason);

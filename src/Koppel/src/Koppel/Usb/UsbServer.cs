@@ -54,7 +54,10 @@ internal sealed partial class UsbServer(
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
     private readonly JsonConfigFile<SharedDevices> _shared = new(
-        Path.Combine(paths.ConfigDirectory, "devices.json"), SharedDevices.Empty, KoppelJson.Files, logger);
+        Path.Combine(paths.ConfigDirectory, "devices.json"), SharedDevices.Empty, KoppelJson.Files, logger, startWithDefaultsWhenUnusable: true);
+
+    /// <summary>Why <c>devices.json</c> is not being used, or null. Koppel started with nothing shared.</summary>
+    public string? SharedProblem => _shared.Problem;
 
     private readonly ConcurrentDictionary<string, string> _faults = new();
     private readonly ConcurrentDictionary<string, (string ClientId, DateTimeOffset Since)> _attachedTo = new();

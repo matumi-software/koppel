@@ -237,9 +237,9 @@ public sealed class UsbClientFailureTests : IDisposable
     public async Task A_gateway_port_that_is_taken_does_not_stop_the_host_and_shows_in_the_client_list()
     {
         var ct = TestContext.Current.CancellationToken;
-        var port = KoppelFactory.FreePort();
-        var blocker = new TcpListener(IPAddress.Loopback, port);
+        var blocker = new TcpListener(IPAddress.Loopback, 0);
         blocker.Start();
+        var port = ((IPEndPoint)blocker.LocalEndpoint).Port;
         try
         {
             using var client = new KoppelFactory(kestrel: true, configuration: new Dictionary<string, string> { ["Gateway:Port"] = port.ToString(CultureInfo.InvariantCulture) });

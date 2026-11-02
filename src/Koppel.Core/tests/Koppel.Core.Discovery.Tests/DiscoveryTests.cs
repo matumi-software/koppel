@@ -130,8 +130,12 @@ public sealed class DiscoveryTests
         new DiscoveredServer("x", "2001:db8::5", 5241, Fingerprint, null).Url.Should().Be("https://[2001:db8::5]:5241");
     }
 
-    /// <summary>A real round trip over this machine's network interfaces, both libraries talking mDNS.</summary>
+    /// <summary>
+    /// A real round trip over this machine's network interfaces, both libraries talking mDNS. It needs
+    /// multicast, so it is tagged Integration: <c>dotnet test --filter "Category!=Integration"</c> skips it.
+    /// </summary>
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task A_browser_finds_an_announced_server_and_sees_it_leave()
     {
         var ct = TestContext.Current.CancellationToken;

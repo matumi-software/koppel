@@ -24,7 +24,7 @@ internal static class SystemEndpoints
     /// <summary>What this machine can do: share (usbip-host) and attach (vhci-hcd). Read-only.</summary>
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher, SettingsStore settings, UsbIpTlsServer listener) => TypedResults.Ok(new[]
+        app.MapGet("/api/system/checks", (IUsbHost host, IUsbAttacher attacher, SettingsStore settings, UsbIpTlsServer listener, UsbServer server, UsbClient client) => TypedResults.Ok(new[]
         {
             host.Unavailable is { } shareProblem
                 ? new SystemCheck("share", false, "Sharing is not available.", shareProblem)
@@ -37,7 +37,13 @@ internal static class SystemEndpoints
                 : new SystemCheck("listen", true, "The USB port is ready.", listener.Status.Listening ? $"Clients connect on port {listener.Status.Port}." : "This machine is not a server, so the USB port is closed."),
         }.Concat(settings.Problem is { } problem
             ? [new SystemCheck("settings", false, "settings.json was not applied.", problem)]
-            : []).ToArray()));
+            : [])
+            .Concat(server.SharedProblem is { } sharedProblem
+                ? [new SystemCheck("devices", false, "devices.json was not used.", sharedProblem)]
+                : [])
+            .Concat(client.RememberedProblem is { } rememberedProblem
+                ? [new SystemCheck("attached", false, "attached.json was not used.", rememberedProblem)]
+                : []).ToArray()));
         app.MapGet("/api/system/info", (HostInfo info, SettingsStore settings, ServerSecretsStore secrets) => TypedResults.Ok(new SystemInfo(
             Environment.MachineName,
             Version,

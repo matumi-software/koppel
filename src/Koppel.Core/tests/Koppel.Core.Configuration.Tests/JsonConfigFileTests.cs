@@ -161,6 +161,113 @@ public sealed class JsonConfigFileTests : IDisposable
     }
 
     [Fact]
+    public async Task A_nested_update_is_delivered_after_the_running_delivery_in_write_order_for_every_subscriber()
+    {
+        using var file = Create();
+        await file.StartAsync(Ct);
+        var first = new List<int>();
+        var second = new List<int>();
+        var enteredTwo = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTwo = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        file.Changed += async value =>
+        {
+            lock (first)
+            {
+                first.Add(value.Number);
+            }
+
+            if (value.Number == 2)
+            {
+                enteredTwo.SetResult();
+                await releaseTwo.Task;
+
+                // Written while 2 is still being delivered, after the 10 that is already waiting.
+                await file.UpdateAsync(current => current with { Number = 3 }, Ct);
+            }
+        };
+        file.Changed += value =>
+        {
+            lock (second)
+            {
+                second.Add(value.Number);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var two = file.UpdateAsync(current => current with { Number = 2 }, Ct);
+        await enteredTwo.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
+        var ten = file.UpdateAsync(current => current with { Number = 10 }, Ct);
+        await WaitForAsync(() => file.Current.Number == 10);
+        releaseTwo.SetResult();
+        await Task.WhenAll(two, ten).WaitAsync(TimeSpan.FromSeconds(5), Ct);
+        await WaitForAsync(() => file.Current.Number == 3 && second.Count == 3);
+
+        first.Should().Equal(2, 10, 3);
+        second.Should().Equal(2, 10, 3);
+    }
+
+    [Fact]
+    public async Task A_file_opened_to_start_with_defaults_survives_an_unusable_file_and_leaves_it_alone()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(FilePath, "{ not json", Ct);
+        var before = await File.ReadAllBytesAsync(FilePath, Ct);
+        using var file = Tolerant();
+
+        await file.StartAsync(Ct);
+
+        file.Current.Should().Be(new Sample("default", 1));
+        file.Problem.Should().Contain("not valid JSON");
+        (await File.ReadAllBytesAsync(FilePath, Ct)).Should().Equal(before);
+        Directory.GetFiles(_directory).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task A_change_over_an_unusable_file_moves_it_aside_and_writes_a_fresh_one()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(FilePath, "{ not json", Ct);
+        using var file = Tolerant();
+        await file.StartAsync(Ct);
+
+        await file.UpdateAsync(current => current with { Number = 5 }, Ct);
+
+        Read().Should().Be(new Sample("default", 5));
+        file.Problem.Should().BeNull();
+        var aside = Directory.GetFiles(_directory, "sample.json.unreadable-*").Should().ContainSingle().Subject;
+        (await File.ReadAllTextAsync(aside, Ct)).Should().Be("{ not json");
+    }
+
+    [Fact]
+    public async Task A_change_that_leaves_the_defaults_as_they_are_still_replaces_an_unusable_file()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(FilePath, "{ not json", Ct);
+        using var file = Tolerant();
+        await file.StartAsync(Ct);
+
+        await file.UpdateAsync(current => current, Ct);
+
+        Read().Should().Be(new Sample("default", 1));
+        Directory.GetFiles(_directory, "sample.json.unreadable-*").Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Fixing_an_unusable_file_by_hand_clears_the_problem_and_is_applied()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(FilePath, "{ not json", Ct);
+        using var file = Tolerant();
+        await file.StartAsync(Ct);
+
+        await File.WriteAllTextAsync(FilePath, """{ "name": "fixed", "number": 7 }""", Ct);
+        await WaitForAsync(() => file.Problem is null && file.Current.Number == 7);
+
+        Directory.GetFiles(_directory, "sample.json.unreadable-*").Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task An_update_that_changes_nothing_raises_once_and_does_not_write()
     {
         using var file = Create();
@@ -171,13 +278,15 @@ public sealed class JsonConfigFileTests : IDisposable
             Interlocked.Increment(ref raised);
             return Task.CompletedTask;
         };
-        var stamp = File.GetLastWriteTimeUtc(FilePath);
-        await Task.Delay(50, Ct);
+
+        // A write would move the time forward from this fixed point, so no waiting is needed to tell.
+        var longAgo = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(FilePath, longAgo);
 
         await file.UpdateAsync(current => current, Ct);
 
         raised.Should().Be(1);
-        File.GetLastWriteTimeUtc(FilePath).Should().Be(stamp);
+        File.GetLastWriteTimeUtc(FilePath).Should().Be(longAgo);
     }
 
     [Fact]
@@ -265,6 +374,9 @@ public sealed class JsonConfigFileTests : IDisposable
 
     private JsonConfigFile<Sample> Create(Func<Sample, string?>? validate = null) =>
         new(FilePath, new Sample("default", 1), JsonSerializerOptions.Web, NullLogger.Instance, validate: validate);
+
+    private JsonConfigFile<Sample> Tolerant() =>
+        new(FilePath, new Sample("default", 1), JsonSerializerOptions.Web, NullLogger.Instance, startWithDefaultsWhenUnusable: true);
 
     private Sample Read() => JsonSerializer.Deserialize<Sample>(File.ReadAllText(FilePath), JsonSerializerOptions.Web)!;
 

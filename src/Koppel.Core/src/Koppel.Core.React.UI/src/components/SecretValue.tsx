@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from './Button';
+import { copyText, selectText } from './clipboard';
 
 export interface SecretValueProps {
   /** Fetches the secret when someone reveals or copies it. Nothing is fetched before that. */
@@ -18,6 +19,7 @@ export function SecretValue({ loadSecret, unavailable }: SecretValueProps) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<'reveal' | 'copy'>();
   const [error, setError] = useState<string>();
+  const code = useRef<HTMLElement>(null);
 
   if (unavailable) {
     return <p className="kp-field__help">{unavailable}</p>;
@@ -38,9 +40,16 @@ export function SecretValue({ loadSecret, unavailable }: SecretValueProps) {
       if (action === 'reveal') {
         setRevealed((shown) => !shown);
       } else {
-        await navigator.clipboard.writeText(secret);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        try {
+          await copyText(secret);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch (e) {
+          // Show the secret and select it, so Ctrl+C works.
+          setRevealed(true);
+          requestAnimationFrame(() => selectText(code.current));
+          throw e;
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the secret.');
@@ -51,7 +60,9 @@ export function SecretValue({ loadSecret, unavailable }: SecretValueProps) {
 
   return (
     <div className="kp-secret">
-      <code className="kp-id kp-secret__value" aria-label={revealed ? 'Client secret' : 'Client secret, hidden'}>
+      {/* A label on <code> is not valid ARIA, and inside it the label would be copied with the secret. */}
+      <span className="kp-sr-only">{revealed ? 'Client secret' : 'Client secret, hidden'}</span>
+      <code ref={code} className="kp-id kp-secret__value">
         {revealed && value ? value : '••••••••••••••••••••'}
       </code>
       <div className="kp-row">
@@ -62,7 +73,11 @@ export function SecretValue({ loadSecret, unavailable }: SecretValueProps) {
           {copied ? 'Copied' : 'Copy'}
         </Button>
       </div>
-      {error && <span className="kp-error kp-type-caption">{error}</span>}
+      {error && (
+        <span className="kp-error kp-type-caption" role="status">
+          {error}
+        </span>
+      )}
     </div>
   );
 }
@@ -70,25 +85,39 @@ export function SecretValue({ loadSecret, unavailable }: SecretValueProps) {
 /** Text with a Copy button, for IDs and fingerprints. */
 export function CopyValue({ value, wrap }: { value: string; wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string>();
+  const code = useRef<HTMLElement>(null);
+
+  const copy = () => {
+    setError(undefined);
+    copyText(value).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      (e: unknown) => {
+        setCopied(false);
+        setError(e instanceof Error ? e.message : 'Could not copy.');
+        selectText(code.current);
+      },
+    );
+  };
+
   return (
-    <div className="kp-row" style={{ gap: 4 }}>
-      <code className="kp-id kp-secret__value" data-wrap={wrap ? 'true' : undefined}>
-        {value}
-      </code>
-      <Button
-        variant="ghost"
-        onPress={() =>
-          navigator.clipboard.writeText(value).then(
-            () => {
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            },
-            () => setCopied(false),
-          )
-        }
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </Button>
+    <div style={{ display: 'grid', gap: 4 }}>
+      <div className="kp-row" style={{ gap: 4 }}>
+        <code ref={code} className="kp-id kp-secret__value" data-wrap={wrap ? 'true' : undefined}>
+          {value}
+        </code>
+        <Button variant="ghost" onPress={copy}>
+          {copied ? 'Copied' : 'Copy'}
+        </Button>
+      </div>
+      {error && (
+        <span className="kp-error kp-type-caption" role="status">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

@@ -35,7 +35,7 @@ export function DeviceCardBody({ name, vendor, vidPid, busId, state, where, acti
       <p className="kp-device__where">{where}</p>
       {(action || footnote) && (
         <div className="kp-device__foot">
-          {footnote ? <span className="kp-switch__note">{footnote}</span> : <span />}
+          {footnote ? <span className="kp-switch__note" role="status">{footnote}</span> : <span />}
           {action}
         </div>
       )}

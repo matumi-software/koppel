@@ -27,7 +27,7 @@ export function Field({ label, labelHidden, help, state, mono, placeholder, acti
         {action}
       </div>
       {caption && (
-        <Text slot={state === 'invalid' ? 'errorMessage' : 'description'} className="kp-field__help">
+        <Text slot={state === 'invalid' ? 'errorMessage' : 'description'} className="kp-field__help" role={state === 'invalid' ? undefined : 'status'}>
           {caption}
         </Text>
       )}

@@ -1,7 +1,10 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="1CFA893C-6A76-421E-B40E-86B0F6A16154" Scope="perMachine">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Koppel is already installed." />
+    <!-- Same-version upgrades keep a rebuilt dev installer from installing next to the last one
+         (ICE61 warns about that and is suppressed in the wixproj). -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Koppel is already installed." AllowSameVersionUpgrades="yes" />
     <MediaTemplate EmbedCab="yes" />
 
     <!-- Shows in the Apps list when the MSI is installed on its own; setup.exe's entry carries the same icon. -->
@@ -22,29 +25,60 @@
       <Component Id="Service">
         <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes">
           <!-- Answers to "which Koppel servers are here?" arrive over multicast DNS. Windows' own mDNS rule
-               only covers its DNS client service, so Koppel needs its own, kept to the local subnet. -->
-          <fw:FirewallException Id="KoppelDiscovery" Name="Koppel: find servers on the local network" Protocol="udp" Port="5353" Scope="localSubnet" />
+               only covers its DNS client service, so Koppel needs its own, kept to the local subnet and to
+               domain and private networks: a laptop on a public network does not announce or browse. -->
+          <fw:FirewallException Id="KoppelDiscoveryDomain" Name="Koppel: find servers on the local network" Protocol="udp" Port="5353" Scope="localSubnet" Profile="domain" />
+          <fw:FirewallException Id="KoppelDiscoveryPrivate" Name="Koppel: find servers on the local network" Protocol="udp" Port="5353" Scope="localSubnet" Profile="private" />
         </File>
-        <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on http://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes" />
+        <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on http://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes">
+          <!-- Restart after a crash: after 5 s, again after 5 s, then every 30 s. The count resets after a day without one. -->
+          <util:ServiceConfig ServiceName="Koppel" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
+        </ServiceInstall>
         <ServiceControl Id="KoppelService" Name="Koppel" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+        <!-- The native app's UI is used on this machine only, so the web UI listens on the loopback address. Koppel's
+             own ports (token endpoint, USB over TLS) are not affected. -->
+        <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\Koppel" Name="Environment" Type="multiString" Value="Ports__HttpAddress=127.0.0.1" />
       </Component>
       <Files Include="$(var.StagingDir)\**">
         <Exclude Files="$(var.StagingDir)\Koppel.exe" />
       </Files>
     </ComponentGroup>
 
-    <!-- The driver goes in after the files and before the service starts; it comes out before the files go. -->
+    <!-- The data folder is made safe first, then the driver goes in after the files and before the service starts.
+         The driver comes out before the files go, but not when an upgrade is replacing this version: the new
+         version's install updates the same driver in place. -->
+    <SetProperty Id="PrepareDataFolder" Sequence="execute" Before="PrepareDataFolder"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\data-folder.ps1&quot;" />
+    <CustomAction Id="PrepareDataFolder" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
+
     <SetProperty Id="InstallUsbDriver" Sequence="execute" Before="InstallUsbDriver"
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Install" />
     <CustomAction Id="InstallUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
+    <!-- If the install fails after the driver went in, take it out again. Not on an upgrade: the old version stays. -->
+    <SetProperty Id="RollbackUsbDriver" Sequence="execute" Before="RollbackUsbDriver"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Uninstall" />
+    <CustomAction Id="RollbackUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="rollback" Impersonate="no" Return="ignore" />
+
+    <!-- Return="ignore" so a driver that will not come out never blocks an uninstall. driver.ps1 prints what it
+         failed to remove, and WixQuietExec puts that output in the MSI log. -->
     <SetProperty Id="RemoveUsbDriver" Sequence="execute" Before="RemoveUsbDriver"
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\driver.ps1&quot; -Uninstall" />
     <CustomAction Id="RemoveUsbDriver" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
 
+    <!-- pnputil can answer 3010 (a restart finishes the driver install). WixQuietExec reads that as a failure, so
+         driver.ps1 leaves a registry value and restart-flag.js (kept to one line, the Target column is short)
+         turns it into the DRIVER_RESTART property, which ScheduleReboot acts on. -->
+    <CustomAction Id="ReadDriverRestart" Script="jscript" ScriptSourceFile="restart-flag.js" Execute="immediate" Return="check" />
+
     <InstallExecuteSequence>
-      <Custom Action="InstallUsbDriver" After="InstallFiles" Condition="NOT REMOVE" />
-      <Custom Action="RemoveUsbDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot;" />
+      <Custom Action="PrepareDataFolder" After="InstallFiles" Condition="NOT REMOVE" />
+      <Custom Action="RollbackUsbDriver" Before="InstallUsbDriver" Condition="NOT REMOVE AND NOT WIX_UPGRADE_DETECTED" />
+      <Custom Action="InstallUsbDriver" After="PrepareDataFolder" Condition="NOT REMOVE" />
+      <Custom Action="RemoveUsbDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="ReadDriverRestart" After="InstallFinalize" Condition="NOT REMOVE" />
+      <ScheduleReboot After="ReadDriverRestart" Condition="DRIVER_RESTART" />
     </InstallExecuteSequence>
   </Package>
 </Wix>

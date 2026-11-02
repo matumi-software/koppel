@@ -4,6 +4,8 @@
   <PropertyGroup>
     <OutputName>Koppel</OutputName>
     <InstallerPlatform>x64</InstallerPlatform>
+    <!-- ICE61: MajorUpgrade AllowSameVersionUpgrades is deliberate, see Package.wxs. -->
+    <SuppressIces>ICE61</SuppressIces>
     <Logos>$(MSBuildThisFileDirectory)..\..\..\..\resources\design-system\assets\Logos</Logos>
     <DefineConstants>StagingDir=$(StagingDir);Version=$(Version);Logos=$(Logos)</DefineConstants>
   </PropertyGroup>

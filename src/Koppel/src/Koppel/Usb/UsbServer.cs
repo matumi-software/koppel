@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Koppel.Core.Activity;
 using Koppel.Core.Configuration;
 using Koppel.Core.Usb;
 using Koppel.Settings;
@@ -24,7 +25,10 @@ public sealed record DeviceView(
     string State,
     string? AttachedTo,
     DateTimeOffset? AttachedSince,
-    string? Fault);
+    string? Fault,
+    string? Serial = null,
+    string? Driver = null,
+    IReadOnlyList<string>? Interfaces = null);
 
 /// <summary>What the server's UI shows: its devices, or why it cannot share any.</summary>
 public sealed record ServerDevices(IReadOnlyList<DeviceView> Devices, string? Unavailable);
@@ -39,6 +43,7 @@ internal sealed partial class UsbServer(
     KoppelPaths paths,
     SettingsStore settings,
     TimeProvider time,
+    IActivityRecorder activity,
     ILogger<UsbServer> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
@@ -49,6 +54,8 @@ internal sealed partial class UsbServer(
     private readonly ConcurrentDictionary<string, string> _faults = new();
     private readonly ConcurrentDictionary<string, (string ClientId, DateTimeOffset Since)> _attachedTo = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ConcurrentDictionary<string, string> _names = new();
+    private HashSet<string>? _present;
     private string _lastJson = "";
     private ServerDevices _current = new([], null);
 
@@ -95,6 +102,17 @@ internal sealed partial class UsbServer(
         }, cancellationToken);
         TryApply(busId, share);
         await RefreshAsync(cancellationToken, force: true);
+
+        var name = _names.GetValueOrDefault(busId, busId);
+        var entity = new EntityRef(busId, name, "device");
+        if (_faults.TryGetValue(busId, out var fault))
+        {
+            await activity.RecordAsync(entity, share ? ActivityReason.Shared : ActivityReason.Unshared, ActivityOutcome.Failed, $"{name} was not {(share ? "shared" : "unshared")}", fault);
+        }
+        else
+        {
+            await activity.RecordAsync(entity, share ? ActivityReason.Shared : ActivityReason.Unshared, ActivityOutcome.Succeeded, share ? $"{name} is shared" : $"{name} is no longer shared");
+        }
     }
 
     /// <summary>Called by the data plane when a client imports or releases a device.</summary>
@@ -195,6 +213,31 @@ internal sealed partial class UsbServer(
         {
             await handler(next);
         }
+
+        await RecordPlugChangesAsync(next);
+    }
+
+    /// <summary>Logs devices that appeared or disappeared since the last look. The first look only remembers.</summary>
+    private async Task RecordPlugChangesAsync(ServerDevices devices)
+    {
+        var present = devices.Devices.Where(d => d.State != "offline").Select(d => d.BusId).ToHashSet(StringComparer.Ordinal);
+        var previous = Interlocked.Exchange(ref _present, present);
+        if (previous is null)
+        {
+            return;
+        }
+
+        foreach (var busId in present.Except(previous))
+        {
+            var name = _names.GetValueOrDefault(busId, busId);
+            await activity.RecordAsync(new EntityRef(busId, name, "device"), ActivityReason.Plugged, ActivityOutcome.Succeeded, $"{name} was plugged in on bus {busId}");
+        }
+
+        foreach (var busId in previous.Except(present))
+        {
+            var name = _names.GetValueOrDefault(busId, busId);
+            await activity.RecordAsync(new EntityRef(busId, name, "device"), ActivityReason.Unplugged, ActivityOutcome.Succeeded, $"{name} was unplugged from bus {busId}");
+        }
     }
 
     private ServerDevices Build()
@@ -203,6 +246,7 @@ internal sealed partial class UsbServer(
         var devices = host.ListDevices();
         var views = devices.Select(d =>
         {
+            _names[d.BusId] = d.Product ?? "Unknown device";
             var state = d.Driver == "usbip-host"
                 ? host.GetStatus(d.BusId) == ExportStatus.Used ? "attached" : "shared"
                 : "local";
@@ -215,16 +259,44 @@ internal sealed partial class UsbServer(
                 state,
                 state == "attached" && _attachedTo.TryGetValue(d.BusId, out var holder) ? holder.ClientId : null,
                 state == "attached" && _attachedTo.TryGetValue(d.BusId, out var held) ? held.Since : null,
-                _faults.GetValueOrDefault(d.BusId));
+                _faults.GetValueOrDefault(d.BusId),
+                d.Serial,
+                d.Driver,
+                [.. d.Interfaces.Select(i => InterfaceClassName(i.Class)).Distinct()]);
         }).ToList();
 
         // Shared devices that are unplugged stay visible, so the user knows they come back shared.
         views.AddRange(intent
             .Where(busId => devices.All(d => d.BusId != busId))
-            .Select(busId => new DeviceView(busId, "", "Unplugged device", null, "", "offline", null, null, _faults.GetValueOrDefault(busId))));
+            .Select(busId => new DeviceView(busId, "", _names.GetValueOrDefault(busId, "Unplugged device"), null, "", "offline", null, null, _faults.GetValueOrDefault(busId))));
 
         return new ServerDevices([.. views.OrderBy(v => v.BusId, StringComparer.Ordinal)], host.Unavailable);
     }
+
+    /// <summary>USB interface classes as people know them.</summary>
+    internal static string InterfaceClassName(byte code) => code switch
+    {
+        0x01 => "Audio",
+        0x02 => "Communications",
+        0x03 => "HID (keyboard, mouse, game pad)",
+        0x05 => "Physical",
+        0x06 => "Image",
+        0x07 => "Printer",
+        0x08 => "Mass storage",
+        0x09 => "Hub",
+        0x0A => "CDC data",
+        0x0B => "Smart card",
+        0x0D => "Content security",
+        0x0E => "Video",
+        0x0F => "Health",
+        0x10 => "Audio/video",
+        0xDC => "Diagnostic",
+        0xE0 => "Wireless",
+        0xEF => "Miscellaneous",
+        0xFE => "Application specific",
+        0xFF => "Vendor specific",
+        _ => $"Class 0x{code:x2}",
+    };
 
     internal static string SpeedLabel(UsbSpeed speed) => speed switch
     {

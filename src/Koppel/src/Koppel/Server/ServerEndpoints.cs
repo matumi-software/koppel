@@ -1,13 +1,16 @@
+using Koppel.Core.Activity;
 using Koppel.Core.Auth;
 
 namespace Koppel.Server;
 
 internal sealed record CreateClientRequest(string? Name);
 
-/// <summary>Returned once when a client is created. The secret is never shown again.</summary>
+/// <summary>Returned when a client is created. The secret is also kept, encrypted, so it can be copied again later.</summary>
 internal sealed record CreatedClient(string ClientId, string ClientSecret, string Name);
 
 internal sealed record ServerIdentity(string Name, string Fingerprint, int HttpsPort);
+
+internal sealed record ClientSecretResponse(string ClientSecret);
 
 internal static class ServerEndpoints
 {
@@ -25,7 +28,7 @@ internal static class ServerEndpoints
 
         group.MapGet("/clients", (ServerSecretsStore secrets) => TypedResults.Ok(secrets.Clients));
 
-        group.MapPost("/clients", async Task<IResult> (CreateClientRequest request, ServerSecretsStore secrets, CancellationToken cancellationToken) =>
+        group.MapPost("/clients", async Task<IResult> (CreateClientRequest request, ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
             var name = request.Name?.Trim();
             if (string.IsNullOrEmpty(name) || name.Length > 80)
@@ -37,13 +40,50 @@ internal static class ServerEndpoints
             }
 
             var (client, secret) = await secrets.CreateClientAsync(name, cancellationToken);
+            await activity.RecordAsync(new EntityRef(client.Id, client.Name, "client"), ActivityReason.ClientAdded, ActivityOutcome.Succeeded, $"Client {client.Name} was added");
             return TypedResults.Created($"/api/server/clients/{client.Id}", new CreatedClient(client.Id, secret, client.Name));
         });
 
-        group.MapDelete("/clients/{clientId}", async Task<IResult> (string clientId, ServerSecretsStore secrets, CancellationToken cancellationToken) =>
-            await secrets.RevokeClientAsync(clientId, cancellationToken)
-                ? TypedResults.Accepted((string?)null)
-                : TypedResults.NotFound());
+        group.MapDelete("/clients/{clientId}", async Task<IResult> (string clientId, ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        {
+            var name = secrets.NameOf(clientId) ?? clientId;
+            if (!await secrets.RevokeClientAsync(clientId, cancellationToken))
+            {
+                return TypedResults.NotFound();
+            }
+
+            await activity.RecordAsync(new EntityRef(clientId, name, "client"), ActivityReason.ClientRevoked, ActivityOutcome.Succeeded, $"Client {name} was revoked");
+            return TypedResults.Accepted((string?)null);
+        });
+
+        // One client's secret, fetched only when someone reveals or copies it.
+        group.MapGet("/clients/{clientId}/secret", IResult (string clientId, ServerSecretsStore secrets) =>
+        {
+            try
+            {
+                return secrets.SecretOf(clientId) is { } secret
+                    ? TypedResults.Ok(new ClientSecretResponse(secret))
+                    : TypedResults.Conflict(new { error = "This client was added before secrets were kept. Rotate the secret to get one you can copy." });
+            }
+            catch (KeyNotFoundException)
+            {
+                return TypedResults.NotFound();
+            }
+        });
+
+        // A new secret, returned once in the response; the client list follows over SignalR.
+        group.MapPost("/clients/{clientId}/rotate", async Task<IResult> (string clientId, ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        {
+            var secret = await secrets.RotateSecretAsync(clientId, cancellationToken);
+            if (secret is null)
+            {
+                return TypedResults.NotFound();
+            }
+
+            var name = secrets.NameOf(clientId) ?? clientId;
+            await activity.RecordAsync(new EntityRef(clientId, name, "client"), ActivityReason.SecretRotated, ActivityOutcome.Succeeded, $"The secret for {name} was rotated");
+            return TypedResults.Ok(new ClientSecretResponse(secret));
+        });
 
         return app;
     }

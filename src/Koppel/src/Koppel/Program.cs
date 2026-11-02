@@ -1,5 +1,6 @@
 using Koppel;
 using Koppel.Client;
+using Koppel.Core.Activity;
 using Koppel.Core.Auth;
 using Koppel.Core.Usb;
 using Koppel.Core.Usb.Linux;
@@ -28,6 +29,10 @@ builder.Services.AddSignalR().AddJsonProtocol(options => KoppelJson.Configure(op
 var paths = KoppelPaths.FromConfiguration(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, httpPort, httpsPort));
+builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton<IActivityRecorder>(sp => sp.GetRequiredService<InMemoryActivityStore>());
+builder.Services.AddSingleton<IActivityReader>(sp => sp.GetRequiredService<InMemoryActivityStore>());
 builder.Services.AddSingleton(sp => SecretBoxFactory.Create(paths, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Koppel.Security")));
 SecretBoxFactory.AddAppDataProtection(builder.Services, paths);
 
@@ -82,6 +87,7 @@ app.MapClientEndpoints();
 app.MapUsbServerEndpoints();
 app.MapUsbClientEndpoints();
 app.MapSystemEndpoints();
+app.MapActivityEndpoints();
 app.MapHub<UiHub>("/api/hubs/ui");
 app.MapHub<RemoteHub>("/api/hubs/remote");
 

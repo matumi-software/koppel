@@ -91,6 +91,42 @@ public sealed class ClientAuthTests : IDisposable
         onDisk.Should().NotContain("a-very-recognisable-name").And.NotContain(clientId);
     }
 
+    [Fact]
+    public async Task Secret_can_be_fetched_again_and_rotating_it_retires_the_old_one()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (clientId, secret) = await CreateClientAsync("bench-2", ct);
+        using var ui = _koppel.CreateUiClient();
+
+        var fetched = await ui.GetFromJsonAsync<JsonElement>($"/api/server/clients/{clientId}/secret", ct);
+        fetched.GetProperty("clientSecret").GetString().Should().Be(secret);
+
+        using var rotate = await ui.PostAsync($"/api/server/clients/{clientId}/rotate", null, ct);
+        rotate.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rotated = (await rotate.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("clientSecret").GetString()!;
+        rotated.Should().NotBe(secret);
+
+        using var https = _koppel.CreateHttpsClient();
+        using var oldToken = await RequestTokenAsync(https, clientId, secret, ct);
+        oldToken.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        using var newToken = await RequestTokenAsync(https, clientId, rotated, ct);
+        newToken.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Adding_and_revoking_a_client_is_in_the_activity_log()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var (clientId, _) = await CreateClientAsync("bench-2", ct);
+        using var ui = _koppel.CreateUiClient();
+        using var revoke = await ui.DeleteAsync($"/api/server/clients/{clientId}", ct);
+
+        var activity = await ui.GetFromJsonAsync<JsonElement>($"/api/activity?entity={clientId}", ct);
+
+        activity.EnumerateArray().Select(e => e.GetProperty("reason").GetString()).Should().Equal("clientRevoked", "clientAdded");
+        activity[0].GetProperty("summary").GetString().Should().Be("Client bench-2 was revoked");
+    }
+
     private async Task<(string ClientId, string Secret)> CreateClientAsync(string name, CancellationToken ct)
     {
         using var ui = _koppel.CreateUiClient();

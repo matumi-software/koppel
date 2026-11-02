@@ -3,6 +3,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
 using Koppel.Client;
+using Koppel.Core.Activity;
 using Koppel.Core.Auth;
 using Koppel.Core.Security;
 using Koppel.Core.Usb;
@@ -29,6 +30,7 @@ internal sealed partial class UsbClient(
     SettingsStore settings,
     IUsbAttacher attacher,
     TimeProvider time,
+    IActivityRecorder activity,
     ILogger<UsbClient> logger) : BackgroundService
 {
     private readonly ConcurrentDictionary<string, Attachment> _attachments = new();
@@ -65,6 +67,7 @@ internal sealed partial class UsbClient(
             {
                 _faults[busId] = ex.Message;
                 LogAttachFailed(busId, ex.Message);
+                await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Failed, $"{NameOf(busId)} was not attached", ex.Message);
                 await RaiseAsync();
             }
         });
@@ -78,6 +81,7 @@ internal sealed partial class UsbClient(
             try
             {
                 attacher.Detach(attachment.Port);
+                await activity.RecordAsync(Device(busId), ActivityReason.Detached, ActivityOutcome.Succeeded, $"{NameOf(busId)} was detached");
             }
             catch (UsbHostException ex)
             {
@@ -231,6 +235,7 @@ internal sealed partial class UsbClient(
             var stop = new CancellationTokenSource();
             _attachments[busId] = new Attachment(port, stop, time.GetUtcNow());
             LogAttached(busId, port);
+            await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Succeeded, $"{NameOf(busId)} is attached here on virtual port {port}");
             await RaiseAsync();
 
             _ = Task.Run(async () =>
@@ -271,12 +276,26 @@ internal sealed partial class UsbClient(
         }
     }
 
-    private Task SetLinkAsync(string link, string? message)
+    private async Task SetLinkAsync(string link, string? message)
     {
+        var previous = _link;
         _link = link;
         _linkMessage = message;
-        return RaiseAsync();
+        if (previous != link && (link == "connected" || (previous == "connected" && link is "error" or "connecting")))
+        {
+            var server = connection.Current.ServerUrl is { } url ? new Uri(url).Host : "the server";
+            var entity = new EntityRef("link", server, "link");
+            await (link == "connected"
+                ? activity.RecordAsync(entity, ActivityReason.LinkUp, ActivityOutcome.Succeeded, $"Linked to {server}")
+                : activity.RecordAsync(entity, ActivityReason.LinkDown, ActivityOutcome.Failed, $"Lost the link to {server}", message));
+        }
+
+        await RaiseAsync();
     }
+
+    private EntityRef Device(string busId) => new(busId, NameOf(busId), "device");
+
+    private string NameOf(string busId) => _remote.Devices.FirstOrDefault(d => d.BusId == busId)?.Name ?? busId;
 
     private Task RaiseAsync() => Changed?.Invoke(Current) ?? Task.CompletedTask;
 

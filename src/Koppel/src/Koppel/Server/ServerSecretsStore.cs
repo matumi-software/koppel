@@ -7,8 +7,11 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace Koppel.Server;
 
-/// <summary>A client allowed to use this server. Only a hash of its secret is kept.</summary>
-internal sealed record RegisteredClient(string Id, string Name, string SecretHash, DateTimeOffset CreatedAt);
+/// <summary>
+/// A client allowed to use this server. The secret is kept, inside the encrypted file, so an admin can
+/// copy it again later, as Timebase Pulse does. Clients made before that have only the hash.
+/// </summary>
+internal sealed record RegisteredClient(string Id, string Name, string SecretHash, DateTimeOffset CreatedAt, string? Secret = null);
 
 /// <summary>The contents of the encrypted <c>secrets.json</c> (server role).</summary>
 internal sealed record ServerSecrets(string? SigningKey, string? CertificatePfx, IReadOnlyList<RegisteredClient> Clients)
@@ -16,8 +19,10 @@ internal sealed record ServerSecrets(string? SigningKey, string? CertificatePfx,
     public static ServerSecrets Empty { get; } = new(null, null, []);
 }
 
-/// <summary>What the UI may see about a client: never its secret or hash.</summary>
-public sealed record ClientView(string Id, string Name, DateTimeOffset CreatedAt);
+/// <summary>What the UI lists about a client. The secret is fetched one client at a time, on demand.</summary>
+/// <param name="HasSecret">False for clients made before secrets were kept: rotate to get a copyable one.</param>
+/// <param name="LastSeen">When the client last got a token, since this server started.</param>
+public sealed record ClientView(string Id, string Name, DateTimeOffset CreatedAt, bool HasSecret, DateTimeOffset? LastSeen);
 
 /// <summary>
 /// Owns <c>secrets.json</c>: the token signing key, the HTTPS certificate and the registered clients.
@@ -27,6 +32,7 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
 {
     private readonly JsonConfigFile<ServerSecrets> _file;
     private readonly TimeProvider _time;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _lastSeen = new();
     private RsaSecurityKey? _signingKey;
     private X509Certificate2? _certificate;
 
@@ -77,9 +83,31 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
     public async Task<(ClientView Client, string Secret)> CreateClientAsync(string name, CancellationToken cancellationToken)
     {
         var secret = Secrets.NewSecret();
-        var client = new RegisteredClient(Secrets.NewId("client"), name.Trim(), Secrets.Hash(secret), _time.GetUtcNow());
+        var client = new RegisteredClient(Secrets.NewId("client"), name.Trim(), Secrets.Hash(secret), _time.GetUtcNow(), secret);
         await _file.UpdateAsync(current => current with { Clients = [.. current.Clients, client] }, cancellationToken);
-        return (new ClientView(client.Id, client.Name, client.CreatedAt), secret);
+        return (ToView(client), secret);
+    }
+
+    /// <summary>The stored secret, or null when this client predates kept secrets. Throws when unknown.</summary>
+    public string? SecretOf(string clientId) =>
+        (_file.Current.Clients.FirstOrDefault(c => c.Id == clientId) ?? throw new KeyNotFoundException(clientId)).Secret;
+
+    public string? NameOf(string? clientId) => _file.Current.Clients.FirstOrDefault(c => c.Id == clientId)?.Name;
+
+    /// <summary>Replaces the secret. The old one stops working for new tokens at once.</summary>
+    public async Task<string?> RotateSecretAsync(string clientId, CancellationToken cancellationToken)
+    {
+        if (_file.Current.Clients.All(c => c.Id != clientId))
+        {
+            return null;
+        }
+
+        var secret = Secrets.NewSecret();
+        await _file.UpdateAsync(current => current with
+        {
+            Clients = [.. current.Clients.Select(c => c.Id == clientId ? c with { SecretHash = Secrets.Hash(secret), Secret = secret } : c)],
+        }, cancellationToken);
+        return secret;
     }
 
     /// <summary>Removes a client. Its tokens stop working when they expire; new ones are refused at once.</summary>
@@ -99,7 +127,13 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
     public ValueTask<bool> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken)
     {
         var client = _file.Current.Clients.FirstOrDefault(c => c.Id == clientId);
-        return ValueTask.FromResult(client is not null && Secrets.Verify(clientSecret, client.SecretHash));
+        var ok = client is not null && Secrets.Verify(clientSecret, client.SecretHash);
+        if (ok)
+        {
+            _lastSeen[clientId] = _time.GetUtcNow();
+        }
+
+        return ValueTask.FromResult(ok);
     }
 
     public void Dispose()
@@ -108,8 +142,10 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
         _certificate?.Dispose();
     }
 
-    private static IReadOnlyList<ClientView> ToViews(ServerSecrets secrets) =>
-        [.. secrets.Clients.Select(c => new ClientView(c.Id, c.Name, c.CreatedAt))];
+    private IReadOnlyList<ClientView> ToViews(ServerSecrets secrets) => [.. secrets.Clients.Select(ToView)];
+
+    private ClientView ToView(RegisteredClient c) =>
+        new(c.Id, c.Name, c.CreatedAt, c.Secret is not null, _lastSeen.TryGetValue(c.Id, out var seen) ? seen : null);
 
     private static string NewSigningKey()
     {

@@ -1,9 +1,18 @@
+using System.Reflection;
 using Koppel.Core.Usb;
+using Koppel.Server;
+using Koppel.Settings;
 
 namespace Koppel;
 
 /// <summary>One thing Koppel needs from this machine, for the first-run checks.</summary>
 internal sealed record SystemCheck(string Id, bool Ok, string Title, string Detail);
+
+/// <summary>Facts about this process that never change while it runs.</summary>
+internal sealed record HostInfo(DateTimeOffset StartedAt, int UiPort, int HttpsPort);
+
+/// <summary>What the side panel shows about this machine.</summary>
+internal sealed record SystemInfo(string Name, string Version, DateTimeOffset StartedAt, KoppelRole Role, int UiPort, int HttpsPort, int UsbPort, string Fingerprint, string Os);
 
 internal static class SystemEndpoints
 {
@@ -19,6 +28,16 @@ internal static class SystemEndpoints
                 ? new SystemCheck("attach", false, "Attaching is not available.", attachProblem)
                 : new SystemCheck("attach", true, "vhci-hcd is loaded.", "This machine can attach devices."),
         }));
+        app.MapGet("/api/system/info", (HostInfo info, SettingsStore settings, ServerSecretsStore secrets) => TypedResults.Ok(new SystemInfo(
+            Environment.MachineName,
+            typeof(SystemEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev",
+            info.StartedAt,
+            settings.Current.Role,
+            info.UiPort,
+            info.HttpsPort,
+            settings.Current.ListenPort,
+            secrets.Fingerprint,
+            System.Runtime.InteropServices.RuntimeInformation.OSDescription)));
         return app;
     }
 }

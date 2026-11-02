@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
+using Koppel.Core.Activity;
 using Koppel.Core.Auth;
 using Koppel.Core.Usb;
 using Koppel.Server;
@@ -23,6 +24,7 @@ namespace Koppel.Usb;
 internal sealed partial class UsbIpTlsServer(
     UsbServer usb,
     ServerSecretsStore secrets,
+    IActivityRecorder activity,
     SettingsStore settings,
     IServiceProvider services,
     ILogger<UsbIpTlsServer> logger) : BackgroundService
@@ -180,6 +182,9 @@ internal sealed partial class UsbIpTlsServer(
 
             await tls.WriteAsync(UsbIpProtocol.ImportReply(device), stoppingToken);
             LogAttached(busId, clientId);
+            var clientName = secrets.NameOf(clientId) ?? clientId;
+            var deviceName = device.Product ?? busId;
+            await activity.RecordAsync(new EntityRef(busId, deviceName, "device"), ActivityReason.Attached, ActivityOutcome.Succeeded, $"{clientName} attached {deviceName}", clientId);
             await usb.SetAttachedAsync(busId, clientId);
             try
             {
@@ -189,6 +194,7 @@ internal sealed partial class UsbIpTlsServer(
             finally
             {
                 LogDetached(busId, clientId);
+                await activity.RecordAsync(new EntityRef(busId, deviceName, "device"), ActivityReason.Detached, ActivityOutcome.Succeeded, $"{clientName} released {deviceName}", clientId);
                 await usb.SetAttachedAsync(busId, null);
             }
         }

@@ -1,0 +1,23 @@
+# Runs a Koppel image that is already on this machine (see deploy.sh). No build here.
+#   docker compose up -d
+# Then browse http://<this machine>:5240/
+
+name: koppel
+
+services:
+  koppel:
+    image: matumi/koppel:latest
+    ports:
+      - "5240:5240"   # UI
+      - "5241:5241"   # token endpoint and remote API (HTTPS)
+      - "3240:3240"   # USB traffic (TLS)
+    volumes:
+      - koppel:/koppel
+    # Binding devices to usbip-host and attaching through vhci-hcd writes to /sys, which needs root
+    # in a privileged container. Attached devices appear on this machine's kernel.
+    user: "0"
+    privileged: true
+    restart: unless-stopped
+
+volumes:
+  koppel:

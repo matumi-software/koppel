@@ -1,4 +1,5 @@
 using Koppel.Client;
+using Koppel.Core.Activity;
 using Koppel.Server;
 using Koppel.Settings;
 using Koppel.Usb;
@@ -24,6 +25,9 @@ public interface IUiClient
 
     /// <summary>Client role: the server's shared devices and what is attached here.</summary>
     Task ClientDevicesChanged(ClientDevices devices);
+
+    /// <summary>Something happened. The UI prepends it to the activity log.</summary>
+    Task ActivityRecorded(ActivityEvent activity);
 }
 
 /// <summary>The UI's live link, mapped at <c>/api/hubs/ui</c>. Push only; commands go over REST.</summary>
@@ -36,6 +40,7 @@ internal sealed class UiHubRelay(
     ConnectionStore connection,
     UsbServer usbServer,
     UsbClient usbClient,
+    InMemoryActivityStore activity,
     IHubContext<UiHub, IUiClient> hub,
     IHubContext<RemoteHub, IRemoteClient> remote) : IHostedService
 {
@@ -46,6 +51,7 @@ internal sealed class UiHubRelay(
         connection.Changed += PushConnectionAsync;
         usbServer.Changed += PushServerDevicesAsync;
         usbClient.Changed += PushClientDevicesAsync;
+        activity.Recorded += PushActivityAsync;
         return Task.CompletedTask;
     }
 
@@ -56,6 +62,7 @@ internal sealed class UiHubRelay(
         connection.Changed -= PushConnectionAsync;
         usbServer.Changed -= PushServerDevicesAsync;
         usbClient.Changed -= PushClientDevicesAsync;
+        activity.Recorded -= PushActivityAsync;
         return Task.CompletedTask;
     }
 
@@ -72,4 +79,6 @@ internal sealed class UiHubRelay(
     }
 
     private Task PushClientDevicesAsync(ClientDevices value) => hub.Clients.All.ClientDevicesChanged(value);
+
+    private Task PushActivityAsync(ActivityEvent value) => hub.Clients.All.ActivityRecorded(value);
 }

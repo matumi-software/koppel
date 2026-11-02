@@ -1,3 +1,5 @@
+using Koppel.Core.Activity;
+
 namespace Koppel.Settings;
 
 internal static class SettingsEndpoints
@@ -12,7 +14,7 @@ internal static class SettingsEndpoints
 
         group.MapGet("/", (SettingsStore store) => TypedResults.Ok(store.Current));
 
-        group.MapPatch("/", async Task<IResult> (SettingsPatch patch, SettingsStore store, CancellationToken cancellationToken) =>
+        group.MapPatch("/", async Task<IResult> (SettingsPatch patch, SettingsStore store, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
             var errors = patch.Validate();
             if (errors.Count > 0)
@@ -21,6 +23,11 @@ internal static class SettingsEndpoints
             }
 
             await store.ApplyAsync(patch, cancellationToken);
+            if (patch.Describe() is { Length: > 0 } summary)
+            {
+                await activity.RecordAsync(new EntityRef("machine", Environment.MachineName, "machine"), ActivityReason.Reconfigured, ActivityOutcome.Succeeded, summary);
+            }
+
             return TypedResults.Accepted((string?)null);
         });
 

@@ -7,12 +7,10 @@ name: koppel
 services:
   koppel:
     image: matumi/koppel:latest
-    # The machine name Koppel shows and puts in its certificate. deploy.sh sets it to the host's name.
-    hostname: ${KOPPEL_HOSTNAME:-koppel}
-    ports:
-      - "5240:5240"   # UI
-      - "5241:5241"   # token endpoint and remote API (HTTPS)
-      - "3240:3240"   # USB traffic (TLS)
+    # The host's network: clients find the server through multicast DNS, which does not cross Docker's
+    # bridge. Koppel listens on the host's ports directly (5240 UI, 5241 HTTPS, 3240 USB over TLS) and
+    # takes the host's name, which it shows and puts in its certificate.
+    network_mode: host
     volumes:
       - koppel:/koppel
     # Binding devices to usbip-host and attaching through vhci-hcd writes to /sys, which needs root

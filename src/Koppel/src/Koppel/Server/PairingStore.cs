@@ -116,6 +116,18 @@ internal sealed class PairingStore(ServerSecretsStore secrets, IActivityRecorder
         return true;
     }
 
+    /// <summary>The client gave up. Only a request still waiting can be withdrawn.</summary>
+    public async Task<bool> WithdrawAsync(string id)
+    {
+        if (!_requests.TryGetValue(id, out var request) || request.State != "waiting" || !_requests.TryRemove(id, out _))
+        {
+            return false;
+        }
+
+        await RaiseAsync();
+        return true;
+    }
+
     /// <summary>The client polls. Credentials are handed over once, then the request is gone.</summary>
     public PairingPoll? Poll(string id)
     {

@@ -97,6 +97,22 @@ public sealed class PairingTests : IDisposable
     }
 
     [Fact]
+    public async Task Cancelling_on_the_client_withdraws_the_request_from_the_server()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        await using var serverHub = await _server.ConnectUiHubAsync(ct);
+        var requests = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetArrayLength() == 1);
+        var withdrawn = Link.Waiter(serverHub, "PairingRequestsChanged", r => r.GetArrayLength() == 0);
+
+        using var clientUi = _client.CreateUiClient();
+        await StartPairingAsync(clientUi, ct);
+        await requests.WaitAsync(TimeSpan.FromSeconds(20), ct);
+        (await clientUi.DeleteAsync("/api/client/pairing", ct)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        await withdrawn.WaitAsync(TimeSpan.FromSeconds(10), ct);
+    }
+
+    [Fact]
     public async Task A_nonce_that_does_not_match_its_commitment_is_refused()
     {
         var ct = TestContext.Current.CancellationToken;

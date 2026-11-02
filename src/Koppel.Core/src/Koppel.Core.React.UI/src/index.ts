@@ -8,6 +8,7 @@ export { ItemList, type ItemListProps } from './components/ItemList';
 export { KoppelMark, type KoppelMarkProps } from './components/KoppelMark';
 export { LinkBanner, type LinkBannerProps, type LinkState } from './components/LinkBanner';
 export { ModalDialog, type ModalDialogProps } from './components/ModalDialog';
+export { PairingCode } from './components/PairingCode';
 export { MiniList, Panel, Setting, SettingList, type MiniListItem, type PanelProps, type SettingProps } from './components/Panel';
 export { CopyValue, SecretValue, type SecretValueProps } from './components/SecretValue';
 export { SegmentedControl, type SegmentedControlProps, type SegmentOption } from './components/SegmentedControl';

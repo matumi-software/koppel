@@ -49,6 +49,9 @@ internal static class PairingEndpoints
         pair.MapGet("/{requestId}", IResult (string requestId, PairingStore pairing) =>
             pairing.Poll(requestId) is { } poll ? TypedResults.Ok(poll) : TypedResults.NotFound());
 
+        pair.MapDelete("/{requestId}", async Task<IResult> (string requestId, PairingStore pairing) =>
+            await pairing.WithdrawAsync(requestId) ? TypedResults.NoContent() : TypedResults.NotFound());
+
         return app;
     }
 

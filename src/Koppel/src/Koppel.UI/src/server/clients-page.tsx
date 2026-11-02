@@ -9,6 +9,7 @@ import { useMachineName } from '@/shared/use-machine-name';
 import { usePending } from '@/shared/use-pending';
 import { Frame } from '@/shell/frame';
 import { useFrame } from '@/shell/frame-context';
+import { PairingRequests } from './pairing-requests';
 
 const clientsKey = ['clients'] as const;
 const dateFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -76,6 +77,8 @@ export function ClientsPage() {
           </span>
         </section>
       )}
+
+      <PairingRequests locked={locked} />
 
       <section className="kp-card" aria-label="Registered clients" style={{ padding: 0, gap: 0 }}>
         {clients.data && clients.data.length === 0 && <p className="kp-mini__empty">No clients yet. Add one below.</p>}

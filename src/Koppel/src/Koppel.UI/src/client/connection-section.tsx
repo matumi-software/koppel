@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Field, Panel } from '@koppel/react-ui';
 import { getConnection, putConnection, testConnection, type ConnectionTestResult, type ConnectionView } from '@/api/client';
 import { useHubEvent } from '@/hub/hub-context';
+import { NearbyServers } from './nearby-servers';
 
 const confirmTimeoutMs = 10_000;
 const connectionKey = ['connection'] as const;
@@ -18,7 +19,12 @@ export function ConnectionSection({ locked }: { locked: boolean }) {
     return null;
   }
   // Remount the form when the confirmed connection changes, so it shows what is stored.
-  return <ConnectionForm key={JSON.stringify(connection.data)} stored={connection.data} locked={locked} />;
+  return (
+    <>
+      <NearbyServers locked={locked} />
+      <ConnectionForm key={JSON.stringify(connection.data)} stored={connection.data} locked={locked} />
+    </>
+  );
 }
 
 function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: boolean }) {
@@ -81,7 +87,7 @@ function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: bo
   return (
     <Panel title="Server connection">
       <div className="kp-panel__body">
-        <p className="kp-note">The Koppel server this machine attaches devices from. Ask its admin for a client.</p>
+        <p className="kp-note">The Koppel server this machine attaches devices from. Pairing above fills this in; enter it by hand for a server on another network.</p>
         <Field label="Server address" mono placeholder="https://lab-rack-3:5241" value={serverUrl} onChange={setServerUrl} isDisabled={disabled} state={fieldState} />
         <Field
           label="Server fingerprint"

@@ -59,9 +59,10 @@ internal sealed partial class PairingClient(ConnectionStore connection, ILogger<
     {
         var status = new PairingStatus("requesting", serverName, serverUrl);
         await SetAsync(status);
+        using var http = new HttpClient(ServerCertificate.CreatePinnedHandler(fingerprint)) { BaseAddress = new Uri(serverUrl), Timeout = TimeSpan.FromSeconds(15) };
+        string? requestId = null;
         try
         {
-            using var http = new HttpClient(ServerCertificate.CreatePinnedHandler(fingerprint)) { BaseAddress = new Uri(serverUrl), Timeout = TimeSpan.FromSeconds(15) };
             var nonce = PairingCode.NewNonce();
             using var open = await http.PostAsJsonAsync("/api/pair", new PairOpenRequest(Environment.MachineName, PairingCode.Commit(nonce)), KoppelJson.Files, cancellationToken);
             if (open.StatusCode == HttpStatusCode.TooManyRequests)
@@ -78,7 +79,11 @@ internal sealed partial class PairingClient(ConnectionStore connection, ILogger<
 
             open.EnsureSuccessStatusCode();
             var opened = (await open.Content.ReadFromJsonAsync<PairOpened>(KoppelJson.Files, cancellationToken))!;
-            (await http.PostAsJsonAsync($"/api/pair/{opened.RequestId}/reveal", new PairRevealRequest(nonce), KoppelJson.Files, cancellationToken)).EnsureSuccessStatusCode();
+            requestId = opened.RequestId;
+            using (var revealed = await http.PostAsJsonAsync($"/api/pair/{opened.RequestId}/reveal", new PairRevealRequest(nonce), KoppelJson.Files, cancellationToken))
+            {
+                revealed.EnsureSuccessStatusCode();
+            }
 
             status = status with { State = "waiting", Code = PairingCode.Compute(fingerprint, nonce, opened.ServerNonce), ExpiresAt = opened.ExpiresAt };
             await SetAsync(status);
@@ -111,6 +116,19 @@ internal sealed partial class PairingClient(ConnectionStore connection, ILogger<
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Cancelled, replaced by another pairing, or out of time; CancelAsync sets the status.
+            // Withdraw the request, so it does not sit on the server's Clients page until it expires.
+            if (requestId is not null)
+            {
+                try
+                {
+                    using var withdrawn = await http.DeleteAsync($"/api/pair/{requestId}", CancellationToken.None);
+                }
+                catch (HttpRequestException)
+                {
+                    // The server expires it on its own.
+                }
+            }
+
             if (_status.State == "waiting" && _status.ServerUrl == serverUrl)
             {
                 await SetAsync(status with { State = "expired", Code = null, Message = "Nobody typed the code in time. Start again." });

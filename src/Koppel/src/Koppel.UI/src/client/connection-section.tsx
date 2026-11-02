@@ -1,83 +1,64 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Button, Field, Panel } from '@koppel/react-ui';
 import { getConnection, putConnection, testConnection, type ConnectionTestResult, type ConnectionView } from '@/api/client';
-import { useHubEvent } from '@/hub/hub-context';
+import { hexOf } from '@/pending/domains';
+import { usePending } from '@/pending/pending-context';
+import { connectionKey } from '@/query-keys';
 import { NearbyServers } from './nearby-servers';
 
-const confirmTimeoutMs = 10_000;
-const connectionKey = ['connection'] as const;
+const connectionPending = 'connection';
 
 /**
- * Client role: the server this machine attaches devices from. Saving is pending until
- * ConnectionChanged arrives; the server writes connection.json once per accepted save and pushes
- * once, so the first push after a save confirms it.
+ * Client role: the server this machine attaches devices from. Saving is pending until the pushed
+ * connection (ConnectionChanged) or a refetch shows the address, fingerprint and client ID that were
+ * sent; a push about some other change does not confirm it.
  */
 export function ConnectionSection({ locked }: { locked: boolean }) {
   const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection });
+  const { saved } = usePending('connection');
   if (!connection.data) {
     return null;
   }
-  // Remount the form when the confirmed connection changes, so it shows what is stored.
+  // Remount the form when the stored connection changes or a save is confirmed, so it shows what is
+  // stored and the secret that was typed is gone.
   return (
     <>
       <NearbyServers locked={locked} />
-      <ConnectionForm key={JSON.stringify(connection.data)} stored={connection.data} locked={locked} />
+      <ConnectionForm key={`${JSON.stringify(connection.data)}#${saved[connectionPending] ?? 0}`} stored={connection.data} locked={locked} />
     </>
   );
 }
 
 function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: boolean }) {
-  const queryClient = useQueryClient();
   const [serverUrl, setServerUrl] = useState(stored.serverUrl ?? '');
   const [fingerprint, setFingerprint] = useState(stored.serverFingerprint ?? '');
   const [clientId, setClientId] = useState(stored.clientId ?? '');
   const [secret, setSecret] = useState('');
-  const [pending, setPending] = useState(false);
-  const [failure, setFailure] = useState<string>();
   const [test, setTest] = useState<ConnectionTestResult>();
   const [testing, setTesting] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const pendingRef = useRef(false);
-
-  const settle = useCallback((reason?: string) => {
-    clearTimeout(timer.current);
-    pendingRef.current = false;
-    setPending(false);
-    setFailure(reason);
-  }, []);
-
-  const onConnectionChanged = useCallback(
-    (view: ConnectionView) => {
-      if (pendingRef.current) settle();
-      queryClient.setQueryData(connectionKey, view);
-    },
-    [queryClient, settle],
-  );
-  useHubEvent('ConnectionChanged', onConnectionChanged);
-
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const { pending, failures, request } = usePending('connection');
+  const isPending = connectionPending in pending;
+  const failure = failures[connectionPending];
 
   const save = () => {
-    pendingRef.current = true;
-    setPending(true);
-    setFailure(undefined);
     setTest(undefined);
-    timer.current = setTimeout(() => settle('no confirmation from the server.'), confirmTimeoutMs);
-    putConnection({ serverUrl, serverFingerprint: fingerprint, clientId, clientSecret: secret }).catch((error: unknown) =>
-      settle(error instanceof Error ? error.message : 'the request failed.'),
+    request(connectionPending, { serverUrl, serverFingerprint: hexOf(fingerprint), clientId }, () =>
+      putConnection({ serverUrl, serverFingerprint: fingerprint, clientId, clientSecret: secret }),
     );
   };
 
   const runTest = () => {
     setTesting(true);
+    setTest(undefined);
     testConnection()
       .then(setTest)
+      .catch((error: unknown) => setTest({ ok: false, message: error instanceof Error ? error.message : 'The test could not run.' }))
       .finally(() => setTesting(false));
   };
 
-  const fieldState = pending ? 'pending' : undefined;
-  const disabled = locked || pending;
+  const fieldState = isPending ? 'pending' : undefined;
+  const disabled = locked || isPending;
   const changed =
     serverUrl !== (stored.serverUrl ?? '') ||
     fingerprint !== (stored.serverFingerprint ?? '') ||
@@ -110,12 +91,16 @@ function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: bo
           state={fieldState}
           help="Encrypted on disk."
         />
-        {failure && <p className="app-error">Not saved: {failure}</p>}
+        {failure && (
+          <p className="app-error" role="status">
+            Not saved: {failure}
+          </p>
+        )}
         <div className="app-inline">
-          <Button variant="primary" isSending={pending} isDisabled={locked || !changed} onPress={save}>
+          <Button variant="primary" isSending={isPending} isDisabled={locked || !changed} onPress={save}>
             Save connection
           </Button>
-          <Button variant="secondary" isSending={testing} isDisabled={locked || pending || changed || !stored.hasSecret} onPress={runTest}>
+          <Button variant="secondary" isSending={testing} isDisabled={locked || isPending || changed || !stored.hasSecret} onPress={runTest}>
             Test connection
           </Button>
         </div>

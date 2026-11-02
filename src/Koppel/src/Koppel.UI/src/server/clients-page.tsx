@@ -1,17 +1,16 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
 import { ActivityFeed, Button, CopyValue, Field, Glyph, ItemList, ModalDialog, SecretValue, StatusBadge } from '@koppel/react-ui';
 import { toEntries, useActivity } from '@/activity/activity-context';
 import { createClient, getClients, getClientSecret, getIdentity, revokeClient, rotateClientSecret, type ClientView, type CreatedClient } from '@/api/server';
 import { since, useServerDevices } from '@/devices/use-devices';
-import { useHubEvent } from '@/hub/hub-context';
 import { useMachineName } from '@/shared/use-machine-name';
-import { usePending } from '@/shared/use-pending';
+import { usePending } from '@/pending/pending-context';
+import { clientsKey } from '@/query-keys';
 import { Frame } from '@/shell/frame';
 import { useFrame } from '@/shell/frame-context';
 import { PairingRequests } from './pairing-requests';
 
-const clientsKey = ['clients'] as const;
 const dateFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
 const seen = (client: ClientView) => {
@@ -28,22 +27,11 @@ const seen = (client: ClientView) => {
 export function ClientsPage() {
   const host = useMachineName();
   const { locked } = useFrame();
-  const queryClient = useQueryClient();
   const identity = useQuery({ queryKey: ['identity'], queryFn: getIdentity });
   const clients = useQuery({ queryKey: clientsKey, queryFn: getClients });
   const devices = useServerDevices();
   const [selected, setSelected] = useState<string | null>(null);
-  const describe = useCallback((id: string) => ({ text: `Revoke ${clients.data?.find((c) => c.id === id)?.name ?? id}`, subject: id }), [clients.data]);
-  const { pending, failures, request, judge } = usePending<true>({ describe });
-
-  const onClientsChanged = useCallback(
-    (list: ClientView[]) => {
-      queryClient.setQueryData(clientsKey, list);
-      judge((id) => (list.some((c) => c.id === id) ? 'waiting' : 'confirmed'));
-    },
-    [queryClient, judge],
-  );
-  useHubEvent('ClientsChanged', onClientsChanged);
+  const { pending, failures, request } = usePending('clients');
 
   const attachedBy = (id: string) => (devices.data?.devices ?? []).filter((d) => d.state === 'attached' && d.attachedTo === id);
   const current = clients.data?.find((c) => c.id === selected);
@@ -101,7 +89,7 @@ export function ClientsPage() {
                   <span className="kp-type-heading">{client.name}</span>
                   <span className="kp-row">
                     <code className="kp-id">{client.id}</code>
-                    <span className="kp-type-caption" style={{ color: busy ? 'var(--pending-text)' : 'var(--text-tertiary)' }}>
+                    <span className="kp-type-caption" role="status" style={{ color: busy ? 'var(--pending-text)' : 'var(--text-tertiary)' }}>
                       {busy ? 'Revoking… waiting for the server' : seen(client)}
                     </span>
                   </span>
@@ -221,7 +209,7 @@ function ClientDrawer({ client, attached, isRevoking, revokeFailure, locked, onR
           <Button variant="secondary" slot="close">
             Cancel
           </Button>
-          <Button variant="primary" isSending={rotating} onPress={rotate}>
+          <Button variant="primary" isSending={rotating} isDisabled={locked} onPress={rotate}>
             Rotate secret
           </Button>
         </div>
@@ -235,6 +223,7 @@ function ClientDrawer({ client, attached, isRevoking, revokeFailure, locked, onR
           </Button>
           <Button
             variant="danger"
+            isDisabled={locked}
             onPress={() => {
               setConfirmRevoke(false);
               onRevoke();

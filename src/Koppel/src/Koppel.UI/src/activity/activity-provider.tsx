@@ -1,33 +1,28 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getActivity, type ServerActivity } from '@/api/activity';
-import { useHubEvent } from '@/hub/hub-context';
-import { ActivityContext, fromServer, type ActivityItem } from './activity-context';
-
-const activityKey = ['activity'] as const;
-const maxItems = 200;
+import { getActivity } from '@/api/activity';
+import { activityKey } from '@/query-keys';
+import { ActivityContext, fromServer, maxActivity, mergeActivity, type ActivityItem } from './activity-context';
 
 /**
- * The activity log: the server's log (loaded once, then followed over the hub, so it survives a
- * reload and matches on every device), plus our own changes that the server has not answered yet.
+ * The activity log: the server's log (loaded once, then followed over the hub by HubPushes, so it
+ * survives a reload and matches on every device), plus our own changes that the server has not
+ * answered yet.
  */
 export function ActivityProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const server = useQuery({ queryKey: activityKey, queryFn: getActivity });
+  const server = useQuery({
+    queryKey: activityKey,
+    // Events pushed while the fetch ran must survive it.
+    queryFn: async () => mergeActivity(queryClient.getQueryData(activityKey), await getActivity()),
+  });
   const [local, setLocal] = useState<ActivityItem[]>([]);
   const next = useRef(0);
-
-  const onRecorded = useCallback(
-    (event: ServerActivity) =>
-      queryClient.setQueryData<ServerActivity[]>(activityKey, (current) => [event, ...(current ?? []).filter((e) => e.id !== event.id)].slice(0, maxItems)),
-    [queryClient],
-  );
-  useHubEvent('ActivityRecorded', onRecorded);
 
   const add = useCallback((item: Omit<ActivityItem, 'id' | 'at'>) => {
     next.current += 1;
     const id = `local-${next.current}`;
-    setLocal((current) => [{ ...item, id, at: new Date() }, ...current].slice(0, maxItems));
+    setLocal((current) => [{ ...item, id, at: new Date() }, ...current].slice(0, maxActivity));
     return id;
   }, []);
 

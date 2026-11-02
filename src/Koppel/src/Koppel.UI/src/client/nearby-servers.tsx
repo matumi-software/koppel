@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { Button, MiniList, PairingCode, Panel, type MiniListItem } from '@koppel/react-ui';
 import { getConnection } from '@/api/client';
@@ -15,7 +15,6 @@ const pairingKey = ['pairing-status'] as const;
  * the server, and a successful pairing ends with ConnectionChanged like any saved connection.
  */
 export function NearbyServers({ locked }: { locked: boolean }) {
-  const queryClient = useQueryClient();
   const me = useMachineName();
   const servers = useQuery({ queryKey: serversKey, queryFn: getDiscoveredServers });
   // The same cache key ConnectionSection keeps current from ConnectionChanged.
@@ -25,16 +24,10 @@ export function NearbyServers({ locked }: { locked: boolean }) {
   const [starting, setStarting] = useState<string>();
   const [failure, setFailure] = useState<string>();
 
-  const onServers = useCallback((list: DiscoveredServer[]) => queryClient.setQueryData(serversKey, list), [queryClient]);
-  useHubEvent('ServersDiscovered', onServers);
-
-  const onStatus = useCallback(
-    (next: PairingStatus) => {
-      queryClient.setQueryData(pairingKey, next);
-      if (next.state !== 'idle') setStarting(undefined);
-    },
-    [queryClient],
-  );
+  // HubPushes puts the pushed status in the cache; this only ends our own "starting" state.
+  const onStatus = useCallback((next: PairingStatus) => {
+    if (next.state !== 'idle') setStarting(undefined);
+  }, []);
   useHubEvent('PairingStatusChanged', onStatus);
 
   const pair = (server: DiscoveredServer) => {

@@ -72,3 +72,17 @@ export function toEntries(items: readonly ActivityItem[], subject?: string): Act
     .filter((item) => subject === undefined || item.subject === subject)
     .map((item) => ({ id: item.id, state: item.state, lead: item.lead, text: item.text, detail: item.detail, time: when(item.at), kind: subject ? undefined : item.kind }));
 }
+
+/** How many lines the log keeps, on the server and here. */
+export const maxActivity = 200;
+
+/**
+ * The server's log with new events folded in by id, newest first. A fetch and a push can each hold
+ * events the other lacks, so neither may replace the list.
+ */
+export function mergeActivity(current: readonly ServerActivity[] | undefined, incoming: readonly ServerActivity[]): ServerActivity[] {
+  const byId = new Map<string, ServerActivity>();
+  for (const event of current ?? []) byId.set(event.id, event);
+  for (const event of incoming) byId.set(event.id, event);
+  return [...byId.values()].sort((a, b) => Date.parse(b.timestampUtc) - Date.parse(a.timestampUtc)).slice(0, maxActivity);
+}

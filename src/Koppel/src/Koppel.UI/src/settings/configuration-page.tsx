@@ -4,7 +4,7 @@ import { ConnectionSection } from '@/client/connection-section';
 import { Frame } from '@/shell/frame';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
-import { roleOptions } from './roles';
+import { isClientRole, isServerRole, roleName, roleOptions } from './roles';
 import { useSettings, type SettingStatus } from './use-settings';
 
 /**
@@ -31,6 +31,9 @@ export function ConfigurationPage() {
     <Frame title="Configuration" lede={`${host}: what it does on the network and how it starts.`}>
       <Panel title="Role" meta={<SavedNote status={role} />}>
         <div className="kp-panel__body">
+          {!roleOptions.some((o) => o.value === role.confirmed) && (
+            <p className="kp-note">This machine's role is {roleName(role.confirmed)}: this version of Koppel does not know it. Pick one below to replace it.</p>
+          )}
           <RoleCards
             label="Role"
             options={roleOptions}
@@ -42,7 +45,7 @@ export function ConfigurationPage() {
         </div>
       </Panel>
 
-      {role.confirmed !== 'client' && (
+      {isServerRole(role.confirmed) && (
         <Panel title="Sharing">
           <SettingList label="Sharing">
             <Setting
@@ -71,22 +74,37 @@ export function ConfigurationPage() {
         </Panel>
       )}
 
-      {role.confirmed !== 'server' && <ConnectionSection locked={locked} />}
+      {isClientRole(role.confirmed) && <ConnectionSection locked={locked} />}
     </Frame>
   );
 }
 
 /** Saving, Saved or why not, for a setting the panel holds. Nothing until the user changes it. */
 function SavedNote({ status }: { status: SettingStatus<'role'> }) {
-  if (status.pendingTarget !== undefined) return <span className="kp-panel__note" data-state="pending">Saving…</span>;
-  if (status.failure) return <span className="kp-panel__note" data-state="fault">Not saved: {status.failure}</span>;
-  return status.saved ? <span className="kp-panel__note">Saved</span> : null;
+  // The live region stays in the page, empty, so a screen reader hears the text arrive.
+  const [state, text] =
+    status.pendingTarget !== undefined
+      ? ['pending', 'Saving…']
+      : status.failure
+        ? ['fault', `Not saved: ${status.failure}`]
+        : status.saved
+          ? [undefined, 'Saved']
+          : [undefined, undefined];
+  return (
+    <span className="kp-panel__note" data-state={state} role="status">
+      {text}
+    </span>
+  );
 }
+
+const validPort = (draft: string) => /^[0-9]{1,5}$/.test(draft) && Number(draft) >= 1 && Number(draft) <= 65535;
 
 function ListenPortSetting({ locked, status, onSave }: { locked: boolean; status: SettingStatus<'listenPort'>; onSave: (port: number) => void }) {
   const [draft, setDraft] = useState(String(status.confirmed));
   const isPending = status.pendingTarget !== undefined;
-  const help = status.failure ? `Not saved: ${status.failure}` : status.saved ? 'Saved' : undefined;
+  const isValid = validPort(draft);
+  const isInvalid = !isValid && draft !== String(status.confirmed);
+  const help = isInvalid ? 'Enter a whole number from 1 to 65535.' : status.failure ? `Not saved: ${status.failure}` : status.saved ? 'Saved' : undefined;
   return (
     <Setting
       title="Listen port"
@@ -99,10 +117,10 @@ function ListenPortSetting({ locked, status, onSave }: { locked: boolean; status
           value={draft}
           onChange={setDraft}
           isDisabled={locked || isPending}
-          state={isPending ? 'pending' : status.failure ? 'invalid' : undefined}
+          state={isPending ? 'pending' : isInvalid || status.failure ? 'invalid' : undefined}
           help={help}
           action={
-            <Button variant="secondary" isSending={isPending} isDisabled={locked || draft === String(status.confirmed)} onPress={() => onSave(Number(draft))}>
+            <Button variant="secondary" isSending={isPending} isDisabled={locked || !isValid || draft === String(status.confirmed)} onPress={() => onSave(Number(draft))}>
               Save
             </Button>
           }

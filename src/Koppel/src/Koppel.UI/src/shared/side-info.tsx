@@ -1,9 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { ActivityFeed, Facts } from '@koppel/react-ui';
 import { toEntries, useActivity } from '@/activity/activity-context';
 import { getSystemInfo } from '@/api/http';
-import { useHubEvent } from '@/hub/hub-context';
+import { systemInfoKey } from '@/query-keys';
 
 const uptime = (since: string) => {
   const minutes = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 60_000));
@@ -13,8 +12,7 @@ const uptime = (since: string) => {
   return `${Math.floor(hours / 24)} days`;
 };
 
-const roles = { server: 'Server', client: 'Client', both: 'Server and client' } as const;
-const infoKey = ['system-info'] as const;
+const roles: Record<string, string> = { server: 'Server', client: 'Client', both: 'Server and client' };
 
 /**
  * The side panel when nothing is selected: facts about this machine, then the activity log, which
@@ -22,12 +20,8 @@ const infoKey = ['system-info'] as const;
  */
 export function SideInfo() {
   const { items } = useActivity();
-  const queryClient = useQueryClient();
-  const info = useQuery({ queryKey: infoKey, queryFn: getSystemInfo, refetchInterval: 60_000 });
-
-  // The role and USB port come from the settings, so a confirmed settings change refetches them.
-  const onSettingsChanged = useCallback(() => void queryClient.invalidateQueries({ queryKey: infoKey }), [queryClient]);
-  useHubEvent('SettingsChanged', onSettingsChanged);
+  // The role and USB port come from the settings, so HubPushes refetches this on SettingsChanged.
+  const info = useQuery({ queryKey: systemInfoKey, queryFn: getSystemInfo, refetchInterval: 60_000 });
   const data = info.data;
 
   return (
@@ -36,7 +30,7 @@ export function SideInfo() {
         <Facts
           title={data.name}
           facts={[
-            { label: 'Role', value: roles[data.role] },
+            { label: 'Role', value: roles[data.role] ?? 'Unknown' },
             { label: 'Up for', value: uptime(data.startedAt) },
             { label: 'Version', value: data.version, mono: true },
             { label: 'Ports', value: `UI ${data.uiPort} · API ${data.httpsPort} · USB ${data.usbPort}`, mono: true },

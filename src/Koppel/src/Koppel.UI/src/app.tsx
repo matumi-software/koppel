@@ -11,10 +11,12 @@ import { useHub } from '@/hub/hub-context';
 import { OverviewPage } from '@/overview/overview-page';
 import { ClientsPage } from '@/server/clients-page';
 import { ConfigurationPage } from '@/settings/configuration-page';
+import { isClientRole, isServerRole } from '@/settings/roles';
 import { SetupPage } from '@/setup/setup-page';
 import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
 import { FrameContext, usePageFromHash, type Page } from '@/shell/frame-context';
 import { useActivity } from '@/activity/activity-context';
+import { clientsKey, connectionKey, settingsKey } from '@/query-keys';
 import { useMachineName } from '@/shared/use-machine-name';
 
 export function App() {
@@ -27,19 +29,20 @@ export function App() {
   const [asideSlot, setAsideSlot] = useState<HTMLDivElement | null>(null);
   const locked = link !== 'live';
 
-  const settings = useQuery({ queryKey: ['settings'], queryFn: getSettings });
-  const role = settings.data?.role ?? 'server';
-  const isServer = role !== 'client';
-  const isClient = role !== 'server';
+  const settings = useQuery({ queryKey: settingsKey, queryFn: getSettings });
+  // Until the settings load, and for a role this UI does not know, the machine is neither.
+  const isServer = isServerRole(settings.data?.role);
+  const isClient = isClientRole(settings.data?.role);
   const server = useServerDevices(isServer && !!settings.data?.setupComplete);
   const client = useClientDevices(isClient && !!settings.data?.setupComplete);
-  const clients = useQuery({ queryKey: ['clients'], queryFn: getClients, enabled: isServer });
-  const connection = useQuery({ queryKey: ['connection'], queryFn: getConnection, enabled: isClient });
+  const clients = useQuery({ queryKey: clientsKey, queryFn: getClients, enabled: isServer });
+  const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection, enabled: isClient });
   const remote = hostOf(connection.data?.serverUrl);
 
-  // A page that does not exist for this role falls back to the overview.
+  // A page that does not exist for this role falls back to the overview, once the role is known:
+  // before that a bookmarked #attach would be thrown away on every load.
   const allowed: Page[] = ['overview', 'configuration', ...(isServer ? (['devices', 'clients'] as Page[]) : []), ...(isClient ? (['attach'] as Page[]) : [])];
-  const shown: Page = allowed.includes(page) ? page : 'overview';
+  const shown: Page = !settings.data || allowed.includes(page) ? page : 'overview';
 
   const pendingCount = items.filter((i) => i.state === 'pending').length;
   const faultCount =
@@ -52,8 +55,8 @@ export function App() {
   };
 
   useEffect(() => {
-    if (page !== shown) go(shown);
-  }, [page, shown, go]);
+    if (settings.data && page !== shown) go(shown);
+  }, [settings.data, page, shown, go]);
 
   const nav = (
     <>

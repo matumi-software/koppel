@@ -1,12 +1,12 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { DeviceCardBody, DeviceCards, DeviceGroup, Switch, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
 import { getClients } from '@/api/server';
-import { setShared, type DeviceView, type ServerDevices } from '@/api/usb';
+import { setShared, type DeviceView } from '@/api/usb';
 import { Frame } from '@/shell/frame';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
-import { usePending } from '@/shared/use-pending';
+import { usePending } from '@/pending/pending-context';
 import { DeviceDrawer } from './device-drawer';
 import { since, useServerDevices } from './use-devices';
 
@@ -20,22 +20,8 @@ export function ServerDevicesPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const clients = useQuery({ queryKey: ['clients'], queryFn: getClients });
   const clientName = (id: string | null) => clients.data?.find((c) => c.id === id)?.name ?? id ?? 'a client';
-  const describe = useCallback(
-    (busId: string, share: boolean) => ({ text: `${share ? 'Share' : 'Stop sharing'} bus ${busId}`, subject: busId }),
-    [],
-  );
-  const { pending, failures, request, judge } = usePending<boolean>({ describe });
-
-  const onPush = useCallback(
-    (next: ServerDevices) =>
-      judge((busId, share) => {
-        const device = next.devices.find((d) => d.busId === busId);
-        if (device?.fault) return { failed: device.fault };
-        return (device ? device.state !== 'local' : false) === share ? 'confirmed' : 'waiting';
-      }),
-    [judge],
-  );
-  const query = useServerDevices(true, onPush);
+  const { pending, failures, request } = usePending('serverDevices');
+  const query = useServerDevices();
   const data = query.data;
 
   const stateOf = (d: DeviceView): DeviceState => (d.busId in pending ? 'pending' : d.state);

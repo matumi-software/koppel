@@ -13,19 +13,18 @@ import { useMachineName } from '@/shared/use-machine-name';
  */
 export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: KoppelRole) => void }) {
   const host = useMachineName();
-  const { query, status, requestChange } = useSettings();
+  const { query, requestSetup, setup } = useSettings();
   const checks = useQuery({ queryKey: ['system-checks'], queryFn: getSystemChecks });
   const [role, setRole] = useState<KoppelRole | null>(null);
   const chosen = role ?? query.data?.role ?? 'server';
-  const pending = status('setupComplete')?.pendingTarget !== undefined || status('role')?.pendingTarget !== undefined;
-  const failure = status('setupComplete')?.failure ?? status('role')?.failure;
+  const pending = setup.isPending;
+  const failure = setup.failure;
 
   const needed = chosen === 'server' ? ['share'] : chosen === 'client' ? ['attach'] : ['share', 'attach'];
   const blocking = (checks.data ?? []).filter((c) => needed.includes(c.id) && !c.ok);
 
   const finish = () => {
-    if (chosen !== query.data?.role) requestChange('role', chosen);
-    requestChange('setupComplete', true);
+    requestSetup(chosen);
     onDone(chosen);
   };
 
@@ -58,7 +57,7 @@ export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: 
             )}
           </section>
 
-          {failure && <p className="kp-error">Not saved: {failure}</p>}
+          {failure && <p className="kp-error" role="status">Not saved: {failure}</p>}
           <div className="kp-row" style={{ justifyContent: 'space-between' }}>
             <span className="kp-type-caption" style={{ color: blocking.length ? 'var(--fault-text)' : 'var(--text-tertiary)' }}>
               {blocking.length ? 'Koppel can save this role, but it cannot use USB until the problems above are fixed.' : 'Everything this role needs is here.'}

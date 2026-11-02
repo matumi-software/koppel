@@ -1,8 +1,8 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import { getSettings, patchSettings, type KoppelSettings } from '@/api/settings';
-import { useHubEvent } from '@/hub/hub-context';
-import { usePending } from '@/shared/use-pending';
+import { getSettings, patchSettings, type KoppelRole, type KoppelSettings } from '@/api/settings';
+import { usePending } from '@/pending/pending-context';
+import { settingsKey } from '@/query-keys';
 
 type Key = keyof KoppelSettings;
 
@@ -16,42 +16,23 @@ export interface SettingStatus<K extends Key> {
   saved: boolean;
 }
 
-const settingsKey = ['settings'] as const;
-
-const labels: Record<Key, string> = {
-  role: 'Role',
-  shareOnStartup: 'Share saved devices on startup',
-  listenPort: 'Listen port',
-  setupComplete: 'Setup',
-};
-
-const describeSetting = (key: string, value: unknown) => ({
-  text:
-    key === 'setupComplete'
-      ? 'Finish setup'
-      : `${labels[key as Key] ?? key}: ${typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value)}`,
-});
-
 /**
- * Settings with the confirm rule: a change is pending from the moment it is sent until
- * SettingsChanged brings the same value back from the server, after the server wrote its file.
+ * Settings with the confirm rule: a change is pending from the moment it is sent until the settings
+ * the server pushes (or a refetch) show the same value, after the server wrote its file. The pending
+ * state lives above the page, so it survives leaving it.
  */
 export function useSettings() {
-  const queryClient = useQueryClient();
   const query = useQuery({ queryKey: settingsKey, queryFn: getSettings });
-  const { pending, failures, saved, request, judge } = usePending<unknown>({ describe: describeSetting });
-
-  const onSettingsChanged = useCallback(
-    (settings: KoppelSettings) => {
-      queryClient.setQueryData(settingsKey, settings);
-      judge((key, target) => (settings[key as Key] === target ? 'confirmed' : 'waiting'));
-    },
-    [queryClient, judge],
-  );
-  useHubEvent('SettingsChanged', onSettingsChanged);
+  const { pending, failures, saved, request } = usePending('settings');
 
   const requestChange = useCallback(
     <K extends Key>(key: K, value: KoppelSettings[K]) => request(key, value, () => patchSettings({ [key]: value })),
+    [request],
+  );
+
+  /** First run: the role and "setup complete" go in one PATCH, so they are saved or not saved together. */
+  const requestSetup = useCallback(
+    (role: KoppelRole) => request('setup', { role }, () => patchSettings({ role, setupComplete: true })),
     [request],
   );
 
@@ -60,8 +41,10 @@ export function useSettings() {
       confirmed: query.data[key],
       pendingTarget: key in pending ? (pending[key] as KoppelSettings[K]) : undefined,
       failure: failures[key],
-      saved: saved[key] ?? false,
+      saved: (saved[key] ?? 0) > 0,
     };
 
-  return { query, status, requestChange };
+  const setup = { isPending: 'setup' in pending, failure: failures.setup };
+
+  return { query, status, requestChange, requestSetup, setup };
 }

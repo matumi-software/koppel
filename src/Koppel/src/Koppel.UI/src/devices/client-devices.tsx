@@ -1,16 +1,14 @@
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { Button, CopyValue, DeviceCardBody, DeviceCards, DeviceGroup, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
 import { getConnection } from '@/api/client';
-import { attachDevice, detachDevice, type ClientDeviceView, type ClientDevices } from '@/api/usb';
+import { attachDevice, detachDevice, type ClientDeviceView } from '@/api/usb';
+import { connectionKey } from '@/query-keys';
 import { Frame } from '@/shell/frame';
 import { useFrame } from '@/shell/frame-context';
-import { usePending } from '@/shared/use-pending';
+import { usePending } from '@/pending/pending-context';
 import { DeviceDrawer } from './device-drawer';
 import { hostOf, since, useClientDevices } from './use-devices';
-
-/** Attaching can take a while: TLS, token, import and the kernel. */
-const attachTimeoutMs = 30_000;
 
 /**
  * Client role: the devices the server shares, grouped by what you can do with them. Attach and detach
@@ -18,22 +16,11 @@ const attachTimeoutMs = 30_000;
  */
 export function ClientDevicesPage() {
   const { locked, go } = useFrame();
-  const connection = useQuery({ queryKey: ['connection'], queryFn: getConnection });
+  const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection });
   const server = hostOf(connection.data?.serverUrl) ?? 'the server';
   const [selected, setSelected] = useState<string | null>(null);
-  const describe = useCallback((busId: string, attach: boolean) => ({ text: `${attach ? 'Attach' : 'Detach'} ${busId}`, subject: busId }), []);
-  const { pending, failures, request, judge } = usePending<boolean>({ timeoutMs: attachTimeoutMs, describe });
-
-  const onPush = useCallback(
-    (next: ClientDevices) =>
-      judge((busId, attach) => {
-        const entry = next.devices.find((d) => d.device.busId === busId);
-        if (entry?.fault) return { failed: entry.fault };
-        return (entry?.attachedHere ?? false) === attach ? 'confirmed' : 'waiting';
-      }),
-    [judge],
-  );
-  const query = useClientDevices(true, onPush);
+  const { pending, failures, request } = usePending('clientDevices');
+  const query = useClientDevices();
   const data = query.data;
   const entries = data?.devices ?? [];
 

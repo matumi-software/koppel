@@ -1,39 +1,15 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
-import { getClientDevices, getServerDevices, type ClientDevices, type ServerDevices } from '@/api/usb';
-import { useHubEvent } from '@/hub/hub-context';
+import { useQuery } from '@tanstack/react-query';
+import { getClientDevices, getServerDevices } from '@/api/usb';
+import { clientDevicesKey, serverDevicesKey } from '@/query-keys';
 
-export const serverDevicesKey = ['server-devices'] as const;
-export const clientDevicesKey = ['client-devices'] as const;
-
-/** This machine's devices (server role), kept current by DevicesChanged. */
-export function useServerDevices(enabled = true, onPush?: (devices: ServerDevices) => void) {
-  const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: serverDevicesKey, queryFn: getServerDevices, enabled });
-  const onChanged = useCallback(
-    (next: ServerDevices) => {
-      queryClient.setQueryData(serverDevicesKey, next);
-      onPush?.(next);
-    },
-    [queryClient, onPush],
-  );
-  useHubEvent('DevicesChanged', onChanged);
-  return query;
+/** This machine's devices (server role). DevicesChanged keeps them current, see HubPushes. */
+export function useServerDevices(enabled = true) {
+  return useQuery({ queryKey: serverDevicesKey, queryFn: getServerDevices, enabled });
 }
 
-/** The server's shared devices and what is attached here (client role), kept current by ClientDevicesChanged. */
-export function useClientDevices(enabled = true, onPush?: (devices: ClientDevices) => void) {
-  const queryClient = useQueryClient();
-  const query = useQuery({ queryKey: clientDevicesKey, queryFn: getClientDevices, enabled });
-  const onChanged = useCallback(
-    (next: ClientDevices) => {
-      queryClient.setQueryData(clientDevicesKey, next);
-      onPush?.(next);
-    },
-    [queryClient, onPush],
-  );
-  useHubEvent('ClientDevicesChanged', onChanged);
-  return query;
+/** The server's shared devices and what is attached here (client role). ClientDevicesChanged keeps them current. */
+export function useClientDevices(enabled = true) {
+  return useQuery({ queryKey: clientDevicesKey, queryFn: getClientDevices, enabled });
 }
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });

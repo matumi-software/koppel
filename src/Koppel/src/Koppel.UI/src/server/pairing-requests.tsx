@@ -1,8 +1,7 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Field } from '@koppel/react-ui';
 import { approvePairing, denyPairing, getPairingRequests, type PairingRequest } from '@/api/pairing';
-import { useHubEvent } from '@/hub/hub-context';
 
 const requestsKey = ['pairing-requests'] as const;
 const confirmTimeoutMs = 10_000;
@@ -12,10 +11,7 @@ const confirmTimeoutMs = 10_000;
  * pending until PairingRequestsChanged arrives without the request; a wrong code is refused at once.
  */
 export function PairingRequests({ locked }: { locked: boolean }) {
-  const queryClient = useQueryClient();
   const requests = useQuery({ queryKey: requestsKey, queryFn: getPairingRequests });
-  const onRequests = useCallback((list: PairingRequest[]) => queryClient.setQueryData(requestsKey, list), [queryClient]);
-  useHubEvent('PairingRequestsChanged', onRequests);
 
   if (!requests.data || requests.data.length === 0) {
     return null;

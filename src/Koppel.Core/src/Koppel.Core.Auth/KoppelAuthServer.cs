@@ -14,13 +14,13 @@ namespace Koppel.Core.Auth;
 /// <summary>Checks a client ID and secret against wherever the server keeps its registered clients.</summary>
 public interface IClientCredentialValidator
 {
-    ValueTask<bool> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken);
-
     /// <summary>
-    /// The generation of a client's credentials, which goes into every token issued to it. A rotated secret
-    /// is a new generation, so tokens issued before the rotation stop working.
+    /// The generation of the client's credentials that the secret was verified against, or null when the
+    /// client is unknown, revoked or the secret is wrong. The token is issued for exactly this generation,
+    /// so a secret that is rotated in between never yields a token for the newer one. A rotated secret is
+    /// a new generation, so tokens issued before the rotation stop working.
     /// </summary>
-    int GenerationOf(string clientId) => 0;
+    ValueTask<int?> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken);
 }
 
 /// <summary>Supplies the key the server signs access tokens with. It must survive restarts.</summary>
@@ -38,7 +38,7 @@ public static class KoppelAuthServer
     /// <summary>The token endpoint path.</summary>
     public const string TokenPath = "/connect/token";
 
-    /// <summary>The claim that carries the client's credential generation (see <see cref="IClientCredentialValidator.GenerationOf"/>).</summary>
+    /// <summary>The claim that carries the client's credential generation (see <see cref="IClientCredentialValidator.ValidateAsync"/>).</summary>
     public const string GenerationClaim = "koppel_generation";
 
     /// <summary>The authorization policy for endpoints only registered clients may call.</summary>
@@ -111,13 +111,22 @@ public static class KoppelAuthServer
         return int.TryParse(principal.FindFirst(GenerationClaim)?.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var generation) ? generation : null;
     }
 
-    private sealed class IssueClientToken(IClientCredentialValidator validator) : IOpenIddictServerHandler<HandleTokenRequestContext>
+    /// <summary>The key under which validation hands the verified generation to the issuing handler.</summary>
+    private const string VerifiedGeneration = "koppel:verified-generation";
+
+    private sealed class IssueClientToken : IOpenIddictServerHandler<HandleTokenRequestContext>
     {
         public ValueTask HandleAsync(HandleTokenRequestContext context)
         {
+            if (!context.Transaction.Properties.TryGetValue(VerifiedGeneration, out var verified) || verified is not int generation)
+            {
+                context.Reject(Errors.InvalidClient, "The client credentials were not verified.");
+                return ValueTask.CompletedTask;
+            }
+
             var identity = new ClaimsIdentity(TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
             identity.SetClaim(Claims.Subject, context.Request.ClientId);
-            identity.SetClaim(GenerationClaim, validator.GenerationOf(context.Request.ClientId!).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            identity.SetClaim(GenerationClaim, generation.ToString(System.Globalization.CultureInfo.InvariantCulture));
             identity.SetDestinations(static _ => [Destinations.AccessToken]);
             context.SignIn(new ClaimsPrincipal(identity));
             return ValueTask.CompletedTask;
@@ -135,10 +144,13 @@ public static class KoppelAuthServer
             }
 
             if (string.IsNullOrEmpty(context.ClientId) || string.IsNullOrEmpty(context.ClientSecret)
-                || !await validator.ValidateAsync(context.ClientId, context.ClientSecret, context.CancellationToken))
+                || await validator.ValidateAsync(context.ClientId, context.ClientSecret, context.CancellationToken) is not { } generation)
             {
                 context.Reject(Errors.InvalidClient, "The client ID or secret is wrong, or the client was revoked.");
+                return;
             }
+
+            context.Transaction.Properties[VerifiedGeneration] = generation;
         }
     }
 }

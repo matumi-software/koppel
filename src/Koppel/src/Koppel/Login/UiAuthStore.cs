@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Koppel.Core.Configuration;
@@ -47,7 +48,8 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
     private readonly Lock _codeGate = new();
     private string? _setupCode;
     private string _seenStamp = string.Empty;
-    private string? _keepSession;
+    private int _passwordChecks;
+    private readonly ConcurrentDictionary<string, string> _keepSessions = new();
 
     public UiAuthStore(KoppelPaths paths, SecretBox box, ILogger<UiAuthStore> logger)
     {
@@ -89,8 +91,19 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
-    public bool VerifyPassword(string? password) =>
-        _file.Current.PasswordHash is { } hash && !string.IsNullOrEmpty(password) && password.Length <= UiPassword.MaxLength && UiPassword.Verify(password, hash);
+    /// <summary>How many password hashes <see cref="VerifyPassword"/> has run. Tests use it to see how many guesses got as far as the hash.</summary>
+    public int PasswordChecks => Volatile.Read(ref _passwordChecks);
+
+    public bool VerifyPassword(string? password)
+    {
+        if (_file.Current.PasswordHash is not { } hash || string.IsNullOrEmpty(password) || password.Length > UiPassword.MaxLength)
+        {
+            return false;
+        }
+
+        Interlocked.Increment(ref _passwordChecks);
+        return UiPassword.Verify(password, hash);
+    }
 
     /// <summary>Sets the first password when the code is right. Works once: later calls find a password and are refused.</summary>
     public async Task<SetupOutcome> SetFirstPasswordAsync(string? code, string password, CancellationToken cancellationToken)
@@ -124,8 +137,10 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
         var hash = UiPassword.Hash(next);
         await _file.UpdateAsync(current =>
         {
-            _keepSession = keepSession;
-            return current with { PasswordHash = hash, SecurityStamp = NewStamp() };
+            // The session to keep travels with the stamp it belongs to, so two changes at once each keep their own.
+            var stamp = NewStamp();
+            _keepSessions[stamp] = keepSession;
+            return current with { PasswordHash = hash, SecurityStamp = stamp };
         }, cancellationToken);
     }
 
@@ -165,7 +180,7 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
         }
 
         _seenStamp = credentials.SecurityStamp;
-        var keep = Interlocked.Exchange(ref _keepSession, null);
+        _keepSessions.TryRemove(credentials.SecurityStamp, out var keep);
         return StampChanged.RaiseAsync(new UiStampChange(credentials.SecurityStamp, keep), _logger);
     }
 

@@ -17,7 +17,7 @@ services:
       Gateway__Port: "3242"
       Gateway__Address: 0.0.0.0
     ports:
-      - "5240:5240"             # UI
+      - "127.0.0.1:5240:5240"             # UI, this machine only
       - "127.0.0.1:3240:3242"   # USB/IP gateway for usbip-win2
     volumes:
       - koppel:/koppel

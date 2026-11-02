@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Koppel.Core.Auth;
+using Koppel.Server;
 
 namespace Koppel.Web;
 
@@ -8,6 +9,9 @@ internal static class WebProtection
 {
     /// <summary>Real clients ask for a token about every 30 minutes and on each attach, so this is far above use.</summary>
     private const int DefaultTokenPerMinute = 60;
+
+    /// <summary>Setup, login and password change: each one is a password guess or a hash, so far fewer than a person needs.</summary>
+    private const int DefaultAuthPerMinute = 30;
 
     /// <summary>Pairing polls every 2 seconds, 30 a minute for each client waiting.</summary>
     private const int DefaultPairPerMinute = 120;
@@ -27,13 +31,15 @@ internal static class WebProtection
     });
 
     /// <summary>
-    /// Rate limits by remote IP on the token endpoint and the pairing endpoints, the two a stranger on
-    /// the network can reach before it has credentials. Over the limit answers 429.
+    /// Rate limits by remote IP on the token endpoint, the pairing endpoints and the UI's setup, login
+    /// and password routes, the ones a stranger on the network can reach before it has credentials.
+    /// Over the limit answers 429.
     /// </summary>
     public static IServiceCollection AddKoppelRateLimits(this IServiceCollection services, IConfiguration configuration)
     {
         var tokens = configuration.GetValue("RateLimits:TokenPerMinute", DefaultTokenPerMinute);
         var pairing = configuration.GetValue("RateLimits:PairPerMinute", DefaultPairPerMinute);
+        var auth = configuration.GetValue("RateLimits:AuthPerMinute", DefaultAuthPerMinute);
         return services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -45,12 +51,20 @@ internal static class WebProtection
                     return Window($"token:{RemoteAddress(context)}", tokens);
                 }
 
-                return path.StartsWithSegments("/api/pair")
-                    ? Window($"pair:{RemoteAddress(context)}", pairing)
+                if (path.StartsWithSegments("/api/pair"))
+                {
+                    return Window($"pair:{RemoteAddress(context)}", pairing);
+                }
+
+                // Counted per IPv4 address or IPv6 /64, as the sign-in throttle is. State and logout are left out: the UI polls state.
+                return AuthPaths.Any(p => path.StartsWithSegments(p))
+                    ? Window($"auth:{PairingStore.AddressKey(context.Connection.RemoteIpAddress)}", auth)
                     : RateLimitPartition.GetNoLimiter("none");
             });
         });
     }
+
+    private static readonly string[] AuthPaths = ["/api/auth/setup", "/api/auth/login", "/api/auth/password"];
 
     /// <summary>The caller's address, with an IPv4 address in its IPv6 form folded back to IPv4.</summary>
     internal static string RemoteAddress(HttpContext context) =>

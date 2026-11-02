@@ -16,7 +16,8 @@ internal static class UiAuthEndpoints
     /// <summary>
     /// Sign-in for the UI. State, setup and login are anonymous (see <c>Surface.Anonymous</c>); logout
     /// and password change need the session. Success is 204 with a cookie, a wrong password or code is
-    /// 401, 403 or 400 with <c>{ error }</c>, and a caller who tried too often gets 429 with Retry-After.
+    /// 401, 403 or 400 with <c>{ error }</c>, and a caller who tried too often, or arrives while the
+    /// server is busy hashing other passwords, gets 429 with Retry-After.
     /// </summary>
     public static IEndpointRouteBuilder MapUiAuthEndpoints(this IEndpointRouteBuilder app)
     {
@@ -28,30 +29,32 @@ internal static class UiAuthEndpoints
             return TypedResults.Ok(new UiAuthState(session.Succeeded, store.HasPassword, Environment.MachineName));
         });
 
-        group.MapPost("/setup", async Task<IResult> (SetupRequest request, HttpContext context, UiAuthStore store, UiSignIn signIn, CancellationToken cancellationToken) =>
+        group.MapPost("/setup", async Task<IResult> (SetupRequest request, HttpContext context, UiAuthStore store, UiSignIn signIn, TimeProvider time, CancellationToken cancellationToken) =>
         {
             var result = await signIn.SetupAsync(UiSignIn.Caller(context), request.SetupCode, request.Password, cancellationToken);
             if (result.Verdict == Verdict.Ok)
             {
-                await UiSession.SignInAsync(context, UiSession.NewPrincipal(store.SecurityStamp));
+                await UiSession.SignInAsync(context, UiSession.NewPrincipal(store.SecurityStamp, time.GetUtcNow()));
             }
 
             return Answer(context, result, wrong: StatusCodes.Status403Forbidden, wrongText: "That setup code is not right.");
         });
 
-        group.MapPost("/login", async Task<IResult> (LoginRequest request, HttpContext context, UiAuthStore store, UiSignIn signIn) =>
+        group.MapPost("/login", async Task<IResult> (LoginRequest request, HttpContext context, UiAuthStore store, UiSignIn signIn, TimeProvider time) =>
         {
             var result = await signIn.LoginAsync(UiSignIn.Caller(context), request.Password);
             if (result.Verdict == Verdict.Ok)
             {
-                await UiSession.SignInAsync(context, UiSession.NewPrincipal(store.SecurityStamp));
+                await UiSession.SignInAsync(context, UiSession.NewPrincipal(store.SecurityStamp, time.GetUtcNow()));
             }
 
             return Answer(context, result, wrong: StatusCodes.Status401Unauthorized, wrongText: "That password is not right.");
         });
 
-        group.MapPost("/logout", async (HttpContext context, UiConnections connections) =>
+        group.MapPost("/logout", async (HttpContext context, UiConnections connections, UiRevokedSessions revoked) =>
         {
+            // The cookie is only removed from this browser; revoking the id is what makes a copy of it useless.
+            revoked.Revoke(UiSession.SessionOf(context.User), UiSession.EndOf(context.User));
             connections.CloseSession(UiSession.SessionOf(context.User));
             await context.SignOutAsync(UiSession.Scheme);
             return TypedResults.NoContent();
@@ -66,7 +69,7 @@ internal static class UiAuthEndpoints
             if (result.Verdict == Verdict.Ok)
             {
                 // The change moved the stamp; this session gets a cookie for the new one.
-                await UiSession.SignInAsync(context, UiSession.NewPrincipal(store.SecurityStamp, session));
+                await UiSession.SignInAsync(context, UiSession.NewPrincipal(store.SecurityStamp, UiSession.IssuedOf(context.User)!.Value, session));
             }
 
             return Answer(context, result, wrong: StatusCodes.Status400BadRequest, wrongText: "The current password is not right.");
@@ -85,6 +88,9 @@ internal static class UiAuthEndpoints
                 var seconds = (int)Math.Ceiling(result.RetryAfter!.Value.TotalSeconds);
                 context.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
                 return TypedResults.Json(new { error = $"Too many tries. Wait {Wait(seconds)} and try again." }, statusCode: StatusCodes.Status429TooManyRequests);
+            case Verdict.Busy:
+                context.Response.Headers.RetryAfter = "1";
+                return TypedResults.Json(new { error = "The server is busy checking another password. Try again in a moment." }, statusCode: StatusCodes.Status429TooManyRequests);
             case Verdict.Invalid:
                 return TypedResults.Json(new { error = result.Problem }, statusCode: StatusCodes.Status400BadRequest);
             case Verdict.AlreadySet:

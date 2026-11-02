@@ -135,9 +135,7 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
     /// <summary>Whether a validated bearer token belongs to a registered client at its current generation.</summary>
     public bool IsCurrent(ClaimsPrincipal? principal) => principal is not null && IsCurrent(principal.GetClientId(), principal.GetGeneration());
 
-    public int GenerationOf(string clientId) => _file.Current.Clients.FirstOrDefault(c => c.Id == clientId)?.Generation ?? 0;
-
-    public async ValueTask<bool> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken)
+    public async ValueTask<int?> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken)
     {
         var client = _file.Current.Clients.FirstOrDefault(c => c.Id == clientId);
         var ok = client is not null && Secrets.Verify(clientSecret, client.SecretHash);
@@ -150,7 +148,8 @@ internal sealed class ServerSecretsStore : IHostedService, IClientCredentialVali
             }
         }
 
-        return ok;
+        // The generation of the very record the secret was checked against.
+        return ok ? client!.Generation : null;
     }
 
     /// <summary>Swaps an older hash format for the current one, now that the secret is at hand. The client stays valid if this fails.</summary>

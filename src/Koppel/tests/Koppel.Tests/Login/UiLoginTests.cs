@@ -176,6 +176,115 @@ public sealed class UiLoginTests : IDisposable
     }
 
     [Fact]
+    public async Task Wrong_setup_codes_from_one_caller_do_not_block_a_correct_code_from_another()
+    {
+        var host = Host();
+        var signIn = host.Services.GetRequiredService<UiSignIn>();
+        var code = host.SetupCode;
+
+        for (var i = 0; i < UiLoginThrottle.FreeFailures + 3; i++)
+        {
+            await signIn.SetupAsync("attacker", "AAAA-AAAA", KoppelFactory.Password, TestContext.Current.CancellationToken);
+        }
+
+        (await signIn.SetupAsync("attacker", code, KoppelFactory.Password, TestContext.Current.CancellationToken)).Verdict.Should().Be(Verdict.Locked);
+        (await signIn.SetupAsync("admin", code, KoppelFactory.Password, TestContext.Current.CancellationToken)).Verdict.Should().Be(Verdict.Ok);
+    }
+
+    [Fact]
+    public async Task Many_parallel_wrong_logins_run_at_most_five_password_checks_per_lock_window()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = Host();
+        await SetPasswordAsync(host);
+        var store = host.Services.GetRequiredService<UiAuthStore>();
+        var before = store.PasswordChecks;
+        var anonymous = Own(host.CreateAnonymousUiClient());
+
+        var statuses = await Task.WhenAll(Enumerable.Range(0, 60).Select(async i =>
+        {
+            using var response = await anonymous.PostAsJsonAsync("/api/auth/login", new { password = "wrong password " + i }, ct);
+            return response.StatusCode;
+        }));
+
+        (store.PasswordChecks - before).Should().BeLessThanOrEqualTo(UiLoginThrottle.FreeFailures);
+        statuses.Should().OnlyContain(s => s == HttpStatusCode.Unauthorized || s == HttpStatusCode.TooManyRequests);
+        statuses.Count(s => s == HttpStatusCode.Unauthorized).Should().BeLessThanOrEqualTo(UiLoginThrottle.FreeFailures);
+    }
+
+    [Fact]
+    public async Task A_busy_server_answers_at_once_and_does_not_count_the_try()
+    {
+        var host = Host();
+        await SetPasswordAsync(host);
+        var gate = host.Services.GetRequiredService<UiPasswordGate>();
+        var held = Enumerable.Range(0, UiPasswordGate.Slots).Select(_ => gate.TryEnter()).ToList();
+        var signIn = host.Services.GetRequiredService<UiSignIn>();
+        try
+        {
+            for (var i = 0; i < UiLoginThrottle.FreeFailures + 2; i++)
+            {
+                (await signIn.LoginAsync("caller", "wrong")).Verdict.Should().Be(Verdict.Busy);
+            }
+        }
+        finally
+        {
+            held.ForEach(slot => slot?.Dispose());
+        }
+
+        (await signIn.LoginAsync("caller", KoppelFactory.Password)).Verdict.Should().Be(Verdict.Ok, "busy answers never counted against the caller");
+    }
+
+    [Fact]
+    public async Task Setup_login_and_password_change_are_rate_limited_per_address()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = new KoppelFactory(kestrel: true, configuration: new Dictionary<string, string> { ["RateLimits:AuthPerMinute"] = "3" });
+        _disposables.Add(host);
+        var anonymous = Own(host.CreateAnonymousUiClient());
+
+        for (var i = 0; i < 3; i++)
+        {
+            (await anonymous.PostAsJsonAsync("/api/auth/login", new { password = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.Conflict);
+        }
+
+        (await anonymous.PostAsJsonAsync("/api/auth/login", new { password = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        (await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = "x", password = "y" }, ct)).StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        (await anonymous.GetAsync("/api/auth/state", ct)).StatusCode.Should().Be(HttpStatusCode.OK, "the UI polls state, so it is not limited");
+    }
+
+    [Fact]
+    public async Task A_copied_cookie_is_refused_after_signing_out()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = Host();
+        var cookie = await SetPasswordAsync(host);
+        var copy = WithCookie(host, cookie);
+        (await copy.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var logout = await WithCookie(host, cookie).PostAsync("/api/auth/logout", null, ct);
+
+        logout.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await copy.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        using var login = await Own(host.CreateAnonymousUiClient()).PostAsJsonAsync("/api/auth/login", new { password = KoppelFactory.Password }, ct);
+        (await WithCookie(host, CookieOf(login)).GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK, "another session is not affected");
+    }
+
+    [Fact]
+    public async Task The_ui_hub_closes_when_the_cookie_expires()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = new KoppelFactory(kestrel: true, services: s => s.PostConfigure<CookieAuthenticationOptions>(UiSession.Scheme, o => o.ExpireTimeSpan = TimeSpan.FromSeconds(3)));
+        _disposables.Add(host);
+        var cookie = await SetPasswordAsync(host);
+        await using var hub = await ConnectHubAsync(host, cookie, ct);
+        var closed = new TaskCompletionSource();
+        hub.Closed += _ => { closed.TrySetResult(); return Task.CompletedTask; };
+
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(20), ct);
+    }
+
+    [Fact]
     public async Task The_setup_code_is_written_to_a_file_and_removed_once_a_password_is_set()
     {
         var host = Host();
@@ -236,7 +345,7 @@ public sealed class UiLoginTests : IDisposable
 
         var activity = await ui.GetFromJsonAsync<JsonElement>("/api/activity?max=50", ct);
         activity.EnumerateArray().Count(e => e.GetProperty("reason").GetString() == "signInFailed" && e.GetProperty("outcome").GetString() == "failed")
-            .Should().Be(UiLoginThrottle.FreeFailures, "the locked attempt is not logged again");
+            .Should().Be(1, "one entry when the lock engages, not one per wrong try");
     }
 
     [Fact]

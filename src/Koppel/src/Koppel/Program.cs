@@ -69,6 +69,8 @@ builder.Services.AddSingleton<ServerSecretsStore>();
 builder.Services.AddSingleton<ConnectionStore>();
 builder.Services.AddSingleton<UiAuthStore>();
 builder.Services.AddSingleton<UiLoginThrottle>();
+builder.Services.AddSingleton<UiPasswordGate>();
+builder.Services.AddSingleton<UiRevokedSessions>();
 builder.Services.AddSingleton<UiSignIn>();
 builder.Services.AddSingleton<UiConnections>();
 builder.Services.AddUiSession();
@@ -156,7 +158,7 @@ app.MapUsbServerEndpoints();
 app.MapUsbClientEndpoints();
 app.MapSystemEndpoints();
 app.MapActivityEndpoints();
-app.MapHub<UiHub>("/api/hubs/ui");
+app.MapHub<UiHub>("/api/hubs/ui", options => options.CloseOnAuthenticationExpiration = true);
 app.MapHub<RemoteHub>("/api/hubs/remote", options => options.CloseOnAuthenticationExpiration = true);
 
 // For a container's health check: anonymous, on the UI port, whatever the role.

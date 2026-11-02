@@ -56,17 +56,17 @@ public sealed class UiLoginThrottleTests
 
         for (var i = 0; i < UiLoginThrottle.FreeFailures - 1; i++)
         {
-            throttle.Fail("ip");
+            throttle.Reserve("ip");
             throttle.LockedFor("ip").Should().BeNull();
         }
 
-        throttle.Fail("ip");
+        throttle.Reserve("ip");
         throttle.LockedFor("ip").Should().Be(TimeSpan.FromMinutes(1));
         throttle.LockedFor("another").Should().BeNull();
 
         clock.Advance(TimeSpan.FromSeconds(61));
         throttle.LockedFor("ip").Should().BeNull();
-        throttle.Fail("ip");
+        throttle.Reserve("ip");
         throttle.LockedFor("ip").Should().Be(TimeSpan.FromMinutes(2));
     }
 
@@ -76,7 +76,7 @@ public sealed class UiLoginThrottleTests
         var throttle = new UiLoginThrottle(new ManualTimeProvider());
         for (var i = 0; i < UiLoginThrottle.FreeFailures; i++)
         {
-            throttle.Fail("ip");
+            throttle.Reserve("ip");
         }
 
         throttle.Clear("ip");
@@ -87,10 +87,17 @@ public sealed class UiLoginThrottleTests
     [Fact]
     public void The_lock_never_grows_past_an_hour()
     {
-        var throttle = new UiLoginThrottle(new ManualTimeProvider());
-        for (var i = 0; i < 60; i++)
+        var clock = new ManualTimeProvider();
+        var throttle = new UiLoginThrottle(clock);
+        for (var i = 0; i < 40; i++)
         {
-            throttle.Fail("ip");
+            // Each further try comes once the lock has run out.
+            if (throttle.LockedFor("ip") is { } wait)
+            {
+                clock.Advance(wait + TimeSpan.FromSeconds(1));
+            }
+
+            throttle.Reserve("ip");
         }
 
         throttle.LockedFor("ip").Should().Be(TimeSpan.FromHours(1));

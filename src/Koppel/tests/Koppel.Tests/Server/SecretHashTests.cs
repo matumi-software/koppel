@@ -37,8 +37,8 @@ public sealed class SecretHashTests : IDisposable
 
         var (client, secret) = await secrets.CreateClientAsync("bench", ct);
 
-        (await secrets.ValidateAsync(client.Id, secret, ct)).Should().BeTrue();
-        (await secrets.ValidateAsync(client.Id, secret + "x", ct)).Should().BeFalse();
+        (await secrets.ValidateAsync(client.Id, secret, ct)).Should().Be(1);
+        (await secrets.ValidateAsync(client.Id, secret + "x", ct)).Should().BeNull();
         File.Exists(_paths.ServerSecretsFile).Should().BeTrue();
     }
 
@@ -50,8 +50,8 @@ public sealed class SecretHashTests : IDisposable
         await SeedAsync(new RegisteredClient("client-old", "old", Pbkdf2(secret), DateTimeOffset.UnixEpoch), ct);
         using var secrets = await StartAsync(ct);
 
-        (await secrets.ValidateAsync("client-old", "wrong", ct)).Should().BeFalse();
-        (await secrets.ValidateAsync("client-old", secret, ct)).Should().BeTrue();
+        (await secrets.ValidateAsync("client-old", "wrong", ct)).Should().BeNull();
+        (await secrets.ValidateAsync("client-old", secret, ct)).Should().HaveValue();
         secrets.Dispose();
 
         using var reloaded = new JsonConfigFile<ServerSecrets>(_paths.ServerSecretsFile, ServerSecrets.Empty, KoppelJson.Files, NullLogger.Instance, _box.AsFileCodec());

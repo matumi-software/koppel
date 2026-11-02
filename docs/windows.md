@@ -50,6 +50,10 @@ That builds `matumisoftware/koppel:0.1.0` (the tag in `KOPPEL_TAG`), which both 
    usbipd-win shares. Share and unshare with `usbipd bind` and `usbipd unbind`; the switch in
    Koppel cannot change it. USB/IP sends no product names, so devices show by VID:PID.
 
+Both compose files publish the UI as `127.0.0.1:5240:5240`, so it answers on this machine only.
+Docker Desktop's network translation makes every caller look like the same address, so a UI open
+to the LAN would let one wrong-password caller lock the admin out. Open it from this machine.
+
 Koppel's USB port on this machine is 3241, because usbipd-win holds 3240. Clients learn the port
 from the server, so nothing changes on their side.
 

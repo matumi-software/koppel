@@ -21,10 +21,18 @@ internal sealed class UiAuthGuard(RequestDelegate next)
             }
 
             context.User = result.Principal;
+            // The cookie is not the default scheme, so tell SignalR when this one expires: that is what
+            // lets the UI hub close with it (CloseOnAuthenticationExpiration).
+            context.Features.Set<IAuthenticateResultFeature>(new SessionResult(result));
         }
 
         await next(context);
     }
+}
+
+internal sealed class SessionResult(AuthenticateResult result) : IAuthenticateResultFeature
+{
+    public AuthenticateResult? AuthenticateResult { get; set; } = result;
 }
 
 internal static class UiAuthGuardExtensions

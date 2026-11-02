@@ -18,7 +18,7 @@ services:
       # So Koppel's own USB port moves to 3241. Clients learn it from the server.
       Usb__ListenPort: "3241"
     ports:
-      - "5240:5240"   # UI
+      - "127.0.0.1:5240:5240"   # UI, this machine only
       - "5241:5241"   # token endpoint and remote API (HTTPS)
       - "3241:3241"   # USB traffic (TLS)
     volumes:

@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.{png,jpg,ico,woff,woff2} binary
+
+# Signed third-party files: the driver catalog covers the exact bytes, so git must never touch them.
+src/Koppel/installer/usbip-win2/** binary

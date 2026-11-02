@@ -1,0 +1,136 @@
+using System.Net;
+using System.Net.Sockets;
+
+namespace Koppel.Core.Usb;
+
+/// <summary>Whether a shared device is free, in use by a client, or broken (the kernel's usbip_status).</summary>
+public enum ExportStatus
+{
+    NotExported = 0,
+    Available = 1,
+    Used = 2,
+    Error = 3,
+}
+
+/// <summary>The server side of USB/IP on this machine: list devices and hand them to the network.</summary>
+public interface IUsbHost
+{
+    /// <summary>Null when this machine can share USB devices; otherwise why not, for the UI.</summary>
+    string? Unavailable { get; }
+
+    IReadOnlyList<UsbDevice> ListDevices();
+
+    /// <summary>Takes the device from its driver and gives it to usbip-host, so it can be exported.</summary>
+    void Share(string busId);
+
+    /// <summary>Gives the device back to its normal driver.</summary>
+    void Unshare(string busId);
+
+    ExportStatus GetStatus(string busId);
+
+    /// <summary>
+    /// Hands an open TCP socket to the kernel, which from then on carries the device's USB traffic over
+    /// it. The caller must keep <paramref name="socket"/> alive until the client goes away.
+    /// </summary>
+    void Export(string busId, Socket socket);
+}
+
+/// <summary>A virtual host controller port on the client.</summary>
+public sealed record VhciPort(int Port, string Hub, int Status, uint DevId, string? LocalBusId)
+{
+    /// <summary>VDEV_ST_NULL: nothing attached.</summary>
+    public bool IsFree => Status == 4;
+}
+
+/// <summary>The client side of USB/IP on this machine: attach remote devices as local ones.</summary>
+public interface IUsbAttacher
+{
+    /// <summary>Null when this machine can attach USB devices; otherwise why not, for the UI.</summary>
+    string? Unavailable { get; }
+
+    IReadOnlyList<VhciPort> Ports();
+
+    /// <summary>
+    /// Hands a socket that has already completed OP_REQ_IMPORT to the virtual host controller.
+    /// Returns the port used. Keep <paramref name="socket"/> alive until detached.
+    /// </summary>
+    int Attach(Socket socket, uint devId, UsbSpeed speed);
+
+    void Detach(int port);
+}
+
+/// <summary>Plumbing shared by both ends.</summary>
+public static class UsbSockets
+{
+    /// <summary>
+    /// Two connected loopback TCP sockets. The kernel gets one end as a plain socket; Koppel relays the
+    /// other end through TLS. That is how USB/IP traffic stays encrypted on the network.
+    /// </summary>
+    public static async Task<(Socket KernelEnd, Socket RelayEnd)> CreateLoopbackPairAsync(CancellationToken cancellationToken)
+    {
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen(1);
+        var kernelEnd = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            var accept = listener.AcceptAsync(cancellationToken).AsTask();
+            await kernelEnd.ConnectAsync(listener.LocalEndPoint!, cancellationToken);
+            var relayEnd = await accept;
+            relayEnd.NoDelay = true;
+            return (kernelEnd, relayEnd);
+        }
+        catch
+        {
+            kernelEnd.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>The socket's file descriptor, which the kernel's sysfs files take as text.</summary>
+    public static int FileDescriptor(Socket socket)
+    {
+        ArgumentNullException.ThrowIfNull(socket);
+        return checked((int)socket.SafeHandle.DangerousGetHandle());
+    }
+
+    /// <summary>Copies both directions until either side closes, then returns.</summary>
+    public static async Task RelayAsync(Stream a, Stream b, CancellationToken cancellationToken)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var aToB = a.CopyToAsync(b, linked.Token);
+        var bToA = b.CopyToAsync(a, linked.Token);
+        await Task.WhenAny(aToB, bToA);
+        await linked.CancelAsync();
+        try
+        {
+            await Task.WhenAll(aToB, bToA);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+        {
+            // One side closed; the other copy was cut off. That is the normal end of a session.
+        }
+    }
+}
+
+/// <summary>Stands in on platforms where Koppel cannot drive USB yet.</summary>
+public sealed class UnsupportedUsb(string reason) : IUsbHost, IUsbAttacher
+{
+    public string? Unavailable => reason;
+
+    public IReadOnlyList<UsbDevice> ListDevices() => [];
+
+    public void Share(string busId) => throw new UsbHostException(reason);
+
+    public void Unshare(string busId) => throw new UsbHostException(reason);
+
+    public ExportStatus GetStatus(string busId) => ExportStatus.NotExported;
+
+    public void Export(string busId, Socket socket) => throw new UsbHostException(reason);
+
+    public IReadOnlyList<VhciPort> Ports() => [];
+
+    public int Attach(Socket socket, uint devId, UsbSpeed speed) => throw new UsbHostException(reason);
+
+    public void Detach(int port) => throw new UsbHostException(reason);
+}

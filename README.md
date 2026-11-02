@@ -36,8 +36,8 @@ The image is `matumisoftware/koppel` on Docker Hub (amd64 for now).
 
 3. Open `http://<machine>:5240` and choose the role.
 
-The container uses the host's network so clients can find it, and restarts after a crash or a
-reboot unless you stop it yourself.
+The container uses the host's network so clients can find it. It restarts after a crash, and comes
+back at the next reboot even if someone stopped it by hand.
 
 To upgrade:
 

@@ -24,7 +24,7 @@ services:
     volumes:
       - koppel:/koppel
     user: "0"
-    restart: unless-stopped
+    restart: always
 
 volumes:
   koppel:

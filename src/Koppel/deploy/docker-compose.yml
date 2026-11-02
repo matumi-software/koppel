@@ -20,7 +20,7 @@ services:
     # in a privileged container. Attached devices appear on this machine's kernel.
     user: "0"
     privileged: true
-    restart: unless-stopped
+    restart: always
 
 volumes:
   koppel:

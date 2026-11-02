@@ -53,7 +53,8 @@ Every change goes to the server over REST and is only shown as done when the ser
 
 ## Layout
 
-- The app is a shell: sidebar navigation, the page, and an aside. The aside shows Activity, or the selected device's details.
+- The app is a shell: sidebar navigation, the page, and an aside. The aside is one panel at a width the user sets: it shows Activity, or the selected device's or client's details, and what it shows never changes its width.
+- Settings pages use Panels with settings rows, like the Overview, and the role uses the same role cards as the first run.
 - The Overview leads with Needs you when anything is pending or rejected, then what this machine shares and what it has attached.
 - Devices are grouped by what they need (Waiting for the server, In use, Shared and free, Not shared or offline), not listed alphabetically.
 - At phone width the sidebar becomes a menu and the aside folds below the page. Nothing scrolls sideways. A phone is for checking up on devices, so the Overview and device pages must read well there.

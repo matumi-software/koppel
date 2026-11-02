@@ -5,6 +5,8 @@ export type SwitchState = 'off' | 'on' | 'pending-on' | 'pending-off' | 'failed'
 
 export interface SwitchProps {
   label: string;
+  /** Keep the label for screen readers only, when the row around the switch already names it. */
+  labelHidden?: boolean;
   /** The value the server last confirmed. */
   confirmed: boolean;
   /** The value the user asked for, while the server has not confirmed it yet. */
@@ -28,7 +30,7 @@ export function switchState(confirmed: boolean, pendingTarget?: boolean, failure
  * Confirm-on-push switch. It shows the server's confirmed value, or the requested value with the
  * pending stripe while the server has not confirmed it.
  */
-export function Switch({ label, confirmed, pendingTarget, failure, note, isDisabled, onRequestChange }: SwitchProps) {
+export function Switch({ label, labelHidden, confirmed, pendingTarget, failure, note, isDisabled, onRequestChange }: SwitchProps) {
   const noteId = useId();
   const state = switchState(confirmed, pendingTarget, failure);
   const isPending = pendingTarget !== undefined;
@@ -47,7 +49,7 @@ export function Switch({ label, confirmed, pendingTarget, failure, note, isDisab
       <span className="kp-switch__track" aria-hidden="true">
         <span className="kp-switch__thumb" />
       </span>
-      <span>{label}</span>
+      <span className={labelHidden ? 'kp-sr-only' : undefined}>{label}</span>
       {caption && (
         <span className="kp-switch__note" id={noteId}>
           {caption}

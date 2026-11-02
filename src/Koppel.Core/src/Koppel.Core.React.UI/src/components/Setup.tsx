@@ -11,14 +11,27 @@ export interface RoleCardsProps<T extends string> {
   label: string;
   options: readonly RoleOption<T>[];
   value: T | null;
+  /** As a stored setting: the role asked for while the server has not confirmed it. */
+  pendingValue?: T;
   isDisabled?: boolean;
   onChange: (value: T) => void;
 }
 
-/** Big choice cards for the machine's role. A react-aria RadioGroup, so arrow keys move between them. */
-export function RoleCards<T extends string>({ label, options, value, isDisabled, onChange }: RoleCardsProps<T>) {
+/**
+ * Big choice cards for the machine's role. A react-aria RadioGroup, so arrow keys move between them.
+ * As a stored setting the requested card shows the pending stripe until the server confirms it.
+ */
+export function RoleCards<T extends string>({ label, options, value, pendingValue, isDisabled, onChange }: RoleCardsProps<T>) {
+  const isPending = pendingValue !== undefined;
   return (
-    <RadioGroup className="kp-rolecards" aria-label={label} value={value} isDisabled={isDisabled} onChange={(v) => onChange(v as T)}>
+    <RadioGroup
+      className="kp-rolecards"
+      data-state={isPending ? 'pending' : undefined}
+      aria-label={label}
+      value={isPending ? pendingValue : value}
+      isDisabled={isDisabled || isPending}
+      onChange={(v) => onChange(v as T)}
+    >
       {options.map((option) => (
         <Radio key={option.value} value={option.value} className="kp-rolecard">
           <span className="kp-rolecard__title">

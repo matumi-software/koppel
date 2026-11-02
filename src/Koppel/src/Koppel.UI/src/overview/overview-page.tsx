@@ -6,7 +6,6 @@ import { getClients } from '@/api/server';
 import { getSettings } from '@/api/settings';
 import { hostOf, since, useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { Frame } from '@/shell/frame';
-import { SideInfo } from '@/shared/side-info';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
 
@@ -86,9 +85,6 @@ export function OverviewPage() {
     <Frame
       title="Overview"
       lede={`${lede}.${needs.length ? ` ${needs.length} ${needs.length === 1 ? 'thing needs' : 'things need'} you.` : ' Nothing needs you.'}`}
-      aside={
-        <SideInfo />
-      }
     >
       {needs.length > 0 && (
         <Panel title="Needs you" meta={needs.length} tone="needs">

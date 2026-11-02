@@ -49,3 +49,32 @@ export function MiniList({ items, empty }: { items: readonly MiniListItem[]; emp
     </ul>
   );
 }
+
+export interface SettingProps {
+  title: string;
+  /** What the setting does, under the title. */
+  description?: ReactNode;
+  /** The control: a Switch or Field with its label hidden, since the title names it. */
+  control: ReactNode;
+}
+
+/** Settings rows inside a Panel: the text on the left, the control on the right. */
+export function SettingList({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <ul className="kp-settings" aria-label={label}>
+      {children}
+    </ul>
+  );
+}
+
+export function Setting({ title, description, control }: SettingProps) {
+  return (
+    <li className="kp-setting">
+      <div className="kp-setting__text">
+        <span className="kp-setting__title">{title}</span>
+        {description && <span className="kp-setting__help">{description}</span>}
+      </div>
+      <div className="kp-setting__control">{control}</div>
+    </li>
+  );
+}

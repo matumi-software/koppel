@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import { getClients } from '@/api/server';
 import { setShared, type DeviceView, type ServerDevices } from '@/api/usb';
 import { Frame } from '@/shell/frame';
-import { SideInfo } from '@/shared/side-info';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
 import { usePending } from '@/shared/use-pending';
@@ -89,10 +88,10 @@ export function ServerDevicesPage() {
       action={shareSwitch(current)}
       onClose={() => setSelected(null)}
     />
-  ) : <SideInfo />;
+  ) : undefined;
 
   return (
-    <Frame title="Devices on this machine" lede={`Plug a device into ${host} to share it. Changes show once the server confirms them.`} aside={aside} asideWide={!!current}>
+    <Frame title="Devices on this machine" lede={`Plug a device into ${host} to share it. Changes show once the server confirms them.`} aside={aside} asideKey={current?.busId}>
       {data?.unavailable && <p className="kp-error">{data.unavailable}</p>}
       {query.isPending && <p className="kp-note">Loading devices…</p>}
       {data && devices.length === 0 && !data.unavailable && <p className="kp-note">No USB devices found on this machine.</p>}

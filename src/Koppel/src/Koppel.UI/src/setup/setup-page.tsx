@@ -3,14 +3,9 @@ import { useState } from 'react';
 import { Button, KoppelMark, RoleCards, SetupChecks, Steps } from '@koppel/react-ui';
 import { getSystemChecks } from '@/api/http';
 import type { KoppelRole } from '@/api/settings';
+import { roleOptions } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
 import { useMachineName } from '@/shared/use-machine-name';
-
-const roles = [
-  { value: 'server', title: 'Server', description: 'Shares the USB devices plugged into this machine with other machines on the network.' },
-  { value: 'client', title: 'Client', description: 'Attaches devices from a Koppel server, so programs here see them as if they were plugged in.' },
-  { value: 'both', title: 'Both', description: 'Shares its own devices and attaches devices from another server.' },
-] as const;
 
 /**
  * First run: pick what this machine does, and see whether its kernel can do it. Continue saves the
@@ -48,7 +43,7 @@ export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: 
             <p>Pick what this machine does. You can change it later under This machine.</p>
           </div>
 
-          <RoleCards label="Role" options={roles} value={chosen} isDisabled={locked || pending} onChange={setRole} />
+          <RoleCards label="Role" options={roleOptions} value={chosen} isDisabled={locked || pending} onChange={setRole} />
 
           <section className="kp-card" aria-label="Checking this machine">
             <h2>Checking this machine</h2>

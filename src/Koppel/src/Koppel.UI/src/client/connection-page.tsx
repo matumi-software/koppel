@@ -1,5 +1,4 @@
 import { Frame } from '@/shell/frame';
-import { SideInfo } from '@/shared/side-info';
 import { useFrame } from '@/shell/frame-context';
 import { ConnectionSection } from './connection-section';
 
@@ -10,9 +9,6 @@ export function ConnectionPage() {
     <Frame
       title="Server connection"
       lede="The Koppel server this machine attaches devices from. Ask its admin for a client."
-      aside={
-        <SideInfo />
-      }
     >
       <ConnectionSection locked={locked} />
     </Frame>

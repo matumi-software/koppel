@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { Button, LinkBanner, NavGroup, NavItem } from '@koppel/react-ui';
+import { AppShell, Button, LinkBanner, NavGroup, NavItem } from '@koppel/react-ui';
 import { getClients } from '@/api/server';
 import { getConnection } from '@/api/client';
 import { getSettings } from '@/api/settings';
@@ -13,6 +13,7 @@ import { OverviewPage } from '@/overview/overview-page';
 import { ClientsPage } from '@/server/clients-page';
 import { MachinePage } from '@/settings/machine-page';
 import { SetupPage } from '@/setup/setup-page';
+import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
 import { FrameContext, usePageFromHash, type Page } from '@/shell/frame-context';
 import { useActivity } from '@/activity/activity-context';
 import { useMachineName } from '@/shared/use-machine-name';
@@ -23,6 +24,8 @@ export function App() {
   const { items } = useActivity();
   const [page, go] = usePageFromHash();
   const [isMenuOpen, setMenuOpen] = useState(false);
+  const [title, setTitle] = useState('Koppel');
+  const [asideSlot, setAsideSlot] = useState<HTMLDivElement | null>(null);
   const locked = link !== 'live';
 
   const settings = useQuery({ queryKey: ['settings'], queryFn: getSettings });
@@ -122,10 +125,10 @@ export function App() {
   );
 
   const frame = useMemo(
-    () => ({ page: shown, go: open, nav, navFoot, navFootState: link, status, isMenuOpen, setMenuOpen, locked }),
+    () => ({ page: shown, go: open, nav, navFoot, navFootState: link, status, isMenuOpen, setMenuOpen, locked, asideSlot, setTitle }),
     // The nav and foot are rebuilt every render anyway; memo only keeps the object stable between them.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shown, nav, navFoot, link, status, isMenuOpen, locked],
+    [shown, nav, navFoot, link, status, isMenuOpen, locked, asideSlot],
   );
 
   if (!settings.data) {
@@ -136,14 +139,28 @@ export function App() {
     return <SetupPage locked={locked} onDone={(chosen) => go(chosen === 'client' ? 'connection' : 'clients')} />;
   }
 
+  // One shell for every page, so the side panel is one panel too: pages swap its content, never its width.
   return (
     <FrameContext.Provider value={frame}>
-      {shown === 'overview' && <OverviewPage />}
-      {shown === 'devices' && <ServerDevicesPage />}
-      {shown === 'clients' && <ClientsPage />}
-      {shown === 'attach' && <ClientDevicesPage />}
-      {shown === 'machine' && <MachinePage />}
-      {shown === 'connection' && <ConnectionPage />}
+      <AppShell
+        nav={nav}
+        navFoot={navFoot}
+        navFootState={link}
+        aside={<div ref={setAsideSlot} style={{ display: 'contents' }} />}
+        defaultAsideWidth={storedAsideWidth()}
+        onAsideWidthChange={storeAsideWidth}
+        title={title}
+        status={status}
+        isMenuOpen={isMenuOpen}
+        onMenuOpenChange={setMenuOpen}
+      >
+        {shown === 'overview' && <OverviewPage />}
+        {shown === 'devices' && <ServerDevicesPage />}
+        {shown === 'clients' && <ClientsPage />}
+        {shown === 'attach' && <ClientDevicesPage />}
+        {shown === 'machine' && <MachinePage />}
+        {shown === 'connection' && <ConnectionPage />}
+      </AppShell>
     </FrameContext.Provider>
   );
 }

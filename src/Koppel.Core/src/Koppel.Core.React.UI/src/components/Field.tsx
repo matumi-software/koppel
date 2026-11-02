@@ -5,6 +5,8 @@ export type FieldState = 'pending' | 'invalid';
 
 export interface FieldProps extends Omit<TextFieldProps, 'className' | 'style' | 'children'> {
   label: string;
+  /** Keep the label for screen readers only, when the row around the field already names it. */
+  labelHidden?: boolean;
   help?: string;
   state?: FieldState;
   /** Set for identifiers: client IDs, host:port, paths. */
@@ -15,11 +17,11 @@ export interface FieldProps extends Omit<TextFieldProps, 'className' | 'style' |
 }
 
 /** A labelled text input for settings and authentication. */
-export function Field({ label, help, state, mono, placeholder, action, ...props }: FieldProps) {
+export function Field({ label, labelHidden, help, state, mono, placeholder, action, ...props }: FieldProps) {
   const caption = state === 'pending' ? 'Saving…' : help;
   return (
     <TextField {...props} className="kp-field" data-state={state} isInvalid={state === 'invalid'}>
-      <Label className="kp-field__label">{label}</Label>
+      <Label className={labelHidden ? 'kp-sr-only' : 'kp-field__label'}>{label}</Label>
       <div className="kp-field__control">
         <Input className="kp-input" data-mono={mono ? 'true' : undefined} placeholder={placeholder} />
         {action}

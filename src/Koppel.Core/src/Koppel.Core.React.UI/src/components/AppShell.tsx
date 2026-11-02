@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { Button, Dialog, Link, Modal, ModalOverlay } from 'react-aria-components';
 import { KoppelMark } from './KoppelMark';
 
@@ -8,10 +8,15 @@ export interface AppShellProps {
   /** Shown at the bottom of the sidebar, such as LinkBanner. */
   navFoot?: ReactNode;
   navFootState?: 'live' | 'reconnecting' | 'down';
-  /** Right column: activity, or a device's details. Folds below the page at phone width. */
+  /**
+   * Right column: activity, or the selected item's details. One panel for every page, whose width
+   * the user sets by dragging its edge and its content never changes. Folds below the page at phone width.
+   */
   aside?: ReactNode;
-  /** A wider right column, for details. */
-  asideWide?: boolean;
+  /** The aside's width in pixels when the shell first shows, such as the width the user left it at. */
+  defaultAsideWidth?: number;
+  /** Called with the new width when the user finishes resizing the aside. */
+  onAsideWidthChange?: (width: number) => void;
   /** The phone top bar's title, such as the open page. */
   title: string;
   /** Small status for the phone top bar, such as the live dot. */
@@ -25,7 +30,9 @@ export interface AppShellProps {
  * The app frame: sidebar navigation, the page, and an aside. At phone width the sidebar moves into
  * a menu behind a top-bar button and the aside folds below the page, so nothing scrolls sideways.
  */
-export function AppShell({ nav, navFoot, navFootState, aside, asideWide, title, status, isMenuOpen, onMenuOpenChange, children }: AppShellProps) {
+export function AppShell({ nav, navFoot, navFootState, aside, defaultAsideWidth, onAsideWidthChange, title, status, isMenuOpen, onMenuOpenChange, children }: AppShellProps) {
+  const [asideWidth, setAsideWidth] = useState(() => clampAside(defaultAsideWidth ?? asideDefault));
+  const [isResizing, setResizing] = useState(false);
   const brand = (
     <div className="kp-brand">
       <KoppelMark size={26} />
@@ -39,7 +46,7 @@ export function AppShell({ nav, navFoot, navFootState, aside, asideWide, title, 
   );
 
   return (
-    <div className="kp-shell">
+    <div className="kp-shell" data-resizing={isResizing ? 'true' : undefined}>
       <header className="kp-shell__top">
         <Button className="kp-button" data-variant="ghost" aria-label="Open menu" onPress={() => onMenuOpenChange(true)} style={{ minWidth: 44, minHeight: 44 }}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
@@ -74,11 +81,85 @@ export function AppShell({ nav, navFoot, navFootState, aside, asideWide, title, 
       <main className="kp-shell__main">{children}</main>
 
       {aside && (
-        <aside className="kp-shell__aside" data-wide={asideWide ? 'true' : undefined}>
-          {aside}
+        <aside className="kp-shell__aside" aria-label="Details" style={{ '--kp-aside-width': `${asideWidth}px` } as CSSProperties}>
+          <AsideResizer
+            width={asideWidth}
+            isResizing={isResizing}
+            onResize={setAsideWidth}
+            onResizingChange={setResizing}
+            onDone={(width) => onAsideWidthChange?.(width)}
+          />
+          <div className="kp-shell__aside-body">{aside}</div>
         </aside>
       )}
     </div>
+  );
+}
+
+const asideMin = 280;
+const asideMax = 560;
+const asideDefault = 340;
+const asideStep = 16;
+const clampAside = (width: number) => Math.round(Math.min(asideMax, Math.max(asideMin, width)));
+
+interface AsideResizerProps {
+  width: number;
+  isResizing: boolean;
+  onResize: (width: number) => void;
+  onResizingChange: (isResizing: boolean) => void;
+  onDone: (width: number) => void;
+}
+
+/**
+ * The aside's left edge as a focusable separator. Dragging it left widens the aside; with focus,
+ * the arrow keys move it in steps and Home and End jump to the narrowest and widest.
+ */
+function AsideResizer({ width, isResizing, onResize, onResizingChange, onDone }: AsideResizerProps) {
+  const drag = useRef<{ x: number; width: number } | null>(null);
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drag.current = { x: e.clientX, width };
+    onResizingChange(true);
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    if (drag.current) onResize(clampAside(drag.current.width + drag.current.x - e.clientX));
+  };
+  const onPointerEnd = () => {
+    if (!drag.current) return;
+    drag.current = null;
+    onResizingChange(false);
+    onDone(width);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const next =
+      e.key === 'ArrowLeft' ? width + asideStep : e.key === 'ArrowRight' ? width - asideStep : e.key === 'Home' ? asideMin : e.key === 'End' ? asideMax : undefined;
+    if (next === undefined) return;
+    e.preventDefault();
+    const clamped = clampAside(next);
+    onResize(clamped);
+    onDone(clamped);
+  };
+
+  return (
+    <div
+      className="kp-shell__resize"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the side panel"
+      aria-valuenow={width}
+      aria-valuemin={asideMin}
+      aria-valuemax={asideMax}
+      tabIndex={0}
+      data-dragging={isResizing ? 'true' : undefined}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd}
+      onPointerCancel={onPointerEnd}
+      onKeyDown={onKeyDown}
+    />
   );
 }
 

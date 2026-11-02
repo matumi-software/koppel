@@ -265,12 +265,22 @@
   position: sticky; top: 0; height: 100vh; overflow-y: auto; scrollbar-width: thin;
 }
 .kp-shell__main { flex: 1 1 auto; min-width: 0; padding: 28px 32px 40px; display: flex; flex-direction: column; gap: 24px; }
+/* One aside for every page. Its width is set by the user, never by what it shows, so opening a
+   device's details does not resize the page or the cards on it. */
 .kp-shell__aside {
-  flex: none; width: 320px; background: var(--bg-surface); border-left: 1px solid var(--border-default);
-  padding: 20px 18px; display: flex; flex-direction: column; gap: 16px;
-  position: sticky; top: 0; height: 100vh; overflow-y: auto; scrollbar-width: thin;
+  flex: none; width: var(--kp-aside-width, 340px); max-width: 45vw; background: var(--bg-surface);
+  border-left: 1px solid var(--border-default); position: sticky; top: 0; height: 100vh; display: flex;
 }
-.kp-shell__aside[data-wide="true"] { width: 400px; }
+.kp-shell__aside-body {
+  flex: 1 1 auto; min-width: 0; padding: 20px 18px; display: flex; flex-direction: column; gap: 16px;
+  overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-gutter: stable;
+}
+/* The aside's left edge: drag it, or focus it and use the arrow keys. */
+.kp-shell__resize { position: absolute; top: 0; bottom: 0; left: -4px; width: 8px; z-index: 1; cursor: col-resize; touch-action: none; outline: none; }
+.kp-shell__resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 120ms ease; }
+.kp-shell__resize:hover::after, .kp-shell__resize[data-dragging="true"]::after { background: var(--accent); }
+.kp-shell__resize:focus-visible::after { background: var(--focus-ring); }
+.kp-shell[data-resizing="true"] { cursor: col-resize; user-select: none; }
 .kp-shell__top { display: none; }
 .kp-brand { display: flex; align-items: center; gap: 8px; padding: 0 10px; font: 600 17px/24px var(--font-sans); white-space: nowrap; }
 .kp-shell__foot { margin-top: auto; display: grid; gap: 10px; padding: 12px; border-radius: var(--radius-lg); background: var(--bg-inset); border: 1px solid var(--border-default); }
@@ -286,10 +296,12 @@
     border-bottom: 1px solid var(--border-default); position: sticky; top: 0; z-index: 5;
   }
   .kp-shell__main { padding: 16px; gap: 20px; }
-  .kp-shell__aside, .kp-shell__aside[data-wide="true"] {
-    width: auto; height: auto; position: static; overflow: visible; border-left: 0; border-top: 1px solid var(--border-default);
-    border-radius: 14px 14px 0 0; padding: 14px 16px 24px;
+  .kp-shell__aside {
+    width: auto; max-width: none; height: auto; position: static; border-left: 0; border-top: 1px solid var(--border-default);
+    border-radius: 14px 14px 0 0;
   }
+  .kp-shell__aside-body { overflow: visible; padding: 14px 16px 24px; }
+  .kp-shell__resize { display: none; }
 }
 
 /* Navigation: groups of links. aria-current="page" marks the open page. */
@@ -385,6 +397,10 @@
 .kp-panel__foot { padding: 10px 16px; border-top: 1px solid var(--border-default); }
 .kp-panel[data-tone="needs"] { border-color: var(--pending); }
 .kp-panel[data-tone="needs"] > .kp-panel__head { background: var(--pending-subtle); color: var(--pending-text); border-bottom-color: var(--pending); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.kp-panel__body { padding: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.kp-panel__note { font: 400 12px/16px var(--font-sans); color: var(--text-tertiary); }
+.kp-panel__note[data-state="pending"] { color: var(--pending-text); }
+.kp-panel__note[data-state="fault"] { color: var(--fault-text); }
 .kp-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 20px; align-items: start; }
 .kp-mini { list-style: none; margin: 0; padding: 0; }
 .kp-mini > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--border-default); }
@@ -411,6 +427,16 @@
 .kp-rolecard[data-selected] .kp-rolecard__radio { border-color: var(--accent); }
 .kp-rolecard[data-selected] .kp-rolecard__radio::after { content: ""; width: 10px; height: 10px; border-radius: var(--radius-pill); background: var(--accent); }
 .kp-rolecard p { margin: 0; color: var(--text-secondary); }
+/* As a stored setting the chosen card waits for the server: pending edge and stripe, group disabled. */
+.kp-rolecards[data-state="pending"] .kp-rolecard[data-selected] { border-color: var(--pending); box-shadow: inset 0 0 0 1px var(--pending); background: var(--bg-surface); position: relative; overflow: hidden; }
+.kp-rolecards[data-state="pending"] .kp-rolecard[data-selected]::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px;
+  background-image: repeating-linear-gradient(-45deg, var(--pending) 0 4px, var(--pending-subtle) 4px 8px);
+}
+.kp-rolecards[data-state="pending"] .kp-rolecard[data-selected] .kp-rolecard__radio { border-color: var(--pending); }
+.kp-rolecards[data-state="pending"] .kp-rolecard[data-selected] .kp-rolecard__radio::after { background: var(--pending); }
+.kp-rolecard[data-disabled] { cursor: not-allowed; }
+.kp-rolecards[data-disabled]:not([data-state="pending"]) .kp-rolecard { opacity: 0.5; }
 .kp-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .kp-check { display: flex; align-items: flex-start; gap: 10px; font: 400 13px/18px var(--font-sans); color: var(--text-secondary); }
 .kp-check b { color: var(--text-primary); font-weight: 600; }
@@ -452,3 +478,17 @@
 .kp-feed__detail { margin: 2px 0 0; font: 400 12px/16px var(--font-sans); color: var(--fault-text); overflow-wrap: anywhere; }
 .kp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .kp-chip { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: var(--radius-sm); background: var(--bg-inset); border: 1px solid var(--border-default); font: 500 12px/16px var(--font-sans); color: var(--text-secondary); }
+
+/* Settings rows inside a panel: what the setting does on the left, its control on the right.
+   The control wraps below the text when the row gets narrow. */
+.kp-settings { list-style: none; margin: 0; padding: 0; }
+.kp-setting { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 14px 16px; border-top: 1px solid var(--border-default); }
+.kp-setting:first-child { border-top: 0; }
+.kp-setting__text { flex: 1 1 260px; min-width: 0; display: grid; gap: 2px; }
+.kp-setting__title { font: 500 14px/20px var(--font-sans); color: var(--text-primary); }
+.kp-setting__help { font: 400 12px/16px var(--font-sans); color: var(--text-tertiary); }
+.kp-setting__control { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; justify-content: flex-end; }
+.kp-setting__control .kp-field { width: 260px; max-width: 100%; }
+
+/* Text only screen readers get, such as the label of a control a settings row already names. */
+.kp-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

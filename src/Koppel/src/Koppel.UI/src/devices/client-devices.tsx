@@ -4,7 +4,6 @@ import { useQuery } from '@tanstack/react-query';
 import { getConnection } from '@/api/client';
 import { attachDevice, detachDevice, type ClientDeviceView, type ClientDevices } from '@/api/usb';
 import { Frame } from '@/shell/frame';
-import { SideInfo } from '@/shared/side-info';
 import { useFrame } from '@/shell/frame-context';
 import { usePending } from '@/shared/use-pending';
 import { DeviceDrawer } from './device-drawer';
@@ -110,11 +109,11 @@ export function ClientDevicesPage() {
       }
       onClose={() => setSelected(null)}
     />
-  ) : <SideInfo />;
+  ) : undefined;
 
   const link = data?.link;
   return (
-    <Frame title={`Devices on ${server}`} lede="Attach a device to use it here as if it were plugged in." aside={aside} asideWide={!!current}>
+    <Frame title={`Devices on ${server}`} lede="Attach a device to use it here as if it were plugged in." aside={aside} asideKey={current?.device.busId}>
       {link === 'unconfigured' && (
         <div className="kp-row">
           <p className="kp-note">Set up the server connection to see its devices.</p>

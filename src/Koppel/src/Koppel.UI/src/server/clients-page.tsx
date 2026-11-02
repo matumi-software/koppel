@@ -5,7 +5,6 @@ import { toEntries, useActivity } from '@/activity/activity-context';
 import { createClient, getClients, getClientSecret, getIdentity, revokeClient, rotateClientSecret, type ClientView, type CreatedClient } from '@/api/server';
 import { since, useServerDevices } from '@/devices/use-devices';
 import { useHubEvent } from '@/hub/hub-context';
-import { SideInfo } from '@/shared/side-info';
 import { useMachineName } from '@/shared/use-machine-name';
 import { usePending } from '@/shared/use-pending';
 import { Frame } from '@/shell/frame';
@@ -64,11 +63,9 @@ export function ClientsPage() {
             onRevoke={() => request(current.id, true, () => revokeClient(current.id))}
             onClose={() => setSelected(null)}
           />
-        ) : (
-          <SideInfo />
-        )
+        ) : undefined
       }
-      asideWide={!!current}
+      asideKey={current?.id}
     >
       {identity.data && (
         <section className="kp-card" aria-label="Server fingerprint" style={{ gap: 8 }}>

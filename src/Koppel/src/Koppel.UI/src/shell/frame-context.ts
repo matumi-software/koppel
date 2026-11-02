@@ -35,6 +35,10 @@ export interface FrameApi {
   setMenuOpen: (open: boolean) => void;
   /** True while the UI's own link to its server is not live, so nothing may send a change. */
   locked: boolean;
+  /** The one side panel. A page renders its content there through Frame's aside. */
+  asideSlot: HTMLElement | null;
+  /** Sets the phone top bar's title to the open page's. */
+  setTitle: (title: string) => void;
 }
 
 export const FrameContext = createContext<FrameApi | null>(null);

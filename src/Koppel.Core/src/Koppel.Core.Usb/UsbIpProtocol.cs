@@ -32,10 +32,35 @@ public static class UsbIpProtocol
         ArgumentNullException.ThrowIfNull(stream);
         var buffer = new byte[HeaderSize];
         await stream.ReadExactlyAsync(buffer, cancellationToken);
-        return new OpHeader(
-            BinaryPrimitives.ReadUInt16BigEndian(buffer),
-            BinaryPrimitives.ReadUInt16BigEndian(buffer.AsSpan(2)),
-            BinaryPrimitives.ReadUInt32BigEndian(buffer.AsSpan(4)));
+        return ParseHeader(buffer);
+    }
+
+    public static OpHeader ParseHeader(ReadOnlySpan<byte> source) => new(
+        BinaryPrimitives.ReadUInt16BigEndian(source),
+        BinaryPrimitives.ReadUInt16BigEndian(source[2..]),
+        BinaryPrimitives.ReadUInt32BigEndian(source[4..]));
+
+    /// <summary>Reads the body of an OP_REP_DEVLIST after its header: each device with its interfaces.</summary>
+    public static IReadOnlyList<UsbDevice> ReadDevList(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        var count = new byte[4];
+        stream.ReadExactly(count);
+        var devices = new List<UsbDevice>();
+        var buffer = new byte[DeviceSize];
+        for (var n = BinaryPrimitives.ReadUInt32BigEndian(count); n > 0; n--)
+        {
+            stream.ReadExactly(buffer);
+            var device = ReadDevice(buffer);
+            var interfaces = new byte[buffer[311] * InterfaceSize];
+            stream.ReadExactly(interfaces);
+            devices.Add(device with
+            {
+                Interfaces = [.. interfaces.Chunk(InterfaceSize).Select(i => new UsbInterface(i[0], i[1], i[2]))],
+            });
+        }
+
+        return devices;
     }
 
     /// <summary>The bus ID that follows an OP_REQ_IMPORT header.</summary>

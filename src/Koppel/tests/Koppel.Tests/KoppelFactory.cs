@@ -18,7 +18,7 @@ public sealed class KoppelFactory : IDisposable
     private readonly WebApplicationFactory<Program> _factory;
     private readonly bool _kestrel;
 
-    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null)
+    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null)
     {
         _kestrel = kestrel;
         Directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
@@ -37,6 +37,11 @@ public sealed class KoppelFactory : IDisposable
             builder.UseSetting("Paths:Keys", Path.Combine(Directory, "keys"));
             builder.UseSetting("Ports:Http", HttpPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("Ports:Https", HttpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            foreach (var (key, value) in configuration ?? new Dictionary<string, string>())
+            {
+                builder.UseSetting(key, value);
+            }
+
             if (services is not null)
             {
                 builder.ConfigureTestServices(services);
@@ -96,7 +101,7 @@ public sealed class KoppelFactory : IDisposable
         }
     }
 
-    private static int FreePort()
+    public static int FreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();

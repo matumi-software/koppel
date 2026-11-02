@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Koppel.Settings;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Koppel.Tests.Settings;
@@ -68,7 +69,20 @@ public sealed class SettingsStoreTests : IDisposable
 
     private string SettingsFile => Path.Combine(_directory, "settings.json");
 
-    private SettingsStore CreateStore() => new(new KoppelPaths(_directory, Path.Combine(_directory, "keys")), NullLogger<SettingsStore>.Instance);
+    [Fact]
+    public async Task A_configured_usb_port_is_the_default_for_a_new_install()
+    {
+        using var store = CreateStore(new Dictionary<string, string?> { ["Usb:ListenPort"] = "3241" });
+
+        await store.StartAsync(TestContext.Current.CancellationToken);
+
+        ReadFile().ListenPort.Should().Be(3241);
+    }
+
+    private SettingsStore CreateStore(Dictionary<string, string?>? configuration = null) => new(
+        new KoppelPaths(_directory, Path.Combine(_directory, "keys")),
+        new ConfigurationBuilder().AddInMemoryCollection(configuration ?? []).Build(),
+        NullLogger<SettingsStore>.Instance);
 
     private KoppelSettings ReadFile() =>
         JsonSerializer.Deserialize<KoppelSettings>(File.ReadAllText(SettingsFile), KoppelJson.Files)!;

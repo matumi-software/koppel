@@ -25,9 +25,12 @@ export interface ServerDevices {
 export interface ClientDeviceView {
   device: DeviceView;
   attachedHere: boolean;
+  /** Null when attached through the gateway: the other machine's driver holds it, not this kernel. */
   port: number | null;
   attachedSince: string | null;
   fault: string | null;
+  /** Where a gateway attach came from, such as 172.17.0.1. */
+  attachedVia: string | null;
 }
 
 export type LinkStatus = 'unconfigured' | 'connecting' | 'connected' | 'error';
@@ -37,6 +40,8 @@ export interface ClientDevices {
   linkMessage: string | null;
   devices: ClientDeviceView[];
   unavailable: string | null;
+  /** True while the plain USB/IP gateway listens, for a driver such as usbip-win2 on the host. */
+  gateway: boolean;
 }
 
 export const getServerDevices = () => getJson<ServerDevices>('/api/server/devices');

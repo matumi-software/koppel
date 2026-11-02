@@ -50,21 +50,27 @@ builder.Services.AddSingleton<UsbClient>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbServer>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbClient>());
 builder.Services.AddHostedService<UsbIpTlsServer>();
+builder.Services.AddHostedService<UsbIpGateway>();
 builder.Services.AddHostedService<UiHubRelay>();
 
 // USB goes through the Linux kernel's USB/IP drivers. Other platforms report why they cannot share yet.
+// Usb:Upstream (host:port) shares another USB/IP server's devices instead, such as usbipd-win on a
+// Windows host; Gateway:Port lets a USB/IP driver on this machine attach (see UsbIpGateway).
 var sysRoot = builder.Configuration["Usb:SysRoot"] ?? "/sys";
-if (OperatingSystem.IsLinux())
+var unsupported = new UnsupportedUsb("Sharing and attaching USB devices needs Linux, or a USB/IP server or driver on the host. See docs/windows.md.");
+if (builder.Configuration["Usb:Upstream"] is { Length: > 0 } upstream)
 {
-    builder.Services.AddSingleton<IUsbHost>(new SysfsUsbHost(sysRoot));
-    builder.Services.AddSingleton<IUsbAttacher>(new SysfsVhci(sysRoot));
+    var (upstreamHost, upstreamPort) = upstream.LastIndexOf(':') is var colon and > 0
+        ? (upstream[..colon], int.Parse(upstream[(colon + 1)..], System.Globalization.CultureInfo.InvariantCulture))
+        : (upstream, 3240);
+    builder.Services.AddSingleton<IUsbHost>(sp => new UsbIpUpstreamHost(upstreamHost, upstreamPort, sp.GetRequiredService<TimeProvider>()));
 }
 else
 {
-    var unsupported = new UnsupportedUsb("Sharing and attaching USB devices needs Linux for now. Run the Koppel Docker image on a Linux host; Windows support comes later.");
-    builder.Services.AddSingleton<IUsbHost>(unsupported);
-    builder.Services.AddSingleton<IUsbAttacher>(unsupported);
+    builder.Services.AddSingleton<IUsbHost>(OperatingSystem.IsLinux() ? new SysfsUsbHost(sysRoot) : unsupported);
 }
+
+builder.Services.AddSingleton<IUsbAttacher>(OperatingSystem.IsLinux() ? new SysfsVhci(sysRoot) : unsupported);
 
 builder.Services.AddKoppelAuthServer();
 

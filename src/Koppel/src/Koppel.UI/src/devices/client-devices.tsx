@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Button, DeviceCardBody, DeviceCards, DeviceGroup, type DeviceState } from '@koppel/react-ui';
+import { Button, CopyValue, DeviceCardBody, DeviceCards, DeviceGroup, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
 import { getConnection } from '@/api/client';
 import { attachDevice, detachDevice, type ClientDeviceView, type ClientDevices } from '@/api/usb';
@@ -58,7 +58,12 @@ export function ClientDevicesPage() {
     );
   };
   const where = (e: ClientDeviceView) =>
-    e.attachedHere ? (
+    e.attachedHere && e.port === null ? (
+      <>
+        Attached through the gateway for <b>{e.attachedVia}</b>
+        {since(e.attachedSince)}
+      </>
+    ) : e.attachedHere ? (
       <>
         Attached here on virtual port <b>{e.port}</b>
         {since(e.attachedSince)}
@@ -84,13 +89,25 @@ export function ClientDevicesPage() {
       device={current.device}
       state={stateOf(current)}
       holder={
-        current.attachedHere
-          ? { state: 'attached', title: 'Attached here', detail: `On virtual port ${current.port}${since(current.attachedSince)}.` }
-          : takenElsewhere(current)
-            ? { state: 'attached', title: 'In use elsewhere', detail: 'Another client has it. Ask there to detach it.' }
-            : { state: 'shared', title: 'Free to attach', detail: `${server} shares it with registered clients.` }
+        current.attachedHere && current.port === null
+          ? { state: 'attached', title: 'Attached through the gateway', detail: `The USB/IP driver on ${current.attachedVia} has it${since(current.attachedSince)}. Detach here unplugs it there.` }
+          : current.attachedHere
+            ? { state: 'attached', title: 'Attached here', detail: `On virtual port ${current.port}${since(current.attachedSince)}.` }
+            : takenElsewhere(current)
+              ? { state: 'attached', title: 'In use elsewhere', detail: 'Another client has it. Ask there to detach it.' }
+              : { state: 'shared', title: 'Free to attach', detail: `${server} shares it with registered clients.` }
       }
-      action={action(current)}
+      action={
+        <>
+          {action(current)}
+          {data?.gateway && !current.attachedHere && current.device.state === 'shared' && (
+            <div style={{ display: 'grid', gap: 6, marginTop: 12 }}>
+              <span className="kp-type-caption">Or attach it to the computer that runs this container, with usbip-win2:</span>
+              <CopyValue value={`usbip attach -r 127.0.0.1 -b ${current.device.busId}`} wrap />
+            </div>
+          )}
+        </>
+      }
       onClose={() => setSelected(null)}
     />
   ) : <SideInfo />;

@@ -46,7 +46,7 @@ Code (under `src/Koppel/`): `src/Koppel/Settings/SettingsStore.cs` (write, then 
 - **Docker:** USB needs a privileged container running as root, and the host must have the modules loaded (`modprobe usbip-host` on servers, `modprobe vhci-hcd` on clients). Attached devices appear on the client's host kernel.
 - **Tested:** the protocol encoding, the sysfs adapters against a fake `/sys`, and a full server-to-client run on real Kestrel with fake kernels on both ends (token, pinning, hub, TLS, import, byte round trip).
 - **Real kernel (2026-11-02, WSL2 6.6, software USB device):** sharing binds the device to `usbip-host`, both kernels take Koppel's sockets, and the device enumerates through both relays and TLS up to `SET_CONFIGURATION`. That step deadlocks because the test device and its attached copy sit on the same virtual controller, the only one the WSL kernel has; the same happens with no Koppel in the path. Configuration and bulk data still need a client on a second machine. The rig is in `D:\testing\koppel-usb`.
-- **Windows:** reports that USB needs Linux for now. Planned: the client through usbip-win2, the server by driving an installed usbipd-win.
+- **Windows:** the container uses a USB/IP driver on the Windows host over plain USB/IP inside the machine. A server shares what usbipd-win exports (`Usb:Upstream`, `UsbIpUpstreamHost`); a client runs a gateway that usbip-win2 attaches from (`Gateway:Port`, `UsbIpGateway`). See `docs/windows.md`. Koppel run natively on Windows, without a container, still reports that USB needs Linux unless one of those two is set.
 
 ## Activity
 

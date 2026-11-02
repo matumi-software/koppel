@@ -1,0 +1,30 @@
+# Koppel as a server on a Windows host with Docker Desktop. See docs/windows.md.
+#   docker compose -f docker-compose.windows-server.yml up -d
+# Then browse http://localhost:5240/
+#
+# A container cannot take USB devices from Windows. usbipd-win on the host does that: devices you
+# share with `usbipd bind` are what Koppel offers. Koppel reaches usbipd-win over plain USB/IP inside
+# this machine and carries it to clients over TLS behind a token.
+
+name: koppel
+
+services:
+  koppel:
+    image: matumi/koppel:latest
+    hostname: ${KOPPEL_HOSTNAME:-${COMPUTERNAME:-koppel}}
+    environment:
+      # usbipd-win listens on the host's port 3240.
+      Usb__Upstream: host.docker.internal:3240
+      # So Koppel's own USB port moves to 3241. Clients learn it from the server.
+      Usb__ListenPort: "3241"
+    ports:
+      - "5240:5240"   # UI
+      - "5241:5241"   # token endpoint and remote API (HTTPS)
+      - "3241:3241"   # USB traffic (TLS)
+    volumes:
+      - koppel:/koppel
+    user: "0"
+    restart: unless-stopped
+
+volumes:
+  koppel:

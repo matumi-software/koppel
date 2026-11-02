@@ -70,7 +70,7 @@ internal sealed partial class UsbServer(
 
     /// <summary>Devices a client may import: shared and present.</summary>
     public IReadOnlyList<UsbDevice> Exportable() =>
-        [.. host.ListDevices().Where(d => d.Driver == "usbip-host")];
+        [.. host.ListDevices().Where(host.IsShared)];
 
     public IUsbHost Host => host;
 
@@ -158,7 +158,7 @@ internal sealed partial class UsbServer(
                 {
                     foreach (var device in host.ListDevices().Where(_shared.Current.Expects))
                     {
-                        if (device.Driver != "usbip-host" && !_faults.ContainsKey(device.BusId))
+                        if (!host.IsShared(device) && !_faults.ContainsKey(device.BusId))
                         {
                             TryApply(device.BusId, share: true);
                         }
@@ -255,7 +255,7 @@ internal sealed partial class UsbServer(
         var views = devices.Select(d =>
         {
             _names[d.BusId] = d.Product ?? "Unknown device";
-            var state = d.Driver == "usbip-host"
+            var state = host.IsShared(d)
                 ? host.GetStatus(d.BusId) == ExportStatus.Used ? "attached" : "shared"
                 : "local";
             return new DeviceView(

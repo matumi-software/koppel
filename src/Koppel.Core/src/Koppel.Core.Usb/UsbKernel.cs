@@ -20,6 +20,9 @@ public interface IUsbHost
 
     IReadOnlyList<UsbDevice> ListDevices();
 
+    /// <summary>Whether a listed device is ready to export. The Linux kernel says so by binding it to usbip-host.</summary>
+    bool IsShared(UsbDevice device) => device?.Driver == "usbip-host";
+
     /// <summary>Takes the device from its driver and gives it to usbip-host, so it can be exported.</summary>
     void Share(string busId);
 

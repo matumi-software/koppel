@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Text;
@@ -13,11 +14,14 @@ using Microsoft.AspNetCore.SignalR.Client;
 namespace Koppel.Usb;
 
 /// <summary>A remote device as the client's UI sees it.</summary>
-public sealed record ClientDeviceView(DeviceView Device, bool AttachedHere, int? Port, DateTimeOffset? AttachedSince, string? Fault);
+/// <param name="Port">The virtual port when this machine's kernel has it; null when it went through the gateway.</param>
+/// <param name="AttachedVia">Where a gateway attach came from, such as <c>172.17.0.1</c>.</param>
+public sealed record ClientDeviceView(DeviceView Device, bool AttachedHere, int? Port, DateTimeOffset? AttachedSince, string? Fault, string? AttachedVia = null);
 
 /// <summary>What the client's UI shows: the link to the server and the devices it shares.</summary>
 /// <param name="Link"><c>unconfigured</c>, <c>connecting</c>, <c>connected</c> or <c>error</c>.</param>
-public sealed record ClientDevices(string Link, string? LinkMessage, IReadOnlyList<ClientDeviceView> Devices, string? Unavailable);
+/// <param name="Gateway">True while the plain USB/IP gateway listens, so the UI can show how to attach through it.</param>
+public sealed record ClientDevices(string Link, string? LinkMessage, IReadOnlyList<ClientDeviceView> Devices, string? Unavailable, bool Gateway = false);
 
 /// <summary>
 /// Client role: keeps a live SignalR link to the configured server for its device list, and attaches
@@ -39,19 +43,27 @@ internal sealed partial class UsbClient(
     private string _link = "unconfigured";
     private string? _linkMessage;
     private CancellationTokenSource? _session;
+    private bool _gateway;
 
     public event Func<ClientDevices, Task>? Changed;
 
     public ClientDevices Current => new(
         _link,
         _linkMessage,
-        [.. _remote.Devices.Select(d => new ClientDeviceView(
-            d,
-            _attachments.ContainsKey(d.BusId),
-            _attachments.TryGetValue(d.BusId, out var a) ? a.Port : null,
-            _attachments.TryGetValue(d.BusId, out var since) ? since.Since : null,
-            _faults.GetValueOrDefault(d.BusId)))],
-        attacher.Unavailable);
+        [.. _remote.Devices.Select(d =>
+        {
+            var a = _attachments.GetValueOrDefault(d.BusId);
+            return new ClientDeviceView(d, a is not null, a?.Port, a?.Since, _faults.GetValueOrDefault(d.BusId), a?.Via);
+        })],
+        attacher.Unavailable,
+        _gateway);
+
+    /// <summary>Called by <see cref="UsbIpGateway"/> when it starts or stops listening.</summary>
+    public Task SetGatewayAsync(bool listening)
+    {
+        _gateway = listening;
+        return RaiseAsync();
+    }
 
     /// <summary>Starts attaching in the background. The outcome reaches the UI through <see cref="Changed"/>.</summary>
     public void BeginAttach(string busId)
@@ -80,7 +92,12 @@ internal sealed partial class UsbClient(
         {
             try
             {
-                attacher.Detach(attachment.Port);
+                // A gateway attach has no port here; stopping its relay unplugs it on the other side.
+                if (attachment.Port is { } port)
+                {
+                    attacher.Detach(port);
+                }
+
                 await activity.RecordAsync(Device(busId), ActivityReason.Detached, ActivityOutcome.Succeeded, $"{NameOf(busId)} was detached");
             }
             catch (UsbHostException ex)
@@ -179,7 +196,96 @@ internal sealed partial class UsbClient(
         await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
     }
 
-    private async Task AttachAsync(string busId)
+    /// <summary>
+    /// Serves one plain USB/IP connection from a USB/IP driver on this machine, such as usbip-win2 on the
+    /// Windows host of Koppel's container. The request goes to the server through the same TLS session
+    /// an attach uses. An import is tracked, so the UI shows the device attached here and can detach it.
+    /// </summary>
+    public async Task ServeGatewayAsync(Socket local, CancellationToken stoppingToken)
+    {
+        var from = (local.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "this machine";
+        await using var plain = new NetworkStream(local, ownsSocket: true);
+        var request = await UsbIpProtocol.ReadHeaderAsync(plain, stoppingToken);
+        var replyCode = request.Code switch
+        {
+            UsbIpProtocol.OpReqDevList => UsbIpProtocol.OpRepDevList,
+            UsbIpProtocol.OpReqImport => UsbIpProtocol.OpRepImport,
+            _ => (ushort)0,
+        };
+        if (replyCode == 0)
+        {
+            return;
+        }
+
+        var busId = request.Code == UsbIpProtocol.OpReqImport ? await UsbIpProtocol.ReadBusIdAsync(plain, stoppingToken) : null;
+        TcpClient tcp;
+        SslStream tls;
+        try
+        {
+            if (settings.Current.Role == KoppelRole.Server)
+            {
+                throw new InvalidOperationException("This machine is a server, not a client.");
+            }
+
+            (tcp, tls) = await OpenSessionAsync(stoppingToken);
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or TokenRequestException or System.Security.Authentication.AuthenticationException or InvalidOperationException or HttpRequestException)
+        {
+            LogGatewayFailed(busId ?? "the device list", ex.Message);
+            await plain.WriteAsync(UsbIpProtocol.Header(replyCode, UsbIpProtocol.StatusError), stoppingToken);
+            return;
+        }
+
+        using (tcp)
+        await using (tls)
+        {
+            if (busId is null)
+            {
+                await tls.WriteAsync(UsbIpProtocol.DevListRequest(), stoppingToken);
+                await tls.CopyToAsync(plain, stoppingToken);
+                return;
+            }
+
+            await tls.WriteAsync(UsbIpProtocol.ImportRequest(busId), stoppingToken);
+            var reply = await UsbIpProtocol.ReadHeaderAsync(tls, stoppingToken);
+            if (reply.Code != UsbIpProtocol.OpRepImport || reply.Status != UsbIpProtocol.StatusOk)
+            {
+                await plain.WriteAsync(UsbIpProtocol.Header(UsbIpProtocol.OpRepImport, UsbIpProtocol.StatusError), stoppingToken);
+                await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Failed, $"{NameOf(busId)} was not attached through the gateway", "The server could not export the device. Someone else may be using it.");
+                return;
+            }
+
+            // Pass the server's device record on as it came, interfaces count and all.
+            var device = new byte[UsbIpProtocol.DeviceSize];
+            await tls.ReadExactlyAsync(device, stoppingToken);
+            await plain.WriteAsync(UsbIpProtocol.Header(UsbIpProtocol.OpRepImport, UsbIpProtocol.StatusOk), stoppingToken);
+            await plain.WriteAsync(device, stoppingToken);
+
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _faults.TryRemove(busId, out _);
+            _attachments[busId] = new Attachment(null, stop, time.GetUtcNow(), from);
+            LogGatewayAttached(busId, from);
+            await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Succeeded, $"{NameOf(busId)} is attached through the gateway for {from}");
+            await RaiseAsync();
+            try
+            {
+                await UsbSockets.RelayAsync(tls, plain, stop.Token);
+            }
+            finally
+            {
+                if (_attachments.TryRemove(busId, out _))
+                {
+                    // Released on the other side, or the link dropped. A detach here records itself.
+                    await activity.RecordAsync(Device(busId), ActivityReason.Detached, ActivityOutcome.Succeeded, $"{NameOf(busId)} was released by {from}");
+                }
+
+                await RaiseAsync();
+            }
+        }
+    }
+
+    /// <summary>Opens a TLS connection to the server's USB port and proves who this client is. USB/IP follows.</summary>
+    private async Task<(TcpClient Tcp, SslStream Tls)> OpenSessionAsync(CancellationToken cancellationToken)
     {
         var c = connection.Current;
         if (!c.IsComplete || _remote.UsbPort == 0)
@@ -187,30 +293,50 @@ internal sealed partial class UsbClient(
             throw new InvalidOperationException("Not connected to a server.");
         }
 
-        if (attacher.Unavailable is { } reason)
-        {
-            throw new UsbHostException(reason);
-        }
-
         var server = new Uri(c.ServerUrl!);
         using var tokenHttp = new HttpClient(ServerCertificate.CreatePinnedHandler(c.ServerFingerprint!));
         using var tokens = new KoppelTokenClient(tokenHttp, time);
-        var token = await tokens.GetAccessTokenAsync(server, c.ClientId!, c.ClientSecret!, CancellationToken.None);
+        var token = await tokens.GetAccessTokenAsync(server, c.ClientId!, c.ClientSecret!, cancellationToken);
 
         var tcp = new TcpClient { NoDelay = true };
-        await tcp.ConnectAsync(server.Host, _remote.UsbPort);
-        var tls = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false,
-            (_, certificate, _, _) => ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, c.ServerFingerprint));
+        SslStream? tls = null;
         try
         {
+            await tcp.ConnectAsync(server.Host, _remote.UsbPort, cancellationToken);
+            tls = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false,
+                (_, certificate, _, _) => ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, c.ServerFingerprint));
             await tls.AuthenticateAsClientAsync(server.Host);
-            await tls.WriteAsync(Encoding.ASCII.GetBytes($"{UsbIpTlsServer.Preface}{token}\n"));
-            var answer = await UsbIpTlsServer.ReadLineAsync(tls, CancellationToken.None);
+            await tls.WriteAsync(Encoding.ASCII.GetBytes($"{UsbIpTlsServer.Preface}{token}\n"), cancellationToken);
+            var answer = await UsbIpTlsServer.ReadLineAsync(tls, cancellationToken);
             if (answer != "OK")
             {
                 throw new InvalidOperationException($"The server refused the connection: {answer ?? "no answer"}.");
             }
 
+            return (tcp, tls);
+        }
+        catch
+        {
+            if (tls is not null)
+            {
+                await tls.DisposeAsync();
+            }
+
+            tcp.Dispose();
+            throw;
+        }
+    }
+
+    private async Task AttachAsync(string busId)
+    {
+        if (attacher.Unavailable is { } reason)
+        {
+            throw new UsbHostException(reason);
+        }
+
+        var (tcp, tls) = await OpenSessionAsync(CancellationToken.None);
+        try
+        {
             await tls.WriteAsync(UsbIpProtocol.ImportRequest(busId));
             var header = await UsbIpProtocol.ReadHeaderAsync(tls, CancellationToken.None);
             if (header.Code != UsbIpProtocol.OpRepImport || header.Status != UsbIpProtocol.StatusOk)
@@ -299,10 +425,18 @@ internal sealed partial class UsbClient(
 
     private Task RaiseAsync() => Changed?.Invoke(Current) ?? Task.CompletedTask;
 
-    private sealed record Attachment(int Port, CancellationTokenSource Stop, DateTimeOffset Since);
+    /// <param name="Port">The virtual port, or null for a gateway attach.</param>
+    /// <param name="Via">Where a gateway attach came from.</param>
+    private sealed record Attachment(int? Port, CancellationTokenSource Stop, DateTimeOffset Since, string? Via = null);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Attached {BusId} on virtual port {Port}")]
     private partial void LogAttached(string busId, int port);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Attached {BusId} through the gateway for {From}")]
+    private partial void LogGatewayAttached(string busId, string from);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Gateway request for {Subject} failed: {Reason}")]
+    private partial void LogGatewayFailed(string subject, string reason);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Attaching {BusId} failed: {Reason}")]
     private partial void LogAttachFailed(string busId, string reason);

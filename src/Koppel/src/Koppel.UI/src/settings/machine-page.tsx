@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { ActivityFeed, Button, Field, SegmentedControl, Switch } from '@koppel/react-ui';
-import { toEntries, useActivity } from '@/activity/activity-context';
+import { Button, Field, SegmentedControl, Switch } from '@koppel/react-ui';
 import type { KoppelRole } from '@/api/settings';
 import { Frame } from '@/shell/frame';
+import { SideInfo } from '@/shared/side-info';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
 import { useSettings, type SettingStatus } from './use-settings';
@@ -17,17 +17,9 @@ const roles = [
 export function MachinePage() {
   const host = useMachineName();
   const { locked } = useFrame();
-  const { items } = useActivity();
   const { query, status, requestChange } = useSettings();
 
-  const aside = (
-    <>
-      <h2 className="kp-type-heading" style={{ margin: 0 }}>
-        Activity
-      </h2>
-      <ActivityFeed entries={toEntries(items)} empty="Changes show here when the server confirms or rejects them." />
-    </>
-  );
+  const aside = <SideInfo />;
 
   if (!query.data) {
     return (

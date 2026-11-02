@@ -27,8 +27,9 @@ export function usePending<T>({ timeoutMs = confirmTimeoutMs, describe }: Pendin
   const logIds = useRef(new Map<string, { id: string; text: string }>());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
+  // `serverLogged`: the server's own activity log already has the outcome, so our line goes.
   const settle = useCallback(
-    (key: string, failure?: string) => {
+    (key: string, failure?: string, serverLogged = false) => {
       clearTimeout(timers.current.get(key));
       timers.current.delete(key);
       const rest = { ...pendingRef.current };
@@ -50,12 +51,11 @@ export function usePending<T>({ timeoutMs = confirmTimeoutMs, describe }: Pendin
       const log = logIds.current.get(key);
       if (log) {
         logIds.current.delete(key);
-        activity.update(
-          log.id,
-          failure
-            ? { state: 'fault', lead: 'Not done.', text: `${log.text}: ${failure}` }
-            : { state: 'shared', lead: 'Done.', text: log.text },
-        );
+        if (failure && !serverLogged) {
+          activity.update(log.id, { state: 'fault', lead: 'Not done.', detail: failure });
+        } else {
+          activity.remove(log.id);
+        }
       }
     },
     [activity],
@@ -88,7 +88,7 @@ export function usePending<T>({ timeoutMs = confirmTimeoutMs, describe }: Pendin
       for (const [key, target] of Object.entries(pendingRef.current)) {
         const result = verdict(key, target);
         if (result === 'confirmed') settle(key);
-        else if (result !== 'waiting') settle(key, result.failed);
+        else if (result !== 'waiting') settle(key, result.failed, true);
       }
     },
     [settle],

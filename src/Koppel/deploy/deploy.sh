@@ -26,7 +26,7 @@ docker save matumi/koppel:latest | gzip | ssh "$target" 'gunzip | docker load'
 echo "Starting Koppel on $target..."
 ssh "$target" 'mkdir -p ~/koppel'
 scp "$here/docker-compose.yml" "$target:~/koppel/docker-compose.yml"
-ssh "$target" 'cd ~/koppel && docker compose up -d && docker compose ps'
+ssh "$target" 'cd ~/koppel && echo "KOPPEL_HOSTNAME=$(hostname)" > .env && docker compose up -d && docker compose ps'
 
 host="${target#*@}"
 echo "Koppel is running. Open http://$host:5240/"

@@ -1,10 +1,10 @@
 import { useCallback, useState } from 'react';
-import { ActivityFeed, Button, DeviceCardBody, DeviceCards, DeviceGroup, type DeviceState } from '@koppel/react-ui';
-import { toEntries, useActivity } from '@/activity/activity-context';
+import { Button, DeviceCardBody, DeviceCards, DeviceGroup, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
 import { getConnection } from '@/api/client';
 import { attachDevice, detachDevice, type ClientDeviceView, type ClientDevices } from '@/api/usb';
 import { Frame } from '@/shell/frame';
+import { SideInfo } from '@/shared/side-info';
 import { useFrame } from '@/shell/frame-context';
 import { usePending } from '@/shared/use-pending';
 import { DeviceDrawer } from './device-drawer';
@@ -19,7 +19,6 @@ const attachTimeoutMs = 30_000;
  */
 export function ClientDevicesPage() {
   const { locked, go } = useFrame();
-  const { items } = useActivity();
   const connection = useQuery({ queryKey: ['connection'], queryFn: getConnection });
   const server = hostOf(connection.data?.serverUrl) ?? 'the server';
   const [selected, setSelected] = useState<string | null>(null);
@@ -94,14 +93,7 @@ export function ClientDevicesPage() {
       action={action(current)}
       onClose={() => setSelected(null)}
     />
-  ) : (
-    <>
-      <h2 className="kp-type-heading" style={{ margin: 0 }}>
-        Activity
-      </h2>
-      <ActivityFeed entries={toEntries(items)} empty="Changes show here when the server confirms or rejects them." />
-    </>
-  );
+  ) : <SideInfo />;
 
   const link = data?.link;
   return (

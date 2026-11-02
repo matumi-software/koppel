@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { ActivityFeed, Button, MiniList, Panel, StatusBadge, type MiniListItem } from '@koppel/react-ui';
-import { toEntries, useActivity } from '@/activity/activity-context';
+import { Button, MiniList, Panel, StatusBadge, type MiniListItem } from '@koppel/react-ui';
+import { useActivity } from '@/activity/activity-context';
 import { getConnection } from '@/api/client';
+import { getClients } from '@/api/server';
 import { getSettings } from '@/api/settings';
 import { hostOf, since, useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { Frame } from '@/shell/frame';
+import { SideInfo } from '@/shared/side-info';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
 
@@ -21,6 +23,8 @@ export function OverviewPage() {
   const client = useClientDevices(isClient);
   const connection = useQuery({ queryKey: ['connection'], queryFn: getConnection, enabled: isClient });
   const remote = hostOf(connection.data?.serverUrl) ?? 'the server';
+  const clients = useQuery({ queryKey: ['clients'], queryFn: getClients, enabled: isServer });
+  const clientName = (id: string | null) => clients.data?.find((c) => c.id === id)?.name ?? id ?? 'A client';
 
   const needs: MiniListItem[] = [];
   for (const item of items.filter((i) => i.state === 'pending')) {
@@ -54,7 +58,7 @@ export function OverviewPage() {
     sub: (
       <>
         <span className="kp-type-mono-sm">{d.vidPid || d.busId}</span>
-        <span>{d.state === 'attached' ? `${d.attachedTo ?? 'A client'}${since(d.attachedSince)}` : d.state === 'offline' ? 'Unplugged' : 'Free'}</span>
+        <span>{d.state === 'attached' ? `${clientName(d.attachedTo)}${since(d.attachedSince)}` : d.state === 'offline' ? 'Unplugged' : 'Free'}</span>
       </>
     ),
   }));
@@ -83,12 +87,7 @@ export function OverviewPage() {
       title="Overview"
       lede={`${lede}.${needs.length ? ` ${needs.length} ${needs.length === 1 ? 'thing needs' : 'things need'} you.` : ' Nothing needs you.'}`}
       aside={
-        <>
-          <h2 className="kp-type-heading" style={{ margin: 0 }}>
-            Activity
-          </h2>
-          <ActivityFeed entries={toEntries(items)} empty="Changes show here when the server confirms or rejects them." />
-        </>
+        <SideInfo />
       }
     >
       {needs.length > 0 && (

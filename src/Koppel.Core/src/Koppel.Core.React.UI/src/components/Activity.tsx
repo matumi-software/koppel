@@ -10,11 +10,15 @@ export function Glyph({ state }: { state: GlyphState }) {
 export interface ActivityEntry {
   id: string;
   state: GlyphState;
-  /** A short lead word, such as "Saved." or "Not saved.". */
+  /** A short lead word, such as "Waiting." or "Not done.". */
   lead?: string;
   text: ReactNode;
+  /** Why it failed, shown under the text. */
+  detail?: ReactNode;
   /** When, already formatted, such as 10:42:18. */
   time: string;
+  /** What it is about, such as device or client, shown beside the time. */
+  kind?: string;
 }
 
 /** Changes as the server confirms or rejects them, newest first. A live log for screen readers. */
@@ -32,10 +36,36 @@ export function ActivityFeed({ entries, empty }: { entries: readonly ActivityEnt
               {entry.lead && <b>{entry.lead} </b>}
               {entry.text}
             </p>
-            <span className="kp-feed__time">{entry.time}</span>
+            {entry.detail && <p className="kp-feed__detail">{entry.detail}</p>}
+            <span className="kp-feed__time">
+              {entry.time}
+              {entry.kind && ` · ${entry.kind}`}
+            </span>
           </div>
         </li>
       ))}
     </ol>
+  );
+}
+
+export interface FactsProps {
+  title: string;
+  facts: readonly { label: string; value: ReactNode; mono?: boolean }[];
+}
+
+/** A short block of facts, such as this machine's name, role, version and ports. */
+export function Facts({ title, facts }: FactsProps) {
+  return (
+    <section className="kp-facts" aria-label={title}>
+      <h2>{title}</h2>
+      <dl className="kp-kv">
+        {facts.map((fact) => (
+          <div key={fact.label} style={{ display: 'contents' }}>
+            <dt>{fact.label}</dt>
+            <dd className={fact.mono ? 'kp-type-mono-sm' : undefined}>{fact.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
   );
 }

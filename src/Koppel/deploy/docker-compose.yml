@@ -7,6 +7,8 @@ name: koppel
 services:
   koppel:
     image: matumi/koppel:latest
+    # The machine name Koppel shows and puts in its certificate. deploy.sh sets it to the host's name.
+    hostname: ${KOPPEL_HOSTNAME:-koppel}
     ports:
       - "5240:5240"   # UI
       - "5241:5241"   # token endpoint and remote API (HTTPS)

@@ -16,11 +16,11 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ActivityProvider>
-        <HubProvider>
+      <HubProvider>
+        <ActivityProvider>
           <App />
-        </HubProvider>
-      </ActivityProvider>
+        </ActivityProvider>
+      </HubProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

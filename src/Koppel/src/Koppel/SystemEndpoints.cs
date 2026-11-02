@@ -37,7 +37,20 @@ internal static class SystemEndpoints
             info.HttpsPort,
             settings.Current.ListenPort,
             secrets.Fingerprint,
-            System.Runtime.InteropServices.RuntimeInformation.OSDescription)));
+            OsLabel())));
         return app;
+    }
+
+    /// <summary>On Linux the kernel matters most (it carries the USB/IP drivers), and in Docker it is the host's.</summary>
+    private static string OsLabel()
+    {
+        if (OperatingSystem.IsLinux() && File.Exists("/proc/sys/kernel/osrelease"))
+        {
+            var kernel = File.ReadAllText("/proc/sys/kernel/osrelease").Trim();
+            var inContainer = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+            return inContainer ? $"Linux kernel {kernel}, in Docker" : $"Linux kernel {kernel}";
+        }
+
+        return System.Runtime.InteropServices.RuntimeInformation.OSDescription;
     }
 }

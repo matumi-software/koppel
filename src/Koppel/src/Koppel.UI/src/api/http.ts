@@ -47,3 +47,18 @@ export interface SystemCheck {
 }
 
 export const getSystemChecks = () => getJson<SystemCheck[]>('/api/system/checks');
+
+/** Mirrors Koppel.SystemInfo: what the side panel shows about this machine. */
+export interface SystemInfo {
+  name: string;
+  version: string;
+  startedAt: string;
+  role: 'server' | 'client' | 'both';
+  uiPort: number;
+  httpsPort: number;
+  usbPort: number;
+  fingerprint: string;
+  os: string;
+}
+
+export const getSystemInfo = () => getJson<SystemInfo>('/api/system/info');

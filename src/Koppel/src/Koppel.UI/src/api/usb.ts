@@ -12,6 +12,9 @@ export interface DeviceView {
   attachedTo: string | null;
   attachedSince: string | null;
   fault: string | null;
+  serial: string | null;
+  driver: string | null;
+  interfaces: string[] | null;
 }
 
 export interface ServerDevices {

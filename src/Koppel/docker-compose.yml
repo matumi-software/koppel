@@ -10,6 +10,8 @@ name: koppel
 services:
   koppel:
     image: ${DOCKER_REGISTRY-}matumi/koppel
+    # The machine name Koppel shows and puts in its certificate. A container's own name is random.
+    hostname: ${KOPPEL_HOSTNAME:-${COMPUTERNAME:-koppel}}
     build:
       context: ..
       dockerfile: Koppel/src/Koppel/Dockerfile

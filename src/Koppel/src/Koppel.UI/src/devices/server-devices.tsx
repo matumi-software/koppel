@@ -1,8 +1,10 @@
 import { useCallback, useState } from 'react';
-import { ActivityFeed, DeviceCardBody, DeviceCards, DeviceGroup, Switch, type DeviceState } from '@koppel/react-ui';
-import { toEntries, useActivity } from '@/activity/activity-context';
+import { DeviceCardBody, DeviceCards, DeviceGroup, Switch, type DeviceState } from '@koppel/react-ui';
+import { useQuery } from '@tanstack/react-query';
+import { getClients } from '@/api/server';
 import { setShared, type DeviceView, type ServerDevices } from '@/api/usb';
 import { Frame } from '@/shell/frame';
+import { SideInfo } from '@/shared/side-info';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
 import { usePending } from '@/shared/use-pending';
@@ -16,9 +18,13 @@ import { since, useServerDevices } from './use-devices';
 export function ServerDevicesPage() {
   const host = useMachineName();
   const { locked } = useFrame();
-  const { items } = useActivity();
   const [selected, setSelected] = useState<string | null>(null);
-  const describe = useCallback((busId: string, share: boolean) => ({ text: `${share ? 'Share' : 'Stop sharing'} ${busId}`, subject: busId }), []);
+  const clients = useQuery({ queryKey: ['clients'], queryFn: getClients });
+  const clientName = (id: string | null) => clients.data?.find((c) => c.id === id)?.name ?? id ?? 'a client';
+  const describe = useCallback(
+    (busId: string, share: boolean) => ({ text: `${share ? 'Share' : 'Stop sharing'} bus ${busId}`, subject: busId }),
+    [],
+  );
   const { pending, failures, request, judge } = usePending<boolean>({ describe });
 
   const onPush = useCallback(
@@ -47,7 +53,7 @@ export function ServerDevicesPage() {
   const where = (d: DeviceView) =>
     d.state === 'attached' ? (
       <>
-        Attached to <b>{d.attachedTo ?? 'a client'}</b>
+        Attached to <b>{clientName(d.attachedTo)}</b>
         {since(d.attachedSince)}
       </>
     ) : d.state === 'offline' ? (
@@ -73,7 +79,7 @@ export function ServerDevicesPage() {
       state={stateOf(current)}
       holder={
         current.state === 'attached'
-          ? { state: 'attached', title: `${current.attachedTo ?? 'A client'} has it`, detail: `Attached${since(current.attachedSince)}. Ask there to detach it.` }
+          ? { state: 'attached', title: `${clientName(current.attachedTo)} has it`, detail: `Attached${since(current.attachedSince)}. Ask there to detach it.` }
           : current.state === 'shared'
             ? { state: 'shared', title: 'Free', detail: 'Any registered client can attach it.' }
             : current.state === 'offline'
@@ -83,14 +89,7 @@ export function ServerDevicesPage() {
       action={shareSwitch(current)}
       onClose={() => setSelected(null)}
     />
-  ) : (
-    <>
-      <h2 className="kp-type-heading" style={{ margin: 0 }}>
-        Activity
-      </h2>
-      <ActivityFeed entries={toEntries(items)} empty="Changes show here when the server confirms or rejects them." />
-    </>
-  );
+  ) : <SideInfo />;
 
   return (
     <Frame title="Devices on this machine" lede={`Plug a device into ${host} to share it. Changes show once the server confirms them.`} aside={aside} asideWide={!!current}>

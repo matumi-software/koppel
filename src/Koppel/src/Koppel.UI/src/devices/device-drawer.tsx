@@ -44,6 +44,32 @@ export function DeviceDrawer({ device, state, holder, action, onClose }: DeviceD
         <dd className="kp-type-mono">{device.busId}</dd>
         <dt>Speed</dt>
         <dd>{device.speed || 'unknown'}</dd>
+        {device.serial && (
+          <>
+            <dt>Serial</dt>
+            <dd className="kp-type-mono">{device.serial}</dd>
+          </>
+        )}
+        {device.driver && (
+          <>
+            <dt>Driver</dt>
+            <dd className="kp-type-mono">{device.driver}</dd>
+          </>
+        )}
+        {device.interfaces && device.interfaces.length > 0 && (
+          <>
+            <dt>Kind</dt>
+            <dd>
+              <span className="kp-chips">
+                {device.interfaces.map((name) => (
+                  <span key={name} className="kp-chip">
+                    {name}
+                  </span>
+                ))}
+              </span>
+            </dd>
+          </>
+        )}
       </dl>
 
       <div>{action}</div>

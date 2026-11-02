@@ -48,6 +48,25 @@ Code (under `src/Koppel/`): `src/Koppel/Settings/SettingsStore.cs` (write, then 
 - **Real kernel (2026-11-02, WSL2 6.6, software USB device):** sharing binds the device to `usbip-host`, both kernels take Koppel's sockets, and the device enumerates through both relays and TLS up to `SET_CONFIGURATION`. That step deadlocks because the test device and its attached copy sit on the same virtual controller, the only one the WSL kernel has; the same happens with no Koppel in the path. Configuration and bulk data still need a client on a second machine. The rig is in `D:\testing\koppel-usb`.
 - **Windows:** reports that USB needs Linux for now. Planned: the client through usbip-win2, the server by driving an installed usbipd-win.
 
+## Activity
+
+The server keeps an activity log in memory (Koppel.Core.Activity, shaped like Timebase.Core.Activity):
+sharing, plugging and unplugging, attaches and releases, client changes and settings changes, each with
+an outcome and, when it failed, the reason. The UI loads it from `GET /api/activity` and follows
+`ActivityRecorded` over the hub, so it is the same after a reload and on every device. It starts
+empty when the process restarts. A change the UI sent shows as Waiting until the server logs it.
+
+## Running on another machine
+
+`src/Koppel/deploy` runs Koppel on a Debian or Ubuntu machine without a registry:
+
+1. Copy `prepare-host.sh` to the machine and run it once with sudo. It installs Docker, loads
+   `usbip-host` and `vhci-hcd` and keeps them loaded at boot.
+2. From this repo, with SSH access to the machine: `bash src/Koppel/deploy/deploy.sh user@host`. It
+   builds the image here, copies it over SSH, and starts it with `deploy/docker-compose.yml`.
+
+The image is built for this machine's architecture; the script stops if the target's differs.
+
 ## Config on disk
 
 The config directory holds:

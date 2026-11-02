@@ -433,3 +433,23 @@
 .kp-list > li[data-state="pending"] { background: var(--pending-subtle); }
 .kp-list__main { flex: 1 1 200px; min-width: 0; display: grid; gap: 4px; }
 .kp-shell, .kp-shell *, .kp-shell *::before, .kp-shell *::after, .kp-overlay, .kp-overlay * { box-sizing: border-box; }
+
+/* Secret and copyable values: masked text with Reveal and Copy, or text with Copy. */
+.kp-secret { display: grid; gap: 6px; min-width: 0; }
+.kp-secret > .kp-row { gap: 4px; }
+.kp-secret__value { white-space: normal; overflow-wrap: anywhere; width: fit-content; max-width: 100%; letter-spacing: 0.02em; }
+
+/* Selectable rows (react-aria GridList), such as clients. */
+.kp-list__item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid var(--border-default); flex-wrap: wrap; cursor: pointer; outline: none; }
+.kp-list__item:first-child { border-top: 0; }
+.kp-list__item[data-hovered] { background: var(--bg-inset); }
+.kp-list__item[data-selected] { background: var(--accent-subtle); box-shadow: inset 3px 0 0 var(--accent); }
+.kp-list__item[data-state="pending"] { background: var(--pending-subtle); }
+.kp-list__item[data-focus-visible] { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* Facts about this machine at the top of the side panel. */
+.kp-facts { display: grid; gap: 10px; padding: 14px; border-radius: var(--radius-lg); background: var(--bg-inset); border: 1px solid var(--border-default); }
+.kp-facts h2 { margin: 0; font: 600 14px/20px var(--font-sans); }
+.kp-feed__detail { margin: 2px 0 0; font: 400 12px/16px var(--font-sans); color: var(--fault-text); overflow-wrap: anywhere; }
+.kp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kp-chip { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: var(--radius-sm); background: var(--bg-inset); border: 1px solid var(--border-default); font: 500 12px/16px var(--font-sans); color: var(--text-secondary); }

@@ -67,6 +67,8 @@ vi.mock('@microsoft/signalr', () => ({ HubConnectionBuilder: signalr.HubConnecti
 const noContent = () => new Response(null, { status: 204 });
 const problem = (error: string, status: number) => json({ error }, status);
 
+const busy = 'The server is busy checking another password. Try again in a moment.';
+
 const state = (overrides: Partial<AuthState> = {}): AuthState => ({ signedIn: false, passwordSet: true, machineName: 'bench-pc', ...overrides });
 
 function SignOutButton() {
@@ -148,6 +150,20 @@ describe('login', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await screen.findByText(/Too many tries/);
+  });
+
+  it('shows the busy answer on login and keeps what was typed', async () => {
+    mockFetch({
+      'GET /api/auth/state': () => json(state()),
+      'POST /api/auth/login': () => problem(busy, 429),
+    });
+    renderGate();
+    await userEvent.type(await screen.findByLabelText('Password'), 'whatever it is');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText(busy);
+    expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('whatever it is');
   });
 
   it('goes back to the login screen when an API call is answered 401', async () => {
@@ -241,6 +257,17 @@ describe('change password', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Change password' }));
 
     await screen.findByText('Not saved: The current password is not right.');
+    expect((screen.getByLabelText('New password') as HTMLInputElement).value).toBe('another long password');
+  });
+
+  it('shows the busy answer and keeps what was typed', async () => {
+    mockFetch({ 'POST /api/auth/password': () => problem(busy, 429) });
+    renderApp(<ChangePassword locked={false} />);
+    await fill('correct horse battery', 'another long password');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Change password' }));
+
+    await screen.findByText(`Not saved: ${busy}`);
     expect((screen.getByLabelText('New password') as HTMLInputElement).value).toBe('another long password');
   });
 

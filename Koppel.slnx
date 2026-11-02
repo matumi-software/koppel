@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Koppel/Koppel.csproj" />
+    <Project Path="src/Koppel.UI/Koppel.UI.esproj">
+      <Build />
+      <Deploy />
+    </Project>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Koppel.Tests/Koppel.Tests.csproj" />
+  </Folder>
+</Solution>

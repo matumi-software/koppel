@@ -1,0 +1,20 @@
+# Run from the repo root:
+#   docker compose up --build
+# Then browse http://localhost:5240/
+
+name: koppel
+
+services:
+  koppel:
+    image: ${DOCKER_REGISTRY-}matumi/koppel
+    build:
+      context: .
+      dockerfile: src/Koppel/Dockerfile
+    ports:
+      - "5240:5240"
+    volumes:
+      - koppel:/koppel
+    restart: unless-stopped
+
+volumes:
+  koppel:

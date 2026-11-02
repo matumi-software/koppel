@@ -1,0 +1,248 @@
+/* Generated from resources/design-system/components/bundle.css by tools/sync-design-system.mjs. Do not edit. */
+/* Koppel components. Every color, space and radius comes from tokens.css.
+   Class prefix: kp-. State lives in data-state, never in extra classes.
+   Selectors also cover react-aria-components' data attributes (data-disabled,
+   data-focus-visible, data-selected), so the same sheet styles the React library. */
+
+.kp-root {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-primary);
+  background: var(--bg-page);
+}
+
+/* Shared: the stripe that means "waiting for the server to confirm". */
+.kp-stripe {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--pending) 0 4px,
+    var(--pending-subtle) 4px 8px
+  );
+  background-size: 11.31px 11.31px;
+  animation: kp-stripe-move 0.8s linear infinite;
+}
+@keyframes kp-stripe-move {
+  to { background-position: 11.31px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kp-stripe, .kp-switch[data-state^="pending"] .kp-switch__track, .kp-link[data-state="live"] .kp-link__dot { animation: none; }
+}
+
+/* ---------- Button ---------- */
+.kp-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font: 500 13px/18px var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.kp-button:focus-visible, .kp-button[data-focus-visible] { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.kp-button[data-variant="primary"] { background: var(--accent); color: var(--on-accent); }
+.kp-button[data-variant="primary"]:hover { background: var(--accent-hover); }
+.kp-button[data-variant="secondary"] { background: var(--bg-surface); color: var(--text-primary); border-color: var(--border-control); }
+.kp-button[data-variant="secondary"]:hover { background: var(--bg-inset); }
+.kp-button[data-variant="ghost"] { background: transparent; color: var(--accent-text); }
+.kp-button[data-variant="ghost"]:hover { background: var(--accent-subtle); }
+.kp-button[data-variant="danger"] { background: var(--bg-surface); color: var(--fault-text); border-color: var(--fault); }
+.kp-button[data-variant="danger"]:hover { background: var(--fault-subtle); }
+.kp-button[data-state="sending"] { cursor: progress; }
+.kp-button[data-state="sending"]::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: kp-spin 0.8s linear infinite;
+}
+.kp-button:disabled, .kp-button[aria-disabled="true"], .kp-button[data-disabled] { opacity: 0.5; cursor: not-allowed; }
+@keyframes kp-spin { to { transform: rotate(360deg); } }
+
+/* ---------- Status badge ---------- */
+.kp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  font: 500 12px/16px var(--font-sans);
+  white-space: nowrap;
+}
+.kp-badge::before { content: ""; width: 8px; height: 8px; flex: none; }
+/* Circle = shared, square = attached: the two terminals of the mark. */
+.kp-badge[data-state="shared"] { background: var(--shared-subtle); color: var(--shared-text); }
+.kp-badge[data-state="shared"]::before { background: var(--shared); border-radius: var(--radius-pill); }
+.kp-badge[data-state="attached"] { background: var(--attached-subtle); color: var(--attached-text); }
+.kp-badge[data-state="attached"]::before { background: var(--attached); border-radius: 1px; }
+.kp-badge[data-state="pending"] { background: var(--pending-subtle); color: var(--pending-text); }
+.kp-badge[data-state="pending"]::before {
+  border-radius: 1px;
+  background-image: repeating-linear-gradient(-45deg, var(--pending) 0 2px, transparent 2px 4px);
+}
+.kp-badge[data-state="offline"] { background: var(--fault-subtle); color: var(--fault-text); }
+.kp-badge[data-state="offline"]::before {
+  background:
+    linear-gradient(45deg, transparent 40%, var(--fault) 40% 60%, transparent 60%),
+    linear-gradient(-45deg, transparent 40%, var(--fault) 40% 60%, transparent 60%);
+}
+.kp-badge[data-state="local"] { background: var(--bg-inset); color: var(--text-secondary); }
+.kp-badge[data-state="local"]::before { border: 1.5px solid var(--text-tertiary); border-radius: var(--radius-pill); box-sizing: border-box; }
+
+/* ---------- Switch (confirm-on-push) ---------- */
+.kp-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font: 500 13px/18px var(--font-sans);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.kp-switch__track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-control);
+  background: var(--bg-inset);
+  box-sizing: border-box;
+}
+.kp-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: var(--text-secondary);
+  transition: left 120ms ease;
+}
+.kp-switch:focus-visible { outline: none; }
+.kp-switch:focus-visible .kp-switch__track, .kp-switch[data-focus-visible] .kp-switch__track { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.kp-switch[data-state="on"] .kp-switch__track { background: var(--accent); border-color: var(--accent); }
+.kp-switch[data-state="on"] .kp-switch__thumb { left: 18px; background: var(--on-accent); }
+/* Pending: the thumb shows where the user asked to go; the stripe says the server has not confirmed it. */
+.kp-switch[data-state^="pending"] { cursor: progress; }
+.kp-switch[data-state^="pending"] .kp-switch__track {
+  border-color: var(--pending);
+  background-image: repeating-linear-gradient(-45deg, var(--pending) 0 4px, var(--pending-subtle) 4px 8px);
+  background-size: 11.31px 11.31px;
+  animation: kp-stripe-move 0.8s linear infinite;
+}
+.kp-switch[data-state^="pending"] .kp-switch__thumb { background: var(--bg-surface); box-shadow: 0 0 0 1px var(--pending); }
+.kp-switch[data-state="pending-on"] .kp-switch__thumb { left: 18px; }
+.kp-switch[data-state="failed"] .kp-switch__track { border-color: var(--fault); box-shadow: 0 0 0 1px var(--fault); }
+.kp-switch[aria-disabled="true"], .kp-switch[data-disabled] { opacity: 0.5; cursor: not-allowed; }
+.kp-switch__note { font: 400 12px/16px var(--font-sans); color: var(--text-tertiary); }
+.kp-switch[data-state^="pending"] .kp-switch__note { color: var(--pending-text); }
+.kp-switch[data-state="failed"] .kp-switch__note { color: var(--fault-text); }
+
+/* ---------- Device card ---------- */
+.kp-device {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  min-width: 0;
+}
+.kp-device[data-selected="true"] { border-color: var(--accent); background: var(--accent-subtle); }
+.kp-device__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.kp-device__name { font: 600 16px/24px var(--font-sans); color: var(--text-primary); margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.kp-device__ids { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.kp-id {
+  font: 400 12px/16px var(--font-mono);
+  color: var(--text-secondary);
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-variant-numeric: tabular-nums;
+}
+.kp-device__where { font: 400 13px/18px var(--font-sans); color: var(--text-secondary); margin: 0; }
+.kp-device__where b { font-weight: 500; color: var(--text-primary); }
+.kp-device__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-default);
+  flex-wrap: wrap;
+}
+
+/* ---------- Live link banner ---------- */
+.kp-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font: 500 13px/18px var(--font-sans);
+}
+.kp-link__dot { width: 8px; height: 8px; border-radius: var(--radius-pill); flex: none; }
+.kp-link__detail { font-weight: 400; color: var(--text-secondary); }
+.kp-link[data-state="live"] { background: transparent; color: var(--text-secondary); padding-inline: 0; }
+.kp-link[data-state="live"] .kp-link__dot { background: var(--shared); animation: kp-breathe 2.4s ease-in-out infinite; }
+.kp-link[data-state="reconnecting"] { background: var(--pending-subtle); color: var(--pending-text); }
+.kp-link[data-state="reconnecting"] .kp-link__dot { background-image: repeating-linear-gradient(-45deg, var(--pending) 0 2px, transparent 2px 4px); }
+.kp-link[data-state="reconnecting"] .kp-link__detail { color: var(--pending-text); }
+.kp-link[data-state="down"] { background: var(--fault-subtle); color: var(--fault-text); }
+.kp-link[data-state="down"] .kp-link__dot { background: var(--fault); border-radius: 1px; }
+.kp-link[data-state="down"] .kp-link__detail { color: var(--fault-text); }
+@keyframes kp-breathe { 50% { opacity: 0.35; } }
+
+/* ---------- Field ---------- */
+.kp-field { display: grid; gap: var(--space-1); min-width: 0; }
+.kp-field__label { font: 500 13px/18px var(--font-sans); color: var(--text-primary); }
+.kp-field__control { display: flex; gap: var(--space-2); }
+.kp-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-control);
+  background: var(--bg-inset);
+  color: var(--text-primary);
+  font: 400 14px/20px var(--font-sans);
+  box-sizing: border-box;
+}
+.kp-input[data-mono="true"] { font: 400 13px/18px var(--font-mono); }
+.kp-input::placeholder { color: var(--text-tertiary); }
+.kp-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.kp-field[data-state="pending"] .kp-input { border-color: var(--pending); }
+.kp-field[data-state="invalid"] .kp-input { border-color: var(--fault); }
+.kp-field__help { font: 400 12px/16px var(--font-sans); color: var(--text-tertiary); }
+.kp-field[data-state="pending"] .kp-field__help { color: var(--pending-text); }
+.kp-field[data-state="invalid"] .kp-field__help { color: var(--fault-text); }
+
+/* ---------- Segmented control ---------- */
+.kp-segment {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+}
+.kp-segment__item {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: 500 13px/18px var(--font-sans);
+  cursor: pointer;
+}
+.kp-segment__item:hover { color: var(--text-primary); }
+.kp-segment__item[aria-checked="true"], .kp-segment__item[data-selected] { background: var(--bg-surface); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent); }
+.kp-segment__item:focus-visible, .kp-segment__item[data-focus-visible] { outline: 2px solid var(--focus-ring); outline-offset: 1px; }

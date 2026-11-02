@@ -1,0 +1,12 @@
+@import "./fonts.css";
+@import "./tokens.css";
+@import "./components.css";
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+}

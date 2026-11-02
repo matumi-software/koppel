@@ -1,0 +1,13 @@
+bin/
+obj/
+*.user
+.vs/
+.vscode/
+node_modules/
+dist/
+**/wwwroot/
+TestResults/
+\package.g.props
+
+# Local runtime data (config, keys) written by the host in Development
+.koppel/

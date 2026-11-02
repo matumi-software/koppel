@@ -1,0 +1,171 @@
+/* Generated from resources/design-system/tokens.json by tools/sync-design-system.mjs. Do not edit. */
+
+:root {
+  --bg-page: #161512;
+  --bg-surface: #1E1D19;
+  --bg-inset: #131210;
+  --bg-raised: #26241F;
+  --text-primary: #EDEAE0;
+  --text-secondary: #B5B0A2;
+  --text-tertiary: #8A8578;
+  --border-default: #34322B;
+  --border-control: #7A766A;
+  --focus-ring: #5FA983;
+  --accent: #549572;
+  --accent-hover: #5FA983;
+  --accent-subtle: #1D2B23;
+  --accent-text: #9CCAB1;
+  --on-accent: #0E1F17;
+  --shared: #549572;
+  --shared-subtle: #1D2B23;
+  --shared-text: #9CCAB1;
+  --attached: #5FA0A6;
+  --attached-subtle: #1B2829;
+  --attached-text: #8FC3C7;
+  --pending: #D2A032;
+  --pending-subtle: #2E2718;
+  --pending-text: #DDB45C;
+  --fault: #E06A5C;
+  --fault-subtle: #322019;
+  --fault-text: #E88579;
+  --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg-page: #FBF9F4;
+    --bg-surface: #FFFFFF;
+    --bg-inset: #F5F2EA;
+    --bg-raised: #FFFFFF;
+    --text-primary: #1C1B18;
+    --text-secondary: #5C584D;
+    --text-tertiary: #6E6A5E;
+    --border-default: #DDD8CA;
+    --border-control: #8A8578;
+    --focus-ring: #3A805C;
+    --accent: #2A6B4E;
+    --accent-hover: #20543D;
+    --accent-subtle: #EAF2ED;
+    --accent-text: #173F2E;
+    --on-accent: #FFFFFF;
+    --shared: #2A6B4E;
+    --shared-subtle: #EAF2ED;
+    --shared-text: #173F2E;
+    --attached: #2F6F74;
+    --attached-subtle: #E9F1F1;
+    --attached-text: #245A5E;
+    --pending: #B07C10;
+    --pending-subtle: #F9F1DE;
+    --pending-text: #8C620C;
+    --fault: #BE3B2E;
+    --fault-subtle: #FAEAE8;
+    --fault-text: #9A2F24;
+    --shadow-raised: 0 8px 24px rgba(18, 24, 22, 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg-page: #FBF9F4;
+  --bg-surface: #FFFFFF;
+  --bg-inset: #F5F2EA;
+  --bg-raised: #FFFFFF;
+  --text-primary: #1C1B18;
+  --text-secondary: #5C584D;
+  --text-tertiary: #6E6A5E;
+  --border-default: #DDD8CA;
+  --border-control: #8A8578;
+  --focus-ring: #3A805C;
+  --accent: #2A6B4E;
+  --accent-hover: #20543D;
+  --accent-subtle: #EAF2ED;
+  --accent-text: #173F2E;
+  --on-accent: #FFFFFF;
+  --shared: #2A6B4E;
+  --shared-subtle: #EAF2ED;
+  --shared-text: #173F2E;
+  --attached: #2F6F74;
+  --attached-subtle: #E9F1F1;
+  --attached-text: #245A5E;
+  --pending: #B07C10;
+  --pending-subtle: #F9F1DE;
+  --pending-text: #8C620C;
+  --fault: #BE3B2E;
+  --fault-subtle: #FAEAE8;
+  --fault-text: #9A2F24;
+  --shadow-raised: 0 8px 24px rgba(18, 24, 22, 0.12);
+  color-scheme: light;
+}
+
+:root {
+  --font-sans: "Instrument Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+}
+
+.kp-type-display {
+  font-family: var(--font-sans);
+  font-size: 32px;
+  line-height: 38px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.kp-type-title {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+.kp-type-heading {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.kp-type-body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+.kp-type-label {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
+
+.kp-type-caption {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}
+
+.kp-type-mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+}
+
+.kp-type-mono-sm {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+}

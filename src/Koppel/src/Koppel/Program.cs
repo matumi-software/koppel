@@ -81,6 +81,7 @@ app.MapRemoteEndpoints().MapUsbRemoteEndpoints();
 app.MapClientEndpoints();
 app.MapUsbServerEndpoints();
 app.MapUsbClientEndpoints();
+app.MapSystemEndpoints();
 app.MapHub<UiHub>("/api/hubs/ui");
 app.MapHub<RemoteHub>("/api/hubs/remote");
 

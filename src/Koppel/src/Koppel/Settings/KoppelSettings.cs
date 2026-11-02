@@ -14,7 +14,9 @@ public sealed record KoppelSettings(
     /// <summary>Re-share the devices that were shared before a restart.</summary>
     bool ShareOnStartup,
     /// <summary>The TLS port for USB traffic. USB/IP's usual port, encrypted and behind auth.</summary>
-    int ListenPort)
+    int ListenPort,
+    /// <summary>False until the user finishes the first-run setup in the UI.</summary>
+    bool SetupComplete = false)
 {
     public static KoppelSettings Default { get; } = new(KoppelRole.Server, ShareOnStartup: true, ListenPort: 3240);
 }
@@ -23,7 +25,8 @@ public sealed record KoppelSettings(
 internal sealed record SettingsPatch(
     KoppelRole? Role,
     bool? ShareOnStartup,
-    int? ListenPort)
+    int? ListenPort,
+    bool? SetupComplete = null)
 {
     public Dictionary<string, string[]> Validate()
     {
@@ -46,5 +49,6 @@ internal sealed record SettingsPatch(
         Role = Role ?? current.Role,
         ShareOnStartup = ShareOnStartup ?? current.ShareOnStartup,
         ListenPort = ListenPort ?? current.ListenPort,
+        SetupComplete = SetupComplete ?? current.SetupComplete,
     };
 }

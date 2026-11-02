@@ -23,6 +23,7 @@ public sealed record DeviceView(
     string Speed,
     string State,
     string? AttachedTo,
+    DateTimeOffset? AttachedSince,
     string? Fault);
 
 /// <summary>What the server's UI shows: its devices, or why it cannot share any.</summary>
@@ -37,6 +38,7 @@ internal sealed partial class UsbServer(
     IUsbHost host,
     KoppelPaths paths,
     SettingsStore settings,
+    TimeProvider time,
     ILogger<UsbServer> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
@@ -45,7 +47,7 @@ internal sealed partial class UsbServer(
         Path.Combine(paths.ConfigDirectory, "devices.json"), SharedDevices.Empty, KoppelJson.Files, logger);
 
     private readonly ConcurrentDictionary<string, string> _faults = new();
-    private readonly ConcurrentDictionary<string, string> _attachedTo = new();
+    private readonly ConcurrentDictionary<string, (string ClientId, DateTimeOffset Since)> _attachedTo = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private string _lastJson = "";
     private ServerDevices _current = new([], null);
@@ -104,7 +106,7 @@ internal sealed partial class UsbServer(
         }
         else
         {
-            _attachedTo[busId] = clientId;
+            _attachedTo[busId] = (clientId, time.GetUtcNow());
         }
 
         return RefreshAsync(CancellationToken.None, force: true);
@@ -211,14 +213,15 @@ internal sealed partial class UsbServer(
                 d.Manufacturer,
                 SpeedLabel(d.Speed),
                 state,
-                state == "attached" ? _attachedTo.GetValueOrDefault(d.BusId) : null,
+                state == "attached" && _attachedTo.TryGetValue(d.BusId, out var holder) ? holder.ClientId : null,
+                state == "attached" && _attachedTo.TryGetValue(d.BusId, out var held) ? held.Since : null,
                 _faults.GetValueOrDefault(d.BusId));
         }).ToList();
 
         // Shared devices that are unplugged stay visible, so the user knows they come back shared.
         views.AddRange(intent
             .Where(busId => devices.All(d => d.BusId != busId))
-            .Select(busId => new DeviceView(busId, "", "Unplugged device", null, "", "offline", null, _faults.GetValueOrDefault(busId))));
+            .Select(busId => new DeviceView(busId, "", "Unplugged device", null, "", "offline", null, null, _faults.GetValueOrDefault(busId))));
 
         return new ServerDevices([.. views.OrderBy(v => v.BusId, StringComparer.Ordinal)], host.Unavailable);
     }

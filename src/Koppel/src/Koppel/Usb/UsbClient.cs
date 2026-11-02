@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.SignalR.Client;
 namespace Koppel.Usb;
 
 /// <summary>A remote device as the client's UI sees it.</summary>
-public sealed record ClientDeviceView(DeviceView Device, bool AttachedHere, int? Port, string? Fault);
+public sealed record ClientDeviceView(DeviceView Device, bool AttachedHere, int? Port, DateTimeOffset? AttachedSince, string? Fault);
 
 /// <summary>What the client's UI shows: the link to the server and the devices it shares.</summary>
 /// <param name="Link"><c>unconfigured</c>, <c>connecting</c>, <c>connected</c> or <c>error</c>.</param>
@@ -47,6 +47,7 @@ internal sealed partial class UsbClient(
             d,
             _attachments.ContainsKey(d.BusId),
             _attachments.TryGetValue(d.BusId, out var a) ? a.Port : null,
+            _attachments.TryGetValue(d.BusId, out var since) ? since.Since : null,
             _faults.GetValueOrDefault(d.BusId)))],
         attacher.Unavailable);
 
@@ -228,7 +229,7 @@ internal sealed partial class UsbClient(
             }
 
             var stop = new CancellationTokenSource();
-            _attachments[busId] = new Attachment(port, stop);
+            _attachments[busId] = new Attachment(port, stop, time.GetUtcNow());
             LogAttached(busId, port);
             await RaiseAsync();
 
@@ -279,7 +280,7 @@ internal sealed partial class UsbClient(
 
     private Task RaiseAsync() => Changed?.Invoke(Current) ?? Task.CompletedTask;
 
-    private sealed record Attachment(int Port, CancellationTokenSource Stop);
+    private sealed record Attachment(int Port, CancellationTokenSource Stop, DateTimeOffset Since);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Attached {BusId} on virtual port {Port}")]
     private partial void LogAttached(string busId, int port);

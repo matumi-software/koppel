@@ -37,3 +37,13 @@ export async function sendChange(url: string, method: 'POST' | 'PATCH' | 'PUT' |
     throw await rejection(response);
   }
 }
+
+/** Mirrors Koppel.SystemCheck: something this machine needs, and whether it has it. */
+export interface SystemCheck {
+  id: string;
+  ok: boolean;
+  title: string;
+  detail: string;
+}
+
+export const getSystemChecks = () => getJson<SystemCheck[]>('/api/system/checks');

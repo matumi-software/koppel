@@ -10,6 +10,7 @@ export interface DeviceView {
   speed: string;
   state: Exclude<DeviceState, 'pending'>;
   attachedTo: string | null;
+  attachedSince: string | null;
   fault: string | null;
 }
 
@@ -22,6 +23,7 @@ export interface ClientDeviceView {
   device: DeviceView;
   attachedHere: boolean;
   port: number | null;
+  attachedSince: string | null;
   fault: string | null;
 }
 

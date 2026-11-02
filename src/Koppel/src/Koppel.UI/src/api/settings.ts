@@ -7,6 +7,7 @@ export interface KoppelSettings {
   role: KoppelRole;
   shareOnStartup: boolean;
   listenPort: number;
+  setupComplete: boolean;
 }
 
 export type SettingsPatch = Partial<KoppelSettings>;

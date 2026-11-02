@@ -51,6 +51,13 @@ Every change goes to the server over REST and is only shown as done when the ser
 - The wordmark is "Koppel" set in Instrument Sans 600 next to the mark, with the mark's height matched to the cap height plus ascender. There is no outlined wordmark file yet; set it in type.
 - UI icons: use Lucide (outline, 1.5px stroke, 16px in controls and 20px in headings), drawn in `currentColor`. No emoji anywhere in the product.
 
+## Layout
+
+- The app is a shell: sidebar navigation, the page, and an aside. The aside shows Activity, or the selected device's details.
+- The Overview leads with Needs you when anything is pending or rejected, then what this machine shares and what it has attached.
+- Devices are grouped by what they need (Waiting for the server, In use, Shared and free, Not shared or offline), not listed alphabetically.
+- At phone width the sidebar becomes a menu and the aside folds below the page. Nothing scrolls sideways. A phone is for checking up on devices, so the Overview and device pages must read well there.
+
 ## Components
 
 Components here are the reference look, written as CSS classes with a `kp-` prefix and state in `data-state`. The React implementations live in the repo's own UI library on top of react-aria-components and use these exact class names and tokens.
@@ -61,4 +68,5 @@ Components here are the reference look, written as CSS classes with a `kp-` pref
 - `DeviceCard`: one USB device with its identity, where it is and the action for this role.
 - `LinkBanner`: the live link to the server: live, reconnecting or down.
 - `Field`: text, ID and secret inputs for auth and settings, with pending and invalid states.
-- `SegmentedControl`: switches the view between the Server and Client roles.
+- `SegmentedControl`: the role, as a stored setting that waits for the server.
+- `AppShell`, `DeviceGroup`, `ActivityFeed`, `DeviceDrawer`, `Panel`, `Setup`, `ModalDialog`: the app frame and pages, built on react-aria-components.

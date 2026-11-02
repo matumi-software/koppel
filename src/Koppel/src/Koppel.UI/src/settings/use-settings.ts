@@ -1,12 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { getSettings, patchSettings, type KoppelSettings } from '@/api/settings';
 import { useHubEvent } from '@/hub/hub-context';
+import { usePending } from '@/shared/use-pending';
 
 type Key = keyof KoppelSettings;
-
-/** How long to wait for the server's confirmation before calling a change failed. */
-const confirmTimeoutMs = 10_000;
 
 export interface SettingStatus<K extends Key> {
   /** The value the server last confirmed. */
@@ -20,67 +18,41 @@ export interface SettingStatus<K extends Key> {
 
 const settingsKey = ['settings'] as const;
 
+const labels: Record<Key, string> = {
+  role: 'Role',
+  shareOnStartup: 'Share saved devices on startup',
+  listenPort: 'Listen port',
+  setupComplete: 'Setup',
+};
+
+const describeSetting = (key: string, value: unknown) => ({
+  text:
+    key === 'setupComplete'
+      ? 'Finish setup'
+      : `${labels[key as Key] ?? key}: ${typeof value === 'boolean' ? (value ? 'on' : 'off') : String(value)}`,
+});
+
 /**
- * Settings with the confirm-on-push rule: a change is pending from the moment it is sent until
+ * Settings with the confirm rule: a change is pending from the moment it is sent until
  * SettingsChanged brings the same value back from the server, after the server wrote its file.
  */
 export function useSettings() {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: settingsKey, queryFn: getSettings });
-  const [pending, setPending] = useState<Partial<Record<Key, unknown>>>({});
-  const [failures, setFailures] = useState<Partial<Record<Key, string>>>({});
-  const [saved, setSaved] = useState<Partial<Record<Key, boolean>>>({});
-  const timers = useRef(new Map<Key, ReturnType<typeof setTimeout>>());
-  // The pending map is written through this ref first, so hub handlers and the request callback
-  // always see the latest value without re-subscribing.
-  const pendingRef = useRef(pending);
-
-  const settle = useCallback((key: Key, failure?: string) => {
-    clearTimeout(timers.current.get(key));
-    timers.current.delete(key);
-    const rest = { ...pendingRef.current };
-    delete rest[key];
-    pendingRef.current = rest;
-    setPending(rest);
-    setFailures((current) => ({ ...current, [key]: failure }));
-    setSaved((current) => ({ ...current, [key]: failure === undefined }));
-  }, []);
+  const { pending, failures, saved, request, judge } = usePending<unknown>({ describe: describeSetting });
 
   const onSettingsChanged = useCallback(
     (settings: KoppelSettings) => {
       queryClient.setQueryData(settingsKey, settings);
-      const current = pendingRef.current;
-      for (const key of Object.keys(current) as Key[]) {
-        if (settings[key] === current[key]) {
-          settle(key);
-        }
-      }
+      judge((key, target) => (settings[key as Key] === target ? 'confirmed' : 'waiting'));
     },
-    [queryClient, settle],
+    [queryClient, judge],
   );
   useHubEvent('SettingsChanged', onSettingsChanged);
 
-  useEffect(() => {
-    const active = timers.current;
-    return () => active.forEach(clearTimeout);
-  }, []);
-
   const requestChange = useCallback(
-    <K extends Key>(key: K, value: KoppelSettings[K]) => {
-      if (key in pendingRef.current) return;
-      pendingRef.current = { ...pendingRef.current, [key]: value };
-      setPending(pendingRef.current);
-      setFailures((current) => ({ ...current, [key]: undefined }));
-      setSaved((current) => ({ ...current, [key]: false }));
-      timers.current.set(
-        key,
-        setTimeout(() => settle(key, 'no confirmation from the server.'), confirmTimeoutMs),
-      );
-      patchSettings({ [key]: value }).catch((error: unknown) =>
-        settle(key, error instanceof Error ? error.message : 'the request failed.'),
-      );
-    },
-    [settle],
+    <K extends Key>(key: K, value: KoppelSettings[K]) => request(key, value, () => patchSettings({ [key]: value })),
+    [request],
   );
 
   const status = <K extends Key>(key: K): SettingStatus<K> | undefined =>

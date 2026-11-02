@@ -1,8 +1,14 @@
+export { ActivityFeed, Glyph, type ActivityEntry, type GlyphState } from './components/Activity';
+export { AppShell, NavGroup, NavItem, type AppShellProps, type NavItemProps } from './components/AppShell';
 export { Button, type ButtonProps, type ButtonVariant } from './components/Button';
-export { DeviceCard, type DeviceCardProps } from './components/DeviceCard';
+export { DeviceCard, DeviceCardBody, type DeviceCardBodyProps, type DeviceCardProps } from './components/DeviceCard';
+export { DeviceCards, DeviceGroup, type DeviceCardsProps, type DeviceGroupProps } from './components/DeviceGroup';
 export { Field, type FieldProps, type FieldState } from './components/Field';
 export { KoppelMark, type KoppelMarkProps } from './components/KoppelMark';
 export { LinkBanner, type LinkBannerProps, type LinkState } from './components/LinkBanner';
+export { ModalDialog, type ModalDialogProps } from './components/ModalDialog';
+export { MiniList, Panel, type MiniListItem, type PanelProps } from './components/Panel';
 export { SegmentedControl, type SegmentedControlProps, type SegmentOption } from './components/SegmentedControl';
+export { RoleCards, SetupChecks, Steps, type RoleCardsProps, type RoleOption, type SetupCheck } from './components/Setup';
 export { StatusBadge, type DeviceState, type StatusBadgeProps } from './components/StatusBadge';
 export { Switch, switchState, type SwitchProps, type SwitchState } from './components/Switch';

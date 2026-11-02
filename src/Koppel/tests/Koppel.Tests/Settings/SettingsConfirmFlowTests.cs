@@ -24,6 +24,7 @@ public sealed class SettingsConfirmFlowTests : IDisposable
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Paths:Config", _directory);
+            builder.UseSetting("Paths:Keys", Path.Combine(_directory, "keys"));
         });
     }
 
@@ -52,7 +53,7 @@ public sealed class SettingsConfirmFlowTests : IDisposable
         var pushed = await confirmed.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
         pushed.GetProperty("requireTls").GetBoolean().Should().BeFalse();
         var onDisk = JsonSerializer.Deserialize<KoppelSettings>(
-            await File.ReadAllTextAsync(Path.Combine(_directory, "settings.json"), ct), SettingsStore.JsonOptions)!;
+            await File.ReadAllTextAsync(Path.Combine(_directory, "settings.json"), ct), KoppelJson.Files)!;
         onDisk.RequireTls.Should().BeFalse();
     }
 

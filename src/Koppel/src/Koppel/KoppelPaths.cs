@@ -1,26 +1,41 @@
 namespace Koppel;
 
 /// <summary>Where Koppel keeps its files on disk.</summary>
-internal sealed record KoppelPaths(string ConfigDirectory)
+/// <param name="ConfigDirectory">Config files: <c>settings.json</c> (plain) and the encrypted <c>secrets.json</c> and <c>connection.json</c>.</param>
+/// <param name="KeysDirectory">The key ring that encrypts the secret files. Kept apart from them.</param>
+/// <param name="KeyCertificatePath">Optional PFX that protects the key ring itself, such as a Docker secret.</param>
+internal sealed record KoppelPaths(string ConfigDirectory, string KeysDirectory, string? KeyCertificatePath = null)
 {
     public string SettingsFile => Path.Combine(ConfigDirectory, "settings.json");
 
+    /// <summary>Server role: signing key, HTTPS certificate and registered clients. Encrypted.</summary>
+    public string ServerSecretsFile => Path.Combine(ConfigDirectory, "secrets.json");
+
+    /// <summary>Client role: server address, pinned fingerprint, client ID and secret. Encrypted.</summary>
+    public string ConnectionFile => Path.Combine(ConfigDirectory, "connection.json");
+
     /// <summary>
-    /// Reads <c>Paths:Config</c>, resolved against the content root when relative. Without it the
-    /// default is <c>%ProgramData%\Koppel\config</c> on Windows and <c>/var/lib/koppel/config</c>
-    /// elsewhere. Docker sets <c>Paths__Config</c> to a path inside the volume.
+    /// Reads <c>Paths:Config</c>, <c>Paths:Keys</c> and <c>Paths:KeyCertificate</c>, resolving relative
+    /// paths against the content root. Defaults: <c>%ProgramData%\Koppel\{config,keys}</c> on Windows,
+    /// <c>/var/lib/koppel/{config,keys}</c> elsewhere.
     /// </summary>
     public static KoppelPaths FromConfiguration(IConfiguration configuration, IHostEnvironment environment)
     {
-        var configured = configuration["Paths:Config"];
-        var directory = string.IsNullOrWhiteSpace(configured)
-            ? DefaultConfigDirectory()
-            : Path.GetFullPath(configured, environment.ContentRootPath);
-        return new KoppelPaths(directory);
-    }
+        string Resolve(string key, string fallback) =>
+            configuration[key] is { Length: > 0 } configured
+                ? Path.GetFullPath(configured, environment.ContentRootPath)
+                : fallback;
 
-    private static string DefaultConfigDirectory() =>
-        OperatingSystem.IsWindows()
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Koppel", "config")
-            : "/var/lib/koppel/config";
+        var root = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Koppel")
+            : "/var/lib/koppel";
+        var certificate = configuration["Paths:KeyCertificate"] is { Length: > 0 } path
+            ? Path.GetFullPath(path, environment.ContentRootPath)
+            : null;
+
+        return new KoppelPaths(
+            Resolve("Paths:Config", Path.Combine(root, "config")),
+            Resolve("Paths:Keys", Path.Combine(root, "keys")),
+            certificate);
+    }
 }

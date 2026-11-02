@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Koppel.Core.Auth/Koppel.Core.Auth.csproj" />
+    <Project Path="src/Koppel.Core.Configuration/Koppel.Core.Configuration.csproj" />
+    <Project Path="src/Koppel.Core.Security/Koppel.Core.Security.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Koppel.Core.Security.Tests/Koppel.Core.Security.Tests.csproj" />
+  </Folder>
+</Solution>

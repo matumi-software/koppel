@@ -59,7 +59,7 @@ public sealed class SettingsStoreTests : IDisposable
         };
 
         var edited = KoppelSettings.Default with { ListenPort = 4000 };
-        await File.WriteAllTextAsync(SettingsFile, JsonSerializer.Serialize(edited, SettingsStore.JsonOptions), TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(SettingsFile, JsonSerializer.Serialize(edited, KoppelJson.Files), TestContext.Current.CancellationToken);
 
         var result = await raised.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         result.ListenPort.Should().Be(4000);
@@ -68,8 +68,8 @@ public sealed class SettingsStoreTests : IDisposable
 
     private string SettingsFile => Path.Combine(_directory, "settings.json");
 
-    private SettingsStore CreateStore() => new(new KoppelPaths(_directory), NullLogger<SettingsStore>.Instance);
+    private SettingsStore CreateStore() => new(new KoppelPaths(_directory, Path.Combine(_directory, "keys")), NullLogger<SettingsStore>.Instance);
 
     private KoppelSettings ReadFile() =>
-        JsonSerializer.Deserialize<KoppelSettings>(File.ReadAllText(SettingsFile), SettingsStore.JsonOptions)!;
+        JsonSerializer.Deserialize<KoppelSettings>(File.ReadAllText(SettingsFile), KoppelJson.Files)!;
 }

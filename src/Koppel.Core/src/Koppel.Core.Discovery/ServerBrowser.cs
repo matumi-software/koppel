@@ -12,12 +12,15 @@ namespace Koppel.Core.Discovery;
 /// <summary>
 /// Finds Koppel servers on the local network with multicast DNS and keeps the list current as they
 /// come and go. Built on Tmds.MDns (MIT). Anyone on the network can announce anything, so what it
-/// keeps is bounded: a fixed number of entries, fingerprints that are really fingerprints, short
-/// names, and entries that go when nobody refreshes them.
+/// keeps is bounded: a fixed number of entries with a share per source address, fingerprints that
+/// are really fingerprints, short names, and entries that go when nobody refreshes them. Entries
+/// are told apart by instance name and fingerprint, so a server that copies a name sits beside the
+/// real one instead of replacing it, and the UI can warn about the two.
 /// </summary>
 public sealed partial class ServerBrowser : IDisposable
 {
     public const int MaxEntries = 64;
+    public const int MaxEntriesPerAddress = 8;
     public const int MaxNameLength = 63;
     public const int MaxVersionLength = 32;
 
@@ -27,24 +30,37 @@ public sealed partial class ServerBrowser : IDisposable
     public static readonly TimeSpan SweepEvery = TimeSpan.FromMinutes(1);
 
     private readonly ServiceBrowser _browser = new();
-    private readonly Dictionary<string, Seen> _seen = [];
+    private readonly IBrowseControl _control;
+    private readonly Dictionary<EntryKey, Seen> _seen = [];
+    private IReadOnlyList<DiscoveredServer> _published = [];
     private readonly Lock _gate = new();
+    // Held around every start and stop of the browse. The browser's own threads take _gate, never this, so a stop can wait for them.
+    private readonly Lock _browseLock = new();
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
-    private readonly Channel<IReadOnlyList<DiscoveredServer>> _changes = Channel.CreateUnbounded<IReadOnlyList<DiscoveredServer>>(new UnboundedChannelOptions { SingleReader = true });
+    // Only the latest list matters to anyone listening, so a slow listener skips the ones in between.
+    private readonly Channel<IReadOnlyList<DiscoveredServer>> _changes = Channel.CreateBounded<IReadOnlyList<DiscoveredServer>>(
+        new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
     private readonly ITimer _sweeper;
     private readonly Task _raising;
     private DateTimeOffset _browseStarted;
+    private bool _wanted;
 
     public ServerBrowser(TimeProvider? time = null, ILogger<ServerBrowser>? logger = null)
+        : this(time, logger, null)
+    {
+    }
+
+    internal ServerBrowser(TimeProvider? time, ILogger<ServerBrowser>? logger, IBrowseControl? control)
     {
         _time = time ?? TimeProvider.System;
         _logger = logger ?? NullLogger<ServerBrowser>.Instance;
+        _control = control ?? new ServiceBrowserControl(_browser);
         _browser.ServiceAdded += (_, e) => Update(e.Announcement);
         _browser.ServiceChanged += (_, e) => Update(e.Announcement);
         _browser.ServiceRemoved += (_, e) => Remove(e.Announcement);
         _raising = Task.Run(RaiseInOrderAsync);
-        _sweeper = _time.CreateTimer(_ => Sweep(), null, SweepEvery, SweepEvery);
+        _sweeper = _time.CreateTimer(_ => SweepSafely(), null, SweepEvery, SweepEvery);
     }
 
     /// <summary>Raised when a server appears, changes or goes away. One list at a time, in the order the changes happened.</summary>
@@ -62,26 +78,34 @@ public sealed partial class ServerBrowser : IDisposable
         }
     }
 
-    public bool IsBrowsing => _browser.IsBrowsing;
+    public bool IsBrowsing => _control.IsBrowsing;
 
     public void Start()
     {
-        if (!_browser.IsBrowsing)
+        lock (_browseLock)
         {
-            lock (_gate)
+            _wanted = true;
+            if (!_control.IsBrowsing)
             {
-                _browseStarted = _time.GetUtcNow();
-            }
+                lock (_gate)
+                {
+                    _browseStarted = _time.GetUtcNow();
+                }
 
-            _browser.StartBrowse(KoppelService.Type, useSynchronizationContext: false);
+                _control.StartBrowse();
+            }
         }
     }
 
     public void Stop()
     {
-        if (_browser.IsBrowsing)
+        lock (_browseLock)
         {
-            _browser.StopBrowse();
+            _wanted = false;
+            if (_control.IsBrowsing)
+            {
+                _control.StopBrowse();
+            }
         }
 
         lock (_gate)
@@ -177,30 +201,59 @@ public sealed partial class ServerBrowser : IDisposable
     {
         if (Read(announcement.Txt, announcement.Addresses, announcement.Port, announcement.NetworkInterface) is { } server)
         {
-            Add(Key(announcement), server, Rank(announcement.NetworkInterface));
+            Add(announcement.Instance, announcement.NetworkInterface?.Id, server, Rank(announcement.NetworkInterface));
         }
     }
 
-    /// <summary>Keeps or refreshes an entry. A new one is turned away when the list is full.</summary>
-    internal void Add(string key, DiscoveredServer server, int rank)
+    /// <summary>
+    /// Keeps or refreshes an entry. When one address already holds its share, its stalest entry goes to
+    /// make room. When the whole list is full, the stalest entry of the address holding the most goes,
+    /// so a flood from one address pushes out its own entries and not other servers'.
+    /// </summary>
+    internal void Add(string instance, string? networkInterface, DiscoveredServer server, int rank)
     {
+        var key = new EntryKey(instance, server.Fingerprint, networkInterface);
         lock (_gate)
         {
-            if (!_seen.ContainsKey(key) && _seen.Count >= MaxEntries)
+            if (!_seen.ContainsKey(key))
             {
-                return;
+                if (_seen.Count(e => e.Value.Server.Address == server.Address) >= MaxEntriesPerAddress)
+                {
+                    EvictStalest(server.Address);
+                }
+                else if (_seen.Count >= MaxEntries)
+                {
+                    EvictStalest(_seen.GroupBy(e => e.Value.Server.Address).MaxBy(g => g.Count())!.Key);
+                }
             }
 
-            _seen[key] = new Seen(server, rank, _time.GetUtcNow());
+            _seen[key] = new Seen(instance, networkInterface, server, rank, _time.GetUtcNow());
             Publish();
         }
     }
 
+    /// <summary>Drops the entry from this address that nobody has refreshed for longest, with the gate held.</summary>
+    private void EvictStalest(string address)
+    {
+        var stalest = _seen.Where(e => e.Value.Server.Address == address).MinBy(e => e.Value.LastSeen).Key;
+        _seen.Remove(stalest);
+    }
+
     private void Remove(ServiceAnnouncement announcement)
     {
+        // A goodbye may not carry the record, so without a fingerprint it removes every entry of that instance on that interface.
+        var fingerprint = Read(announcement.Txt, announcement.Addresses, announcement.Port, announcement.NetworkInterface)?.Fingerprint;
         lock (_gate)
         {
-            if (_seen.Remove(Key(announcement)))
+            var gone = _seen.Where(e => e.Value.Instance == announcement.Instance
+                && e.Value.Interface == announcement.NetworkInterface?.Id
+                && (fingerprint is null || e.Key.Fingerprint == fingerprint)).Select(e => e.Key).ToList();
+            foreach (var key in gone)
+            {
+                _seen.Remove(key);
+            }
+
+            if (gone.Count > 0)
             {
                 Publish();
             }
@@ -210,7 +263,6 @@ public sealed partial class ServerBrowser : IDisposable
     /// <summary>Drops what nobody refreshed, and restarts the browse now and then so live servers answer again.</summary>
     internal void Sweep()
     {
-        bool restart;
         lock (_gate)
         {
             var now = _time.GetUtcNow();
@@ -225,25 +277,43 @@ public sealed partial class ServerBrowser : IDisposable
                 Publish();
             }
 
-            restart = _browser.IsBrowsing && _browseStarted + RefreshEvery <= now;
-            if (restart)
-            {
-                _browseStarted = now;
-            }
         }
 
         // Outside the gate: the browser raises its events on its own threads, and they take the gate.
-        if (restart)
+        // Under the same lock as Start and Stop, so a role change cannot slip in between the check and the restart.
+        lock (_browseLock)
         {
-            try
+            if (!_wanted || !_control.IsBrowsing)
             {
-                _browser.StopBrowse();
-                _browser.StartBrowse(KoppelService.Type, useSynchronizationContext: false);
+                return;
             }
-            catch (SocketException ex)
+
+            var now = _time.GetUtcNow();
+            lock (_gate)
             {
-                LogRestartFailed(ex);
+                if (_browseStarted + RefreshEvery > now)
+                {
+                    return;
+                }
+
+                _browseStarted = now;
             }
+
+            _control.StopBrowse();
+            _control.StartBrowse();
+        }
+    }
+
+    /// <summary>The timer's callback. An exception that leaves a timer thread ends the process, so nothing leaves.</summary>
+    private void SweepSafely()
+    {
+        try
+        {
+            Sweep();
+        }
+        catch (Exception ex)
+        {
+            LogSweepFailed(ex);
         }
     }
 
@@ -253,8 +323,16 @@ public sealed partial class ServerBrowser : IDisposable
             .Select(g => g.OrderBy(s => s.Rank).First().Server)
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)];
 
-    /// <summary>Queues the current list, with the gate held, so lists leave in the order the changes happened.</summary>
-    private void Publish() => _changes.Writer.TryWrite(Snapshot());
+    /// <summary>Queues the current list when it differs from the last one queued, with the gate held, so lists leave in the order the changes happened.</summary>
+    private void Publish()
+    {
+        var snapshot = Snapshot();
+        if (!snapshot.SequenceEqual(_published))
+        {
+            _published = snapshot;
+            _changes.Writer.TryWrite(snapshot);
+        }
+    }
 
     private async Task RaiseInOrderAsync()
     {
@@ -264,8 +342,6 @@ public sealed partial class ServerBrowser : IDisposable
         }
     }
 
-    private static string Key(ServiceAnnouncement a) => $"{a.Instance}|{a.NetworkInterface?.Id}";
-
     /// <summary>Prefers wired and wireless interfaces over virtual ones, such as Hyper-V switches.</summary>
     private static int Rank(NetworkInterface? arrivedOn) =>
         arrivedOn?.NetworkInterfaceType is NetworkInterfaceType.Ethernet or NetworkInterfaceType.Wireless80211
@@ -274,8 +350,30 @@ public sealed partial class ServerBrowser : IDisposable
             ? 0
             : 1;
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not restart the browse for servers")]
-    private partial void LogRestartFailed(Exception exception);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not sweep the list of servers or restart the browse")]
+    private partial void LogSweepFailed(Exception exception);
 
-    private sealed record Seen(DiscoveredServer Server, int Rank, DateTimeOffset LastSeen);
+    /// <summary>One announcement: the instance name and fingerprint tell servers apart, the interface tells the copies of one server apart.</summary>
+    private readonly record struct EntryKey(string Instance, string Fingerprint, string? Interface);
+
+    private sealed record Seen(string Instance, string? Interface, DiscoveredServer Server, int Rank, DateTimeOffset LastSeen);
+
+    /// <summary>Starting and stopping the browse, so a test can stand in for the network.</summary>
+    internal interface IBrowseControl
+    {
+        bool IsBrowsing { get; }
+
+        void StartBrowse();
+
+        void StopBrowse();
+    }
+
+    private sealed class ServiceBrowserControl(ServiceBrowser browser) : IBrowseControl
+    {
+        public bool IsBrowsing => browser.IsBrowsing;
+
+        public void StartBrowse() => browser.StartBrowse(KoppelService.Type, useSynchronizationContext: false);
+
+        public void StopBrowse() => browser.StopBrowse();
+    }
 }

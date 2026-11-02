@@ -122,7 +122,14 @@ internal sealed partial class UsbClient(
                 _faults[busId] = ex.Message;
             }
 
-            await attachment.Stop.CancelAsync();
+            try
+            {
+                await attachment.Stop.CancelAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The session ended by itself first, as it does once a driver lets go of the device.
+            }
         }
 
         await RaiseAsync();

@@ -39,10 +39,11 @@ internal sealed class FakeUsbIpDriver : IUsbIpDriver, IDisposable
         return DriverPort;
     }
 
-    public Task DetachAsync(string host, int port, string busId, int driverPort, CancellationToken cancellationToken)
+    public async Task DetachAsync(string host, int port, string busId, int driverPort, CancellationToken cancellationToken)
     {
         Detached.Add($"{busId}@{driverPort}");
         _tcp?.Dispose();
-        return Task.CompletedTask;
+        // usbip.exe returns once the device is gone, by which time the gateway session has ended too.
+        await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
     }
 }

@@ -52,7 +52,8 @@ Copy-Item (Join-Path $InstallDir 'usbip.exe'), (Join-Path $InstallDir 'devnode.e
 Get-ChildItem $InstallDir -Filter *.dll | Copy-Item -Destination $tools
 
 Invoke-WebRequest "https://raw.githubusercontent.com/vadimgrn/usbip-win2/v.$version/LICENSE.txt" -OutFile (Join-Path $target 'LICENSE.txt')
-Invoke-WebRequest "https://raw.githubusercontent.com/vadimgrn/usbip-win2/v.$version/userspace/CLI11/CLI11.txt" -OutFile (Join-Path $target 'CLI11-LICENSE.txt')
+# usbip.exe compiles in CLI11 (BSD-3-Clause). usbip-win2's CLI11.txt is a note, not the licence.
+Invoke-WebRequest 'https://raw.githubusercontent.com/CLIUtils/CLI11/main/LICENSE' -OutFile (Join-Path $target 'CLI11-LICENSE.txt')
 
 # .inf files are covered by the package's .cat, so only the signed kinds are listed.
 Get-ChildItem $target -Recurse -File -Include *.cat, *.sys, *.exe, *.dll | ForEach-Object {

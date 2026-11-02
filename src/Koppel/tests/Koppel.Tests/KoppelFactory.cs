@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using Koppel.Core.Usb;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -44,10 +45,12 @@ public sealed class KoppelFactory : IDisposable
                 builder.UseSetting(key, value);
             }
 
-            if (services is not null)
+            builder.ConfigureTestServices(s =>
             {
-                builder.ConfigureTestServices(services);
-            }
+                // Never the machine's own usbip-win2: a test that wants a driver brings a fake one.
+                s.AddSingleton<IUsbIpDriver>(new UnsupportedUsb("No USB/IP driver in tests."));
+                services?.Invoke(s);
+            });
         });
         if (kestrel)
         {

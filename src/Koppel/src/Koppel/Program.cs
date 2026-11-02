@@ -26,6 +26,7 @@ var paths = KoppelPaths.FromConfiguration(builder.Configuration, builder.Environ
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(sp => SecretBoxFactory.Create(paths, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Koppel.Security")));
+SecretBoxFactory.AddAppDataProtection(builder.Services, paths);
 
 builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<ServerSecretsStore>();

@@ -9,7 +9,7 @@ One codebase and one Docker image cover every role; the role is a setting.
 | Layer | What | Status |
 |---|---|---|
 | Control plane | ASP.NET Core host, REST for commands, SignalR for pushes, React UI | Scaffolded |
-| Auth | The server is an OAuth server (client credentials); client ID and secret are kept encrypted next to the config on both sides | Planned |
+| Auth | The server is an OAuth server (client credentials); client ID and secret are kept encrypted next to the config on both sides | Done |
 | Data plane | USB/IP protocol (Linux kernel spec), wrapped in TLS | Planned |
 
 ## The confirm rule
@@ -29,12 +29,31 @@ Code (under `src/Koppel/`): `src/Koppel/Settings/SettingsStore.cs` (write, then 
 `src/Koppel/Hubs/UiHub.cs` (relay to the hub), `src/Koppel.UI/src/settings/use-settings.ts`
 (pending, confirm, fail). The end-to-end test is `tests/Koppel.Tests/Settings/SettingsConfirmFlowTests.cs`.
 
+## Auth
+
+- **Ports:** HTTP 5240 serves the UI. HTTPS 5241 serves the token endpoint (`/connect/token`) and the remote API (`/api/remote/*`) that other Koppel machines call.
+- **Certificate:** each server creates a self-signed certificate on first start. Its SHA-256 fingerprint shows in the server's Clients section. Clients pin it: they talk only to a server presenting that exact certificate.
+- **Clients:** the server admin adds a client by name and gets a client ID and secret once. The server keeps only a PBKDF2 hash of the secret. Revoking a client blocks it at once, even if it still holds an unexpired token.
+- **Tokens:** OAuth 2.0 client credentials, issued by OpenIddict in degraded mode (no database; clients come from our encrypted file). Access tokens are signed with an RSA key kept in the encrypted secrets file, last 30 minutes, and are only accepted over HTTPS.
+- **Not covered yet:** the UI on port 5240 has no login. Anyone who can reach that port can manage the machine. Keep it on a trusted network or bind it to localhost until UI login lands.
+
 ## Config on disk
 
-`settings.json` lives in the config directory:
+The config directory holds:
+
+- `settings.json`: plain, may be edited by hand.
+- `secrets.json` (server role): signing key, HTTPS certificate, registered clients. Encrypted.
+- `connection.json` (client role): server address, pinned fingerprint, client ID and secret. Encrypted.
+
+The encrypted files use ASP.NET Core Data Protection with a key ring in a separate keys directory
+(`Paths:Keys`, chmod 700 or a restricted ACL). On Windows the key ring is protected with machine
+DPAPI. On Linux it is plain on disk unless `Paths:KeyCertificate` points at a certificate kept
+outside the data volume (for example a Docker secret); Koppel logs a warning when it is not.
+
+Where the config directory is:
 
 - Development: `src/Koppel/.koppel/config` (gitignored), from `appsettings.Development.json`.
-- Docker: `/koppel/config` inside the `koppel` volume (`Paths__Config`).
+- Docker: `/koppel/config` and `/koppel/keys` inside the `koppel` volume.
 - Otherwise: `%ProgramData%\Koppel\config` on Windows, `/var/lib/koppel/config` elsewhere, unless `Paths:Config` is set.
 
 ## USB layer decisions (from the feasibility study, 2026-11-02)

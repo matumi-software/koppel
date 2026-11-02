@@ -37,13 +37,14 @@ WORKDIR /app
 COPY --from=build /publish ./
 
 # One volume root for everything Koppel writes.
-RUN mkdir -p /koppel/config && chown -R $APP_UID /koppel
+RUN mkdir -p /koppel/config /koppel/keys && chown -R $APP_UID /koppel
 VOLUME /koppel
 USER $APP_UID
 
-EXPOSE 5240
+# 5240: the UI (HTTP). 5241: token endpoint and remote API (HTTPS, self-signed, pinned by clients).
+EXPOSE 5240 5241
 
-ENV ASPNETCORE_URLS=http://+:5240
 ENV Paths__Config=/koppel/config
+ENV Paths__Keys=/koppel/keys
 
 ENTRYPOINT ["dotnet", "Koppel.dll"]

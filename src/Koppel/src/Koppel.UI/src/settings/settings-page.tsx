@@ -1,7 +1,16 @@
 import { useState } from 'react';
-import { Button, Field, Switch } from '@koppel/react-ui';
+import { Button, Field, SegmentedControl, Switch } from '@koppel/react-ui';
+import type { KoppelRole } from '@/api/settings';
+import { ConnectionSection } from '@/client/connection-section';
 import { useHub } from '@/hub/hub-context';
+import { ClientsSection } from '@/server/clients-section';
 import { useSettings, type SettingStatus } from './use-settings';
+
+const roles = [
+  { value: 'server', label: 'Server' },
+  { value: 'client', label: 'Client' },
+  { value: 'both', label: 'Both' },
+] as const;
 
 export function SettingsPage() {
   const { state: link } = useHub();
@@ -15,7 +24,11 @@ export function SettingsPage() {
     return <p className="app-note">Could not load settings. Check that the server is running, then reload.</p>;
   }
 
+  const role = status('role')!;
   const shareOnStartup = status('shareOnStartup')!;
+  const isServer = role.confirmed !== 'client';
+  const isClient = role.confirmed !== 'server';
+  const roleNote = role.pendingTarget ? 'Saving…' : role.failure ? `Not saved: ${role.failure}` : role.saved ? 'Saved' : undefined;
   const requireTls = status('requireTls')!;
 
   return (
@@ -24,31 +37,53 @@ export function SettingsPage() {
 
       <section className="app-section">
         <h2 className="kp-type-title app-section__title">This machine</h2>
-        <Switch
-          label="Share devices on startup"
-          confirmed={shareOnStartup.confirmed}
-          pendingTarget={shareOnStartup.pendingTarget}
-          failure={shareOnStartup.failure}
-          note={shareOnStartup.saved ? 'Saved' : undefined}
-          isDisabled={locked}
-          onRequestChange={(value) => requestChange('shareOnStartup', value)}
-        />
-        <Switch
-          label="Require TLS for clients"
-          confirmed={requireTls.confirmed}
-          pendingTarget={requireTls.pendingTarget}
-          failure={requireTls.failure}
-          note={requireTls.saved ? 'Saved' : undefined}
-          isDisabled={locked}
-          onRequestChange={(value) => requestChange('requireTls', value)}
-        />
-        <ListenPortField
-          key={status('listenPort')!.confirmed}
-          locked={locked}
-          status={status('listenPort')!}
-          onSave={(port) => requestChange('listenPort', port)}
-        />
+        <div className="app-kv">
+          <span className="kp-field__label">Role</span>
+          <div className="app-inline">
+            <SegmentedControl<KoppelRole>
+              label="Role"
+              options={roles}
+              value={role.confirmed}
+              pendingValue={role.pendingTarget}
+              isDisabled={locked}
+              onChange={(value) => requestChange('role', value)}
+            />
+            {roleNote && <span className={role.failure ? 'app-error app-flush' : 'kp-field__help'}>{roleNote}</span>}
+          </div>
+          <span className="kp-field__help">A server shares the devices plugged into it. A client attaches devices from a server.</span>
+        </div>
+        {isServer && (
+          <>
+            <Switch
+              label="Share devices on startup"
+              confirmed={shareOnStartup.confirmed}
+              pendingTarget={shareOnStartup.pendingTarget}
+              failure={shareOnStartup.failure}
+              note={shareOnStartup.saved ? 'Saved' : undefined}
+              isDisabled={locked}
+              onRequestChange={(value) => requestChange('shareOnStartup', value)}
+            />
+            <Switch
+              label="Require TLS for clients"
+              confirmed={requireTls.confirmed}
+              pendingTarget={requireTls.pendingTarget}
+              failure={requireTls.failure}
+              note={requireTls.saved ? 'Saved' : undefined}
+              isDisabled={locked}
+              onRequestChange={(value) => requestChange('requireTls', value)}
+            />
+            <ListenPortField
+              key={status('listenPort')!.confirmed}
+              locked={locked}
+              status={status('listenPort')!}
+              onSave={(port) => requestChange('listenPort', port)}
+            />
+          </>
+        )}
       </section>
+
+      {isServer && <ClientsSection locked={locked} />}
+      {isClient && <ConnectionSection locked={locked} />}
     </div>
   );
 }

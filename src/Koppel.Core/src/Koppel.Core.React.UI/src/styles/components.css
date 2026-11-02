@@ -246,3 +246,11 @@
 .kp-segment__item:hover { color: var(--text-primary); }
 .kp-segment__item[aria-checked="true"], .kp-segment__item[data-selected] { background: var(--bg-surface); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent); }
 .kp-segment__item:focus-visible, .kp-segment__item[data-focus-visible] { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* A segment that changes a stored setting waits for the server like a switch does. */
+.kp-segment[data-state="pending"] .kp-segment__item[aria-checked="true"],
+.kp-segment[data-state="pending"] .kp-segment__item[data-selected] {
+  color: var(--pending-text);
+  box-shadow: inset 0 0 0 1px var(--pending);
+  background-image: repeating-linear-gradient(-45deg, var(--pending-subtle) 0 4px, var(--bg-surface) 4px 8px);
+}
+.kp-segment[data-disabled]:not([data-state="pending"]) { opacity: 0.5; }

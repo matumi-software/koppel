@@ -734,7 +734,7 @@ internal sealed partial class UsbClient(
     /// The one token client for the saved connection, with its pinned HTTP client. A new one is built
     /// when the connection changes, so a token for another server or secret is never reused.
     /// </summary>
-    private ServerLink ServerLinkFor()
+    internal ServerLink ServerLinkFor()
     {
         lock (_gate)
         {
@@ -851,7 +851,7 @@ internal sealed partial class UsbClient(
     /// The server answers an import with a device record. It must describe the device the user picked: a
     /// reply for another bus ID, or for another VID:PID than the list showed, is refused.
     /// </summary>
-    private static void Check(UsbDevice device, string busId, DeviceView? picked)
+    internal static void Check(UsbDevice device, string busId, DeviceView? picked)
     {
         if (device.BusId != busId)
         {
@@ -1053,7 +1053,7 @@ internal sealed partial class UsbClient(
     /// The saved connection with the one token client and pinned HTTP client made for it. Everything that
     /// talks to the server over HTTPS shares this, so the cached token is reused.
     /// </summary>
-    private sealed class ServerLink : IDisposable
+    internal sealed class ServerLink : IDisposable
     {
         private readonly HttpClient _http;
 

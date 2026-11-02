@@ -32,7 +32,19 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
 
     public string? Unavailable => null;
 
-    public IReadOnlyList<UsbDevice> ListDevices() => [Dongle];
+    /// <summary>What the server kernel lists. Set it to change what the server offers.</summary>
+    public IReadOnlyList<UsbDevice> Devices { get; set; } = [Dongle];
+
+    /// <summary>While set, a reset blocks, so the server stalls an import after the client authenticated.</summary>
+    public ManualResetEventSlim? ResetGate { get; set; }
+
+    /// <summary>How many times the client kernel attached a device.</summary>
+    public int Attaches => _attaches;
+
+    /// <summary>The ports the client kernel detached, in order.</summary>
+    public ConcurrentQueue<int> DetachedPorts { get; } = new();
+
+    public IReadOnlyList<UsbDevice> ListDevices() => Devices;
 
     public void Share(string busId)
     {
@@ -44,7 +56,11 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
 
     public ExportStatus GetStatus(string busId) => _used ? ExportStatus.Used : ExportStatus.Available;
 
-    public void Reset(string busId) => _reset = true;
+    public void Reset(string busId)
+    {
+        ResetGate?.Wait();
+        _reset = true;
+    }
 
     public void Export(string busId, Socket socket)
     {
@@ -89,6 +105,7 @@ internal sealed class FakeKernel : IUsbHost, IUsbAttacher
 
     public void Detach(int port)
     {
+        DetachedPorts.Enqueue(port);
         if (_attached.TryRemove(port, out var socket))
         {
             socket.Dispose();

@@ -16,6 +16,10 @@ internal sealed record SystemInfo(string Name, string Version, DateTimeOffset St
 
 internal static class SystemEndpoints
 {
+    /// <summary>Koppel's version, such as 0.1.0, without the commit hash.</summary>
+    public static string Version { get; } =
+        typeof(SystemEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev";
+
     /// <summary>What this machine can do: share (usbip-host) and attach (vhci-hcd). Read-only.</summary>
     public static IEndpointRouteBuilder MapSystemEndpoints(this IEndpointRouteBuilder app)
     {
@@ -30,7 +34,7 @@ internal static class SystemEndpoints
         }));
         app.MapGet("/api/system/info", (HostInfo info, SettingsStore settings, ServerSecretsStore secrets) => TypedResults.Ok(new SystemInfo(
             Environment.MachineName,
-            typeof(SystemEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev",
+            Version,
             info.StartedAt,
             settings.Current.Role,
             info.UiPort,

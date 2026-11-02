@@ -1,5 +1,7 @@
 using Koppel.Client;
 using Koppel.Core.Activity;
+using Koppel.Core.Discovery;
+using Koppel.Discovery;
 using Koppel.Server;
 using Koppel.Settings;
 using Koppel.Usb;
@@ -28,6 +30,15 @@ public interface IUiClient
 
     /// <summary>Something happened. The UI prepends it to the activity log.</summary>
     Task ActivityRecorded(ActivityEvent activity);
+
+    /// <summary>Client role: the servers found on the local network.</summary>
+    Task ServersDiscovered(IReadOnlyList<DiscoveredServer> servers);
+
+    /// <summary>Client role: where pairing stands, with the code to type on the server while it waits.</summary>
+    Task PairingStatusChanged(PairingStatus status);
+
+    /// <summary>Server role: the pairing requests waiting for someone to type their code.</summary>
+    Task PairingRequestsChanged(IReadOnlyList<PairingRequestView> requests);
 }
 
 /// <summary>The UI's live link, mapped at <c>/api/hubs/ui</c>. Push only; commands go over REST.</summary>
@@ -41,6 +52,9 @@ internal sealed class UiHubRelay(
     UsbServer usbServer,
     UsbClient usbClient,
     InMemoryActivityStore activity,
+    ServerFinder finder,
+    PairingClient pairingClient,
+    PairingStore pairingRequests,
     IHubContext<UiHub, IUiClient> hub,
     IHubContext<RemoteHub, IRemoteClient> remote) : IHostedService
 {
@@ -52,6 +66,9 @@ internal sealed class UiHubRelay(
         usbServer.Changed += PushServerDevicesAsync;
         usbClient.Changed += PushClientDevicesAsync;
         activity.Recorded += PushActivityAsync;
+        finder.Changed += PushServersAsync;
+        pairingClient.Changed += PushPairingStatusAsync;
+        pairingRequests.Changed += PushPairingRequestsAsync;
         return Task.CompletedTask;
     }
 
@@ -63,6 +80,9 @@ internal sealed class UiHubRelay(
         usbServer.Changed -= PushServerDevicesAsync;
         usbClient.Changed -= PushClientDevicesAsync;
         activity.Recorded -= PushActivityAsync;
+        finder.Changed -= PushServersAsync;
+        pairingClient.Changed -= PushPairingStatusAsync;
+        pairingRequests.Changed -= PushPairingRequestsAsync;
         return Task.CompletedTask;
     }
 
@@ -81,4 +101,10 @@ internal sealed class UiHubRelay(
     private Task PushClientDevicesAsync(ClientDevices value) => hub.Clients.All.ClientDevicesChanged(value);
 
     private Task PushActivityAsync(ActivityEvent value) => hub.Clients.All.ActivityRecorded(value);
+
+    private Task PushServersAsync(IReadOnlyList<DiscoveredServer> value) => hub.Clients.All.ServersDiscovered(value);
+
+    private Task PushPairingStatusAsync(PairingStatus value) => hub.Clients.All.PairingStatusChanged(value);
+
+    private Task PushPairingRequestsAsync(IReadOnlyList<PairingRequestView> value) => hub.Clients.All.PairingRequestsChanged(value);
 }

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Finding Koppel servers on the local network with multicast DNS (DNS-SD).
+       Announcing: Makaretu.Dns.Multicast.New, the maintained fork of the most used .NET mDNS library.
+       Browsing: Tmds.MDns, the best maintained .NET mDNS browser. Neither alone does both well. -->
+  <ItemGroup>
+    <PackageReference Include="Makaretu.Dns.Multicast.New" />
+    <PackageReference Include="Tmds.MDns" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

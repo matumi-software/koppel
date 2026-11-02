@@ -34,6 +34,7 @@
     <ProjectReference Include="..\..\..\Koppel.Core\src\Koppel.Core.Auth\Koppel.Core.Auth.csproj" />
     <ProjectReference Include="..\..\..\Koppel.Core\src\Koppel.Core.Usb\Koppel.Core.Usb.csproj" />
     <ProjectReference Include="..\..\..\Koppel.Core\src\Koppel.Core.Activity\Koppel.Core.Activity.csproj" />
+    <ProjectReference Include="..\..\..\Koppel.Core\src\Koppel.Core.Discovery\Koppel.Core.Discovery.csproj" />
   </ItemGroup>
 
   <!-- Builds the SPA and stages dist/ into wwwroot/ on publish, as in the Timebase template. -->

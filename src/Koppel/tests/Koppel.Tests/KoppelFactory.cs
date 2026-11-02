@@ -40,6 +40,8 @@ public sealed class KoppelFactory : IDisposable
             builder.UseSetting("Ports:Https", HttpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
             // The gateway is on by default on Windows; parallel hosts would fight over its port.
             builder.UseSetting("Gateway:Port", "0");
+            // Test hosts never announce themselves on the real network.
+            builder.UseSetting("Discovery:Enabled", "false");
             foreach (var (key, value) in configuration ?? new Dictionary<string, string>())
             {
                 builder.UseSetting(key, value);

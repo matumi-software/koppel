@@ -12,6 +12,11 @@
     <PackageVersion Include="Microsoft.AspNetCore.SpaProxy" Version="10.*-*" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
 
+    <!-- Discovery: mDNS. See Koppel.Core.Discovery.csproj for why two packages. -->
+    <PackageVersion Include="Makaretu.Dns.Multicast.New" Version="0.38.0" />
+    <PackageVersion Include="Tmds.MDns" Version="0.10.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
+
     <!-- Auth: OAuth server and token validation -->
     <PackageVersion Include="OpenIddict.AspNetCore" Version="7.7.2" />
 

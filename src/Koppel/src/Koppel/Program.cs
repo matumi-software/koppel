@@ -2,9 +2,11 @@ using Koppel;
 using Koppel.Client;
 using Koppel.Core.Activity;
 using Koppel.Core.Auth;
+using Koppel.Core.Discovery;
 using Koppel.Core.Usb;
 using Koppel.Core.Usb.Linux;
 using Koppel.Core.Usb.Windows;
+using Koppel.Discovery;
 using Koppel.Hubs;
 using Koppel.Security;
 using Koppel.Server;
@@ -55,6 +57,13 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbServer>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbClient>());
 builder.Services.AddHostedService<UsbIpTlsServer>();
 builder.Services.AddHostedService<UsbIpGateway>();
+builder.Services.AddSingleton<PairingStore>();
+builder.Services.AddSingleton<PairingClient>();
+builder.Services.AddSingleton<ServerAnnouncer>();
+builder.Services.AddSingleton<ServerBrowser>();
+builder.Services.AddSingleton<ServerFinder>();
+builder.Services.AddHostedService<ServerAnnouncerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerFinder>());
 builder.Services.AddHostedService<UiHubRelay>();
 
 // USB goes through the Linux kernel's USB/IP drivers. Other platforms report why they cannot share yet.
@@ -98,6 +107,8 @@ app.UseAuthorization();
 
 app.MapSettingsEndpoints();
 app.MapServerEndpoints(httpsPort);
+app.MapServerPairingEndpoints();
+app.MapPairingEndpoints();
 app.MapRemoteEndpoints().MapUsbRemoteEndpoints();
 app.MapClientEndpoints();
 app.MapUsbServerEndpoints();

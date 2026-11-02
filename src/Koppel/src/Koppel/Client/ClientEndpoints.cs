@@ -70,6 +70,31 @@ internal static class ClientEndpoints
         group.MapPost("/connection/test", async (RemoteServer server, CancellationToken cancellationToken) =>
             TypedResults.Ok(await server.TestAsync(cancellationToken)));
 
+        // Servers found on the local network. The list also follows over SignalR (ServersDiscovered).
+        group.MapGet("/discovery", (Discovery.ServerFinder finder) => TypedResults.Ok(finder.Servers));
+
+        // Pairing answers 202 and runs in the background; PairingStatusChanged carries the code and the
+        // outcome, and a successful pairing ends with ConnectionChanged like any other save.
+        group.MapGet("/pairing", (PairingClient pairing) => TypedResults.Ok(pairing.Current));
+
+        group.MapPost("/pairing", IResult (PairStartRequest request, PairingClient pairing) =>
+        {
+            var errors = new ConnectionUpdate(request.ServerUrl, request.ServerFingerprint, "pairing", null).Validate();
+            if (errors.Count > 0)
+            {
+                return TypedResults.ValidationProblem(errors);
+            }
+
+            pairing.Begin(new Uri(request.ServerUrl!).GetLeftPart(UriPartial.Authority), request.ServerFingerprint!, request.ServerName);
+            return TypedResults.Accepted((string?)null);
+        });
+
+        group.MapDelete("/pairing", async (PairingClient pairing) =>
+        {
+            await pairing.CancelAsync();
+            return TypedResults.Accepted((string?)null);
+        });
+
         return app;
     }
 }

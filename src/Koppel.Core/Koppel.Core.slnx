@@ -3,10 +3,12 @@
     <Project Path="src/Koppel.Core.Activity/Koppel.Core.Activity.csproj" />
     <Project Path="src/Koppel.Core.Auth/Koppel.Core.Auth.csproj" />
     <Project Path="src/Koppel.Core.Configuration/Koppel.Core.Configuration.csproj" />
+    <Project Path="src/Koppel.Core.Discovery/Koppel.Core.Discovery.csproj" />
     <Project Path="src/Koppel.Core.Security/Koppel.Core.Security.csproj" />
     <Project Path="src/Koppel.Core.Usb/Koppel.Core.Usb.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Koppel.Core.Discovery.Tests/Koppel.Core.Discovery.Tests.csproj" />
     <Project Path="tests/Koppel.Core.Security.Tests/Koppel.Core.Security.Tests.csproj" />
     <Project Path="tests/Koppel.Core.Usb.Tests/Koppel.Core.Usb.Tests.csproj" />
   </Folder>

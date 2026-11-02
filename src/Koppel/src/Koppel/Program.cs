@@ -4,6 +4,7 @@ using Koppel.Core.Activity;
 using Koppel.Core.Auth;
 using Koppel.Core.Usb;
 using Koppel.Core.Usb.Linux;
+using Koppel.Core.Usb.Windows;
 using Koppel.Hubs;
 using Koppel.Security;
 using Koppel.Server;
@@ -11,6 +12,9 @@ using Koppel.Settings;
 using Koppel.Usb;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Runs as a Windows service when the installer registers it as one; a no-op otherwise.
+builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
 
 // HTTP serves the UI. HTTPS, with the server's own self-signed certificate, serves the token
 // endpoint and the APIs remote clients call; clients pin the certificate's fingerprint.
@@ -71,6 +75,12 @@ else
 }
 
 builder.Services.AddSingleton<IUsbAttacher>(OperatingSystem.IsLinux() ? new SysfsVhci(sysRoot) : unsupported);
+
+// Windows attaches through usbip-win2's driver: the copy Koppel's installer bundles, or a standalone install.
+var bundledUsbip = Path.Combine(AppContext.BaseDirectory, "usbip", "usbip.exe");
+var usbipExe = builder.Configuration["Usb:UsbipPath"]
+    ?? (File.Exists(bundledUsbip) ? bundledUsbip : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "USBip", "usbip.exe"));
+builder.Services.AddSingleton<IUsbIpDriver>(OperatingSystem.IsWindows() ? new UsbipWin2Driver(usbipExe) : unsupported);
 
 builder.Services.AddKoppelAuthServer();
 

@@ -62,6 +62,23 @@ public interface IUsbAttacher
     void Detach(int port);
 }
 
+/// <summary>
+/// A USB/IP driver that makes its own connection to a USB/IP server, such as usbip-win2 on Windows.
+/// Linux takes a socket from Koppel instead (<see cref="IUsbAttacher"/>). Koppel points this kind of
+/// driver at its own gateway on 127.0.0.1, which carries the session to the server over TLS.
+/// </summary>
+public interface IUsbIpDriver
+{
+    /// <summary>Null when the driver is installed; otherwise why not, for the UI.</summary>
+    string? Unavailable { get; }
+
+    /// <summary>Attaches <paramref name="busId"/> from the USB/IP server at host:port. Returns the driver's port.</summary>
+    Task<int> AttachAsync(string host, int port, string busId, CancellationToken cancellationToken);
+
+    /// <summary>Detaches the device on <paramref name="driverPort"/> and stops the driver from attaching it again.</summary>
+    Task DetachAsync(string host, int port, string busId, int driverPort, CancellationToken cancellationToken);
+}
+
 /// <summary>Plumbing shared by both ends.</summary>
 public static class UsbSockets
 {
@@ -117,8 +134,12 @@ public static class UsbSockets
 }
 
 /// <summary>Stands in on platforms where Koppel cannot drive USB yet.</summary>
-public sealed class UnsupportedUsb(string reason) : IUsbHost, IUsbAttacher
+public sealed class UnsupportedUsb(string reason) : IUsbHost, IUsbAttacher, IUsbIpDriver
 {
+    public Task<int> AttachAsync(string host, int port, string busId, CancellationToken cancellationToken) => throw new UsbHostException(reason);
+
+    public Task DetachAsync(string host, int port, string busId, int driverPort, CancellationToken cancellationToken) => throw new UsbHostException(reason);
+
     public string? Unavailable => reason;
 
     public IReadOnlyList<UsbDevice> ListDevices() => [];

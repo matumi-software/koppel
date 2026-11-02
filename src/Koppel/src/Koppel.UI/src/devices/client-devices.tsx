@@ -58,7 +58,7 @@ export function ClientDevicesPage() {
     );
   };
   const where = (e: ClientDeviceView) =>
-    e.attachedHere && e.port === null ? (
+    e.attachedHere && e.attachedVia ? (
       <>
         Attached through the gateway for <b>{e.attachedVia}</b>
         {since(e.attachedSince)}
@@ -89,7 +89,7 @@ export function ClientDevicesPage() {
       device={current.device}
       state={stateOf(current)}
       holder={
-        current.attachedHere && current.port === null
+        current.attachedHere && current.attachedVia
           ? { state: 'attached', title: 'Attached through the gateway', detail: `The USB/IP driver on ${current.attachedVia} has it${since(current.attachedSince)}. Detach here unplugs it there.` }
           : current.attachedHere
             ? { state: 'attached', title: 'Attached here', detail: `On virtual port ${current.port}${since(current.attachedSince)}.` }

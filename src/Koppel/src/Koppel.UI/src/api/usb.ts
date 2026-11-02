@@ -25,7 +25,7 @@ export interface ServerDevices {
 export interface ClientDeviceView {
   device: DeviceView;
   attachedHere: boolean;
-  /** Null when attached through the gateway: the other machine's driver holds it, not this kernel. */
+  /** The port this machine's kernel or driver attached it on. Null for another gateway attach. */
   port: number | null;
   attachedSince: string | null;
   fault: string | null;

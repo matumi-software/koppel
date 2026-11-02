@@ -4,10 +4,11 @@ using System.Net.Sockets;
 namespace Koppel.Usb;
 
 /// <summary>
-/// Client role, off by default: a plain USB/IP server for a USB/IP driver on this machine, such as
-/// usbip-win2 on the Windows host of Koppel's container. A container cannot hand a device to the
-/// Windows kernel, but the host's driver can attach from here. Each connection is carried to the
-/// server through <see cref="UsbClient"/>'s TLS session, so the network only sees encrypted traffic.
+/// Client role: a plain USB/IP server for a USB/IP driver on this machine, such as usbip-win2. Koppel
+/// on Windows drives that driver itself and points it here; Koppel in a container on Windows leaves it
+/// to the host's <c>usbip attach</c>. Off unless configured, except on Windows. Each connection is
+/// carried to the server through <see cref="UsbClient"/>'s TLS session, so the network only sees
+/// encrypted traffic.
 /// </summary>
 /// <remarks>
 /// Anyone who reaches this port gets this client's access to the server, with no login. It listens on
@@ -16,9 +17,12 @@ namespace Koppel.Usb;
 /// </remarks>
 internal sealed partial class UsbIpGateway(UsbClient client, IConfiguration configuration, ILogger<UsbIpGateway> logger) : BackgroundService
 {
+    /// <summary>On Windows the gateway is how Koppel's own Attach reaches the driver, so it is on by default.</summary>
+    public const int WindowsDefaultPort = 3242;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var port = configuration.GetValue("Gateway:Port", 0);
+        var port = configuration.GetValue("Gateway:Port", OperatingSystem.IsWindows() ? WindowsDefaultPort : 0);
         if (port == 0)
         {
             return;
@@ -29,7 +33,7 @@ internal sealed partial class UsbIpGateway(UsbClient client, IConfiguration conf
         listener.Bind(new IPEndPoint(address, port));
         listener.Listen(16);
         LogListening(address, port);
-        await client.SetGatewayAsync(true);
+        await client.SetGatewayAsync(port);
         try
         {
             while (true)
@@ -41,7 +45,7 @@ internal sealed partial class UsbIpGateway(UsbClient client, IConfiguration conf
         }
         finally
         {
-            await client.SetGatewayAsync(false);
+            await client.SetGatewayAsync(null);
         }
     }
 

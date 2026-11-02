@@ -37,6 +37,8 @@ public sealed class KoppelFactory : IDisposable
             builder.UseSetting("Paths:Keys", Path.Combine(Directory, "keys"));
             builder.UseSetting("Ports:Http", HttpPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("Ports:Https", HttpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            // The gateway is on by default on Windows; parallel hosts would fight over its port.
+            builder.UseSetting("Gateway:Port", "0");
             foreach (var (key, value) in configuration ?? new Dictionary<string, string>())
             {
                 builder.UseSetting(key, value);

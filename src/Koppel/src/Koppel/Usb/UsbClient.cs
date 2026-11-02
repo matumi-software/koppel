@@ -14,13 +14,14 @@ using Microsoft.AspNetCore.SignalR.Client;
 namespace Koppel.Usb;
 
 /// <summary>A remote device as the client's UI sees it.</summary>
-/// <param name="Port">The virtual port when this machine's kernel has it; null when it went through the gateway.</param>
+/// <param name="Port">The port this machine's kernel or driver attached it on; null for another gateway attach.</param>
 /// <param name="AttachedVia">Where a gateway attach came from, such as <c>172.17.0.1</c>.</param>
 public sealed record ClientDeviceView(DeviceView Device, bool AttachedHere, int? Port, DateTimeOffset? AttachedSince, string? Fault, string? AttachedVia = null);
 
 /// <summary>What the client's UI shows: the link to the server and the devices it shares.</summary>
 /// <param name="Link"><c>unconfigured</c>, <c>connecting</c>, <c>connected</c> or <c>error</c>.</param>
-/// <param name="Gateway">True while the plain USB/IP gateway listens, so the UI can show how to attach through it.</param>
+/// <param name="Gateway">True while the plain USB/IP gateway listens for a driver Koppel does not drive itself
+/// (Koppel in a container on Windows), so the UI can show the command that attaches through it.</param>
 public sealed record ClientDevices(string Link, string? LinkMessage, IReadOnlyList<ClientDeviceView> Devices, string? Unavailable, bool Gateway = false);
 
 /// <summary>
@@ -33,17 +34,19 @@ internal sealed partial class UsbClient(
     ConnectionStore connection,
     SettingsStore settings,
     IUsbAttacher attacher,
+    IUsbIpDriver driver,
     TimeProvider time,
     IActivityRecorder activity,
     ILogger<UsbClient> logger) : BackgroundService
 {
     private readonly ConcurrentDictionary<string, Attachment> _attachments = new();
     private readonly ConcurrentDictionary<string, string> _faults = new();
+    private readonly ConcurrentDictionary<string, bool> _driverAttaching = new();
     private RemoteDevices _remote = new([], 0);
     private string _link = "unconfigured";
     private string? _linkMessage;
     private CancellationTokenSource? _session;
-    private bool _gateway;
+    private int? _gatewayPort;
 
     public event Func<ClientDevices, Task>? Changed;
 
@@ -55,13 +58,19 @@ internal sealed partial class UsbClient(
             var a = _attachments.GetValueOrDefault(d.BusId);
             return new ClientDeviceView(d, a is not null, a?.Port, a?.Since, _faults.GetValueOrDefault(d.BusId), a?.Via);
         })],
-        attacher.Unavailable,
-        _gateway);
+        UsesDriver ? null : attacher.Unavailable,
+        _gatewayPort is not null && !UsesDriver);
 
-    /// <summary>Called by <see cref="UsbIpGateway"/> when it starts or stops listening.</summary>
-    public Task SetGatewayAsync(bool listening)
+    /// <summary>
+    /// True when attaching goes through a driver on this machine (usbip-win2 on Windows) by way of the
+    /// gateway, rather than through this kernel's virtual host controller.
+    /// </summary>
+    private bool UsesDriver => _gatewayPort is not null && driver.Unavailable is null;
+
+    /// <summary>Called by <see cref="UsbIpGateway"/> with its port when it starts listening, and null when it stops.</summary>
+    public Task SetGatewayAsync(int? port)
     {
-        _gateway = listening;
+        _gatewayPort = port;
         return RaiseAsync();
     }
 
@@ -73,7 +82,7 @@ internal sealed partial class UsbClient(
         {
             try
             {
-                await AttachAsync(busId);
+                await (UsesDriver ? AttachThroughDriverAsync(busId) : AttachAsync(busId));
             }
             catch (Exception ex) when (ex is UsbHostException or IOException or SocketException or TokenRequestException or System.Security.Authentication.AuthenticationException or OperationCanceledException or InvalidOperationException)
             {
@@ -92,8 +101,16 @@ internal sealed partial class UsbClient(
         {
             try
             {
-                // A gateway attach has no port here; stopping its relay unplugs it on the other side.
-                if (attachment.Port is { } port)
+                // A driver attach is undone by the driver, which would otherwise attach it again.
+                // Another gateway attach has no port here; stopping its relay unplugs it on the other side.
+                if (attachment.Driver)
+                {
+                    if (attachment.Port is { } driverPort && _gatewayPort is { } gatewayPort)
+                    {
+                        await driver.DetachAsync(IPAddress.Loopback.ToString(), gatewayPort, busId, driverPort, CancellationToken.None);
+                    }
+                }
+                else if (attachment.Via is null && attachment.Port is { } port)
                 {
                     attacher.Detach(port);
                 }
@@ -263,9 +280,13 @@ internal sealed partial class UsbClient(
 
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             _faults.TryRemove(busId, out _);
-            _attachments[busId] = new Attachment(null, stop, time.GetUtcNow(), from);
+            // An import this client's own Attach asked the driver for is "attached here", not a visitor.
+            var mine = _driverAttaching.ContainsKey(busId);
+            _attachments[busId] = new Attachment(null, stop, time.GetUtcNow(), mine ? null : from, Driver: mine);
             LogGatewayAttached(busId, from);
-            await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Succeeded, $"{NameOf(busId)} is attached through the gateway for {from}");
+            await activity.RecordAsync(Device(busId), ActivityReason.Attached, ActivityOutcome.Succeeded, mine
+                ? $"{NameOf(busId)} is attached here"
+                : $"{NameOf(busId)} is attached through the gateway for {from}");
             await RaiseAsync();
             try
             {
@@ -276,7 +297,9 @@ internal sealed partial class UsbClient(
                 if (_attachments.TryRemove(busId, out _))
                 {
                     // Released on the other side, or the link dropped. A detach here records itself.
-                    await activity.RecordAsync(Device(busId), ActivityReason.Detached, ActivityOutcome.Succeeded, $"{NameOf(busId)} was released by {from}");
+                    await activity.RecordAsync(Device(busId), ActivityReason.Detached, ActivityOutcome.Succeeded, mine
+                        ? $"{NameOf(busId)} was detached when its connection ended"
+                        : $"{NameOf(busId)} was released by {from}");
                 }
 
                 await RaiseAsync();
@@ -324,6 +347,35 @@ internal sealed partial class UsbClient(
 
             tcp.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Asks the driver to attach from the gateway. The gateway sees the import and tracks the device;
+    /// this adds the driver's port, which detaching needs.
+    /// </summary>
+    private async Task AttachThroughDriverAsync(string busId)
+    {
+        if (!connection.Current.IsComplete || _remote.UsbPort == 0 || _gatewayPort is not { } gatewayPort)
+        {
+            throw new InvalidOperationException("Not connected to a server.");
+        }
+
+        _driverAttaching[busId] = true;
+        try
+        {
+            var driverPort = await driver.AttachAsync(IPAddress.Loopback.ToString(), gatewayPort, busId, CancellationToken.None);
+            if (_attachments.TryGetValue(busId, out var attachment) && attachment.Driver)
+            {
+                _attachments[busId] = attachment with { Port = driverPort };
+                LogAttached(busId, driverPort);
+            }
+
+            await RaiseAsync();
+        }
+        finally
+        {
+            _driverAttaching.TryRemove(busId, out _);
         }
     }
 
@@ -425,9 +477,10 @@ internal sealed partial class UsbClient(
 
     private Task RaiseAsync() => Changed?.Invoke(Current) ?? Task.CompletedTask;
 
-    /// <param name="Port">The virtual port, or null for a gateway attach.</param>
-    /// <param name="Via">Where a gateway attach came from.</param>
-    private sealed record Attachment(int? Port, CancellationTokenSource Stop, DateTimeOffset Since, string? Via = null);
+    /// <param name="Port">The virtual port, or the driver's port for a driver attach; null for another gateway attach.</param>
+    /// <param name="Via">Where another gateway attach came from.</param>
+    /// <param name="Driver">This client's own attach, made through the driver and the gateway.</param>
+    private sealed record Attachment(int? Port, CancellationTokenSource Stop, DateTimeOffset Since, string? Via = null, bool Driver = false);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Attached {BusId} on virtual port {Port}")]
     private partial void LogAttached(string busId, int port);

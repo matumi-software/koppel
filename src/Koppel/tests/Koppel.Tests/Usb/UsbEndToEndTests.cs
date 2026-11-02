@@ -107,6 +107,41 @@ public sealed class UsbEndToEndTests : IDisposable
     }
 
     [Fact]
+    public async Task With_a_driver_attach_and_detach_drive_it_through_the_gateway()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var driver = new FakeUsbIpDriver();
+        using var client = new KoppelFactory(
+            kestrel: true,
+            services: s => s.AddSingleton<IUsbIpDriver>(driver),
+            configuration: new Dictionary<string, string> { ["Gateway:Port"] = KoppelFactory.FreePort().ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        await using var clientHub = await client.ConnectUiHubAsync(ct);
+        var linked = Link.Waiter(clientHub, "ClientDevicesChanged", d =>
+            d.GetProperty("link").GetString() == "connected" && d.GetProperty("devices").GetArrayLength() == 1);
+        var attached = Link.Waiter(clientHub, "ClientDevicesChanged", d =>
+            d.GetProperty("devices").EnumerateArray().Any(x => x.GetProperty("port").ValueKind == JsonValueKind.Number));
+
+        await Link.ConnectAsync(_server, client, ct);
+        var devices = await Link.WithLastAsync(linked, clientHub, ct);
+        devices.GetProperty("gateway").GetBoolean().Should().BeFalse("Koppel drives the driver itself, so the UI needs no usbip command");
+
+        using var ui = client.CreateUiClient();
+        (await ui.PostAsync("/api/client/devices/1-1.4/attach", null, ct)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var pushed = await Link.WithLastAsync(attached, clientHub, ct);
+        var entry = pushed.GetProperty("devices")[0];
+        entry.GetProperty("attachedHere").GetBoolean().Should().BeTrue();
+        entry.GetProperty("port").GetInt32().Should().Be(FakeUsbIpDriver.DriverPort);
+        entry.GetProperty("attachedVia").ValueKind.Should().Be(JsonValueKind.Null);
+        await EchoesAsync(await driver.Connection.Task.WaitAsync(TimeSpan.FromSeconds(5), ct), ct);
+
+        var detached = Link.Waiter(clientHub, "ClientDevicesChanged", d =>
+            !d.GetProperty("devices")[0].GetProperty("attachedHere").GetBoolean());
+        (await ui.PostAsync("/api/client/devices/1-1.4/detach", null, ct)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+        await Link.WithLastAsync(detached, clientHub, ct);
+        driver.Detached.Should().Equal("1-1.4@1");
+    }
+
+    [Fact]
     public async Task Usb_port_refuses_a_connection_without_a_valid_token()
     {
         var ct = TestContext.Current.CancellationToken;

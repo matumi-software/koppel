@@ -28,7 +28,7 @@ internal static class UiPasswordReset
         }
 
         await output.WriteLineAsync("The UI password is cleared and every signed-in session is ended.");
-        await output.WriteLineAsync($"Koppel issues a new setup code when it starts, or at once if it is running. Read it from the log (docker logs <container>, or journalctl -u koppel for the Linux package) or from {paths.SetupCodeFile}, then open the UI and set a new password.");
+        await output.WriteLineAsync($"Koppel issues a new setup code when it starts, or at once if it is running. Read it from {paths.SetupCodeFile}, or from docker logs <container> when Koppel runs in Docker, then open the UI and set a new password.");
         return 0;
     }
 }

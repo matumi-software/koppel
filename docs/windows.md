@@ -68,7 +68,7 @@ Get-NetFirewallRule -DisplayName usbipd | Get-NetFirewallAddressFilter
 Then turn it off with `Disable-NetFirewallRule -DisplayName usbipd`, and check that the Koppel
 devices page still lists your devices. If it says it cannot reach the USB/IP server, turn the
 rule back on and limit `-RemoteAddress` to the Docker Desktop network with `Set-NetFirewallRule`.
-Not tested yet: which of the two Docker Desktop needs.
+Not tested: which of the two Docker Desktop needs.
 
 ## Windows client
 
@@ -138,8 +138,7 @@ is reached on the same port, 5240, through that rule. A network Windows has mark
 - **The gateway is on by default** (127.0.0.1, port 3242), and serves only the Windows kernel, which is how usbip-win2's driver connects. Another program on the machine that connects to it is turned away, and so is any import Koppel did not ask for itself, such as another user's `usbip attach`. Koppel attaches devices through it by itself; you do not run `usbip attach` by hand.
 - **Servers:** a native Windows machine can be a client. As a server it still needs `Usb:Upstream` pointed at usbipd-win.
 
-Not tested: the elevated parts of the installer (taking over an existing data folder, the driver
-record and standalone detection, rollback, the restart request, the recovery after an error stop) have not been run on a test machine.
+The elevated parts of the installer were run on a clean Windows 11 22H2 VM (see "What is tested"); the rollback of a failed fresh install was not exercised.
 The installer is not code signed.
 
 ## Finding servers
@@ -168,4 +167,7 @@ In a compose file these are environment variables with `__` for `:`, such as `Us
   attaching through it, and a stand-in usbip-win2 listing and attaching through the gateway, with
   USB bytes going both ways through TLS.
 - Real hardware: a Windows 11 client attached a Logitech USB receiver from a Linux server through usbip-win2, both with the native install and through Docker Desktop's gateway, and it worked as keyboard and mouse.
-- Not tested yet: a real usbipd-win with a real device, bulk transfers (storage, printers), and the changes made after those hardware runs (attach deadline, the kernel-only gateway check, detach on stop), which are covered by fakes only.
+- Real hardware (2026-11-03): a native Windows 11 client attached two Logitech receivers and a flash drive from a Debian 13 server, across an installer upgrade. A file on the drive matched its checksum after a detach and reattach, and a 75 second network drop was recovered from by itself.
+- Real usbipd-win (2026-11-03): a Windows 11 PC with usbipd-win 5.x shared a webcam to a Debian client, which streamed it at 30 fps. While another program on Windows held the camera open, usbipd-win could not export it and Koppel kept retrying; it attached once the program let go.
+- Installer (2026-11-03), on a clean Windows 11 22H2 VM: fresh install, service recovery, major upgrade, uninstall, taking over an administrator-owned data folder and refusing one owned by a non-administrator. The rollback of a failed fresh install was not exercised.
+- Not tested: printers, the Windows client through Docker Desktop (not re-run), the attach deadline on its own, and a webcam from a Linux server to a Windows client, which attaches but delivers no frames (#22).

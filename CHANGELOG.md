@@ -35,7 +35,7 @@ First release. If you ran a development build, read Installer and deploy before 
 - A server only exports a device that is bound and is the device you shared on that port. At start it unshares anything it does not mean to share. Leaving the server role unshares and ends the USB sessions.
 - The gateway runs only in the Client or Both role and retries a taken port. On native Windows it serves only the kernel driver's connections.
 - Stopping Koppel detaches devices attached through the Windows driver. Bus IDs are validated everywhere. USB sessions ping both ways, so a vanished peer frees the device in under a minute.
-- Tested with fakes, not yet re-run on real hardware. The earlier real-hardware result (a Logitech receiver working as keyboard and mouse on a Windows 11 client) still stands.
+- Tested on real hardware (2026-11-03): a Debian 13 machine sharing two Logitech receivers and a flash drive to a Windows 11 client. The devices attach and enumerate, a 256 MB file on the drive survives a detach and reattach with its checksum intact, and a 75 second network drop is recovered from by itself. Rotating a client's secret and stopping the client service release and reattach the devices as intended. A Windows server through a real usbipd-win to a Debian client streams a webcam at 30 fps.
 
 ### UI
 
@@ -51,6 +51,8 @@ First release. If you ran a development build, read Installer and deploy before 
 - The service restarts after a crash, and after it stops with an error. The installer adds inbound firewall rules for the Koppel program (TCP and UDP, Private and Domain networks only), removed on uninstall. The setup window's licence link opens `THIRD-PARTY-NOTICES.txt`.
 - Docker deploy composes pin `matumisoftware/koppel:0.1.0`. To upgrade, edit the tag, then `docker compose pull && docker compose up -d`. `deploy.sh` images are never replaced by a pull.
 - Builds are pinned: base images, the vendored usbip-win2 files (hashes, signer certificates and the unsigned DLLs' hashes checked), and package lock files. `THIRD-PARTY-NOTICES.txt` ships in the installer and the image.
+- Upgrading over an existing install works: the driver install no longer fails when the usbip-win2 package is already present, so a major upgrade keeps the driver and the keys and the service keeps running. Uninstall works too.
+- On a `.deb` upgrade where a password is already set, the install message no longer tells you to enter a setup code from a file that is not there.
 - `prepare-host.sh` is run with `sudo bash`, installs Docker from Docker's apt repository and hints at `linux-modules-extra` when a module will not load.
 - The image has a health check on `/healthz`, at the configured UI address. Plain Docker does not restart an unhealthy container.
 - The image is built for amd64 and arm64 (64-bit Raspberry Pi OS). The build cross-compiles on the build machine, so an x64 machine builds both without emulation.
@@ -60,9 +62,11 @@ First release. If you ran a development build, read Installer and deploy before 
 
 - The Linux container is privileged and runs as root. The Windows service runs as LocalSystem.
 - The installer is not signed, and there is no CI.
-- The elevated installer paths (taking over a data folder, driver record, rollback, restart request) have not been run on a VM.
+- The rollback of a failed fresh install was not exercised: the attempt did not make the install fail. The installer's other elevated paths were run on a clean Windows 11 22H2 VM (install, upgrade, uninstall, taking over an administrator-owned data folder, refusing one owned by another user).
 - The UI's certificate is self-signed. Accepting the browser's warning on a network you do not trust could let an impostor collect the password; the fingerprint under Clients is the one to compare.
-- Windows can be a client; a Windows server needs usbipd-win and `Usb:Upstream`, and has not been tried with real usbipd-win.
-- Storage and printers (bulk transfers) are untried on real hardware.
-- The arm64 image and the arm64 `.deb` are untried on a Raspberry Pi. The amd64 `.deb` was installed, upgraded, removed and purged under systemd in a Debian 12 container, and installed and started on Debian 13 and Ubuntu 22.04 and 24.04, but not on a machine with real USB.
+- Warning: the arm64 image and the arm64 `.deb` are untested on a Raspberry Pi. They ship anyway. Do not rely on them yet.
+- Printers are untried. Storage works (bulk transfers, flash drive).
+- Webcams do not stream from a Linux server to a Windows client (a Logitech C270 attaches but delivers no frames, #22). The other direction works: a Windows server through usbipd-win to a Linux client streams at 30 fps. If another program on the Windows server holds the camera open, usbipd-win cannot export it until that program lets go.
+- Windows can be a client; a Windows server needs usbipd-win and `Usb:Upstream`.
+- The Windows client through Docker Desktop and the attach deadline on its own were not re-run on 2026-11-03.
 - There is no apt repository yet, so the `.deb` is installed from a file and upgraded the same way.

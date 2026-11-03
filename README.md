@@ -6,10 +6,10 @@ Koppel speaks the standard USB/IP protocol and adds a web UI, authentication and
 around it. A machine runs as a server (shares its devices), a client (attaches them) or both. Clients
 find servers on the local network and pair by typing a code, so nobody copies secrets around.
 
-Status: version 0.1.0, early. A Linux server in Docker shares a real USB keyboard and mouse receiver
-to a Windows 11 client through the installed service. Storage and printers are the devices we aim to support
-next, and are untried on real hardware. The newest USB changes are covered by tests with fakes and not yet
-re-run on real hardware, and the arm64 image and `.deb` are untried on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`; `main` holds releases.
+Status: version 0.1.0, early. On real hardware, a Debian 13 server shares USB receivers and a flash drive to a
+Windows 11 client, and a Windows server through usbipd-win shares a webcam to a Linux client. Printers are
+untried, webcams do not stream from a Linux server to a Windows client yet, and the arm64 image and `.deb`
+are untested on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`; `main` holds releases.
 
 | Platform | Server | Client |
 |---|---|---|

@@ -8,6 +8,31 @@ dist/
 **/wwwroot/
 TestResults/
 \package.g.props
+*.binlog
+*.tsbuildinfo
+.eslintcache
+coverage/
+artifacts/
+*.log
 
 # Local runtime data (config, keys) written by the host in Development
 .koppel/
+
+# Editors and OS
+.idea/
+*.suo
+*.DotSettings.user
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Keys, certificates and environment files. The Docker deploy reads a koppel-keys.pfx next to the
+# compose file; keep it and any exported PEMs out of git.
+*.pfx
+*.p12
+*.pem
+*.key
+.env
+.env.*
+!.env.example

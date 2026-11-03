@@ -24,7 +24,7 @@ if [ -d /run/systemd/system ]; then
   if systemctl restart koppel.service; then
     echo "Koppel is running. Open https://$(hostname):5240/ and enter the setup code from"
     echo "  sudo cat /var/lib/koppel/config/setup-code.txt"
-    echo "(or sudo journalctl -u koppel). The browser warns about Koppel's own certificate the first time."
+    echo "The browser warns about Koppel's own certificate the first time."
   else
     echo "Koppel did not start. See sudo journalctl -u koppel." >&2
   fi

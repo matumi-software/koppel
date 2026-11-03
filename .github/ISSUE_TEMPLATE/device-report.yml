@@ -1,0 +1,52 @@
+name: Device report
+description: Tell us how a USB device worked through Koppel, good or bad.
+title: "Device: <name> (<VID:PID>)"
+labels: ["device-report", "state: needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying Koppel! Reports that a device works are just as useful as reports that it does not.
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Make and model, and the VID:PID Koppel shows in its device list.
+      placeholder: Logitech Unifying Receiver, 046d:c52b
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Did it work?
+      options:
+        - Works fully
+        - Works partly
+        - Does not work
+    validations:
+      required: true
+  - type: input
+    id: server
+    attributes:
+      label: Server (the machine the device is plugged into)
+      description: OS and how Koppel runs there.
+      placeholder: Debian 13 in Docker, Raspberry Pi OS with the .deb, Windows 11 with usbipd-win...
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Client (the machine that uses the device)
+      placeholder: Windows 11 with the installer, Ubuntu 24.04 in Docker...
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What you did and what happened
+      description: What you used it for, and for a problem, what you expected instead.
+  - type: input
+    id: version
+    attributes:
+      label: Koppel version
+      placeholder: 0.1.0

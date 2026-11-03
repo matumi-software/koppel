@@ -35,6 +35,7 @@ Microsoft.Extensions.AmbientMetadata.Application 10.8.0: MIT; © Microsoft Corpo
 Microsoft.Extensions.Compliance.Abstractions 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.Extensions.DependencyInjection.AutoActivation 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.Extensions.Diagnostics.ExceptionSummarization 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
+Microsoft.Extensions.Hosting.Systemd 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.Extensions.Hosting.WindowsServices 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.Extensions.Http.Diagnostics 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.Extensions.Http.Polly 10.0.11: MIT; © Microsoft Corporation. All rights reserved.; https://asp.net/

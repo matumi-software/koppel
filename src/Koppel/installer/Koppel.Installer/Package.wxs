@@ -1,5 +1,6 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
   <Package Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="1CFA893C-6A76-421E-B40E-86B0F6A16154" Scope="perMachine">
     <!-- Same-version upgrades keep a rebuilt dev installer from installing next to the last one
          (ICE61 warns about that and is suppressed in the wixproj). -->
@@ -22,9 +23,16 @@
 
     <ComponentGroup Id="App" Directory="INSTALLFOLDER">
       <Component Id="Service">
-        <!-- No firewall rule: a client only receives answers to its own discovery broadcast, which
-             Windows lets in, and nothing on a client needs to be reached from the network. -->
         <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes" />
+        <!-- Lets a native Windows server be reached: TCP for the HTTPS port, UDP for discovery answers. The rule is for the
+             program, not a port, so it follows a changed Ports setting. Private and Domain networks only, never Public (the
+             extension takes one profile per rule, so two rules for each protocol). The service is reachable from the network
+             on a client too, but the UI there answers this machine only and the server routes answer 404 in the client role.
+             The rules go with the component: kept on repair and upgrade, removed on uninstall. -->
+        <fw:FirewallException Id="KoppelTcpPrivate" Name="Koppel (TCP, private)" File="KoppelExe" Protocol="tcp" Profile="private" />
+        <fw:FirewallException Id="KoppelTcpDomain" Name="Koppel (TCP, domain)" File="KoppelExe" Protocol="tcp" Profile="domain" />
+        <fw:FirewallException Id="KoppelUdpPrivate" Name="Koppel (UDP, private)" File="KoppelExe" Protocol="udp" Profile="private" />
+        <fw:FirewallException Id="KoppelUdpDomain" Name="Koppel (UDP, domain)" File="KoppelExe" Protocol="udp" Profile="domain" />
         <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on https://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes">
           <!-- Restart after a failure: after 5 s each time, for the first, second and every later one. The count resets after a day
                without one. What counts as a failure is set below (SetServiceFailureFlag). -->

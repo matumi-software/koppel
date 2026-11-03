@@ -126,10 +126,11 @@ docker compose exec koppel dotnet Koppel.dll --reset-password
 
 `src\Koppel\installer\build.ps1` makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows
 service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, the Visual C++
-runtime. It adds no firewall rule: a client only receives answers to its own discovery broadcast, which
-Windows lets in. The UI is at https://localhost:5240 and answers on
+runtime. It adds an inbound firewall rule for `Koppel.exe` (TCP and UDP, any port, so it
+follows a changed `Ports` setting) on Private and Domain networks, never Public. It is removed on uninstall and kept on repair and
+upgrade. The UI is at https://localhost:5240 and answers on
 this machine only: the installer sets `Ui__AllowFrom=local` for the service. A native Windows server
-is reached on the same port, 5240, and needs a firewall rule for it added by hand.
+is reached on the same port, 5240, through that rule. A network Windows has marked Public gets no rule: change it to Private, or add one by hand.
 
 - **Data folder:** `%ProgramData%\Koppel` is created with Administrators as owner and access for SYSTEM and Administrators only. If it already exists as a file or a link, or is owned by someone who is not an administrator, the install stops and says so: rename or delete the folder (copy any keys out first) and run setup again. A folder owned by an administrator, such as one an earlier install left, is taken over: the owner and access are reset for everything under it any link inside is deleted, and a file or folder inside that is not owned by an administrator is renamed aside (`not-admin-owned-<time>`) and not used. The service also locks `%ProgramData%\Koppel` itself down on every start.
 - **Driver:** its output goes to the MSI log, not to a file in the data folder. Keep a log of the install to read it (for example `msiexec /i Koppel.msi /l*v setup.log`). If Windows says a restart finishes the driver install or its removal, setup or uninstall asks for one.

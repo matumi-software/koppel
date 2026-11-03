@@ -23,6 +23,7 @@
 
     <!-- Windows installer. WiX 5, not 6: 6's binaries come under the Open Source Maintenance Fee EULA. -->
     <PackageVersion Include="WixToolset.Util.wixext" Version="5.0.2" />
+    <PackageVersion Include="WixToolset.Firewall.wixext" Version="5.0.2" />
     <PackageVersion Include="WixToolset.Bal.wixext" Version="5.0.2" />
 
     <!-- Tests -->

@@ -139,11 +139,7 @@ internal sealed partial class UsbServer(
         try
         {
             var device = (await host.ListDevicesAsync(cancellationToken)).FirstOrDefault(d => d.BusId == busId);
-            // Only a device that is plugged in and can be shared is remembered. A hub is not listed, and a port with
-            // nothing on it has nothing to remember, so neither may turn up later as an unplugged device.
-            failure = share && device is null
-                ? Fail(busId, "There is no shareable device on this bus ID. A hub cannot be shared.")
-                : await ApplyChoiceAsync(busId, share, device, cancellationToken);
+            failure = await ApplyChoiceAsync(busId, share, device, cancellationToken);
             if (failure is null)
             {
                 await SaveChoiceAsync(busId, share, device, cancellationToken);
@@ -600,14 +596,34 @@ internal sealed partial class UsbServer(
                 [.. d.Interfaces.Select(i => InterfaceClassName(i.Class)).Distinct()]));
         }
 
-        // A device the user shared that is gone stays visible, so they know it comes back shared. Only a bus ID
-        // with a remembered VID:PID counts: one without never held a device Koppel saw, so there is nothing to show as gone.
+        // A shared device that is gone stays visible, so the user knows it comes back shared. It shows what was
+        // remembered about it: its VID:PID, and its name when this run has seen it.
         var remembered = _shared.Current.VidPids;
-        views.AddRange(intent
-            .Where(busId => remembered?.ContainsKey(busId) == true && devices.All(d => d.BusId != busId))
-            .Select(busId => new DeviceView(busId, remembered![busId], _names.GetValueOrDefault(busId, "Unplugged device"), null, "", "offline", null, null, _faults.GetValueOrDefault(busId))));
+        var present = devices.ToLookup(d => d.VidPid);
+        var gone = intent.Where(busId => devices.All(d => d.BusId != busId)).ToList();
+        views.AddRange(gone
+            .Where(busId => !HasMoved(busId, gone, remembered, present, intent))
+            .Select(busId => new DeviceView(busId, remembered?.GetValueOrDefault(busId) ?? "", _names.GetValueOrDefault(busId, "Unplugged device"), null, "", "offline", null, null, _faults.GetValueOrDefault(busId))));
 
         return new ServerDevices([.. views.OrderBy(v => v.BusId, StringComparer.Ordinal)], host.Unavailable);
+    }
+
+    /// <summary>
+    /// A remembered device that was plugged into another port is listed there, so its old port is not shown as
+    /// unplugged as well. That holds when its VID:PID is present on another saved bus ID and there are no more
+    /// gone bus IDs with that VID:PID than present devices. With identical devices the two cannot be told
+    /// apart, so when more are gone than present, every gone row is kept.
+    /// </summary>
+    private static bool HasMoved(string busId, List<string> gone, IReadOnlyDictionary<string, string>? remembered, ILookup<string, UsbDevice> present, HashSet<string> intent)
+    {
+        if (remembered?.GetValueOrDefault(busId) is not { } vidPid)
+        {
+            return false;
+        }
+
+        var elsewhere = present[vidPid].Count(d => intent.Contains(d.BusId));
+        var goneSame = gone.Count(g => remembered.GetValueOrDefault(g) == vidPid);
+        return elsewhere > 0 && goneSame <= elsewhere;
     }
 
     /// <summary>USB interface classes as people know them.</summary>

@@ -188,7 +188,9 @@ public sealed class UsbClientFailureTests : IDisposable
         await using var hub = await LinkAsync(ct);
         await AttachAsync(hub, ct);
         var path = _client.ConfigFile("attached.json");
-        File.SetAttributes(path, FileAttributes.ReadOnly);
+        // A folder where the file belongs: the save cannot replace it on Windows or Linux, and no permission or lock is involved, so it also holds for root in a container.
+        File.Delete(path);
+        Directory.CreateDirectory(path);
         try
         {
             using var ui = _client.CreateUiClient();
@@ -201,7 +203,7 @@ public sealed class UsbClientFailureTests : IDisposable
         }
         finally
         {
-            File.SetAttributes(path, FileAttributes.Normal);
+            Directory.Delete(path);
         }
     }
 

@@ -361,7 +361,7 @@ To release:
 - The installer is not code signed, and there is no CI pipeline or image signing.
 - The elevated installer paths have not been run on a VM: taking over an existing data folder (and renaming aside what is not admin-owned), the exit-code recovery (`sc failureflag`, the host exiting non-zero), the driver state and standalone detection, the rollback, the restart request, and whether the service manager reads the `Environment` value the installer writes. Run an install, a major upgrade and an uninstall on a test machine before relying on them.
 - The new USB behaviour is covered by fakes, not yet re-run on real hardware (see "Tested").
-- `Common.Logging` and `Polly.Extensions.Http` are deprecated packages that arrive through the mDNS library and OpenIddict. Koppel code does not use them directly.
+- `Polly.Extensions.Http` is a deprecated package that arrives through OpenIddict (`Microsoft.Extensions.Http.Polly`). Koppel code does not use it directly. `Common.Logging`, which the mDNS library used to pull in, is no longer in any lock file.
 - The UI does not show `gatewayFault` or the live `listen` status yet.
 
 ## USB layer decisions (from the feasibility study, 2026-11-02)

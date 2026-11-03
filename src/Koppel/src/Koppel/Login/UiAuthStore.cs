@@ -8,10 +8,15 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 
 namespace Koppel.Login;
 
-/// <summary>The contents of the encrypted <c>ui-auth.json</c>: the UI's one password, hashed, and the stamp that ends every session when it changes.</summary>
-internal sealed record UiCredentials(string? PasswordHash, string SecurityStamp)
+/// <summary>
+/// The contents of the encrypted <c>ui-auth.json</c>: the UI's one password, hashed, the stamp that ends
+/// every session when it changes, and the sessions that signed out with the moment each would have ended.
+/// </summary>
+internal sealed record UiCredentials(string? PasswordHash, string SecurityStamp, IReadOnlyDictionary<string, DateTimeOffset>? RevokedSessions = null)
 {
     public static UiCredentials Empty { get; } = new(null, string.Empty);
+
+    public static IReadOnlyDictionary<string, DateTimeOffset> NoSessions { get; } = new Dictionary<string, DateTimeOffset>();
 
     public bool HasPassword => PasswordHash is not null;
 
@@ -69,6 +74,13 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
     public bool HasPassword => _file.Current.HasPassword;
 
     public string SecurityStamp => _file.Current.SecurityStamp;
+
+    /// <summary>Sessions that signed out, each with when it would have ended anyway.</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> RevokedSessions => _file.Current.RevokedSessions ?? UiCredentials.NoSessions;
+
+    /// <summary>Writes the changed list of signed-out sessions. The password and stamp stay as they are.</summary>
+    public Task UpdateRevokedSessionsAsync(Func<IReadOnlyDictionary<string, DateTimeOffset>, IReadOnlyDictionary<string, DateTimeOffset>> change, CancellationToken cancellationToken) =>
+        _file.UpdateAsync(current => current with { RevokedSessions = change(current.RevokedSessions ?? UiCredentials.NoSessions) }, cancellationToken);
 
     /// <summary>The code that sets the first password, or null once there is one.</summary>
     public string? SetupCode

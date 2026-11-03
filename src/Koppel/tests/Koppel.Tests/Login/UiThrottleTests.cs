@@ -92,21 +92,23 @@ public sealed class UiSessionTests
     public void A_revoked_session_is_refused_until_it_would_have_ended_and_the_table_is_bounded()
     {
         var clock = new ManualTimeProvider();
-        var revoked = new UiRevokedSessions(clock);
-        revoked.Revoke("a", clock.GetUtcNow() + TimeSpan.FromHours(1));
+        var revoked = UiRevokedSessions.With(new Dictionary<string, DateTimeOffset>(), "a", clock.GetUtcNow() + TimeSpan.FromHours(1), clock.GetUtcNow());
 
-        revoked.IsRevoked("a").Should().BeTrue();
-        revoked.IsRevoked("b").Should().BeFalse();
+        UiRevokedSessions.IsRevoked(revoked, "a", clock.GetUtcNow()).Should().BeTrue();
+        UiRevokedSessions.IsRevoked(revoked, "b", clock.GetUtcNow()).Should().BeFalse();
         clock.Advance(TimeSpan.FromHours(2));
-        revoked.IsRevoked("a").Should().BeFalse("it would have expired by now, so it need not be remembered");
+        UiRevokedSessions.IsRevoked(revoked, "a", clock.GetUtcNow()).Should().BeFalse("it would have expired by now, so it need not be remembered");
+        revoked = UiRevokedSessions.With(revoked, "b", clock.GetUtcNow() + TimeSpan.FromHours(1), clock.GetUtcNow());
+        revoked.Keys.Should().BeEquivalentTo(["b"], "the next write drops the ones that have ended, so the file stays small");
 
         for (var i = 0; i < UiRevokedSessions.MaxEntries + 10; i++)
         {
-            revoked.Revoke($"s{i}", clock.GetUtcNow() + TimeSpan.FromHours(1) + TimeSpan.FromSeconds(i));
+            revoked = UiRevokedSessions.With(revoked, $"s{i}", clock.GetUtcNow() + TimeSpan.FromHours(1) + TimeSpan.FromSeconds(i), clock.GetUtcNow());
         }
 
-        revoked.IsRevoked($"s{UiRevokedSessions.MaxEntries + 9}").Should().BeTrue();
-        revoked.IsRevoked("s0").Should().BeFalse("the one that ends soonest made room");
+        revoked.Should().HaveCount(UiRevokedSessions.MaxEntries);
+        UiRevokedSessions.IsRevoked(revoked, $"s{UiRevokedSessions.MaxEntries + 9}", clock.GetUtcNow()).Should().BeTrue();
+        UiRevokedSessions.IsRevoked(revoked, "s0", clock.GetUtcNow()).Should().BeFalse("the one that ends soonest made room");
     }
 
     [Fact]

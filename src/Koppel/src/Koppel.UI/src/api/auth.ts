@@ -1,10 +1,15 @@
 import { RejectedError } from './http';
 
-/** Mirrors Koppel.Login.UiAuthState: whether this browser is signed in, and whether a password exists yet. */
+/**
+ * Mirrors Koppel.Login.UiAuthState: whether this browser is signed in, whether a password exists yet,
+ * and while none does, whether the first one may still be set and until when (ISO time; past once closed).
+ */
 export interface AuthState {
   signedIn: boolean;
   passwordSet: boolean;
   machineName: string;
+  setupOpen: boolean;
+  setupUntil: string | null;
 }
 
 export async function getAuthState(): Promise<AuthState> {
@@ -35,7 +40,7 @@ async function post(url: string, body?: unknown): Promise<void> {
   throw new RejectedError(message);
 }
 
-export const setupPassword = (setupCode: string, password: string) => post('/api/auth/setup', { setupCode, password });
+export const setupPassword = (password: string) => post('/api/auth/setup', { password });
 
 export const login = (password: string) => post('/api/auth/login', { password });
 

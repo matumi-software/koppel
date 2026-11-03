@@ -6,15 +6,20 @@ import { authKey } from '@/query-keys';
 import { AuthContext } from './auth-context';
 import { LoginPage } from './login-page';
 import { SetPasswordPage } from './set-password-page';
+import { SetupClosedPage } from './setup-closed-page';
+
+const setupRecheckMs = 15_000;
 
 /**
  * Shows the app only to a signed-in browser: the login screen when there is a password, the first-run
- * password step when there is not. Everything under it, the hub included, mounts only after sign-in
- * and goes away on sign-out or when the server answers 401.
+ * password step when there is not and setup is open, and the timeout screen once it has closed.
+ * Everything under it, the hub included, mounts only after sign-in and goes away on sign-out or when the
+ * server answers 401.
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const state = useQuery({ queryKey: authKey, queryFn: getAuthState });
+  // While no password is set, ask again now and then: setup may time out, or someone else may set it first.
+  const state = useQuery({ queryKey: authKey, queryFn: getAuthState, refetchInterval: (query) => (query.state.data?.passwordSet === false ? setupRecheckMs : false) });
   const signedIn = state.data?.signedIn === true;
 
   // A recheck that lands while signing out could bring the signed-in answer back and flash the app.
@@ -58,7 +63,11 @@ export function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (!state.data.passwordSet) {
-    return <SetPasswordPage machineName={state.data.machineName} onDone={recheck} />;
+    return state.data.setupOpen ? (
+      <SetPasswordPage machineName={state.data.machineName} setupUntil={state.data.setupUntil} recheck={recheck} />
+    ) : (
+      <SetupClosedPage machineName={state.data.machineName} recheck={recheck} />
+    );
   }
 
   if (!signedIn) {

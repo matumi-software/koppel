@@ -6,11 +6,11 @@ import { AuthFrame } from './auth-frame';
 export const minPasswordLength = 10;
 
 /**
- * First run, step one: the one-time setup code from the machine itself and the admin password it
- * unlocks. Signing in follows at once, so the role step comes next.
+ * First run, step one: the admin password. Whoever opens the UI first while setup is open sets it.
+ * Signing in follows at once, so the role step comes next. Any refusal asks the server again, so a
+ * setup that timed out, or that someone else finished first, shows as such.
  */
-export function SetPasswordPage({ machineName, onDone }: { machineName: string; onDone: () => void }) {
-  const [code, setCode] = useState('');
+export function SetPasswordPage({ machineName, setupUntil, recheck }: { machineName: string; setupUntil: string | null; recheck: () => void }) {
   const [password, setPassword] = useState('');
   const [again, setAgain] = useState('');
   const [error, setError] = useState<string>();
@@ -18,17 +18,19 @@ export function SetPasswordPage({ machineName, onDone }: { machineName: string; 
 
   const mismatch = again !== '' && again !== password;
   const tooShort = password !== '' && password.length < minPasswordLength;
-  const ready = code.trim() !== '' && password.length >= minPasswordLength && again === password;
+  const ready = password.length >= minPasswordLength && again === password;
+  const until = setupUntil ? new Date(setupUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
 
   const submit = async () => {
     setSending(true);
     setError(undefined);
     try {
-      await setupPassword(code, password);
-      onDone();
+      await setupPassword(password);
+      recheck();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not set the password.');
       setSending(false);
+      recheck();
     }
   };
 
@@ -37,19 +39,11 @@ export function SetPasswordPage({ machineName, onDone }: { machineName: string; 
       <Steps steps={['Admin password', 'What this machine does', 'Clients or server']} current={0} />
       <div className="kp-page-head">
         <h1>Set up {machineName}</h1>
-        <p>Choose the admin password for this machine. You need the setup code Koppel made when it started.</p>
+        <p>
+          Choose the admin password for this machine.{' '}
+          {until ? `Setup is open until ${until}, and whoever sets the password first owns it.` : 'Whoever sets the password first owns it.'}
+        </p>
       </div>
-      <section className="kp-card" aria-label="Where to find the setup code">
-        <h2>Where is the setup code?</h2>
-        <ul className="kp-note">
-          <li>
-            In Docker: run <code>docker logs &lt;container&gt;</code> and look for the line &quot;Koppel setup code&quot;.
-          </li>
-          <li>
-            On Windows: open <code>%ProgramData%\Koppel\config\setup-code.txt</code>. Only administrators can read it.
-          </li>
-        </ul>
-      </section>
       <form
         className="kp-card"
         aria-label="Set the admin password"
@@ -59,15 +53,15 @@ export function SetPasswordPage({ machineName, onDone }: { machineName: string; 
           if (ready && !sending) void submit();
         }}
       >
-        <Field label="Setup code" mono autoComplete="off" autoFocus placeholder="XXXX-XXXX" value={code} onChange={setCode} state={error ? 'invalid' : undefined} help={error} />
         <Field
           label="New password"
           type="password"
           autoComplete="new-password"
+          autoFocus
           value={password}
           onChange={setPassword}
-          state={tooShort ? 'invalid' : undefined}
-          help={tooShort ? `Use at least ${minPasswordLength} characters.` : `At least ${minPasswordLength} characters.`}
+          state={tooShort || error ? 'invalid' : undefined}
+          help={error ?? (tooShort ? `Use at least ${minPasswordLength} characters.` : `At least ${minPasswordLength} characters.`)}
         />
         <Field
           label="Repeat the password"

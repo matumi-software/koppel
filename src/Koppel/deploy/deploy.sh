@@ -35,4 +35,4 @@ scp "$here/docker-compose.yml" "$target:~/koppel/docker-compose.yml"
 ssh "$target" 'cd ~/koppel && docker compose up -d && docker compose ps'
 
 host="${target#*@}"
-echo "Koppel is running. Open http://$host:5240/"
+echo "Koppel is running. Open https://$host:5240/"

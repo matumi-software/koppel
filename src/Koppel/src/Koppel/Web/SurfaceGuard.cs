@@ -6,7 +6,7 @@ namespace Koppel.Web;
 internal enum Listener
 {
     /// <summary>The UI port: the people at this machine.</summary>
-    Http,
+    Ui,
 
     /// <summary>The HTTPS port, with the server's own certificate: remote Koppel clients.</summary>
     Https,
@@ -24,7 +24,7 @@ internal enum RoleScope
 internal sealed record Surface(string Prefix, Listener Listener, RoleScope Role)
 {
     /// <summary>Everything not listed below, the SPA and the UI's own API included.</summary>
-    public static Surface Ui { get; } = new("/", Listener.Http, RoleScope.Any);
+    public static Surface Ui { get; } = new("/", Listener.Ui, RoleScope.Any);
 
     /// <summary>
     /// The one place that says what is served where. A request outside every prefix is the UI's, so a
@@ -36,8 +36,8 @@ internal sealed record Surface(string Prefix, Listener Listener, RoleScope Role)
         new("/api/remote", Listener.Https, RoleScope.Server),
         new("/api/hubs/remote", Listener.Https, RoleScope.Server),
         new("/api/pair", Listener.Https, RoleScope.Server),
-        new("/api/server", Listener.Http, RoleScope.Server),
-        new("/api/client", Listener.Http, RoleScope.Client),
+        new("/api/server", Listener.Ui, RoleScope.Server),
+        new("/api/client", Listener.Ui, RoleScope.Client),
     ];
 
     /// <summary>
@@ -54,7 +54,7 @@ internal sealed record Surface(string Prefix, Listener Listener, RoleScope Role)
 
     /// <summary>True when a request for this path needs a UI session: it is the UI port's API or hub and not listed as anonymous.</summary>
     public static bool RequiresSignIn(PathString path) =>
-        For(path).Listener == Listener.Http
+        For(path).Listener == Listener.Ui
         && path.StartsWithSegments("/api")
         && !Anonymous.Any(anonymous => path.Equals(anonymous, StringComparison.OrdinalIgnoreCase));
 

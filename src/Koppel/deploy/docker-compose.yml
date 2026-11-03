@@ -1,6 +1,6 @@
 # Runs Koppel from Docker Hub, or the image deploy.sh copied here. No build here.
 #   docker compose up -d
-# Then browse http://<this machine>:5240/
+# Then browse https://<this machine>:5240/
 #
 # The image tag is pinned. To upgrade, change it to the new version and run
 # `docker compose pull && docker compose up -d`. Config and keys live in the koppel volume, not the

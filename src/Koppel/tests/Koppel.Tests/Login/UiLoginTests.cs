@@ -359,13 +359,13 @@ public sealed class UiLoginTests : IDisposable
 
         var cookie = response.Headers.GetValues("Set-Cookie").Single();
         cookie.Should().StartWith("koppel.ui=");
-        cookie.ToLowerInvariant().Should().Contain("httponly").And.Contain("samesite=strict").And.NotContain("secure", "the request was plain HTTP");
+        cookie.ToLowerInvariant().Should().Contain("httponly").And.Contain("samesite=strict").And.Contain("secure");
         cookie.ToLowerInvariant().Should().NotContain("expires=", "a session cookie; the ticket carries the 12 hours");
 
         var options = host.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(UiSession.Scheme);
         options.Cookie.HttpOnly.Should().BeTrue();
         options.Cookie.SameSite.Should().Be(SameSiteMode.Strict);
-        options.Cookie.SecurePolicy.Should().Be(CookieSecurePolicy.SameAsRequest, "Secure whenever the request is HTTPS");
+        options.Cookie.SecurePolicy.Should().Be(CookieSecurePolicy.Always, "the UI is HTTPS only");
         options.SlidingExpiration.Should().BeTrue();
         options.ExpireTimeSpan.Should().Be(TimeSpan.FromHours(12));
     }
@@ -500,7 +500,11 @@ public sealed class UiLoginTests : IDisposable
     private static async Task<HubConnection> ConnectHubAsync(KoppelFactory host, string cookie, CancellationToken ct)
     {
         var hub = new HubConnectionBuilder()
-            .WithUrl($"http://localhost:{host.HttpPort}/api/hubs/ui", options => options.Headers["Cookie"] = cookie)
+            .WithUrl($"https://localhost:{host.HttpPort}/api/hubs/ui", options =>
+            {
+                host.TrustCertificate(options);
+                options.Headers["Cookie"] = cookie;
+            })
             .Build();
         await hub.StartAsync(ct);
         return hub;

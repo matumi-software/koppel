@@ -68,19 +68,20 @@ RUN mkdir -p /koppel/config /koppel/keys && chown -R $APP_UID /koppel
 VOLUME /koppel
 USER $APP_UID
 
-# 5240: the UI (HTTP). 5241: everything other Koppel machines do, USB traffic included (HTTPS,
-# self-signed, pinned by clients), and discovery on UDP.
+# 5240: the UI. 5241: everything other Koppel machines do, USB traffic included (pinned by clients), and
+# discovery on UDP. Both are HTTPS with the server's own self-signed certificate.
 EXPOSE 5240 5241 5241/udp
 
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys
 
 # The anonymous GET /healthz on the UI port, probed at the configured Ports__HttpAddress and Ports__Http and then
-# at 127.0.0.1 (see healthcheck.sh). Plain Docker only reports "unhealthy": it does not restart the container
-# (restart: unless-stopped acts on exits, not on health). Swarm and Kubernetes act on it; with plain Docker,
-# something has to watch it, for example an autoheal container, or `docker ps --filter health=unhealthy`.
-COPY Koppel/src/Koppel/healthcheck.sh /app/healthcheck.sh
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD ["bash", "/app/healthcheck.sh"]
+# at 127.0.0.1 (see Web/HealthProbe.cs). It is Koppel itself because the port is HTTPS and the image has no curl
+# or openssl. The timeout leaves room for the runtime to start on a slow thin client. Plain Docker only reports
+# "unhealthy": it does not restart the container (restart: unless-stopped acts on exits, not on health). Swarm
+# and Kubernetes act on it; with plain Docker, something has to watch it, for example an autoheal container, or
+# `docker ps --filter health=unhealthy`.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD ["dotnet", "/app/Koppel.dll", "--healthcheck"]
 
 ENTRYPOINT ["dotnet", "Koppel.dll"]

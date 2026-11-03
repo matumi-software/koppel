@@ -2,7 +2,7 @@ using System.Net;
 
 namespace Koppel.Web;
 
-/// <summary>Where the UI's HTTP port binds, from <c>Ports:HttpAddress</c>.</summary>
+/// <summary>Where the UI port binds, from <c>Ports:HttpAddress</c>.</summary>
 internal static class ListenAddress
 {
     public const string Setting = "Ports:HttpAddress";

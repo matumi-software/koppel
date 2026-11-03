@@ -13,7 +13,8 @@ namespace Koppel.Tests;
 
 /// <summary>
 /// Gives each request on a test server the local port its scheme stands for, as Kestrel does for a real
-/// connection: the UI port for http, the HTTPS port for https.
+/// connection: the UI port for http, the HTTPS port for https. Both ports are HTTPS on a real host; a
+/// test server has no TLS, so the scheme only tells the two apart.
 /// </summary>
 public sealed class TestListenerPorts(int httpPort, int httpsPort) : IStartupFilter
 {
@@ -31,7 +32,7 @@ public sealed class TestListenerPorts(int httpPort, int httpsPort) : IStartupFil
 /// <summary>
 /// A Koppel host with its own temporary config and key directories. By default it runs on a test
 /// server. With <c>kestrel: true</c> it listens on real free ports, so two hosts can talk as server
-/// and client, and the TLS USB port can be reached. With <c>shareDongle</c> the test device's share is already saved.
+/// and client, and the HTTPS ports can be reached. With <c>shareDongle</c> the test device's share is already saved.
 /// </summary>
 public sealed class KoppelFactory : IDisposable
 {
@@ -110,7 +111,7 @@ public sealed class KoppelFactory : IDisposable
     public const string Password = "correct horse battery";
 
     /// <summary>
-    /// A client on the UI side (plain HTTP) that is signed in, sending the header the UI sends on every
+    /// A client on the UI side that is signed in, sending the header the UI sends on every
     /// request. The first one sets the password with the setup code; later ones share its session.
     /// </summary>
     public HttpClient CreateUiClient()
@@ -159,9 +160,12 @@ public sealed class KoppelFactory : IDisposable
         }
     }
 
-    /// <summary>A UI-side client without the header, as another site's page would be.</summary>
+    /// <summary>
+    /// A UI-side client without the header, as another site's page would be. On a Kestrel host it connects
+    /// to the real UI port and trusts exactly the server's own certificate.
+    /// </summary>
     public HttpClient CreatePlainClient() => _kestrel
-        ? new HttpClient { BaseAddress = new Uri($"http://localhost:{HttpPort}") }
+        ? new HttpClient(Koppel.Core.Security.ServerCertificate.CreatePinnedHandler(Usb.RemoteAccess.Fingerprint(this))) { BaseAddress = new Uri($"https://localhost:{HttpPort}") }
         : _factory.CreateClient();
 
     /// <summary>
@@ -194,7 +198,13 @@ public sealed class KoppelFactory : IDisposable
         }
 
         return _kestrel
-            ? new HubConnectionBuilder().WithUrl($"http://localhost:{HttpPort}/api/hubs/ui", Headers).Build()
+            ? new HubConnectionBuilder()
+                .WithUrl($"https://localhost:{HttpPort}/api/hubs/ui", options =>
+                {
+                    TrustCertificate(options);
+                    Headers(options);
+                })
+                .Build()
             : new HubConnectionBuilder()
                 .WithUrl(new Uri(_factory.Server.BaseAddress, "/api/hubs/ui"), options =>
                 {
@@ -203,6 +213,13 @@ public sealed class KoppelFactory : IDisposable
                     Headers(options);
                 })
                 .Build();
+    }
+
+    /// <summary>Lets a hub connection to this Kestrel host trust exactly the server's own certificate, over HTTP and WebSockets.</summary>
+    public void TrustCertificate(Microsoft.AspNetCore.Http.Connections.Client.HttpConnectionOptions options)
+    {
+        options.HttpMessageHandlerFactory = _ => Koppel.Core.Security.ServerCertificate.CreatePinnedHandler(Usb.RemoteAccess.Fingerprint(this));
+        options.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback = (_, certificate, _, _) => Usb.RemoteAccess.Pinned(this, certificate);
     }
 
     public void Dispose()

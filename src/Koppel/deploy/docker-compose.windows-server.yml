@@ -1,6 +1,6 @@
 # Koppel as a server on a Windows host with Docker Desktop. See docs/windows.md.
 #   docker compose -f docker-compose.windows-server.yml up -d
-# Then browse http://localhost:5240/
+# Then browse https://localhost:5240/
 #
 # A container cannot take USB devices from Windows. usbipd-win on the host does that: devices you
 # share with `usbipd bind` are what Koppel offers. Koppel reaches usbipd-win over plain USB/IP inside

@@ -1,6 +1,6 @@
 # Run from this folder (src/Koppel):
 #   docker compose up --build
-# Then browse http://localhost:5240/
+# Then browse https://localhost:5240/
 #
 # The host needs the USB/IP kernel modules: `modprobe usbip-host` on a server,
 # `modprobe vhci-hcd` on a client (add them to /etc/modules to load at boot).

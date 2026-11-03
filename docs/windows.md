@@ -46,7 +46,7 @@ That builds `matumisoftware/koppel:0.1.0` (the tag in `KOPPEL_TAG`), which both 
    docker compose -f src\Koppel\deploy\docker-compose.windows-server.yml up -d
    ```
 
-4. Open http://localhost:5240/ and finish setup as a server. The devices page shows what
+4. Open https://localhost:5240/, accept the certificate warning and finish setup as a server. The devices page shows what
    usbipd-win shares. Share and unshare with `usbipd bind` and `usbipd unbind`; the switch in
    Koppel cannot change it. USB/IP sends no product names, so devices show by VID:PID.
 
@@ -79,7 +79,7 @@ Not tested yet: which of the two Docker Desktop needs.
    docker compose -f src\Koppel\deploy\docker-compose.windows-client.yml up -d
    ```
 
-3. Open http://localhost:5240/, finish setup as a client and connect it to the server (server
+3. Open https://localhost:5240/, accept the certificate warning, finish setup as a client and connect it to the server (server
    URL, fingerprint, client ID and secret, from the server's Clients page).
 
 4. Attach a device. The device's details in Koppel show this command, ready to copy:
@@ -123,7 +123,7 @@ docker compose exec koppel dotnet Koppel.dll --reset-password
 
 `src\Koppel\installer\build.ps1` makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows
 service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, the Visual C++
-runtime and a firewall rule for finding servers. The UI is at http://localhost:5240 and answers on
+runtime and a firewall rule for finding servers. The UI is at https://localhost:5240 and answers on
 this machine only: the installer sets `Ports__HttpAddress=127.0.0.1` for the service.
 
 - **Data folder:** `%ProgramData%\Koppel` is created with Administrators as owner and access for SYSTEM and Administrators only. If it already exists as a file or a link, or is owned by someone who is not an administrator, the install stops and says so: rename or delete the folder (copy any keys out first) and run setup again. A folder owned by an administrator, such as one an earlier install left, is taken over: the owner and access are reset for everything under it any link inside is deleted, and a file or folder inside that is not owned by an administrator is renamed aside (`not-admin-owned-<time>`) and not used. The service also locks `%ProgramData%\Koppel` itself down on every start.

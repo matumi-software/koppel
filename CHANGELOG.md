@@ -7,7 +7,8 @@ First release. If you ran a development build, read Installer and deploy before 
 ### Security
 
 - The UI now needs a password. The first password needs a one-time setup code (`docker logs`, or `%ProgramData%\Koppel\config\setup-code.txt` on Windows). Wrong tries are slowed down, and sessions end when the password changes or is reset (`Koppel --reset-password`).
-- The UI and the remote API are on separate ports. The UI (5240, HTTP) never serves the token endpoint or pairing, and the HTTPS port (5241) never serves the UI. Other websites cannot drive the UI (Origin check, required `X-Koppel-UI` header, SameSite cookie), and responses carry security headers. The Windows installer binds the UI to this machine only.
+- The UI is served over HTTPS with the server's own certificate, so the password and the session cookie no longer cross the network in clear and the cookie is Secure. The browser warns about the certificate the first time. Open `https://<machine>:5240`.
+- The UI and the remote API are on separate ports. The UI (5240) never serves the token endpoint or pairing, and the HTTPS port (5241) never serves the UI. Other websites cannot drive the UI (Origin check, required `X-Koppel-UI` header, SameSite cookie), and responses carry security headers. The Windows installer binds the UI to this machine only.
 - Revoking a client, or rotating its secret, now ends its running USB sessions and hub connections at once, not only new requests.
 - Pairing is harder to abuse: a secret poll token, a server-wide cap on requests, per-address limits, and a confirm step before a client replaces its connection to another server. Discovery results are size-limited and expire.
 - Client secrets are verified with SHA-256 (older hashes are upgraded on use). The server still keeps them recoverable in its encrypted file, so an admin can copy a secret again.
@@ -56,6 +57,6 @@ First release. If you ran a development build, read Installer and deploy before 
 - The Linux container is privileged and runs as root. The Windows service runs as LocalSystem.
 - The installer is not signed, and there is no CI.
 - The elevated installer paths (taking over a data folder, driver record, rollback, restart request) have not been run on a VM.
-- The UI port is plain HTTP: bind it to loopback or use a TLS proxy on a network you do not trust.
+- The UI's certificate is self-signed. Accepting the browser's warning on a network you do not trust could let an impostor collect the password; the fingerprint under Clients is the one to compare.
 - Windows can be a client; a Windows server needs usbipd-win and `Usb:Upstream`, and has not been tried with real usbipd-win.
 - Storage and printers (bulk transfers) are untried on real hardware.

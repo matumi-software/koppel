@@ -1,6 +1,6 @@
 # Koppel as a client on a Windows host with Docker Desktop. See docs/windows.md.
 #   docker compose -f docker-compose.windows-client.yml up -d
-# Then browse http://localhost:5240/
+# Then browse https://localhost:5240/
 #
 # A container cannot give a USB device to Windows. usbip-win2 on the host can: it attaches from the
 # gateway below, and Koppel carries the session to the server over TLS behind a token.

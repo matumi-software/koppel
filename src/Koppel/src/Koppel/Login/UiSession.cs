@@ -30,7 +30,8 @@ internal static class UiSession
             options.Cookie.Name = CookieName;
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Strict;
-            options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+            // The UI is served over HTTPS only, and a browser never sends a Secure cookie over plain HTTP.
+            options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
             options.ExpireTimeSpan = Lifetime;
             options.SlidingExpiration = true;
             options.Events.OnRedirectToLogin = context =>

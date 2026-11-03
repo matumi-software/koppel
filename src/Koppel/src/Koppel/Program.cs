@@ -14,31 +14,41 @@ using Koppel.Server;
 using Koppel.Settings;
 using Koppel.Usb;
 using Koppel.Web;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Runs as a Windows service when the installer registers it as one; a no-op otherwise.
 builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
 
-// HTTP serves the UI. HTTPS, with the server's own self-signed certificate, serves everything other
-// Koppel machines do, USB traffic included; clients pin the certificate's fingerprint. Discovery
-// answers on UDP at the HTTPS port number.
-var httpPort = builder.Configuration.GetValue("Ports:Http", 5240);
+// Both ports are HTTPS with the server's own self-signed certificate. The UI port serves the UI and can
+// be bound to one address, such as loopback. The other serves everything other Koppel machines do, USB
+// traffic included; clients pin the certificate's fingerprint. Discovery answers on UDP at its number.
+var uiPort = builder.Configuration.GetValue("Ports:Http", 5240);
 var httpsPort = builder.Configuration.GetValue("Ports:Https", 5241);
-var httpAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting], builder.Environment.IsDevelopment());
+var uiAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting], builder.Environment.IsDevelopment());
+
+// A one-off command for the Docker health check: ask the UI port whether Koppel answers, and exit.
+if (HealthProbe.Requested(args))
+{
+    return await HealthProbe.RunAsync(uiAddress, uiPort);
+}
+
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
-    if (httpAddress is null)
+    void Https(ListenOptions listen) => listen.UseHttps(https =>
+        https.ServerCertificateSelector = (_, _) => kestrel.ApplicationServices.GetRequiredService<ServerSecretsStore>().Certificate);
+
+    if (uiAddress is null)
     {
-        kestrel.ListenAnyIP(httpPort);
+        kestrel.ListenAnyIP(uiPort, Https);
     }
     else
     {
-        kestrel.Listen(httpAddress, httpPort);
+        kestrel.Listen(uiAddress, uiPort, Https);
     }
 
-    kestrel.ListenAnyIP(httpsPort, listen => listen.UseHttps(https =>
-        https.ServerCertificateSelector = (_, _) => kestrel.ApplicationServices.GetRequiredService<ServerSecretsStore>().Certificate));
+    kestrel.ListenAnyIP(httpsPort, Https);
 });
 
 builder.Services.AddKoppelRateLimits(builder.Configuration);
@@ -57,7 +67,7 @@ if (UiPasswordReset.Requested(args))
 
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, httpPort, httpsPort));
+builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, uiPort, httpsPort));
 builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>(), logger: sp.GetRequiredService<ILogger<InMemoryActivityStore>>()));
 builder.Services.AddSingleton<IActivityRecorder>(sp => sp.GetRequiredService<InMemoryActivityStore>());
 builder.Services.AddSingleton<IActivityReader>(sp => sp.GetRequiredService<InMemoryActivityStore>());

@@ -39,8 +39,9 @@ if (serving) {
     }
 }
 
-// The UI API is served on Koppel's HTTP port only; the HTTPS port answers remote clients.
-const target = env.KOPPEL_UI_URL ?? 'http://127.0.0.1:5240';
+// The UI API is served on Koppel's UI port only; the other port answers remote clients. Both are
+// HTTPS with Koppel's own self-signed certificate, so the proxy below does not verify it.
+const target = env.KOPPEL_UI_URL ?? 'https://127.0.0.1:5240';
 
 export default defineConfig({
     plugins: [plugin()],

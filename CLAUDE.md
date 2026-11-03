@@ -40,7 +40,7 @@ pnpm --filter koppel.ui test                           # app tests
 pnpm --filter koppel.ui lint
 pnpm --filter koppel.ui build
 dotnet run --project Koppel/src/Koppel               # starts the Vite dev server through SpaProxy
-docker compose -f Koppel/docker-compose.yml up --build   # http://localhost:5240
+docker compose -f Koppel/docker-compose.yml up --build   # https://localhost:5240
 ```
 
 Packages restore from committed `packages.lock.json` files. After adding or changing a package, run `dotnet restore` on both solutions and commit the lock files; a locked build fails with NU1004 until you do. Restore without `-r` (every project restores for win-x64, linux-x64 and linux-arm64), then publish with `--no-restore -r <rid>`.

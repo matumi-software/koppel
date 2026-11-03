@@ -172,10 +172,10 @@ public sealed class WebSurfaceTests : IDisposable
             return response.StatusCode;
         }
 
-        (await Get($"http://localhost:{host.HttpPort}")).Should().Be(HttpStatusCode.OK);
+        (await Get($"https://localhost:{host.HttpPort}")).Should().Be(HttpStatusCode.OK);
         (await Get("https://evil.example")).Should().Be(HttpStatusCode.Forbidden);
-        (await Get($"http://localhost:{host.HttpPort + 1}")).Should().Be(HttpStatusCode.Forbidden, "another port is another origin");
-        (await Get($"https://localhost:{host.HttpPort}")).Should().Be(HttpStatusCode.Forbidden, "another scheme is another origin");
+        (await Get($"https://localhost:{host.HttpPort + 1}")).Should().Be(HttpStatusCode.Forbidden, "another port is another origin");
+        (await Get($"http://localhost:{host.HttpPort}")).Should().Be(HttpStatusCode.Forbidden, "another scheme is another origin");
         (await Get("null")).Should().Be(HttpStatusCode.Forbidden);
         (await Get("https://evil.example", "/api/hubs/ui/negotiate?negotiateVersion=1")).Should().Be(HttpStatusCode.Forbidden);
     }
@@ -187,8 +187,9 @@ public sealed class WebSurfaceTests : IDisposable
         var host = Host();
         using var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Origin", "https://evil.example");
+        socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) => Usb.RemoteAccess.Pinned(host, certificate);
 
-        var connect = () => socket.ConnectAsync(new Uri($"ws://localhost:{host.HttpPort}/api/hubs/ui"), ct);
+        var connect = () => socket.ConnectAsync(new Uri($"wss://localhost:{host.HttpPort}/api/hubs/ui"), ct);
 
         (await connect.Should().ThrowAsync<WebSocketException>()).Which.Message.Should().Contain("403");
     }
@@ -251,7 +252,7 @@ public sealed class WebSurfaceTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var host = Host(configuration: new() { ["Ports:HttpAddress"] = "127.0.0.1" });
         var ui = Own(host.CreateUiClient());
-        ui.BaseAddress = new Uri($"http://127.0.0.1:{host.HttpPort}");
+        ui.BaseAddress = new Uri($"https://127.0.0.1:{host.HttpPort}");
 
         (await ui.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK);
     }

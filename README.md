@@ -40,7 +40,8 @@ The image is `matumisoftware/koppel` on Docker Hub (amd64 for now).
    ```
 
 3. Find the one-time setup code with `docker logs <container>` (it reads `Koppel setup code: XXXX-XXXX`), open
-   `http://<machine>:5240`, set the password and choose the role.
+   `https://<machine>:5240`, set the password and choose the role. The browser warns about the
+   certificate the first time, because it is Koppel's own; accept it to go on.
 
 The container uses the host's network so clients can find it. It restarts after a crash, and comes
 back at the next reboot even if someone stopped it by hand. The image has a health check, but plain Docker only reports an unhealthy container and does not restart it.
@@ -68,7 +69,7 @@ Build the installer from `src/Koppel/installer`:
 
 That makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows service, usbip-win2's signed
 driver, the Visual C++ runtime, and a firewall rule that lets Koppel find servers. Open
-http://localhost:5240 afterwards. The first time, it asks for a setup code: it is in
+https://localhost:5240 afterwards and accept the browser's certificate warning. The first time, it asks for a setup code: it is in
 `%ProgramData%\Koppel\config\setup-code.txt`. The UI answers on this machine only. See
 [docs/windows.md](docs/windows.md) for what the installer does to `%ProgramData%\Koppel` and the driver.
 
@@ -85,7 +86,7 @@ address under Configuration instead.
 
 | Port | What |
 |---|---|
-| 5240 TCP | Web UI (HTTP), behind the password. Native Windows binds it to this machine only |
+| 5240 TCP | Web UI (HTTPS, the server's own certificate), behind the password. Native Windows binds it to this machine only |
 | 5241 TCP | Everything other Koppel machines do: tokens, pairing, the device list and USB traffic (HTTPS) |
 | 5241 UDP | Finding servers on the local network |
 | 3242 TCP | Gateway for a USB/IP driver on the same machine (plain, no login). Native Windows client: on, 127.0.0.1 only. Windows Docker client: inside the container, published as 127.0.0.1:3240 on the host |

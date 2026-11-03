@@ -25,7 +25,7 @@
         <!-- No firewall rule: a client only receives answers to its own discovery broadcast, which
              Windows lets in, and nothing on this machine needs to be reached from the network. -->
         <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes" />
-        <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on http://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes">
+        <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on https://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes">
           <!-- Restart after a failure: after 5 s each time, for the first, second and every later one. The count resets after a day
                without one. What counts as a failure is set below (SetServiceFailureFlag). -->
           <util:ServiceConfig ServiceName="Koppel" FirstFailureActionType="restart" SecondFailureActionType="restart" ThirdFailureActionType="restart"

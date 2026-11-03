@@ -44,7 +44,7 @@ tests (`pnpm --filter koppel.ui test`).
 
 ## Ports and what they serve
 
-Two listeners. The decision uses the local port the connection arrived on, never the `Host` header.
+Two listeners, both HTTPS with the server's own self-signed certificate. The decision uses the local port the connection arrived on, never the `Host` header.
 A request for a surface the other listener owns, or that this machine's current role does not have,
 gets 404. The role is read from the settings on every request, so a role change takes effect at once.
 The table is `Surface.Listed` in `src/Koppel/Web/SurfaceGuard.cs`; a path not listed counts as the UI's,
@@ -52,9 +52,9 @@ so a new route is never exposed to remote clients by accident.
 
 | Port | Serves | Role |
 |---|---|---|
-| 5240 HTTP | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, `/api/hubs/ui`, `/healthz` | Any |
-| 5240 HTTP | `/api/server/*` | Server or both |
-| 5240 HTTP | `/api/client/*` | Client or both |
+| 5240 HTTPS | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, `/api/hubs/ui`, `/healthz` | Any |
+| 5240 HTTPS | `/api/server/*` | Server or both |
+| 5240 HTTPS | `/api/client/*` | Client or both |
 | 5241 HTTPS | `/connect/token`, `/api/remote/*` (USB traffic at `/api/remote/usb`), `/api/hubs/remote`, `/api/pair*` | Server or both |
 | 5241 UDP | Answers to discovery probes | Server or both |
 | 3242 plain | Gateway for a USB/IP driver on this machine | Client or both, and only where `Gateway:Port` is set or on native Windows |
@@ -63,7 +63,7 @@ Settings that move them:
 
 | Setting | Default | What |
 |---|---|---|
-| `Ports:Http`, `Ports:Https` | 5240, 5241 | The two web ports |
+| `Ports:Http`, `Ports:Https` | 5240, 5241 | The UI port and the port for other Koppel machines. Both are HTTPS; the names are older than that |
 | `Ports:HttpAddress` | Any address; loopback in Development | The address the UI port binds to. Must be an IP address, or start-up fails naming the setting. The Windows installer sets `127.0.0.1` for the service, because the native app's UI is used on that machine only. Docker keeps any address, so a headless machine's UI is reachable on the LAN |
 | `Gateway:Port` | 3242 on native Windows, off elsewhere | See "USB client". A compose file sets it by environment variable |
 | `Gateway:Address` | `127.0.0.1` | Where the gateway listens |
@@ -73,7 +73,7 @@ The USB port must not equal the HTTP, HTTPS or gateway port. That is checked on 
 `settings.json` is loaded.
 
 `GET /healthz` is on the UI port, anonymous, answers `ok` in any role and needs no header. The Docker
-image's health check (`healthcheck.sh`) calls it on `Ports__HttpAddress` and `Ports__Http` (any-address and unset mean loopback), then on 127.0.0.1. Plain Docker only marks the container unhealthy and does not restart it; `restart:` acts on exits. Swarm and Kubernetes act on it, and with plain Docker something such as an autoheal container has to.
+image's health check is Koppel itself (`dotnet Koppel.dll --healthcheck`, `Web/HealthProbe.cs`), because the port is HTTPS and the image has no curl or openssl. It calls `/healthz` on `Ports__HttpAddress` and `Ports__Http` (any-address and unset mean loopback), then on 127.0.0.1, and accepts any certificate, since it sends nothing secret. Plain Docker only marks the container unhealthy and does not restart it; `restart:` acts on exits. Swarm and Kubernetes act on it, and with plain Docker something such as an autoheal container has to.
 
 ## Auth
 
@@ -84,14 +84,14 @@ image's health check (`healthcheck.sh`) calls it on `Ports__HttpAddress` and `Po
 
 ### UI sign-in
 
-The UI on port 5240 needs a password. There is one admin password and no user name.
+The UI on port 5240 (HTTPS) needs a password. There is one admin password and no user name.
 
 - **First run:** while no password is set, `POST /api/auth/setup` needs a one-time 8 character setup code, even from the same machine. The code is made of letters and digits without I, O, L, 0 and 1. Koppel logs it at Warning and writes it to `setup-code.txt` in the config directory. Setting the password removes the file.
   - Docker: `docker logs <container>`, or `/koppel/config/setup-code.txt` in the container.
   - Windows: `%ProgramData%\Koppel\config\setup-code.txt` (administrators and SYSTEM can read it).
   - Setup is step 1 of the first-run wizard in the UI.
 - **Password:** at least 10 characters, at most 128, and not "koppel" or "password" in any case. It is hashed with PBKDF2-SHA256, 600,000 iterations and a 16 byte salt, and kept with a security stamp in the encrypted `ui-auth.json`.
-- **Cookie:** `koppel.ui`, HttpOnly, SameSite=Strict, Secure when the request came over HTTPS (the UI port is plain HTTP, so it is not Secure there), a session cookie that lasts 12 hours and slides while it is used, and never more than 7 days after the sign-in (the password change does not restart that). The security stamp, the session id and the 7 day cap are checked on every request. An API call that is not signed in gets 401, never a redirect.
+- **Cookie:** `koppel.ui`, HttpOnly, SameSite=Strict, Secure (the UI is HTTPS only), a session cookie that lasts 12 hours and slides while it is used, and never more than 7 days after the sign-in (the password change does not restart that). The security stamp, the session id and the 7 day cap are checked on every request. An API call that is not signed in gets 401, never a redirect.
 - **Backoff:** login, password change and setup lock a caller for one minute after 5 wrong tries, and double the lock on each further failure, up to one hour. A caller is one IPv4 address or one IPv6 /64, as in pairing. A try is counted before the password is hashed and given back when it is right, so parallel guesses cannot all get in ahead of the lock. The lock applies before the password is looked at, so a right guess during it is refused too. Setup has no limit across callers: the code is about 40 bits, so a global lock would let one host on the network keep the admin out. The table of callers holds at most 2048 entries.
 - **Hash slots:** at most 2 password hashes run at once for the whole server (setup, login and password change). A caller who arrives while both are busy gets 429 with `Retry-After: 1` at once, and the try is not counted against it.
 - **Failures in the log:** every failure goes to the log. The activity log gets one `signInFailed` entry each time a lock engages, so a burst of guesses cannot push the 500 other entries out.
@@ -111,12 +111,12 @@ The UI on port 5240 needs a password. There is one admin password and no user na
 ### Guards on the web surface
 
 - **Origin and header (UI port):** an `Origin` that does not match the request's own scheme, host and port gets 403 on any `/api/*` call, the hub's WebSocket upgrade included. Behind a TLS proxy the scheme comes from `X-Forwarded-Proto`. A change (anything but GET or HEAD) also needs `X-Koppel-UI: 1`, otherwise 403. A page on another site cannot add that header without a CORS preflight, which this server never grants. The UI adds it in `api/http.ts` (`uiFetch`, used by every mutating fetch). The hub is exempt from the header only, because an upgrade cannot carry one.
-- **Host header:** `AllowedHosts` stays `*` and is configurable. A DNS rebinding page is stopped by the SameSite=Strict cookie and the Origin and header checks, not by the host name.
+- **Host header:** `AllowedHosts` stays `*` and is configurable. A DNS rebinding page is stopped by HTTPS: the browser checks Koppel's certificate against the rebinding page's own host name and the request fails, and a page that tries plain HTTP gets no answer from a TLS port. The SameSite=Strict cookie and the Origin and header checks stand behind that, not the host name.
 - **Security headers** on every response: `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` (only that, so it cannot break the app), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
 - **Rate limits:** a fixed one-minute window per remote IP, answering 429. `/connect/token` allows 60 (`RateLimits:TokenPerMinute`), `/api/pair*` allows 120 (`RateLimits:PairPerMinute`; a waiting client polls 30 times a minute), and `/api/auth/setup`, `/login` and `/password` allow 30 (`RateLimits:AuthPerMinute`), counted per IPv4 address or IPv6 /64. The limiter sits after the port and role check, so a request for a surface that is not there does not use up an allowance.
 - **Remote hub:** mapped with `CloseOnAuthenticationExpiration`, so a connection ends when its token runs out. The client makes the link again 30 seconds before that, with a fresh token, and shows nothing of it: no "connecting" and no entry in the activity log. A close within 10 seconds of the token's end counts as the same expiry.
 - **Connection test:** the client's Test button gets one of a fixed set of outcomes with fixed wording, never raw exception text: `ok`, `incomplete`, `unreachable`, `certificateMismatch`, `rejectedCredentials`, `clientUnknown`. The detail goes to the log.
-- **Dev proxy:** the Vite dev server proxies `/api` to `KOPPEL_UI_URL`, default `http://127.0.0.1:5240`, the HTTP port. It sets `X-Forwarded-Proto` so the Origin check passes.
+- **Dev proxy:** the Vite dev server proxies `/api` to `KOPPEL_UI_URL`, default `https://127.0.0.1:5240`, the UI port, without verifying Koppel's self-signed certificate. It sets `X-Forwarded-Proto` so the Origin check passes.
 
 ### Threat model
 
@@ -129,7 +129,7 @@ What the design holds against:
 
 What it does not cover:
 
-- The UI port is plain HTTP. On a network you do not trust, the password and cookie cross it in the clear. On Windows the installer binds it to the loopback address. In Docker it binds every address so a headless machine can be reached: put a TLS proxy in front, or publish it on `127.0.0.1` only. The Docker Desktop compose files for Windows already publish it on `127.0.0.1`.
+- The browser cannot tell Koppel's self-signed certificate from an attacker's. It warns the first time, and whoever accepts the warning on a network they do not trust can be shown an impostor that collects the password. The certificate's SHA-256 fingerprint is the one under Clients, so it can be checked in the browser's certificate details. On Windows the installer binds the UI to the loopback address. The Docker Desktop compose files for Windows publish it on `127.0.0.1`.
 - The gateway on 3242 is plain USB/IP with no login (see "USB client"). Whoever reaches it uses the client's access to the server.
 - Anyone who can read the keys directory can decrypt the secret files, unless `Paths:KeyCertificate` protects the key ring (see "Config on disk").
 - The Linux container is privileged and runs as root, and the Windows service runs as LocalSystem. A flaw in Koppel is a flaw with that reach.

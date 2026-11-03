@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Koppel does not work as it should.
+labels: ["type: bug", "state: needs-triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+  - type: input
+    id: server
+    attributes:
+      label: Server
+      description: OS and how Koppel runs there (Docker, .deb, Windows with usbipd-win).
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      description: OS and how Koppel runs there (Windows installer, Docker, .deb).
+  - type: input
+    id: device
+    attributes:
+      label: Device, if it involves one
+      placeholder: Name and VID:PID from Koppel's device list
+  - type: input
+    id: version
+    attributes:
+      label: Koppel version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Docker: `docker logs <container>`. Linux package: `sudo journalctl -u koppel`. Windows: Event Viewer, Windows Logs > Application, source Koppel. The Activity page in the UI helps too. Remove anything you would rather not share.
+      render: text

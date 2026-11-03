@@ -125,6 +125,21 @@ docker compose exec koppel dotnet Koppel.dll --reset-password
 With the Linux package, run `sudo koppel --reset-password`. On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then read
 a new setup code and set a new password.
 
+## Help test Koppel
+
+Koppel is young, and every report helps. The most useful things to send:
+
+- **Which devices work.** Tried a device, whether it worked or not? Open a
+  [device report](https://github.com/matumi-software/koppel/issues/new?template=device-report.yml) with its
+  VID:PID (Koppel's device list shows it) and what runs on each end.
+- **Bugs.** Open a [bug report](https://github.com/matumi-software/koppel/issues/new?template=bug-report.yml)
+  with the steps and the logs: `docker logs <container>` in Docker, `sudo journalctl -u koppel` for the Linux
+  package, or Event Viewer (Windows Logs, Application, source Koppel) on Windows. The Activity page in the UI
+  shows what happened too.
+- **Ideas and questions.** Bring them to [Discussions](https://github.com/matumi-software/koppel/discussions).
+
+Security problems go privately through [SECURITY.md](SECURITY.md), not into an issue.
+
 ## Develop
 
 See the commands in [CLAUDE.md](CLAUDE.md) and the design in

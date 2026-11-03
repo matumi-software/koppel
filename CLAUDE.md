@@ -5,7 +5,7 @@ USB devices shared over the network. Read `docs/architecture.md` first.
 ## Layout
 
 The root stays clean: no code, no build files. Everything that builds lives under `src/`, one
-folder per solution, each with its own `src/` and `tests/`, the way Timebase is laid out.
+folder per solution, each with its own `src/` and `tests/`.
 
 | Folder | What |
 |---|---|

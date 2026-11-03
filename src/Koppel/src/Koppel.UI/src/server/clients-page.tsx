@@ -21,8 +21,7 @@ const seen = (client: ClientView) => {
 };
 
 /**
- * Server role: the registered clients. Select one to see its ID and secret (Reveal and Copy, like
- * Timebase Pulse), what it has attached and its history; rotate or revoke it there. A revoke stays
+ * Server role: the registered clients. Select one to see its ID and secret (Reveal and Copy), what it has attached and its history; rotate or revoke it there. A revoke stays
  * pending until ClientsChanged arrives without that client.
  */
 export function ClientsPage() {

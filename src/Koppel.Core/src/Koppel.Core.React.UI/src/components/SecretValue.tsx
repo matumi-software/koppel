@@ -10,7 +10,7 @@ export interface SecretValueProps {
 }
 
 /**
- * A masked secret with Reveal and Copy, like Timebase Pulse's: the value is fetched on demand, once,
+ * A masked secret with Reveal and Copy: the value is fetched on demand, once,
  * and kept in the component so Reveal then Copy does not ask twice.
  */
 export function SecretValue({ loadSecret, unavailable }: SecretValueProps) {

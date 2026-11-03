@@ -48,7 +48,14 @@ public sealed class ClientConnectionTests
     {
         (Saved with { ServerFingerprint = Other }).Continues(Saved).Should().BeFalse("nobody announced that certificate");
         (Saved with { ClientId = "client-other" }).Continues(Saved).Should().BeFalse();
-        (Saved with { ServerUrl = "https://elsewhere:5240" }).Continues(Saved).Should().BeFalse();
+        (Saved with { ServerUrl = "https://elsewhere:5240", ClientSecret = "other-secret" }).Continues(Saved).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Continues_is_true_for_the_same_server_at_another_address()
+    {
+        (Saved with { ServerUrl = "https://lab-rack-3:5241" }).Continues(Saved).Should().BeTrue("the same certificate and credentials are the same server, wherever it listens");
+        (Saved with { ServerUrl = "https://10.0.0.9:5240", ServerFingerprint = Next }).Continues(Saved with { NextServerFingerprint = Next }).Should().BeTrue();
     }
 
     [Fact]

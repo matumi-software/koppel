@@ -59,6 +59,7 @@ internal sealed partial class UsbClient(
     KoppelPaths paths,
     ConnectionStore connection,
     SettingsStore settings,
+    ServerMoves moves,
     IUsbAttacher attacher,
     IUsbIpDriver driver,
     TimeProvider time,
@@ -378,6 +379,7 @@ internal sealed partial class UsbClient(
     /// first, so nothing stays attached to a server the user moved away from, and then restarts the link.
     /// A change that touches neither (the listen port, say) leaves the link alone, and so does the same
     /// server announcing or switching to its next certificate (<see cref="ClientConnection.Continues"/>).
+    /// The same server at another address keeps the attachments, but the link starts again there.
     /// The release runs in the background, because the driver's own command may take 30 seconds and the
     /// settings update, and with it the UI's confirmation, waits for this handler. An attach that starts
     /// meanwhile waits for the release.
@@ -387,6 +389,7 @@ internal sealed partial class UsbClient(
         var previous = Task.CompletedTask;
         TaskCompletionSource? done = null;
         ClientConnection was;
+        var moved = false;
         lock (_gate)
         {
             // Read inside the lock, so two changes at once cannot store each other's stale state.
@@ -402,10 +405,13 @@ internal sealed partial class UsbClient(
             if (sameServer)
             {
                 // The server announced or switched to its next certificate: the link and the attachments carry on.
-                if (_serverLink is { } link && now.Connection.Continues(link.Connection))
+                // At another address the attachments carry on, and the link is made again there.
+                if (_serverLink is { } link && link.CarriesOn(now.Connection))
                 {
                     link.Connection = now.Connection;
                 }
+
+                moved = now.Connection.ServerUrl != was.ServerUrl;
             }
             else
             {
@@ -417,6 +423,11 @@ internal sealed partial class UsbClient(
 
         if (done is null)
         {
+            if (moved)
+            {
+                CancelSession();
+            }
+
             await CarryOverRememberedAsync(was);
             return;
         }
@@ -569,6 +580,12 @@ internal sealed partial class UsbClient(
                     try
                     {
                         await SetLinkAsync("error", reason);
+                        // A server that moved on the local network is followed; the move ends this wait.
+                        if (LinkConnection() is { } failed)
+                        {
+                            await moves.LinkFailedAsync(failed, ex);
+                        }
+
                         await Task.Delay(backoff, session.Token);
                     }
                     catch (OperationCanceledException)
@@ -1047,7 +1064,8 @@ internal sealed partial class UsbClient(
     /// <summary>
     /// The one token client for the saved connection, with its pinned HTTP client. A new one is built
     /// when the connection changes, so a token for another server or secret is never reused. The same
-    /// server with its certificate moved on keeps it (<see cref="ClientConnection.Continues"/>).
+    /// server with its certificate moved on keeps it (<see cref="ServerLink.CarriesOn"/>); at another
+    /// address it gets a new one.
     /// </summary>
     internal ServerLink ServerLinkFor()
     {
@@ -1059,7 +1077,7 @@ internal sealed partial class UsbClient(
                 throw new InvalidOperationException("Not connected to a server.");
             }
 
-            if (_serverLink is not null && _serverLink.Connection != c && c.Continues(_serverLink.Connection))
+            if (_serverLink is not null && _serverLink.Connection != c && _serverLink.CarriesOn(c))
             {
                 _serverLink.Connection = c;
             }
@@ -1071,6 +1089,15 @@ internal sealed partial class UsbClient(
             }
 
             return _serverLink;
+        }
+    }
+
+    /// <summary>The connection the current link was made for, or null before the first.</summary>
+    private ClientConnection? LinkConnection()
+    {
+        lock (_gate)
+        {
+            return _serverLink?.Connection;
         }
     }
 
@@ -1328,6 +1355,11 @@ internal sealed partial class UsbClient(
         var previous = _link;
         _link = link;
         _linkMessage = message;
+        if (link == "connected")
+        {
+            moves.LinkUp();
+        }
+
         if (previous != link && (link == "connected" || (previous == "connected" && link is "error" or "connecting")))
         {
             var server = connection.Current.ServerUrl is { } url ? new Uri(url).Host : "the server";
@@ -1385,6 +1417,12 @@ internal sealed partial class UsbClient(
         public Uri Server { get; }
 
         public KoppelTokenClient Tokens { get; }
+
+        /// <summary>
+        /// This link can serve <paramref name="now"/>: the same server (<see cref="ClientConnection.Continues"/>)
+        /// at the same address. A token or an HTTP client is never taken to another address.
+        /// </summary>
+        public bool CarriesOn(ClientConnection now) => now.ServerUrl == Connection.ServerUrl && now.Continues(Connection);
 
         public void Dispose()
         {

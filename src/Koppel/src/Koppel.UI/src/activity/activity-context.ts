@@ -51,6 +51,7 @@ const glyphs: Record<ServerActivity['reason'], GlyphState> = {
   certificatePrepared: 'live',
   certificateCancelled: 'local',
   certificateSwitched: 'live',
+  serverMoved: 'live',
 };
 
 export function fromServer(event: ServerActivity): ActivityItem {

@@ -121,8 +121,11 @@ builder.Services.AddSingleton<ServerAnnouncer>();
 // Clients look for servers on their own discovery port, 5240 unless changed.
 builder.Services.AddSingleton(sp => new ServerBrowser(sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<ServerBrowser>>(), discoveryPort));
 builder.Services.AddSingleton<ServerFinder>();
+builder.Services.AddSingleton<IDiscoveredServers>(sp => sp.GetRequiredService<ServerFinder>());
+builder.Services.AddSingleton<ServerMoves>();
 builder.Services.AddHostedService<ServerAnnouncerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerFinder>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerMoves>());
 builder.Services.AddHostedService<UiHubRelay>();
 
 // USB goes through the Linux kernel's USB/IP drivers. Other platforms report why they cannot share yet.

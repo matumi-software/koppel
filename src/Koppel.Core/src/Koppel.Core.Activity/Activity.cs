@@ -32,6 +32,7 @@ public enum ActivityReason
     CertificatePrepared,
     CertificateCancelled,
     CertificateSwitched,
+    ServerMoved,
 }
 
 /// <summary>Whether the thing the event describes happened.</summary>

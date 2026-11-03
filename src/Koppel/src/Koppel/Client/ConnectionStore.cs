@@ -21,13 +21,13 @@ internal sealed record ClientConnection(string? ServerUrl, string? ServerFingerp
     public bool Trusts(X509Certificate2? certificate) => ServerCertificate.MatchesAny(certificate, ServerFingerprint, NextServerFingerprint);
 
     /// <summary>
-    /// This is <paramref name="previous"/> with at most its certificate moved on: the same server address and
-    /// credentials, pinned to the same fingerprint or to the next one <paramref name="previous"/> was told
-    /// about. Such a change keeps the link and the attached devices; any other is a new server.
+    /// This is <paramref name="previous"/>'s server, at most moved to another address or on to its next
+    /// certificate: the same credentials, pinned to the same fingerprint or to the next one
+    /// <paramref name="previous"/> was told about. Such a change keeps the attached devices, and the link
+    /// too while the address stays; any other is a new server.
     /// </summary>
     public bool Continues(ClientConnection previous) =>
-        ServerUrl == previous.ServerUrl
-        && ClientId == previous.ClientId
+        ClientId == previous.ClientId
         && ClientSecret == previous.ClientSecret
         && ServerFingerprint is not null
         && (ConnectionUpdate.SameFingerprint(ServerFingerprint, previous.ServerFingerprint) || ConnectionUpdate.SameFingerprint(ServerFingerprint, previous.NextServerFingerprint));
@@ -101,6 +101,22 @@ internal sealed class ConnectionStore : IHostedService, IDisposable
         }
 
         return await _file.UpdateAsync(c => c.Continues(link) ? c.WithServerCertificates(fingerprint, next) : c, cancellationToken);
+    }
+
+    /// <summary>
+    /// Points the saved connection at <paramref name="serverUrl"/>, where its server moved to, as long as the
+    /// saved connection is still the one <paramref name="link"/> was made for: whatever the person saved
+    /// meanwhile wins. Only the address changes. True when it moved.
+    /// </summary>
+    public async Task<bool> MoveServerAsync(ClientConnection link, string serverUrl, CancellationToken cancellationToken)
+    {
+        if (_file.Current != link)
+        {
+            return false;
+        }
+
+        var moved = link with { ServerUrl = serverUrl };
+        return await _file.UpdateAsync(c => c == link ? moved : c, cancellationToken) == moved;
     }
 
     public void Dispose() => _file.Dispose();

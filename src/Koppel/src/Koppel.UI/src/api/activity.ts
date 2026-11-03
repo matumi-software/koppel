@@ -23,7 +23,8 @@ export interface ServerActivity {
     | 'signingKeyRotated'
     | 'certificatePrepared'
     | 'certificateCancelled'
-    | 'certificateSwitched';
+    | 'certificateSwitched'
+    | 'serverMoved';
   outcome: 'succeeded' | 'failed';
   summary: string;
   detail: string | null;

@@ -20,4 +20,30 @@ internal static class RemoteFailure
         IOException io => $"The connection to the server was lost: {io.Message}",
         _ => ex.Message,
     };
+
+    /// <summary>
+    /// True when nothing answered at the server's address: the connection was refused or timed out, there
+    /// was no route, or the name no longer resolves. A server that answered, with a certificate that does
+    /// not match or by refusing the credentials, is not unreachable.
+    /// </summary>
+    public static bool IsUnreachable(Exception ex)
+    {
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                case AuthenticationException or TokenRequestException:
+                    return false;
+                case HttpRequestException { HttpRequestError: HttpRequestError.ConnectionError or HttpRequestError.NameResolutionError }:
+                case SocketException
+                {
+                    SocketErrorCode: SocketError.ConnectionRefused or SocketError.TimedOut or SocketError.HostUnreachable
+                        or SocketError.NetworkUnreachable or SocketError.HostDown or SocketError.HostNotFound or SocketError.NoData,
+                }:
+                    return true;
+            }
+        }
+
+        return false;
+    }
 }

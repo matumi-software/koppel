@@ -97,6 +97,14 @@ internal sealed partial class ServerAnnouncerService(
     private partial void LogAnnounceFailed(Exception exception);
 }
 
+/// <summary>The servers this machine hears on the local network, leaving out itself. A test can stand in for the network.</summary>
+internal interface IDiscoveredServers
+{
+    event Func<IReadOnlyList<DiscoveredServer>, Task>? Changed;
+
+    IReadOnlyList<DiscoveredServer> Servers { get; }
+}
+
 /// <summary>
 /// Client role: finds servers on the local network while this machine can be a client, leaving out
 /// itself. <c>Discovery:Enabled=false</c> turns it off.
@@ -106,7 +114,7 @@ internal sealed partial class ServerFinder(
     SettingsStore settings,
     ServerSecretsStore secrets,
     IConfiguration configuration,
-    ILogger<ServerFinder> logger) : IHostedService
+    ILogger<ServerFinder> logger) : IHostedService, IDiscoveredServers
 {
     public event Func<IReadOnlyList<DiscoveredServer>, Task>? Changed;
 

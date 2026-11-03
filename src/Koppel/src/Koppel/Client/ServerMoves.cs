@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Koppel.Core.Activity;
 using Koppel.Core.Discovery;
+using Koppel.Core.Security;
 using Koppel.Discovery;
 using Koppel.Usb;
 
@@ -11,9 +12,11 @@ namespace Koppel.Client;
 /// Follows the saved server to another address or port on the local network, as when it came back on 5240
 /// after an upgrade from 5241, or its machine got a new IP address. While the link cannot reach the saved
 /// address at all, and discovery hears a server with the pinned certificate somewhere else, the saved
-/// address becomes that one. Pinning still applies there, so an answer that copies the fingerprint cannot
-/// complete a connection. A certificate that does not match or credentials the server refused are not a
-/// move. With <c>Discovery:Enabled=false</c> nothing is heard, so nothing moves.
+/// address becomes that one. The fingerprint in a discovery answer is public, so anyone on the network can
+/// copy it: before the move, the new address must prove it holds the pinned certificate over a pinned
+/// handshake, so a copied answer cannot draw the client away from its server. A certificate that does not
+/// match or credentials the server refused are not a move. With <c>Discovery:Enabled=false</c> nothing is
+/// heard, so nothing moves.
 /// </summary>
 internal sealed partial class ServerMoves(
     ConnectionStore connection,
@@ -27,6 +30,9 @@ internal sealed partial class ServerMoves(
 
     /// <summary>How long the saved host name may take to resolve, when working out whether a server is on the same host.</summary>
     private static readonly TimeSpan ResolveTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long an address has to prove it holds the pinned certificate.</summary>
+    private static readonly TimeSpan ProofTimeout = TimeSpan.FromSeconds(5);
 
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _moving = new(1, 1);
@@ -111,7 +117,16 @@ internal sealed partial class ServerMoves(
                 return;
             }
 
-            var to = Pick(stranded, candidates, await AddressesOfAsync(saved), _movedTo.ContainsKey);
+            string? to = null;
+            foreach (var url in Candidates(stranded, candidates, await AddressesOfAsync(saved), _movedTo.ContainsKey))
+            {
+                if (await HoldsCertificateAsync(stranded, url))
+                {
+                    to = url;
+                    break;
+                }
+            }
+
             if (to is null || !await connection.MoveServerAsync(stranded, to, CancellationToken.None))
             {
                 return;
@@ -148,12 +163,12 @@ internal sealed partial class ServerMoves(
         || (current.NextServerFingerprint is not null && ConnectionUpdate.SameFingerprint(server.Fingerprint, current.NextServerFingerprint));
 
     /// <summary>
-    /// The address to move <paramref name="current"/> to, or null when no server with its certificate is
-    /// anywhere else. One on the saved host (<paramref name="savedHost"/>) on another port comes first, and
-    /// keeps the saved host name; then any other. An address it moved to a little while ago is
-    /// <paramref name="heldOff"/>.
+    /// The addresses <paramref name="current"/> could move to, best first: where discovery hears a server
+    /// with its certificate, other than the saved address. One on the saved host (<paramref name="savedHost"/>)
+    /// on another port comes first, and keeps the saved host name; then any other. An address it moved to a
+    /// little while ago is <paramref name="heldOff"/>.
     /// </summary>
-    internal static string? Pick(ClientConnection current, IEnumerable<DiscoveredServer> servers, IReadOnlyCollection<IPAddress> savedHost, Func<string, bool>? heldOff = null)
+    internal static IReadOnlyList<string> Candidates(ClientConnection current, IEnumerable<DiscoveredServer> servers, IReadOnlyCollection<IPAddress> savedHost, Func<string, bool>? heldOff = null)
     {
         var saved = new Uri(current.ServerUrl!);
         return servers
@@ -167,7 +182,30 @@ internal sealed partial class ServerMoves(
             .Where(c => !string.Equals(c.Url, saved.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase) && heldOff?.Invoke(c.Url) != true)
             .OrderByDescending(c => c.SameHost)
             .Select(c => c.Url)
-            .FirstOrDefault();
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="url"/> holds a certificate <paramref name="current"/> trusts: one request over a
+    /// handler pinned to its fingerprints, with no token or secret. Any answer after the pinned handshake
+    /// proves it, a 401 included; a handshake that fails or takes too long does not.
+    /// </summary>
+    private async Task<bool> HoldsCertificateAsync(ClientConnection current, string url)
+    {
+        using var handler = ServerCertificate.CreatePinnedHandler(current.Trusts);
+        handler.AllowAutoRedirect = false;
+        using var http = new HttpClient(handler) { Timeout = ProofTimeout };
+        try
+        {
+            using var response = await http.GetAsync(new Uri(new Uri(url), "/api/remote/hello"), HttpCompletionOption.ResponseHeadersRead);
+            return true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            LogNotProven(url, ex.Message);
+            return false;
+        }
     }
 
     /// <summary>The addresses the saved host stands for: itself when it is one, otherwise what its name resolves to now, or none.</summary>
@@ -197,6 +235,9 @@ internal sealed partial class ServerMoves(
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Could not resolve {Host} to compare it with the servers on the network: {Reason}")]
     private partial void LogNotResolved(string host, string reason);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "A server with the pinned fingerprint was heard at {Url}, but it did not prove it holds the pinned certificate: {Reason}")]
+    private partial void LogNotProven(string url, string reason);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not follow the server to its new address")]
     private partial void LogMoveFailed(Exception exception);

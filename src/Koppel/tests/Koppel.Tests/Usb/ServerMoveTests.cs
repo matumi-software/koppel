@@ -122,21 +122,57 @@ public sealed class ServerMoveTests : IDisposable
     public async Task A_client_does_not_move_on_a_certificate_mismatch()
     {
         var ct = TestContext.Current.CancellationToken;
-        // The server answers at the saved address with a certificate the client does not pin. Something with
-        // the pinned fingerprint is heard elsewhere, but the server did answer, so it has not moved.
-        await _discovery.PublishAsync(Heard(KoppelFactory.FreePort(), Unknown));
+        using var other = OtherServer();
+        // The client pins the other server's certificate, but the saved address answers with this one's. The
+        // other server is heard and could prove it holds the pinned certificate, but the saved address did
+        // answer, so nothing moved.
+        await _discovery.PublishAsync(Heard(other.HttpsPort, RemoteAccess.Fingerprint(other)));
 
-        await StaysAsync(ServerUrl, Unknown, await RemoteAccess.CreateClientAsync(_server, "moving-client", ct), ct);
+        await StaysAsync(ServerUrl, RemoteAccess.Fingerprint(other), await RemoteAccess.CreateClientAsync(_server, "moving-client", ct), ct);
     }
 
     [Fact]
     public async Task A_client_does_not_move_when_the_server_refuses_its_credentials()
     {
         var ct = TestContext.Current.CancellationToken;
-        await _discovery.PublishAsync(Heard(KoppelFactory.FreePort(), ServerFingerprint));
+        // The same server heard on IPv6 loopback is another address that holds the pinned certificate.
+        await _discovery.PublishAsync(new DiscoveredServer("test-server", "::1", _server.HttpsPort, ServerFingerprint, "0.1.0"));
 
         await StaysAsync(ServerUrl, ServerFingerprint, ("client-unknown", "not-the-secret"), ct);
     }
+
+    [Fact]
+    public async Task A_client_does_not_move_to_an_address_that_copies_the_fingerprint()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var spoofer = OtherServer();
+        // Anyone on the network can answer with the real fingerprint. The real server is gone from the saved
+        // address and the copy is all that is heard, but it holds another certificate.
+        await _discovery.PublishAsync(Heard(spoofer.HttpsPort, ServerFingerprint));
+
+        await StaysAsync(Gone(), ServerFingerprint, await RemoteAccess.CreateClientAsync(_server, "moving-client", ct), ct);
+    }
+
+    [Fact]
+    public async Task A_client_moves_past_a_copied_fingerprint_to_the_real_server()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var spoofer = OtherServer();
+        await using var hub = await _client.ConnectUiHubAsync(ct);
+        var moved = Link.Waiter(hub, "ConnectionChanged", c => c.GetProperty("serverUrl").GetString() == ServerUrl);
+        var linked = Link.Waiter(hub, "ClientDevicesChanged", d =>
+            d.GetProperty("link").GetString() == "connected" && d.GetProperty("devices").GetArrayLength() == 1);
+        // Both on the saved host, the copy first: it fails to prove the certificate, so the real one is next.
+        await _discovery.PublishAsync(Heard(spoofer.HttpsPort, ServerFingerprint), Heard(_server.HttpsPort, ServerFingerprint));
+
+        await SaveAsync(Gone(), ServerFingerprint, await RemoteAccess.CreateClientAsync(_server, "moving-client", ct), ct);
+
+        await moved.WaitAsync(TimeSpan.FromSeconds(20), ct);
+        await Link.WithLastAsync(linked, hub, ct);
+    }
+
+    /// <summary>Another server, with a certificate of its own.</summary>
+    private static KoppelFactory OtherServer() => new(kestrel: true, services: s => s.AddSingleton<IUsbHost>(new FakeKernel()));
 
     private const string Unknown = "AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA:AA";
 

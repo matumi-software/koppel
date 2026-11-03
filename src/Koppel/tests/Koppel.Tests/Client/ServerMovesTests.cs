@@ -8,7 +8,7 @@ using Koppel.Usb;
 
 namespace Koppel.Tests.Client;
 
-/// <summary>Where a client follows its server to, and which failures count as the server being gone from its address.</summary>
+/// <summary>Where a client may follow its server to, and which failures count as the server being gone from its address.</summary>
 public sealed class ServerMovesTests
 {
     private const string Current = "3F:9A:1C:2B:7D:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA";
@@ -21,43 +21,44 @@ public sealed class ServerMovesTests
     private static DiscoveredServer Heard(string address, int port, string fingerprint = Current) => new("lab-rack-3", address, port, fingerprint, "0.1.0");
 
     [Fact]
-    public void Pick_prefers_the_saved_host_on_another_port_and_keeps_its_name()
+    public void Candidates_put_the_saved_host_on_another_port_first_and_keep_its_name()
     {
-        ServerMoves.Pick(Saved, [Heard("10.0.0.9", 5240), Heard("10.0.0.5", 5240)], LabRack3).Should().Be("https://lab-rack-3:5240");
+        ServerMoves.Candidates(Saved, [Heard("10.0.0.9", 5240), Heard("10.0.0.5", 5240)], LabRack3)
+            .Should().Equal("https://lab-rack-3:5240", "https://10.0.0.9:5240");
     }
 
     [Fact]
-    public void Pick_follows_the_server_to_another_address()
+    public void Candidates_include_another_address()
     {
-        ServerMoves.Pick(Saved, [Heard("10.0.0.9", 5240)], LabRack3).Should().Be("https://10.0.0.9:5240");
+        ServerMoves.Candidates(Saved, [Heard("10.0.0.9", 5240)], LabRack3).Should().Equal("https://10.0.0.9:5240");
     }
 
     [Fact]
-    public void Pick_follows_the_next_certificate_the_server_announced()
+    public void Candidates_include_the_next_certificate_the_server_announced()
     {
         var waiting = Saved with { NextServerFingerprint = Next };
 
-        ServerMoves.Pick(waiting, [Heard("10.0.0.5", 5240, Next)], LabRack3).Should().Be("https://lab-rack-3:5240");
+        ServerMoves.Candidates(waiting, [Heard("10.0.0.5", 5240, Next)], LabRack3).Should().Equal("https://lab-rack-3:5240");
     }
 
     [Fact]
-    public void Pick_ignores_a_server_with_another_fingerprint()
+    public void Candidates_leave_out_a_server_with_another_fingerprint()
     {
-        ServerMoves.Pick(Saved, [Heard("10.0.0.5", 5240, Other), Heard("10.0.0.9", 5240, Other)], LabRack3).Should().BeNull();
+        ServerMoves.Candidates(Saved, [Heard("10.0.0.5", 5240, Other), Heard("10.0.0.9", 5240, Other)], LabRack3).Should().BeEmpty();
     }
 
     [Fact]
-    public void Pick_ignores_the_address_already_saved()
+    public void Candidates_leave_out_the_address_already_saved()
     {
-        ServerMoves.Pick(Saved, [Heard("10.0.0.5", 5241)], LabRack3).Should().BeNull("that is where it does not answer");
-        ServerMoves.Pick(Saved with { ServerUrl = "https://10.0.0.5:5241" }, [Heard("10.0.0.5", 5241)], []).Should().BeNull();
+        ServerMoves.Candidates(Saved, [Heard("10.0.0.5", 5241)], LabRack3).Should().BeEmpty("that is where it does not answer");
+        ServerMoves.Candidates(Saved with { ServerUrl = "https://10.0.0.5:5241" }, [Heard("10.0.0.5", 5241)], []).Should().BeEmpty();
     }
 
     [Fact]
-    public void Pick_skips_an_address_it_moved_to_a_little_while_ago()
+    public void Candidates_leave_out_an_address_it_moved_to_a_little_while_ago()
     {
-        ServerMoves.Pick(Saved, [Heard("10.0.0.5", 5240), Heard("10.0.0.9", 5240)], LabRack3, url => url == "https://lab-rack-3:5240")
-            .Should().Be("https://10.0.0.9:5240");
+        ServerMoves.Candidates(Saved, [Heard("10.0.0.5", 5240), Heard("10.0.0.9", 5240)], LabRack3, url => url == "https://lab-rack-3:5240")
+            .Should().Equal("https://10.0.0.9:5240");
     }
 
     [Fact]

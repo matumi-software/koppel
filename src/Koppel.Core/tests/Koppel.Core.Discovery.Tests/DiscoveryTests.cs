@@ -83,6 +83,25 @@ public sealed class DiscoveryTests
     }
 
     [Fact]
+    public async Task A_datagram_larger_than_the_buffer_does_not_stop_the_answers()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var port = FreeUdpPort();
+        using var announcer = new ServerAnnouncer(NullLogger<ServerAnnouncer>.Instance);
+        announcer.Announce(new ServerAnnouncement("koppel-test", port, Fingerprint, "0.1.0"));
+        using var client = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        var server = new IPEndPoint(IPAddress.Loopback, port);
+
+        // Windows reports a datagram larger than the receive buffer as an error on the receive; anyone can send one.
+        await client.SendAsync(new byte[8 * 1024], server, ct);
+        await Task.Delay(200, ct);
+
+        await client.SendAsync(KoppelService.CreateProbe(), server, ct);
+        var received = await client.ReceiveAsync(ct).AsTask().WaitAsync(TimeSpan.FromSeconds(5), ct);
+        ServerBrowser.Read(received.Buffer, received.RemoteEndPoint.Address)!.Fingerprint.Should().Be(Fingerprint);
+    }
+
+    [Fact]
     public void Keeps_at_most_64_entries_and_still_refreshes_the_ones_it_has()
     {
         var time = new ManualTimeProvider();

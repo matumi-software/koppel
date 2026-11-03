@@ -94,9 +94,11 @@ public sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : I
             {
                 return;
             }
-            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+            catch (SocketException ex) when (ex.SocketErrorCode is SocketError.ConnectionReset or SocketError.NetworkReset or SocketError.MessageSize)
             {
-                // Windows reports an earlier answer that could not be delivered on the next receive.
+                // Windows reports these on the next receive, each about one datagram: an earlier answer that could
+                // not be delivered or ran out of hops, or a datagram larger than the buffer, which it drops. Anyone
+                // on the network can send the last one, so none of them may stop the answers.
             }
             catch (SocketException ex)
             {

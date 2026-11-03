@@ -24,14 +24,14 @@ First release. If you ran a development build, read Installer and deploy before 
 
 ### Ports
 
-- Koppel needs only 5240, TCP and UDP: the UI, tokens, pairing, the remote API, USB traffic and discovery share it. `Ports:Network` gives what other machines do a port of its own, `Discovery:Port` moves discovery, and `Ports:Address` binds them to one address. The old `Ports:Http`, `Ports:Https` and `Ports:HttpAddress` settings are gone. A client saved with a server at `:5241` needs its address changed, or that server needs `Ports:Network=5241`.
+- Koppel needs only 5240, TCP and UDP: the UI, tokens, pairing, the remote API, USB traffic and discovery share it. `Ports:Network` gives what other machines do a port of its own, `Discovery:Port` moves discovery, and `Ports:Address` binds them to one address. The old `Ports:Http`, `Ports:Https` and `Ports:HttpAddress` settings are gone. A client saved with a server at `:5241` follows it to 5240 by itself when it hears the server on the local network; a server it cannot hear needs the client's address changed, or `Ports:Network=5241` on the server.
 - USB traffic runs as a WebSocket on the network port (`/api/remote/usb`), with the same certificate pinning and token as the rest, so port 3240 and the `listenPort` setting are gone. An existing `settings.json` with `listenPort` still loads.
 - Finding servers uses a small UDP probe and answer on the discovery port instead of multicast DNS on 5353. An answer is never larger than its probe, so a server cannot be used to amplify traffic.
 
 ### USB
 
 - An attach that stalls now fails after 20 seconds (`Usb:AttachTimeoutSeconds`) with a readable reason, instead of hanging.
-- A saved-connection or role change detaches everything first. Remembered devices are kept and attach again.
+- Saving a connection to another server, or a role change, detaches everything first. Remembered devices are kept and attach again. The same server at another address keeps its devices.
 - A server only exports a device that is bound and is the device you shared on that port. At start it unshares anything it does not mean to share. Leaving the server role unshares and ends the USB sessions.
 - The gateway runs only in the Client or Both role and retries a taken port. On native Windows it serves only the kernel driver's connections.
 - Stopping Koppel detaches devices attached through the Windows driver. Bus IDs are validated everywhere. USB sessions ping both ways, so a vanished peer frees the device in under a minute.

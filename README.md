@@ -41,9 +41,10 @@ Raspberry Pi OS, which the script below treats as Debian.
    docker compose up -d
    ```
 
-3. Find the one-time setup code with `docker logs <container>` (it reads `Koppel setup code: XXXX-XXXX`), open
-   `https://<machine>:5240`, set the password and choose the role. The browser warns about the
-   certificate the first time, because it is Koppel's own; accept it to go on.
+3. Within 10 minutes, open `https://<machine>:5240`, set the password and choose the role. Whoever
+   opens the UI first sets the password, so do it straight away. If the 10 minutes pass, the UI says
+   so: run `docker compose restart` and open it again. The browser warns about the certificate the
+   first time, because it is Koppel's own; accept it to go on.
 
 The container uses the host's network so clients can find it. It restarts after a crash, and comes
 back at the next reboot even if someone stopped it by hand. The image has a health check, but plain Docker only reports an unhealthy container and does not restart it.
@@ -72,9 +73,9 @@ sudo apt install ./koppel_0.1.0_amd64.deb
 
 On a Raspberry Pi, take `koppel_0.1.0_arm64.deb` instead.
 
-The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Read the
-setup code with `sudo cat /var/lib/koppel/config/setup-code.txt` and open
-`https://<machine>:5240`. If a module will not load, the install says so; the fix is the same as above.
+The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Open
+`https://<machine>:5240` within 10 minutes and set the password (after that, `sudo systemctl restart koppel`
+opens setup again). If a module will not load, the install says so; the fix is the same as above.
 
 - Config and keys live in `/var/lib/koppel`. An upgrade (`sudo apt install` of a newer `.deb`) and
   `sudo apt remove koppel` keep them; `sudo apt purge koppel` deletes them.
@@ -87,8 +88,8 @@ setup code with `sudo cat /var/lib/koppel/config/setup-code.txt` and open
 Download `Koppel-Setup.exe` from the [latest release](https://github.com/matumi-software/koppel/releases/latest)
 and run it. It installs Koppel as a Windows service, usbip-win2's signed
 driver and the Visual C++ runtime. It also adds an inbound firewall rule for the Koppel program on Private and Domain networks, so a Windows server can be reached without one added by hand. Open
-https://localhost:5240 afterwards and accept the browser's certificate warning. The first time, it asks for a setup code: it is in
-`%ProgramData%\Koppel\config\setup-code.txt`. The UI answers on this machine only. See
+https://localhost:5240 afterwards, accept the browser's certificate warning and set the password within 10 minutes
+(after that, restart the Koppel service). The UI answers on this machine only. See
 [docs/windows.md](docs/windows.md) for what the installer does to `%ProgramData%\Koppel` and the driver.
 
 ## Pair a client
@@ -122,8 +123,8 @@ trust, check that its SHA-256 fingerprint is the one under Clients before you ac
 docker compose exec koppel dotnet Koppel.dll --reset-password
 ```
 
-With the Linux package, run `sudo koppel --reset-password`. On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then read
-a new setup code and set a new password.
+With the Linux package, run `sudo koppel --reset-password`. On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then open
+the UI within 10 minutes and set a new password.
 
 ## Help test Koppel
 

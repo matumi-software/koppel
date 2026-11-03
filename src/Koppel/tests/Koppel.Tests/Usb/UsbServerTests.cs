@@ -67,6 +67,22 @@ public sealed class UsbServerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_bus_id_with_no_shareable_device_is_not_saved_so_it_never_shows_as_unplugged()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        _kernel.Bind("1-1.4", false);
+        _host = new KoppelFactory(services: s => s.AddSingleton<IUsbHost>(_kernel));
+        using var ui = _host.CreateUiClient();
+
+        // A hub is not in the host's list, so to the server it is a bus ID with nothing on it.
+        (await ui.PutAsJsonAsync("/api/server/devices/3-1/shared", new { shared = true }, ct)).StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        File.ReadAllText(_host.ConfigFile("devices.json")).Should().NotContain("3-1");
+        var devices = await ui.GetFromJsonAsync<JsonElement>("/api/server/devices", ct);
+        devices.GetProperty("devices").EnumerateArray().Select(d => d.GetProperty("busId").GetString()).Should().Equal("1-1.4");
+    }
+
+    [Fact]
     public async Task A_share_the_kernel_refused_is_not_saved_and_shows_as_a_fault()
     {
         var ct = TestContext.Current.CancellationToken;

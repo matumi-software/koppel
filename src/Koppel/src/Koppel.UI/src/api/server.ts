@@ -9,6 +9,21 @@ export interface ClientView {
   hasSecret: boolean;
   /** When it last got a token, since the server started. */
   lastSeen: string | null;
+  /** It stored the fingerprint of the prepared next certificate. */
+  hasNextCertificate: boolean;
+}
+
+/** Mirrors Koppel.Server.ServerKeysView: the certificate and the token signing key. */
+export interface ServerKeysView {
+  fingerprint: string;
+  /** The prepared next certificate, or null when none is prepared. */
+  nextFingerprint: string | null;
+  nextPreparedAt: string | null;
+  signingKeyId: string;
+  /** When a rotation made the signing key; null for the one made at first start. */
+  signingKeySince: string | null;
+  /** While replaced keys are still accepted, when the last of them is dropped. */
+  retiredKeysUntil: string | null;
 }
 
 export interface ServerIdentity {
@@ -53,5 +68,13 @@ export async function rotateClientSecret(clientId: string): Promise<string> {
   if (!response.ok) throw await rejection(response);
   return ((await response.json()) as { clientSecret: string }).clientSecret;
 }
+
+export const getServerKeys = () => getJson<ServerKeysView>('/api/server/keys');
+
+/** Each of these answers 202; the new state arrives as ServerKeysChanged. */
+export const rotateSigningKey = () => sendChange('/api/server/keys/signing-key/rotate', 'POST');
+export const prepareCertificate = () => sendChange('/api/server/keys/next-certificate', 'POST');
+export const cancelCertificate = () => sendChange('/api/server/keys/next-certificate', 'DELETE');
+export const switchCertificate = () => sendChange('/api/server/keys/next-certificate/switch', 'POST');
 
 export const revokeClient = (clientId: string) => sendChange(`/api/server/clients/${encodeURIComponent(clientId)}`, 'DELETE');

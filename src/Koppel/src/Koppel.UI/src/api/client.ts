@@ -6,6 +6,8 @@ export interface ConnectionView {
   serverFingerprint: string | null;
   clientId: string | null;
   hasSecret: boolean;
+  /** The certificate the server said it will switch to, trusted as well until then. */
+  nextServerFingerprint: string | null;
 }
 
 export interface ConnectionUpdate {

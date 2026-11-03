@@ -13,7 +13,7 @@ import { accepted, deferred, json, mockFetch, renderApp } from './harness';
 
 const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true };
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
-const connection: ConnectionView = { serverUrl: 'https://lab:5241', serverFingerprint: fingerprint, clientId: 'bench-1', hasSecret: true };
+const connection: ConnectionView = { serverUrl: 'https://lab:5241', serverFingerprint: fingerprint, clientId: 'bench-1', hasSecret: true, nextServerFingerprint: null };
 
 const baseRoutes = {
   'GET /api/settings': () => json(settings),

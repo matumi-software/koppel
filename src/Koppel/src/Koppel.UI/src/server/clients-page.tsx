@@ -2,14 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ActivityFeed, Button, CopyValue, Field, Glyph, ItemList, ModalDialog, SecretValue, StatusBadge } from '@koppel/react-ui';
 import { toEntries, useActivity } from '@/activity/activity-context';
-import { createClient, getClients, getClientSecret, getIdentity, revokeClient, rotateClientSecret, type ClientView, type CreatedClient } from '@/api/server';
+import { createClient, getClients, getClientSecret, getIdentity, getServerKeys, revokeClient, rotateClientSecret, type ClientView, type CreatedClient } from '@/api/server';
 import { since, useServerDevices } from '@/devices/use-devices';
 import { useMachineName } from '@/shared/use-machine-name';
 import { usePending } from '@/pending/pending-context';
-import { clientsKey } from '@/query-keys';
+import { clientsKey, serverKeysKey } from '@/query-keys';
 import { Frame } from '@/shell/frame';
 import { useFrame } from '@/shell/frame-context';
 import { PairingRequests } from './pairing-requests';
+import { ServerKeys } from './server-keys';
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -29,6 +30,8 @@ export function ClientsPage() {
   const { locked } = useFrame();
   const identity = useQuery({ queryKey: ['identity'], queryFn: getIdentity });
   const clients = useQuery({ queryKey: clientsKey, queryFn: getClients });
+  // While a new certificate is prepared, each client says whether it has its fingerprint.
+  const handover = useQuery({ queryKey: serverKeysKey, queryFn: getServerKeys }).data?.nextFingerprint != null;
   const devices = useServerDevices();
   const [selected, setSelected] = useState<string | null>(null);
   const { pending, failures, request } = usePending('clients');
@@ -46,6 +49,7 @@ export function ClientsPage() {
             key={current.id}
             client={current}
             attached={attachedBy(current.id).map((d) => `${d.name}${since(d.attachedSince)}`)}
+            handover={handover}
             isRevoking={current.id in pending}
             revokeFailure={failures[current.id]}
             locked={locked}
@@ -56,15 +60,7 @@ export function ClientsPage() {
       }
       asideKey={current?.id}
     >
-      {identity.data && (
-        <section className="kp-card" aria-label="Server fingerprint" style={{ gap: 8 }}>
-          <span className="kp-field__label">Server fingerprint</span>
-          <CopyValue value={identity.data.fingerprint} wrap />
-          <span className="kp-field__help">
-            Clients connect to <code className="kp-id">https://{host}:{identity.data.httpsPort}</code> and pin this fingerprint.
-          </span>
-        </section>
-      )}
+      <ServerKeys host={host} httpsPort={identity.data?.httpsPort} clients={clients.data ?? []} locked={locked} />
 
       <PairingRequests locked={locked} />
 
@@ -91,6 +87,7 @@ export function ClientsPage() {
                     <code className="kp-id">{client.id}</code>
                     <span className="kp-type-caption" role="status" style={{ color: busy ? 'var(--pending-text)' : 'var(--text-tertiary)' }}>
                       {busy ? 'Revoking… waiting for the server' : seen(client)}
+                      {!busy && handover && (client.hasNextCertificate ? ' · Has the new certificate' : ' · Waiting for the new certificate')}
                     </span>
                   </span>
                   {failures[client.id] && <span className="kp-error kp-type-caption">Not revoked: {failures[client.id]}</span>}
@@ -110,6 +107,8 @@ export function ClientsPage() {
 interface ClientDrawerProps {
   client: ClientView;
   attached: string[];
+  /** A new certificate is prepared, so the drawer says whether this client has it. */
+  handover: boolean;
   isRevoking: boolean;
   revokeFailure?: string;
   locked: boolean;
@@ -117,7 +116,7 @@ interface ClientDrawerProps {
   onClose: () => void;
 }
 
-function ClientDrawer({ client, attached, isRevoking, revokeFailure, locked, onRevoke, onClose }: ClientDrawerProps) {
+function ClientDrawer({ client, attached, handover, isRevoking, revokeFailure, locked, onRevoke, onClose }: ClientDrawerProps) {
   const { items } = useActivity();
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -185,6 +184,17 @@ function ClientDrawer({ client, attached, isRevoking, revokeFailure, locked, onR
           <span className="kp-field__help">No devices attached right now.</span>
         )}
       </div>
+
+      {handover && (
+        <div className="kp-field">
+          <span className="kp-field__label">New certificate</span>
+          <span className="kp-field__help">
+            {client.hasNextCertificate
+              ? `${client.name} has its fingerprint and moves to it when you switch.`
+              : `${client.name} has not received its fingerprint yet. It gets it the next time it connects.`}
+          </span>
+        </div>
+      )}
 
       <div className="kp-row">
         <Button variant="secondary" isDisabled={locked} onPress={() => setConfirmRotate(true)}>

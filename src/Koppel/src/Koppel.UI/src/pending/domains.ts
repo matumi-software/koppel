@@ -1,9 +1,9 @@
 import type { ConnectionView } from '@/api/client';
-import type { ClientView } from '@/api/server';
+import type { ClientView, ServerKeysView } from '@/api/server';
 import type { KoppelRole, KoppelSettings } from '@/api/settings';
 import type { DiscoveredServer, PairingOverview, PairingStatus } from '@/api/pairing';
 import type { ClientDevices, ServerDevices } from '@/api/usb';
-import { clientDevicesKey, clientsKey, connectionKey, pairingRequestsKey, pairingStatusKey, serverDevicesKey, settingsKey } from '@/query-keys';
+import { clientDevicesKey, clientsKey, connectionKey, pairingRequestsKey, pairingStatusKey, serverDevicesKey, serverKeysKey, settingsKey } from '@/query-keys';
 import type { PendingDomain } from './pending-store';
 
 /** How long to wait for the server's confirmation before calling a change failed. */
@@ -92,6 +92,36 @@ export const pendingDomains = {
       subject: id,
     }),
     verdict: (id, _target, list) => (list.some((c) => c.id === id) ? 'waiting' : 'confirmed'),
+  }),
+
+  /**
+   * The certificate and the signing key, by action. The target is what the action replaces: the signing
+   * key's id for `rotate`, the next certificate's fingerprint for `switch`. Settled by ServerKeysChanged.
+   */
+  serverKeys: domain<string | null, ServerKeysView>({
+    queryKey: serverKeysKey,
+    timeoutMs: confirmTimeoutMs,
+    describe: (action) => ({
+      text:
+        action === 'rotate'
+          ? 'Rotate the token signing key'
+          : action === 'prepare'
+            ? 'Prepare a new certificate'
+            : action === 'cancel'
+              ? 'Cancel the new certificate'
+              : 'Switch to the new certificate',
+    }),
+    verdict: (action, target, keys) => {
+      const done =
+        action === 'rotate'
+          ? keys.signingKeyId !== target
+          : action === 'prepare'
+            ? keys.nextFingerprint !== null
+            : action === 'cancel'
+              ? keys.nextFingerprint === null
+              : hexOf(keys.fingerprint) === hexOf(target);
+      return done ? 'confirmed' : 'waiting';
+    },
   }),
 
   connection: domain<ConnectionTarget, ConnectionView>({

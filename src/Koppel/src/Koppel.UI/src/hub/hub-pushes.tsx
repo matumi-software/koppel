@@ -12,6 +12,7 @@ import {
   pairingRequestsKey,
   pairingStatusKey,
   serverDevicesKey,
+  serverKeysKey,
   settingsKey,
   systemInfoKey,
 } from '@/query-keys';
@@ -46,6 +47,11 @@ export function HubPushes() {
         void queryClient.invalidateQueries({ queryKey: systemInfoKey });
       },
       ClientsChanged: replace(queryClient, clientsKey),
+      ServerKeysChanged: (keys) => {
+        void apply(queryClient, serverKeysKey, keys);
+        // The side panel shows the fingerprint too, and a switch changes it.
+        void queryClient.invalidateQueries({ queryKey: systemInfoKey });
+      },
       ConnectionChanged: replace(queryClient, connectionKey),
       DevicesChanged: replace(queryClient, serverDevicesKey),
       ClientDevicesChanged: replace(queryClient, clientDevicesKey),

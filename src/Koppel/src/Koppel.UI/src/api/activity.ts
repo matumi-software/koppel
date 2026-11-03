@@ -19,7 +19,11 @@ export interface ServerActivity {
     | 'linkUp'
     | 'linkDown'
     | 'signInFailed'
-    | 'passwordChanged';
+    | 'passwordChanged'
+    | 'signingKeyRotated'
+    | 'certificatePrepared'
+    | 'certificateCancelled'
+    | 'certificateSwitched';
   outcome: 'succeeded' | 'failed';
   summary: string;
   detail: string | null;

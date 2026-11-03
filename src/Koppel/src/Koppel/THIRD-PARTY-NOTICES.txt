@@ -82,7 +82,7 @@ System.ServiceProcess.ServiceController 10.0.14: MIT; © Microsoft Corporation. 
 @internationalized/string 3.2.10: Apache-2.0; https://github.com/adobe/react-spectrum#readme
 @microsoft/signalr 10.0.11: MIT; Microsoft; https://github.com/dotnet/aspnetcore/tree/main/src/SignalR#readme
 @react-types/shared 3.37.0: Apache-2.0; https://github.com/adobe/react-spectrum#readme
-@swc/helpers 0.5.23: Apache-2.0; Ω░òδÅÖ∞£ñ; https://swc.rs
+@swc/helpers 0.5.23: Apache-2.0; 강동윤; https://swc.rs
 @tanstack/query-core 5.105.1: MIT; tannerlinsley; https://tanstack.com/query
 @tanstack/react-query 5.105.1: MIT; tannerlinsley; https://tanstack.com/query
 @types/react 19.3.0: MIT; https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react
@@ -91,7 +91,7 @@ aria-hidden 1.2.6: MIT; Anton Korzunov; https://github.com/theKashey/aria-hidden
 client-only 0.0.1: MIT; https://reactjs.org/
 clsx 2.1.1: MIT; Luke Edwards; https://github.com/lukeed/clsx#readme
 csstype 3.2.3: MIT; Fredrik Nicol; https://github.com/frenic/csstype#readme
-eventsource 2.0.2: MIT; Aslak Helles├╕y; http://github.com/EventSource/eventsource
+eventsource 2.0.2: MIT; Aslak Hellesøy; http://github.com/EventSource/eventsource
 event-target-shim 5.0.1: MIT; Toru Nagashima; https://github.com/mysticatea/event-target-shim
 fetch-cookie 2.2.0: Unlicense; Val; https://github.com/valeriangalliat/fetch-cookie#readme
 node-fetch 2.7.0: MIT; David Frank; https://github.com/bitinn/node-fetch

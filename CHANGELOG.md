@@ -68,5 +68,5 @@ First release. If you ran a development build, read Installer and deploy before 
 - Printers are untried. Storage works (bulk transfers, flash drive).
 - Webcams do not stream from a Linux server to a Windows client (a Logitech C270 attaches but delivers no frames, #22). The other direction works: a Windows server through usbipd-win to a Linux client streams at 30 fps. If another program on the Windows server holds the camera open, usbipd-win cannot export it until that program lets go.
 - Windows can be a client; a Windows server needs usbipd-win and `Usb:Upstream`.
-- The Windows client through Docker Desktop and the attach deadline on its own were not re-run on 2026-11-03.
+- The attach deadline on its own was not exercised on real hardware; it is covered by tests with fakes.
 - There is no apt repository yet, so the `.deb` is installed from a file and upgraded the same way.

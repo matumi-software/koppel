@@ -43,7 +43,7 @@ public sealed partial class ServerBrowser : IDisposable
     private readonly Task _raising;
     private bool _wanted;
 
-    /// <param name="port">The UDP port servers answer on: Koppel's HTTPS port number.</param>
+    /// <param name="port">The UDP port servers answer on: Koppel's HTTPS port number unless changed.</param>
     public ServerBrowser(TimeProvider? time = null, ILogger<ServerBrowser>? logger = null, int port = KoppelService.DefaultPort)
         : this(time, logger, Udp(port))
     {

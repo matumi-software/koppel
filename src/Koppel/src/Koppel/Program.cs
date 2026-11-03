@@ -21,17 +21,20 @@ var builder = WebApplication.CreateBuilder(args);
 // Runs as a Windows service when the installer registers it as one; a no-op otherwise.
 builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
 
-// Both ports are HTTPS with the server's own self-signed certificate. The UI port serves the UI and can
-// be bound to one address, such as loopback. The other serves everything other Koppel machines do, USB
-// traffic included; clients pin the certificate's fingerprint. Discovery answers on UDP at its number.
-var uiPort = builder.Configuration.GetValue("Ports:Http", 5240);
-var httpsPort = builder.Configuration.GetValue("Ports:Https", 5241);
-var uiAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting], builder.Environment.IsDevelopment());
+// One HTTPS port, 5240, with the server's own self-signed certificate, serves the UI and everything other
+// Koppel machines do, USB traffic included; clients pin the certificate's fingerprint. Ports:Network moves
+// the second onto a port of its own, and discovery answers on UDP at the network port's number unless
+// Discovery:Port says otherwise. Ui:AllowFrom says who may use the UI (UiAccess).
+var uiPort = builder.Configuration.GetValue("Ports:Ui", 5240);
+var networkPort = builder.Configuration.GetValue("Ports:Network", uiPort);
+var discoveryPort = builder.Configuration.GetValue("Discovery:Port", networkPort);
+var listenAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting]);
+var uiReach = UiAccess.Resolve(builder.Configuration[UiAccess.Setting], builder.Environment.IsDevelopment());
 
 // A one-off command for the Docker health check: ask the UI port whether Koppel answers, and exit.
 if (HealthProbe.Requested(args))
 {
-    return await HealthProbe.RunAsync(uiAddress, uiPort);
+    return await HealthProbe.RunAsync(listenAddress, uiPort);
 }
 
 builder.WebHost.ConfigureKestrel(kestrel =>
@@ -39,16 +42,23 @@ builder.WebHost.ConfigureKestrel(kestrel =>
     void Https(ListenOptions listen) => listen.UseHttps(https =>
         https.ServerCertificateSelector = (_, _) => kestrel.ApplicationServices.GetRequiredService<ServerSecretsStore>().Certificate);
 
-    if (uiAddress is null)
+    void Listen(int port)
     {
-        kestrel.ListenAnyIP(uiPort, Https);
-    }
-    else
-    {
-        kestrel.Listen(uiAddress, uiPort, Https);
+        if (listenAddress is null)
+        {
+            kestrel.ListenAnyIP(port, Https);
+        }
+        else
+        {
+            kestrel.Listen(listenAddress, port, Https);
+        }
     }
 
-    kestrel.ListenAnyIP(httpsPort, Https);
+    Listen(uiPort);
+    if (networkPort != uiPort)
+    {
+        Listen(networkPort);
+    }
 });
 
 builder.Services.AddKoppelRateLimits(builder.Configuration);
@@ -67,7 +77,8 @@ if (UiPasswordReset.Requested(args))
 
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, uiPort, httpsPort));
+builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, uiPort, networkPort, discoveryPort));
+builder.Services.AddSingleton(new UiAccess(uiReach));
 builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>(), logger: sp.GetRequiredService<ILogger<InMemoryActivityStore>>()));
 builder.Services.AddSingleton<IActivityRecorder>(sp => sp.GetRequiredService<InMemoryActivityStore>());
 builder.Services.AddSingleton<IActivityReader>(sp => sp.GetRequiredService<InMemoryActivityStore>());
@@ -104,8 +115,8 @@ builder.Services.AddHostedService<UsbIpGateway>();
 builder.Services.AddSingleton<PairingStore>();
 builder.Services.AddSingleton<PairingClient>();
 builder.Services.AddSingleton<ServerAnnouncer>();
-// Clients look for servers on the port number their own HTTPS uses, 5241 unless changed.
-builder.Services.AddSingleton(sp => new ServerBrowser(sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<ServerBrowser>>(), httpsPort));
+// Clients look for servers on their own discovery port, 5240 unless changed.
+builder.Services.AddSingleton(sp => new ServerBrowser(sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<ServerBrowser>>(), discoveryPort));
 builder.Services.AddSingleton<ServerFinder>();
 builder.Services.AddHostedService<ServerAnnouncerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerFinder>());
@@ -161,7 +172,7 @@ app.UseUiAuthGuard();
 
 app.MapUiAuthEndpoints();
 app.MapSettingsEndpoints();
-app.MapServerEndpoints(httpsPort);
+app.MapServerEndpoints(networkPort);
 app.MapServerPairingEndpoints();
 app.MapPairingEndpoints();
 app.MapRemoteEndpoints().MapUsbRemoteEndpoints();

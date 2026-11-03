@@ -18,8 +18,7 @@ services:
       context: ..
       dockerfile: Koppel/src/Koppel/Dockerfile
     ports:
-      - "5240:5240"   # UI
-      - "5241:5241"   # everything other Koppel machines do, USB traffic included (HTTPS)
+      - "5240:5240"   # the UI and everything other Koppel machines do, USB traffic included (HTTPS)
     volumes:
       - koppel:/koppel
     # Binding devices to usbip-host and attaching through vhci-hcd writes to /sys, which needs root

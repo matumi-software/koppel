@@ -14,7 +14,7 @@ internal static class PairingEndpoints
     public const string TokenHeader = "X-Pair-Token";
 
     /// <summary>
-    /// Endpoints a client calls to pair, before it has credentials: no token, but on the HTTPS port only
+    /// Endpoints a client calls to pair, before it has credentials: no token, but on the network port only
     /// and not in the client role (see <see cref="Web.SurfaceGuard"/>), so the client has pinned the
     /// certificate it will derive the code from. See <see cref="PairingStore"/>.
     /// </summary>

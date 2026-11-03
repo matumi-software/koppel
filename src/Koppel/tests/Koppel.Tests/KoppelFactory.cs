@@ -32,7 +32,9 @@ public sealed class TestListenerPorts(int httpPort, int httpsPort) : IStartupFil
 /// <summary>
 /// A Koppel host with its own temporary config and key directories. By default it runs on a test
 /// server. With <c>kestrel: true</c> it listens on real free ports, so two hosts can talk as server
-/// and client, and the HTTPS ports can be reached. With <c>shareDongle</c> the test device's share is already saved.
+/// and client, and the HTTPS ports can be reached. The UI and network ports are separate, as with
+/// <c>Ports:Network</c> set, unless <c>singlePort</c>, the default outside tests. With <c>shareDongle</c>
+/// the test device's share is already saved.
 /// </summary>
 public sealed class KoppelFactory : IDisposable
 {
@@ -41,12 +43,12 @@ public sealed class KoppelFactory : IDisposable
     private readonly object _session = new();
     private string? _cookie;
 
-    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server", bool shareDongle = false, bool shareOnStartup = true)
+    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server", bool shareDongle = false, bool shareOnStartup = true, bool singlePort = false)
     {
         _kestrel = kestrel;
         Directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
         HttpPort = FreePort();
-        HttpsPort = FreePort();
+        HttpsPort = singlePort ? HttpPort : FreePort();
 
         // Seed settings so parallel hosts never fight over the default USB port.
         System.IO.Directory.CreateDirectory(Path.Combine(Directory, "config"));
@@ -62,8 +64,8 @@ public sealed class KoppelFactory : IDisposable
             builder.UseEnvironment("Testing");
             builder.UseSetting("Paths:Config", Path.Combine(Directory, "config"));
             builder.UseSetting("Paths:Keys", Path.Combine(Directory, "keys"));
-            builder.UseSetting("Ports:Http", HttpPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            builder.UseSetting("Ports:Https", HttpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            builder.UseSetting("Ports:Ui", HttpPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            builder.UseSetting("Ports:Network", HttpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture));
             // The gateway is on by default on Windows; parallel hosts would fight over its port.
             builder.UseSetting("Gateway:Port", "0");
             // Test hosts never announce themselves on the real network.

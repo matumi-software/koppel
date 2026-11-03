@@ -50,9 +50,12 @@ That builds `matumisoftware/koppel:0.1.0` (the tag in `KOPPEL_TAG`), which both 
    usbipd-win shares. Share and unshare with `usbipd bind` and `usbipd unbind`; the switch in
    Koppel cannot change it. USB/IP sends no product names, so devices show by VID:PID.
 
-Both compose files publish the UI as `127.0.0.1:5240:5240`, so it answers on this machine only.
-Docker Desktop's network translation makes every caller look like the same address, so a UI open
-to the LAN would let one wrong-password caller lock the admin out. Open it from this machine.
+The client compose file publishes 5240 as `127.0.0.1:5240:5240`, so the UI answers on this machine
+only. The server compose file publishes 5240 on every address, because clients reach the server
+there, and the UI comes with it. Docker Desktop's network translation makes every caller look like
+the same address, so `Ui:AllowFrom` cannot tell them apart, and one caller on the LAN typing wrong
+passwords locks the admin out for a while. To keep the UI on this machine, give the network surface
+its own port: set `Ports__Network: "5241"` and publish `127.0.0.1:5240:5240` and `5241:5241`.
 
 **Close usbipd-win to the network.** Its installer adds a firewall rule named `usbipd` that lets
 every machine on the local subnet connect to port 3240. That is plain USB/IP with no login, so
@@ -125,7 +128,8 @@ docker compose exec koppel dotnet Koppel.dll --reset-password
 service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, the Visual C++
 runtime. It adds no firewall rule: a client only receives answers to its own discovery broadcast, which
 Windows lets in. The UI is at https://localhost:5240 and answers on
-this machine only: the installer sets `Ports__HttpAddress=127.0.0.1` for the service.
+this machine only: the installer sets `Ui__AllowFrom=local` for the service. A native Windows server
+is reached on the same port, 5240, and needs a firewall rule for it added by hand.
 
 - **Data folder:** `%ProgramData%\Koppel` is created with Administrators as owner and access for SYSTEM and Administrators only. If it already exists as a file or a link, or is owned by someone who is not an administrator, the install stops and says so: rename or delete the folder (copy any keys out first) and run setup again. A folder owned by an administrator, such as one an earlier install left, is taken over: the owner and access are reset for everything under it any link inside is deleted, and a file or folder inside that is not owned by an administrator is renamed aside (`not-admin-owned-<time>`) and not used. The service also locks `%ProgramData%\Koppel` itself down on every start.
 - **Driver:** its output goes to the MSI log, not to a file in the data folder. Keep a log of the install to read it (for example `msiexec /i Koppel.msi /l*v setup.log`). If Windows says a restart finishes the driver install or its removal, setup or uninstall asks for one.
@@ -152,7 +156,8 @@ address by hand there, or use the native install, which finds servers.
 | `Gateway:Port` | client | Port of the plain USB/IP gateway. 3242 on native Windows, off elsewhere unless set. The Windows client compose file sets it |
 | `Gateway:Address` | client | Address it listens on. `127.0.0.1` unless set. The compose file sets `0.0.0.0` inside the container |
 | `Usb:AttachTimeoutSeconds` | client | How long an attach may take before it fails with a readable error. 20 |
-| `Ports:HttpAddress` | both | Address the UI port binds to. Any address unless set; the native installer sets `127.0.0.1` |
+| `Ui:AllowFrom` | both | Who may use the UI: `local`, `lan` or `any`. `lan` unless set; the native installer sets `local` |
+| `Ports:Network` | both | A port of its own for what other Koppel machines do. The UI's port (5240) unless set |
 
 In a compose file these are environment variables with `__` for `:`, such as `Usb__Upstream`.
 

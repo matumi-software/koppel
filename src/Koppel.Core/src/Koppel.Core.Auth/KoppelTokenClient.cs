@@ -21,7 +21,7 @@ public sealed class KoppelTokenClient(HttpClient http, TimeProvider time) : IDis
     private readonly SemaphoreSlim _gate = new(1, 1);
     private (string ClientId, string Token, DateTimeOffset ExpiresAt)? _cached;
 
-    /// <param name="server">The server's HTTPS base address, such as <c>https://lab-rack-3:5241</c>.</param>
+    /// <param name="server">The server's HTTPS base address, such as <c>https://lab-rack-3:5240</c>.</param>
     public async Task<string> GetAccessTokenAsync(Uri server, string clientId, string clientSecret, CancellationToken cancellationToken) =>
         (await GetAccessTokenWithExpiryAsync(server, clientId, clientSecret, cancellationToken)).Token;
 

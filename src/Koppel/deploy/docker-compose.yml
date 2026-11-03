@@ -15,8 +15,8 @@ services:
     # replaced by a pull from Docker Hub. Only a missing image is pulled.
     pull_policy: missing
     # The host's network: clients find the server by broadcasting on the local network, which does not
-    # cross Docker's bridge. Koppel listens on the host's ports directly (5240 UI; 5241 for everything
-    # other machines do, TCP and UDP) and takes the host's name, which it shows and puts in its certificate.
+    # cross Docker's bridge. Koppel listens on the host's ports directly (5240, TCP for the UI
+    # and everything other machines do, UDP for discovery) and takes the host's name, which it shows and puts in its certificate.
     network_mode: host
     volumes:
       - koppel:/koppel

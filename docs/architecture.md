@@ -10,7 +10,7 @@ One codebase and one Docker image cover every role; the role is a setting.
 |---|---|---|
 | Control plane | ASP.NET Core host, REST for commands, SignalR for pushes, React UI behind a password | Done |
 | Auth | The server is an OAuth server (client credentials); client ID and secret are kept encrypted next to the config on both sides. The UI has its own password | Done |
-| Data plane | USB/IP protocol (Linux kernel spec), in a WebSocket on the HTTPS port | Linux server and client work. A Windows client works through usbip-win2 (see "Real hardware" below). A Windows server shares through usbipd-win and has been tried only against a fake |
+| Data plane | USB/IP protocol (Linux kernel spec), in a WebSocket on the network port | Linux server and client work. A Windows client works through usbip-win2 (see "Real hardware" below). A Windows server shares through usbipd-win and has been tried only against a fake |
 
 ## The confirm rule
 
@@ -44,33 +44,38 @@ tests (`pnpm --filter koppel.ui test`).
 
 ## Ports and what they serve
 
-Two listeners, both HTTPS with the server's own self-signed certificate. The decision uses the local port the connection arrived on, never the `Host` header.
-A request for a surface the other listener owns, or that this machine's current role does not have,
-gets 404. The role is read from the settings on every request, so a role change takes effect at once.
+One HTTPS port, 5240, with the server's own self-signed certificate, serves both surfaces: the UI, for the
+people who run this machine, and the network surface, for other Koppel machines. `Ports:Network` moves
+the network surface onto a port of its own. Which port serves what is decided by the local port the
+connection arrived on, never the `Host` header. A request for a surface that is not on that port, or
+that this machine's current role does not have, gets 404. The role is read from the settings on every request, so a role change takes effect at once.
 The table is `Surface.Listed` in `src/Koppel/Web/SurfaceGuard.cs`; a path not listed counts as the UI's,
 so a new route is never exposed to remote clients by accident.
 
-| Port | Serves | Role |
-|---|---|---|
-| 5240 HTTPS | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, `/api/hubs/ui`, `/healthz` | Any |
-| 5240 HTTPS | `/api/server/*` | Server or both |
-| 5240 HTTPS | `/api/client/*` | Client or both |
-| 5241 HTTPS | `/connect/token`, `/api/remote/*` (USB traffic at `/api/remote/usb`), `/api/hubs/remote`, `/api/pair*` | Server or both |
-| 5241 UDP | Answers to discovery probes | Server or both |
+| Port | Surface | Serves | Role |
+|---|---|---|---|
+| 5240 HTTPS (`Ports:Ui`) | UI | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, `/api/hubs/ui`, `/healthz` | Any |
+| 5240 HTTPS (`Ports:Ui`) | UI | `/api/server/*` | Server or both |
+| 5240 HTTPS (`Ports:Ui`) | UI | `/api/client/*` | Client or both |
+| 5240 HTTPS (`Ports:Network`) | Network | `/connect/token`, `/api/remote/*` (USB traffic at `/api/remote/usb`), `/api/hubs/remote`, `/api/pair*` | Server or both |
+| 5240 UDP (`Discovery:Port`) | Network | Answers to discovery probes | Server or both |
 | 3242 plain | Gateway for a USB/IP driver on this machine | Client or both, and only where `Gateway:Port` is set or on native Windows |
 
 Settings that move them:
 
 | Setting | Default | What |
 |---|---|---|
-| `Ports:Http`, `Ports:Https` | 5240, 5241 | The UI port and the port for other Koppel machines. Both are HTTPS; the names are older than that |
-| `Ports:HttpAddress` | Any address; loopback in Development | The address the UI port binds to. Must be an IP address, or start-up fails naming the setting. The Windows installer sets `127.0.0.1` for the service, because the native app's UI is used on that machine only. Docker keeps any address, so a headless machine's UI is reachable on the LAN |
+| `Ports:Ui` | 5240 | The UI's port |
+| `Ports:Network` | `Ports:Ui` | The network surface's port. Set it to split the two |
+| `Discovery:Port` | `Ports:Network` | The UDP port a server answers probes on and a client sends them to. A client only finds servers that use its own discovery port |
+| `Ports:Address` | Any address | The address the web ports bind to. Must be an IP address, or start-up fails naming the setting. Other Koppel machines must reach the network surface, so to keep the UI private use `Ui:AllowFrom` |
+| `Ui:AllowFrom` | `lan`; `local` in Development | Who may use the UI, by the caller's address, as Sunshine's `origin_web_ui_allowed`. `local` is this machine only, `lan` adds the local network, `any` is everyone. A refused UI request gets 403; the network surface is not affected. The local network is loopback, 10/8, 172.16/12, 192.168/16, 169.254/16, IPv6 unique local and link-local addresses, and any network this machine has an address on (read again every 30 seconds), so a neighbour with a global IPv6 address counts. Carrier-grade NAT (100.64/10) does not. The Windows installer sets `local`, because the native app's UI is used on that machine only |
 | `Gateway:Port` | 3242 on native Windows, off elsewhere | See "USB client". A compose file sets it by environment variable |
 | `Gateway:Address` | `127.0.0.1` | Where the gateway listens |
 | `RateLimits:TokenPerMinute`, `RateLimits:PairPerMinute`, `RateLimits:AuthPerMinute` | 60, 120, 30 | See "Guards on the web surface" |
 
 `GET /healthz` is on the UI port, anonymous, answers `ok` in any role and needs no header. The Docker
-image's health check is Koppel itself (`dotnet Koppel.dll --healthcheck`, `Web/HealthProbe.cs`), because the port is HTTPS and the image has no curl or openssl. It calls `/healthz` on `Ports__HttpAddress` and `Ports__Http` (any-address and unset mean loopback), then on 127.0.0.1, and accepts any certificate, since it sends nothing secret. Plain Docker only marks the container unhealthy and does not restart it; `restart:` acts on exits. Swarm and Kubernetes act on it, and with plain Docker something such as an autoheal container has to.
+image's health check is Koppel itself (`dotnet Koppel.dll --healthcheck`, `Web/HealthProbe.cs`), because the port is HTTPS and the image has no curl or openssl. It calls `/healthz` on `Ports__Address` and `Ports__Ui` (any-address and unset mean loopback), then on 127.0.0.1, and accepts any certificate, since it sends nothing secret. Plain Docker only marks the container unhealthy and does not restart it; `restart:` acts on exits. Swarm and Kubernetes act on it, and with plain Docker something such as an autoheal container has to.
 
 ## Auth
 
@@ -93,7 +98,7 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 - **Hash slots:** at most 2 password hashes run at once for the whole server (setup, login and password change). A caller who arrives while both are busy gets 429 with `Retry-After: 1` at once, and the try is not counted against it.
 - **Failures in the log:** every failure goes to the log. The activity log gets one `signInFailed` entry each time a lock engages, so a burst of guesses cannot push the 500 other entries out.
 - **Ending sessions:** a password change, a reset or signing out invalidates the cookies and closes the UI hub connections of the sessions that ended. Signing out also revokes the session id on the server, kept until the session could no longer have been valid, so a copy of the cookie is refused too. The session that changed the password stays signed in. The UI hub is mapped with `CloseOnAuthenticationExpiration`, so a connection also ends when its cookie runs out. In the browser the sign-in gate (`AuthGate`) shows the login screen on any 401, and re-asks the server whether the session is still good when the hub closes and on every reconnect retry, so a session that ended during an outage does not retry forever. Signing out cancels any auth check in flight and ignores rechecks until it finishes, and a failed sign-out says so.
-- **Where the rule lives:** `Surface.RequiresSignIn` and `Surface.Anonymous` in `SurfaceGuard.cs`. Every `/api/*` route and `/api/hubs/ui` on the UI port needs a session by default. Anonymous: `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/healthz` and the SPA files. The remote surfaces on 5241 never look at the cookie; they keep bearer tokens.
+- **Where the rule lives:** `Surface.RequiresSignIn` and `Surface.Anonymous` in `SurfaceGuard.cs`. Every `/api/*` route and `/api/hubs/ui` of the UI surface needs a session by default. Anonymous: `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/healthz` and the SPA files. The remote surfaces on 5241 never look at the cookie; they keep bearer tokens.
 - **Forgot the password:** run the reset command. It clears the password, changes the stamp (so every session ends) and exits. A running service sees the change through its file watcher and issues a new setup code at once; otherwise the next start does. Then read the code and set a new password in the UI. An unreadable `ui-auth.json` is replaced by the reset.
 
   ```sh
@@ -107,7 +112,7 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 
 ### Guards on the web surface
 
-- **Origin and header (UI port):** an `Origin` that does not match the request's own scheme, host and port gets 403 on any `/api/*` call, the hub's WebSocket upgrade included. Behind a TLS proxy the scheme comes from `X-Forwarded-Proto`. A change (anything but GET or HEAD) also needs `X-Koppel-UI: 1`, otherwise 403. A page on another site cannot add that header without a CORS preflight, which this server never grants. The UI adds it in `api/http.ts` (`uiFetch`, used by every mutating fetch). The hub is exempt from the header only, because an upgrade cannot carry one.
+- **Origin and header (UI surface):** an `Origin` that does not match the request's own scheme, host and port gets 403 on any `/api/*` call, the hub's WebSocket upgrade included. Behind a TLS proxy the scheme comes from `X-Forwarded-Proto`. A change (anything but GET or HEAD) also needs `X-Koppel-UI: 1`, otherwise 403. A page on another site cannot add that header without a CORS preflight, which this server never grants. The UI adds it in `api/http.ts` (`uiFetch`, used by every mutating fetch). The hub is exempt from the header only, because an upgrade cannot carry one.
 - **Host header:** `AllowedHosts` stays `*` and is configurable. A DNS rebinding page is stopped by HTTPS: the browser checks Koppel's certificate against the rebinding page's own host name and the request fails, and a page that tries plain HTTP gets no answer from a TLS port. The SameSite=Strict cookie and the Origin and header checks stand behind that, not the host name.
 - **Security headers** on every response: `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` (only that, so it cannot break the app), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
 - **Rate limits:** a fixed one-minute window per remote IP, answering 429. `/connect/token` allows 60 (`RateLimits:TokenPerMinute`), `/api/pair*` allows 120 (`RateLimits:PairPerMinute`; a waiting client polls 30 times a minute), and `/api/auth/setup`, `/login` and `/password` allow 30 (`RateLimits:AuthPerMinute`), counted per IPv4 address or IPv6 /64. The limiter sits after the port and role check, so a request for a surface that is not there does not use up an allowance.
@@ -121,7 +126,7 @@ What the design holds against:
 
 - A stranger on the network reaching the UI: the UI needs a password, and the first password needs the setup code that only someone with access to the machine's log or config directory sees. Guessing is slowed by the backoff.
 - A web page in the admin's browser calling the UI: SameSite=Strict, the Origin check and the `X-Koppel-UI` header.
-- A stranger reaching the remote surface: the HTTPS port serves only the token endpoint, pairing and the token-guarded remote API, and each of those has a rate limit. Nothing from the UI is served there.
+- A stranger reaching the network surface: it is only the token endpoint, pairing and the token-guarded remote API, and each of those has a rate limit. The UI on the same port turns away callers outside `Ui:AllowFrom` (the local network by default) and needs the password.
 - A revoked client: its sessions end and it cannot get a new token.
 
 What it does not cover:
@@ -133,7 +138,7 @@ What it does not cover:
 
 ## Finding servers and pairing
 
-- **Discovery:** every ten seconds a client broadcasts a probe over UDP to its HTTPS port number (5241 unless changed), on every IPv4 network it is on. A server listens on UDP at its own HTTPS port number and answers the client directly with its name, HTTPS port, certificate fingerprint and version (`KoppelService`). The client reaches the server at the address the answer came from. A client lists what it hears under Configuration, Servers on your network. `Discovery:Enabled=false` turns both sides off.
+- **Discovery:** every ten seconds a client broadcasts a probe over UDP to its discovery port (`Discovery:Port`, the HTTPS port number 5240 unless changed), on every IPv4 network it is on. A server listens on UDP at its own discovery port and answers the client directly with its name, HTTPS port, certificate fingerprint and version (`KoppelService`). The client reaches the server at the address the answer came from. A client lists what it hears under Configuration, Servers on your network. `Discovery:Enabled=false` turns both sides off.
 - **Why not multicast DNS:** it worked, but it needs UDP 5353 as well, and Koppel's aim is one port number between machines. Probes are padded to 512 bytes and an answer is never larger than the probe, so a server cannot be used to multiply traffic at someone else. Broadcasts stay on the local network, so servers elsewhere are still entered by address. IPv6-only networks are not covered yet.
 - **Discovery limits:** the client keeps at most 64 entries, at most 8 from one source address; when a limit is hit, the stalest entry of the address holding the most makes room, so one address cannot push out the others. Entries are keyed by fingerprint and the address the answer came from, so a server that copies a name shows beside the real one and the duplicate-name warning fires. The list is pushed only when it changed, and a slow listener gets the latest list, not every one in between. An entry needs a fingerprint of exactly 64 hex digits (shown in colon form), a name of at most 63 characters and a version of at most 32; anything else is dropped. An entry that missed three probes in a row (35 seconds) expires. Every start, stop and probe runs under one lock, and a probe checks under it that browsing is still wanted, so a role change cannot be undone by a tick. The timer catches every exception and logs it. The list shows a short fingerprint beside each name and warns about a duplicate name or one that imitates another.
 - **Pairing:** instead of copying a client ID and secret, the client shows a six-digit code and a person types it on the server's Clients page, under Waiting to pair, as with Moonlight and Sunshine. On a match the server registers the client and hands it its credentials over HTTPS pinned to the announced fingerprint; they go straight into `connection.json`, and `ConnectionChanged` confirms it as for any saved connection.
@@ -155,7 +160,7 @@ What it does not cover:
 - **Exportable rule:** a device can be exported only when it is bound and is the VID:PID that was shared on that bus port. A bus ID is a port, so a different device plugged into the same port is unbound, shows a fault and is not shared without asking. A share whose apply fails is not saved. Bus IDs are validated (`UsbBusId`) before anything is saved; the endpoint answers 400.
 - **Start-up reconciliation:** at start, Koppel shares what was saved (when `ShareOnStartup` is on and the role serves) and unbinds every other device bound to `usbip-host`, such as a share a crash left behind. A sysfs error here is logged and does not stop start-up; the poll applies the saved shares on its next pass.
 - **Role change:** the surface guard serves the data plane only while the role is server or both. Leaving the server role ends the sessions and aborts the remote hub connections (`LiveSessions`), and unshares the devices in the background, so the settings change is confirmed to the UI without waiting for the unshare.
-- **Session:** a client opens a WebSocket at `/api/remote/usb` on the HTTPS port, pinned to the server's certificate and with its bearer token. The remote group checks the token and that the client is registered at its current generation (a missing or invalid token gets 401), and `UsbDataPlane` then speaks plain USB/IP inside the WebSocket: a device list, or an import followed by the device's traffic. The client has 10 seconds to ask for one. Before it is authenticated a caller gets only what Kestrel gives any HTTPS request: its TLS handshake and request header timeouts and the token check. A session ends when its client is revoked or rotated, when the role leaves the server side, when either end misses pings for 30 seconds, or when Koppel stops.
+- **Session:** a client opens a WebSocket at `/api/remote/usb` on the network port, pinned to the server's certificate and with its bearer token. The remote group checks the token and that the client is registered at its current generation (a missing or invalid token gets 401), and `UsbDataPlane` then speaks plain USB/IP inside the WebSocket: a device list, or an import followed by the device's traffic. The client has 10 seconds to ask for one. Before it is authenticated a caller gets only what Kestrel gives any HTTPS request: its TLS handshake and request header timeouts and the token check. A session ends when its client is revoked or rotated, when the role leaves the server side, when either end misses pings for 30 seconds, or when Koppel stops.
 - **Import:** the status check, the reset and the start of the export run under a lock per bus ID, so two imports of one device cannot race the reset. An upstream host (usbipd-win) claims the bus ID before it connects to the upstream server and releases it after the connection is closed.
 - **Relay:** on import the server writes one end of a loopback socket pair to the device's `usbip_sockfd`, so the kernel serves USB from there, and relays the other end through the WebSocket. The loopback pair accepts only the kernel end's own connection. Both ends ping every 15 seconds and give up after 30 without an answer, so a client that vanished frees its device.
 - **Revocation:** see "Auth". A USB session carries the generation of its token and ends when the client is revoked or rotated.
@@ -280,7 +285,7 @@ vendored usbip-win2 files against `usbip-win2/<version>/SHA256SUMS` and their Au
 appends the Windows-only notices.
 
 - **Service:** Koppel runs as a Windows service under LocalSystem, set to start at boot. It is configured to restart after the first, second and third failure, after 5 seconds, and the count resets after a day without one. `sc failureflag \Koppel 1` (the `SetServiceFailureFlag` action) makes a stop with a non-zero exit code count as a failure too, and the host exits that way when a background service dies (`Program.cs` sets `ServiceBase.ExitCode` and `Environment.ExitCode`). The installer sets the service's environment to `Ports__HttpAddress=127.0.0.1`, so the UI answers on this machine only.
-- **Firewall:** none. A client only receives answers to its own discovery broadcast, which Windows lets in, and nothing on a client needs to be reached from the network. No rule opens the UI port.
+- **Firewall:** none. A client only receives answers to its own discovery broadcast, which Windows lets in, and nothing on a client needs to be reached from the network. No rule opens 5240, so a native Windows server needs one added by hand.
 - **Data folder:** `data-folder.ps1` runs as SYSTEM after the files are in. It creates `%ProgramData%\Koppel` with owner Administrators and a protected ACL (SYSTEM and Administrators). An existing folder that is a file or a link, or owned by an account that is not an administrator, fails the install with a message that says what to do (rename or delete the folder, copying keys out first if you need them). An existing folder owned by an administrator (SYSTEM, Administrators, TrustedInstaller, or an account in the local Administrators group) is taken over: its owner and ACL are reset, recursively, any link inside it is deleted (the link only, never what it points to), and a file or folder inside that no administrator owns is renamed aside (`not-admin-owned-<time>`) instead of being taken over. At start the host (`\KoppelPaths.Prepare`) protects `%ProgramData%\Koppel` itself the same way, when the config and keys folders are in it. A machine where the folder is owned by an ordinary user needs it renamed or deleted once.
 - **Driver:** `driver.ps1` installs usbip-win2's driver after the files and before the service starts. Its output goes to the MSI log (`msiexec /l*v`), not to a file on disk. pnputil may say a restart finishes the driver install: the installer then asks for a restart. It records the packages and the device node it installed in `%ProgramData%\Koppel\driver-state.json`, and uninstall removes only those, and only the ones Windows still lists with an original name of `usbip2_*.inf` (it reads the driver store through `pnputil /enum-drivers /format xml`, then `Get-WindowsDriver`, so a non-English Windows works). The record is used only if an administrator owns it and nobody else can write to it. A restart that pnputil asks for on uninstall is reported to the MSI too.
 - **A standalone usbip-win2** (under Program Files\USBip or in the Apps list) is detected first (whatever the record says), logged, used, and left alone: Koppel never changes or removes its driver or device node. A machine with drivers but no record and no standalone usbip-win2 is treated as an earlier Koppel install and adopted. An uninstall with no record leaves the driver in place and says how to remove it by hand.

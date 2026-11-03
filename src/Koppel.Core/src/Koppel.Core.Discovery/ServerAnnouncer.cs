@@ -5,8 +5,8 @@ using Microsoft.Extensions.Logging;
 namespace Koppel.Core.Discovery;
 
 /// <summary>
-/// Answers discovery probes for this server on UDP, on the same port number as its HTTPS. See
-/// <see cref="KoppelService"/>.
+/// Answers discovery probes for this server on UDP, on the same port number as its HTTPS unless told
+/// another. See <see cref="KoppelService"/>.
 /// </summary>
 public sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : IDisposable
 {
@@ -25,17 +25,18 @@ public sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : I
         }
     }
 
-    /// <summary>Starts answering, or replaces what the answers say.</summary>
-    public void Announce(ServerAnnouncement announcement)
+    /// <summary>Starts answering on UDP <paramref name="port"/> (the announced HTTPS port number unless given), or replaces what the answers say.</summary>
+    public void Announce(ServerAnnouncement announcement, int? port = null)
     {
         ArgumentNullException.ThrowIfNull(announcement);
+        var udpPort = port ?? announcement.HttpsPort;
         lock (_lock)
         {
             StopLocked();
             var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             try
             {
-                socket.Bind(new IPEndPoint(IPAddress.Any, announcement.HttpsPort));
+                socket.Bind(new IPEndPoint(IPAddress.Any, udpPort));
             }
             catch
             {
@@ -46,7 +47,7 @@ public sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : I
             _socket = socket;
             _stop = new CancellationTokenSource();
             _ = AnswerAsync(socket, KoppelService.CreateReply(announcement), _stop.Token);
-            LogAnnouncing(announcement.Name, announcement.HttpsPort);
+            LogAnnouncing(announcement.Name, udpPort);
         }
     }
 

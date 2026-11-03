@@ -6,13 +6,13 @@ namespace Koppel.Core.Discovery;
 
 /// <summary>
 /// How a client finds Koppel servers on the local network. It broadcasts a probe over UDP to the port
-/// number Koppel's HTTPS runs on (5241 unless changed), and every server that hears it answers the
-/// client directly with what it needs to pair. TCP and UDP ports are separate, so a Koppel machine
-/// needs that one port number for everything another machine does with it.
+/// number Koppel's HTTPS runs on (5240 unless changed), and every server that hears it answers the
+/// client directly with what it needs to pair, its HTTPS port included. TCP and UDP ports are separate,
+/// so a Koppel machine needs that one port number for everything.
 /// </summary>
 public static class KoppelService
 {
-    public const int DefaultPort = 5241;
+    public const int DefaultPort = 5240;
 
     /// <summary>
     /// Probes are padded to this size, and a server never answers with more bytes than the probe had,

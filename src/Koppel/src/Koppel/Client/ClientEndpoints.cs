@@ -10,7 +10,7 @@ internal sealed record ConnectionUpdate(string? ServerUrl, string? ServerFingerp
         var errors = new Dictionary<string, string[]>();
         if (!Uri.TryCreate(ServerUrl, UriKind.Absolute, out var url) || url.Scheme != Uri.UriSchemeHttps)
         {
-            errors["serverUrl"] = ["Use the server's HTTPS address, such as https://lab-rack-3:5241."];
+            errors["serverUrl"] = ["Use the server's HTTPS address, such as https://lab-rack-3:5240."];
         }
 
         var hex = new string((ServerFingerprint ?? "").Where(Uri.IsHexDigit).ToArray());

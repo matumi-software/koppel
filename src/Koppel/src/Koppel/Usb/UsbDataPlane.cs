@@ -11,7 +11,7 @@ namespace Koppel.Usb;
 
 /// <summary>
 /// The encrypted USB data plane (server role). A client opens a WebSocket at <c>/api/remote/usb</c> on
-/// the HTTPS port, pinned to the server's certificate and carrying its bearer token, then speaks plain
+/// the network port, pinned to the server's certificate and carrying its bearer token, then speaks plain
 /// USB/IP inside it. On import the host relays the stream to the device, so USB traffic never crosses
 /// the network unencrypted, and Koppel needs no port of its own for it.
 /// </summary>

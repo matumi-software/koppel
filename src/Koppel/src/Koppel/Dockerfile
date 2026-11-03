@@ -68,14 +68,14 @@ RUN mkdir -p /koppel/config /koppel/keys && chown -R $APP_UID /koppel
 VOLUME /koppel
 USER $APP_UID
 
-# 5240: the UI. 5241: everything other Koppel machines do, USB traffic included (pinned by clients), and
-# discovery on UDP. Both are HTTPS with the server's own self-signed certificate.
-EXPOSE 5240 5241 5241/udp
+# 5240: the UI and everything other Koppel machines do, USB traffic included (pinned by clients), HTTPS with
+# the server's own self-signed certificate; discovery on UDP. Ports__Network and Discovery__Port split them.
+EXPOSE 5240 5240/udp
 
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys
 
-# The anonymous GET /healthz on the UI port, probed at the configured Ports__HttpAddress and Ports__Http and then
+# The anonymous GET /healthz on the UI port, probed at the configured Ports__Address and Ports__Ui and then
 # at 127.0.0.1 (see Web/HealthProbe.cs). It is Koppel itself because the port is HTTPS and the image has no curl
 # or openssl. The timeout leaves room for the runtime to start on a slow thin client. Plain Docker only reports
 # "unhealthy": it does not restart the container (restart: unless-stopped acts on exits, not on health). Swarm

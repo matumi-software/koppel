@@ -1,14 +1,14 @@
 namespace Koppel.Web;
 
 /// <summary>
-/// Protects the UI's API from other sites in the browser. On the UI port, a request to <c>/api/*</c>
+/// Protects the UI's API from other sites in the browser. A request to the UI's <c>/api/*</c>
 /// is refused with 403 when its <c>Origin</c> is another origin, and a change (anything but GET or
 /// HEAD) is refused without <c>X-Koppel-UI: 1</c>, a header a page on another site cannot add without
 /// a CORS preflight this server never grants. The hub is exempt from the header only, because a
-/// WebSocket upgrade cannot carry one; its Origin is still checked. The HTTPS port's remote API is
-/// not the browser's and is left alone.
+/// WebSocket upgrade cannot carry one; its Origin is still checked. The network surfaces (tokens,
+/// pairing, the remote API) are not the browser's and are left alone, on whichever port they are.
 /// </summary>
-internal sealed class UiRequestGuard(RequestDelegate next, HostInfo host)
+internal sealed class UiRequestGuard(RequestDelegate next)
 {
     public const string HeaderName = "X-Koppel-UI";
 
@@ -17,7 +17,7 @@ internal sealed class UiRequestGuard(RequestDelegate next, HostInfo host)
     public Task InvokeAsync(HttpContext context)
     {
         var request = context.Request;
-        if (context.Connection.LocalPort == host.UiPort && request.Path.StartsWithSegments("/api") && !Allowed(request))
+        if (Surface.For(request.Path).Listener == Listener.Ui && request.Path.StartsWithSegments("/api") && !Allowed(request))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return Task.CompletedTask;

@@ -85,7 +85,7 @@ function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: bo
     <Panel title="Server connection">
       <div className="kp-panel__body">
         <p className="kp-note">The Koppel server this machine attaches devices from. Pairing above fills this in; enter it by hand for a server on another network.</p>
-        <Field label="Server address" mono placeholder="https://lab-rack-3:5241" value={serverUrl} onChange={setServerUrl} isDisabled={disabled} state={fieldState} />
+        <Field label="Server address" mono placeholder="https://lab-rack-3:5240" value={serverUrl} onChange={setServerUrl} isDisabled={disabled} state={fieldState} />
         <Field
           label="Server fingerprint"
           mono

@@ -57,7 +57,7 @@ internal sealed partial class ServerAnnouncerService(
         {
             if (shouldAnnounce)
             {
-                announcer.Announce(new ServerAnnouncement(Environment.MachineName, host.HttpsPort, secrets.Fingerprint, SystemEndpoints.Version));
+                announcer.Announce(new ServerAnnouncement(Environment.MachineName, host.NetworkPort, secrets.Fingerprint, SystemEndpoints.Version), host.DiscoveryPort);
             }
             else
             {

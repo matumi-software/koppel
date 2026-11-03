@@ -9,8 +9,8 @@ namespace Koppel;
 /// <summary>One thing Koppel needs from this machine, for the first-run checks.</summary>
 internal sealed record SystemCheck(string Id, bool Ok, string Title, string Detail);
 
-/// <summary>Facts about this process that never change while it runs.</summary>
-internal sealed record HostInfo(DateTimeOffset StartedAt, int UiPort, int HttpsPort);
+/// <summary>Facts about this process that never change while it runs. The UI and network ports are the same port unless <c>Ports:Network</c> is set.</summary>
+internal sealed record HostInfo(DateTimeOffset StartedAt, int UiPort, int NetworkPort, int DiscoveryPort);
 
 /// <summary>What the side panel shows about this machine.</summary>
 internal sealed record SystemInfo(string Name, string Version, DateTimeOffset StartedAt, KoppelRole Role, int UiPort, int HttpsPort, string Fingerprint, string Os);
@@ -47,7 +47,7 @@ internal static class SystemEndpoints
             info.StartedAt,
             settings.Current.Role,
             info.UiPort,
-            info.HttpsPort,
+            info.NetworkPort,
             secrets.Fingerprint,
             OsLabel())));
         return app;

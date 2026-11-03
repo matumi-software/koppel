@@ -86,15 +86,15 @@ address under Configuration instead.
 
 | Port | What |
 |---|---|
-| 5240 TCP | Web UI (HTTPS, the server's own certificate), behind the password. Native Windows binds it to this machine only |
-| 5241 TCP | Everything other Koppel machines do: tokens, pairing, the device list and USB traffic (HTTPS) |
-| 5241 UDP | Finding servers on the local network |
+| 5240 TCP | The web UI, and everything other Koppel machines do: tokens, pairing, the device list and USB traffic. HTTPS with the server's own certificate. The UI needs the password and answers the local network only, this machine only on native Windows (`Ui:AllowFrom`) |
+| 5240 UDP | Finding servers on the local network |
 | 3242 TCP | Gateway for a USB/IP driver on the same machine (plain, no login). Native Windows client: on, 127.0.0.1 only. Windows Docker client: inside the container, published as 127.0.0.1:3240 on the host |
 
-Between machines, Koppel needs only 5241, TCP and UDP.
+Koppel needs only 5240, TCP and UDP. `Ports:Network` puts what other machines do on a port of its own,
+and `Discovery:Port` moves discovery; see [docs/architecture.md](docs/architecture.md).
 
-The UI is plain HTTP. On a network you do not trust, bind it to `127.0.0.1` or put a TLS proxy in front, because the
-password and the session cookie cross it unencrypted. If you forget the password:
+The browser warns about Koppel's certificate the first time, because it is Koppel's own. On a network you do not
+trust, check that its SHA-256 fingerprint is the one under Clients before you accept it. If you forget the password:
 
 ```sh
 docker compose exec koppel dotnet Koppel.dll --reset-password

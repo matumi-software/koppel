@@ -8,8 +8,8 @@ namespace Koppel.Web;
 /// for a shell script to speak it with.
 /// </summary>
 /// <remarks>
-/// It asks where the UI is configured to listen (<c>Ports:HttpAddress</c> and <c>Ports:Http</c>, read
-/// as the host reads them), then 127.0.0.1, so a container bound to one LAN address is not unhealthy
+/// It asks where the UI is configured to listen (<c>Ports:Address</c> and <c>Ports:Ui</c>, read as
+/// the host reads them), then 127.0.0.1, so a container bound to one LAN address is not unhealthy
 /// forever just because nothing listens on loopback. Any address is reached through loopback.
 /// </remarks>
 internal static class HealthProbe

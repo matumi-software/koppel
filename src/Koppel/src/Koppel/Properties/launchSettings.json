@@ -15,11 +15,11 @@
       "commandName": "Project",
       "dotnetRunMessages": true,
       "launchBrowser": true,
-      "applicationUrl": "https://localhost:5240;https://localhost:5241",
+      "applicationUrl": "https://localhost:5240",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development",
         "ASPNETCORE_HOSTINGSTARTUPASSEMBLIES": "Microsoft.AspNetCore.SpaProxy",
-        "ASPNETCORE_HTTPS_PORT": "5241"
+        "ASPNETCORE_HTTPS_PORT": "5240"
       }
     }
   }

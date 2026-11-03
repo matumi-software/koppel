@@ -35,7 +35,7 @@ internal static class UsbEndpoints
     }
 
     /// <summary>
-    /// Remote clients: the shared devices, and the USB data plane as a WebSocket on the HTTPS port. Added
+    /// Remote clients: the shared devices, and the USB data plane as a WebSocket on the network port. Added
     /// to the remote group, which checks the token and the client.
     /// </summary>
     public static RouteGroupBuilder MapUsbRemoteEndpoints(this RouteGroupBuilder remote)

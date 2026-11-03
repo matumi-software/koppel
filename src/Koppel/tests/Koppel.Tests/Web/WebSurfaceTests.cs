@@ -21,9 +21,9 @@ public sealed class WebSurfaceTests : IDisposable
         }
     }
 
-    private KoppelFactory Host(string role = "server", Dictionary<string, string>? configuration = null)
+    private KoppelFactory Host(string role = "server", Dictionary<string, string>? configuration = null, bool singlePort = false)
     {
-        var host = new KoppelFactory(kestrel: true, configuration: configuration, role: role);
+        var host = new KoppelFactory(kestrel: true, configuration: configuration, role: role, singlePort: singlePort);
         _disposables.Add(host);
         return host;
     }
@@ -68,6 +68,23 @@ public sealed class WebSurfaceTests : IDisposable
         (await ui.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await https.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ui.PostAsync("/api/hubs/remote/negotiate?negotiateVersion=1", null, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task On_one_port_the_ui_and_the_remote_routes_both_answer()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = Host(singlePort: true);
+        var ui = Own(host.CreateUiClient());
+        var remote = Own(host.CreateHttpsClient());
+        var form = new Dictionary<string, string> { ["grant_type"] = "client_credentials", ["client_id"] = "x", ["client_secret"] = "y" };
+
+        host.HttpsPort.Should().Be(host.HttpPort);
+        (await ui.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await remote.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the UI is there, and needs a session");
+        (await remote.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a remote client sends no X-Koppel-UI header, and the UI's guard is not its business");
+        (await remote.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await remote.GetAsync("/api/remote/hello", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -247,10 +264,10 @@ public sealed class WebSurfaceTests : IDisposable
     }
 
     [Fact]
-    public async Task The_http_port_binds_to_the_configured_address()
+    public async Task The_ports_bind_to_the_configured_address()
     {
         var ct = TestContext.Current.CancellationToken;
-        var host = Host(configuration: new() { ["Ports:HttpAddress"] = "127.0.0.1" });
+        var host = Host(configuration: new() { ["Ports:Address"] = "127.0.0.1" });
         var ui = Own(host.CreateUiClient());
         ui.BaseAddress = new Uri($"https://127.0.0.1:{host.HttpPort}");
 

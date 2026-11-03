@@ -991,7 +991,7 @@ internal sealed partial class UsbClient(
     }
 
     /// <summary>
-    /// Opens the USB data plane: a WebSocket on the server's HTTPS port, pinned to its certificate and
+    /// Opens the USB data plane: a WebSocket on the server's network port, pinned to its certificate and
     /// carrying this client's bearer token. USB/IP follows inside it. Both ends ping, so a server that
     /// vanishes without a goodbye ends the session in under a minute, not never. The caller sets the
     /// deadline through <paramref name="cancellationToken"/>.

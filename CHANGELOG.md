@@ -8,7 +8,7 @@ First release. If you ran a development build, read Installer and deploy before 
 
 - The UI now needs a password. The first password needs a one-time setup code (`docker logs`, or `%ProgramData%\Koppel\config\setup-code.txt` on Windows). Wrong tries are slowed down, and sessions end when the password changes or is reset (`Koppel --reset-password`).
 - The UI is served over HTTPS with the server's own certificate, so the password and the session cookie no longer cross the network in clear and the cookie is Secure. The browser warns about the certificate the first time. Open `https://<machine>:5240`.
-- The UI and the remote API are on separate ports. The UI (5240) never serves the token endpoint or pairing, and the HTTPS port (5241) never serves the UI. Other websites cannot drive the UI (Origin check, required `X-Koppel-UI` header, SameSite cookie), and responses carry security headers. The Windows installer binds the UI to this machine only.
+- The UI answers only the local network by default, judged by the caller's address as Sunshine does (`Ui:AllowFrom`: `local`, `lan` or `any`). The Windows installer sets `local`. Other websites cannot drive the UI (Origin check, required `X-Koppel-UI` header, SameSite cookie), and responses carry security headers.
 - Revoking a client, or rotating its secret, now ends its running USB sessions and hub connections at once, not only new requests.
 - Pairing is harder to abuse: a secret poll token, a server-wide cap on requests, per-address limits, and a confirm step before a client replaces its connection to another server. Discovery results are size-limited and expire.
 - Client secrets are verified with SHA-256 (older hashes are upgraded on use). The server still keeps them recoverable in its encrypted file, so an admin can copy a secret again.
@@ -23,8 +23,9 @@ First release. If you ran a development build, read Installer and deploy before 
 
 ### Ports
 
-- Between machines Koppel needs only 5241, TCP and UDP. USB traffic runs as a WebSocket on the HTTPS port (`/api/remote/usb`), with the same certificate pinning and token as the rest, so port 3240 and the `listenPort` setting are gone. An existing `settings.json` with `listenPort` still loads.
-- Finding servers uses a small UDP probe and answer on the HTTPS port number instead of multicast DNS on 5353. An answer is never larger than its probe, so a server cannot be used to amplify traffic.
+- Koppel needs only 5240, TCP and UDP: the UI, tokens, pairing, the remote API, USB traffic and discovery share it. `Ports:Network` gives what other machines do a port of its own, `Discovery:Port` moves discovery, and `Ports:Address` binds them to one address. The old `Ports:Http`, `Ports:Https` and `Ports:HttpAddress` settings are gone. A client saved with a server at `:5241` needs its address changed, or that server needs `Ports:Network=5241`.
+- USB traffic runs as a WebSocket on the network port (`/api/remote/usb`), with the same certificate pinning and token as the rest, so port 3240 and the `listenPort` setting are gone. An existing `settings.json` with `listenPort` still loads.
+- Finding servers uses a small UDP probe and answer on the discovery port instead of multicast DNS on 5353. An answer is never larger than its probe, so a server cannot be used to amplify traffic.
 
 ### USB
 

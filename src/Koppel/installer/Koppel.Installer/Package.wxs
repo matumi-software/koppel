@@ -23,7 +23,7 @@
     <ComponentGroup Id="App" Directory="INSTALLFOLDER">
       <Component Id="Service">
         <!-- No firewall rule: a client only receives answers to its own discovery broadcast, which
-             Windows lets in, and nothing on this machine needs to be reached from the network. -->
+             Windows lets in, and nothing on a client needs to be reached from the network. -->
         <File Id="KoppelExe" Source="$(var.StagingDir)\Koppel.exe" KeyPath="yes" />
         <ServiceInstall Name="Koppel" DisplayName="Koppel" Description="Shares and attaches USB devices over the network. UI on https://localhost:5240/." Start="auto" Type="ownProcess" ErrorControl="normal" Account="LocalSystem" Vital="yes">
           <!-- Restart after a failure: after 5 s each time, for the first, second and every later one. The count resets after a day
@@ -32,9 +32,9 @@
                               RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
         </ServiceInstall>
         <ServiceControl Id="KoppelService" Name="Koppel" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
-        <!-- The native app's UI is used on this machine only, so the web UI listens on the loopback address. Koppel's
-             own ports (token endpoint, USB over TLS) are not affected. -->
-        <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\Koppel" Name="Environment" Type="multiString" Value="Ports__HttpAddress=127.0.0.1" />
+        <!-- The native app's UI is used on this machine only, so it answers this machine only (Ui:AllowFrom). What other
+             Koppel machines do on the same port is not affected. -->
+        <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\Koppel" Name="Environment" Type="multiString" Value="Ui__AllowFrom=local" />
       </Component>
       <Files Include="$(var.StagingDir)\**">
         <Exclude Files="$(var.StagingDir)\Koppel.exe" />

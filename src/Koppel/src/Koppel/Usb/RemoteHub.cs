@@ -16,7 +16,7 @@ public interface IRemoteClient
 }
 
 /// <summary>
-/// Remote clients' live link, mapped at <c>/api/hubs/remote</c> on the HTTPS port. Needs a bearer token
+/// Remote clients' live link, mapped at <c>/api/hubs/remote</c> on the network port. Needs a bearer token
 /// from a registered client. Push only.
 /// </summary>
 [Authorize(Policy = KoppelAuthServer.ClientPolicy)]

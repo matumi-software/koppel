@@ -53,12 +53,15 @@ function Get-DriverStorePackages {
     # Every package in the driver store as @{ Published = 'oemNN.inf'; Original = 'usbip2_ude.inf' }. Windows
     # names a package oemNN.inf once it is stored, and reuses the number after a package is deleted. Read
     # without parsing English: pnputil's XML output first (Windows 11 and newer builds of 10), then DISM's.
-    try {
-        $xml = [xml](& $pnputil /enum-drivers /format xml | Out-String)
-        $found = @($xml.PnpUtil.Driver | ForEach-Object { @{ Published = [string]$_.DriverName; Original = [string]$_.OriginalName } })
-        if ($found.Count -gt 0) { return $found }
+    $text = & $pnputil /enum-drivers /format xml | Out-String
+    if ($text.TrimStart().StartsWith('<')) {
+        try {
+            $found = @(([xml]$text).PnpUtil.Driver | ForEach-Object { @{ Published = [string]$_.DriverName; Original = [string]$_.OriginalName } })
+            if ($found.Count -gt 0) { return $found }
+        }
+        catch { Write-Host "pnputil's XML could not be read ($($_.Exception.Message)); asking Windows another way." }
     }
-    catch { Write-Host "pnputil could not list drivers as XML ($_); asking Windows another way." }
+    else { Write-Host 'This pnputil has no XML output; asking Windows another way.' }
     try {
         @(Get-WindowsDriver -Online -All -ErrorAction Stop | ForEach-Object {
             @{ Published = [string]$_.Driver; Original = [IO.Path]::GetFileName([string]$_.OriginalFileName) }
@@ -225,11 +228,12 @@ function Install-Driver {
         Write-State @(@($known) + $added | Select-Object -Unique) $node
     }
 
-    Invoke-Tool $pnputil @('/add-driver', (Get-Inf 'usbip2_filter'), '/install') @(0, 3010)
+    # 259: the package is already in the driver store and no device needed it, as on an upgrade to the same driver.
+    Invoke-Tool $pnputil @('/add-driver', (Get-Inf 'usbip2_filter'), '/install') @(0, 3010, 259)
     & $record
     if ($controllerBefore) {
         Write-Output 'The virtual USB host controller already exists; updating its driver.'
-        Invoke-Tool $pnputil @('/add-driver', (Get-Inf 'usbip2_ude'), '/install') @(0, 3010)
+        Invoke-Tool $pnputil @('/add-driver', (Get-Inf 'usbip2_ude'), '/install') @(0, 3010, 259)
     }
     else {
         $node = $true

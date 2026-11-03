@@ -43,7 +43,7 @@ export function LoginPage({ machineName, onSignedIn }: { machineName: string; on
           </Button>
         </div>
       </form>
-      <p className="kp-note">Forgot it? Run <code>Koppel --reset-password</code> on this machine to clear it and get a new setup code.</p>
+      <p className="kp-note">Forgot it? Run <code>Koppel --reset-password</code> on this machine to clear it, then set a new one here.</p>
     </AuthFrame>
   );
 }

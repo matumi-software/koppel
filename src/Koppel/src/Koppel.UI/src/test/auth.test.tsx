@@ -69,7 +69,10 @@ const problem = (error: string, status: number) => json({ error }, status);
 
 const busy = 'The server is busy checking another password. Try again in a moment.';
 
-const state = (overrides: Partial<AuthState> = {}): AuthState => ({ signedIn: false, passwordSet: true, machineName: 'bench-pc', ...overrides });
+const state = (overrides: Partial<AuthState> = {}): AuthState => ({ signedIn: false, passwordSet: true, machineName: 'bench-pc', setupOpen: false, setupUntil: null, ...overrides });
+
+/** A machine without a password, still taking its first one. */
+const openSetup = (overrides: Partial<AuthState> = {}) => state({ passwordSet: false, setupOpen: true, setupUntil: '2026-11-03T12:40:00Z', ...overrides });
 
 function SignOutButton() {
   const { signOut } = useAuth();
@@ -179,21 +182,22 @@ describe('login', () => {
 });
 
 describe('first-run password', () => {
-  it('asks for the setup code and says where to find it', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(state({ passwordSet: false })) });
+  it('asks only for a password and says until when setup is open', async () => {
+    mockFetch({ 'GET /api/auth/state': () => json(openSetup()) });
     renderGate();
 
     await screen.findByRole('heading', { name: 'Set up bench-pc' });
 
-    expect(screen.getByText(/docker logs/)).toBeTruthy();
-    expect(screen.getByText(/setup-code\.txt/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`Setup is open until ${new Date('2026-11-03T12:40:00Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`))).toBeTruthy();
+    expect(screen.queryByLabelText('Setup code')).toBeNull();
+    expect(screen.queryByText(/setup-code\.txt|docker logs/)).toBeNull();
     expect(screen.queryByText('The app')).toBeNull();
   });
 
-  it('keeps the button off until the password is long enough and repeated, then sends the code and password', async () => {
+  it('keeps the button off until the password is long enough and repeated, then sends only the password', async () => {
     let passwordSet = false;
     const { calls } = mockFetch({
-      'GET /api/auth/state': () => json(state({ passwordSet, signedIn: passwordSet })),
+      'GET /api/auth/state': () => json(passwordSet ? state({ signedIn: true }) : openSetup()),
       'POST /api/auth/setup': () => {
         passwordSet = true;
         return noContent();
@@ -201,7 +205,6 @@ describe('first-run password', () => {
     });
     renderGate();
     const button = await screen.findByRole('button', { name: 'Set password and continue' });
-    await userEvent.type(screen.getByLabelText('Setup code'), 'ABCD-2345');
     await userEvent.type(screen.getByLabelText('New password'), 'short');
     await userEvent.type(screen.getByLabelText('Repeat the password'), 'short');
     expect(button.hasAttribute('disabled')).toBe(true);
@@ -213,19 +216,50 @@ describe('first-run password', () => {
     await userEvent.click(button);
 
     await screen.findByText('The app');
-    expect(calls.find((c) => c.key === 'POST /api/auth/setup')?.body).toEqual({ setupCode: 'ABCD-2345', password: 'correct horse battery' });
+    expect(calls.find((c) => c.key === 'POST /api/auth/setup')?.body).toEqual({ password: 'correct horse battery' });
   });
 
-  it('shows a refused setup code', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(state({ passwordSet: false })), 'POST /api/auth/setup': () => problem('That setup code is not right.', 403) });
+  it('shows the server\'s refusal and stays while setup is still open', async () => {
+    mockFetch({ 'GET /api/auth/state': () => json(openSetup()), 'POST /api/auth/setup': () => problem('Do not use "koppel" or "password" as the password.', 400) });
     renderGate();
-    await userEvent.type(await screen.findByLabelText('Setup code'), 'AAAA-AAAA');
-    await userEvent.type(screen.getByLabelText('New password'), 'correct horse battery');
+    await userEvent.type(await screen.findByLabelText('New password'), 'koppel1234');
+    await userEvent.type(screen.getByLabelText('Repeat the password'), 'koppel1234');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set password and continue' }));
+
+    await screen.findByText('Do not use "koppel" or "password" as the password.');
+    expect(screen.getByRole('heading', { name: 'Set up bench-pc' })).toBeTruthy();
+  });
+
+  it('explains the timeout and how to restart once setup has closed', async () => {
+    const { count } = mockFetch({ 'GET /api/auth/state': () => json(state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' })) });
+    renderGate();
+
+    await screen.findByRole('heading', { name: 'Setup has timed out' });
+
+    expect(screen.getByText(/Restart Koppel, then open this page again/)).toBeTruthy();
+    expect(screen.getByText('sudo systemctl restart koppel')).toBeTruthy();
+    expect(screen.queryByLabelText('New password')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
+  });
+
+  it('shows the timeout screen when a password comes too late', async () => {
+    let closed = false;
+    mockFetch({
+      'GET /api/auth/state': () => json(closed ? state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' }) : openSetup()),
+      'POST /api/auth/setup': () => {
+        closed = true;
+        return problem('Setup has timed out. Restart Koppel, then set it.', 403);
+      },
+    });
+    renderGate();
+    await userEvent.type(await screen.findByLabelText('New password'), 'correct horse battery');
     await userEvent.type(screen.getByLabelText('Repeat the password'), 'correct horse battery');
 
     await userEvent.click(screen.getByRole('button', { name: 'Set password and continue' }));
 
-    await screen.findByText('That setup code is not right.');
+    await screen.findByRole('heading', { name: 'Setup has timed out' });
   });
 });
 

@@ -10,7 +10,7 @@ One codebase and one Docker image cover every role; the role is a setting.
 |---|---|---|
 | Control plane | ASP.NET Core host, REST for commands, SignalR for pushes, React UI behind a password | Done |
 | Auth | The server is an OAuth server (client credentials); client ID and secret are kept encrypted next to the config on both sides. The UI has its own password | Done |
-| Data plane | USB/IP protocol (Linux kernel spec), in a WebSocket on the network port | Linux server and client work. A Windows client works through usbip-win2 (see "Real hardware" below). A Windows server shares through usbipd-win and has been tried only against a fake |
+| Data plane | USB/IP protocol (Linux kernel spec), in a WebSocket on the network port | Linux server and client work. A Windows client works through usbip-win2 (see "Real hardware" below). A Windows server shares through usbipd-win, and a real one was run to a Linux client |
 
 ## The confirm rule
 
@@ -206,10 +206,14 @@ What it does not cover:
 ### Tested
 
 - **Running the tests:** `dotnet test` runs everything. The discovery round trip (`DiscoveryTests.A_browser_finds_a_server_and_drops_it_when_it_stops_answering`) runs over loopback, so it needs no network.
-- **Fakes:** the protocol encoding, the sysfs adapters against a fake `/sys`, and a full server-to-client run on real Kestrel with fake kernels on both ends (token, pinning, hub, WebSocket, import, byte round trip). All the server and client changes listed above (deadlines, revocation, the exportable rule, reconciliation, the gateway check, detach on stop) are covered this way.
-- **Not on real hardware yet:** the changes made after the hardware runs below have not been re-run on a real kernel or a real usbip-win2: real `usbip-host` bind and unbind, `usbip_sockfd`, `vhci_hcd`, keepalive against a vanished peer, usbipd-win, and the `--bus-id=` form of the `usbip.exe` command.
+- **Fakes:** the protocol encoding, the sysfs adapters against a fake `/sys`, and a full server-to-client run on real Kestrel with fake kernels on both ends (token, pinning, hub, WebSocket, import, byte round trip). The server and client changes listed above (deadlines, revocation, the exportable rule, reconciliation, the gateway check, detach on stop) have fake-based tests, and most were also run on real hardware on 2026-11-03 (below).
+- **Not re-run on real hardware:** the Windows client through Docker Desktop, and the attach deadline on its own (the gateway only served the kernel's connections).
 - **Real kernel (2026-11-02, WSL2 6.6, software USB device):** sharing binds the device to `usbip-host`, both kernels take Koppel's sockets, and the device enumerates through both relays and TLS up to `SET_CONFIGURATION`. That step deadlocks because the test device and its attached copy sit on the same virtual controller, the only one the WSL kernel has; the same happens with no Koppel in the path. Configuration and bulk data still need a client on a second machine.
-- **Real hardware (2026-11-02):** a Debian thin client runs the server in Docker and shares a Logitech USB receiver. A Windows 11 client attaches it through the installed service and usbip-win2, and through Docker Desktop's gateway, and it works as keyboard and mouse there. That covers configuration and interrupt transfers on a second machine; bulk transfers (storage, printers) are still untried.
+- **Real hardware (2026-11-02, first run):** a Debian thin client runs the server in Docker and shares a Logitech USB receiver. A Windows 11 client attaches it through the installed service and usbip-win2, and through Docker Desktop's gateway, and it works as keyboard and mouse there.
+- **Real hardware (2026-11-03):** a Debian 13 machine runs the server in Docker and shares two Logitech receivers, a flash drive and a webcam. A native Windows 11 client attaches the receivers and the drive, and they keep working across an installer upgrade. A 256 MB file written to the drive and read back after a detach and reattach matched its checksum (about 8 MB/s). A 75 second network drop was recovered from by itself: the server freed the devices after about 50 seconds and they reattached within 2 seconds of the traffic returning. Rotating a client's secret ended its sessions at once, and stopping the client service removed the devices. A Windows 11 PC running a real usbipd-win shared a webcam to the Debian machine, which streamed it at 30 fps, so isochronous transfers cross the relay in that direction. A Logitech C270 webcam from the Linux server to the Windows client attaches but delivers no frames (#22).
+- **Linux package (2026-11-03):** the amd64 `.deb` was installed, upgraded, removed and purged on a Debian 13 machine with real USB. The service started, the setup code was in `setup-code.txt`, an upgrade kept the certificate and password, and purge deleted `/var/lib/koppel`.
+- **Windows installer (2026-11-03):** run on a clean Windows 11 22H2 VM: fresh install, service recovery after a killed process, major upgrade, uninstall, taking over an administrator-owned data folder, and refusing one owned by a non-administrator. The rollback of a failed fresh install was not exercised.
+- **Untested:** printers, and the arm64 image and `.deb` on a Raspberry Pi.
 
 ### Windows
 
@@ -363,8 +367,10 @@ To release:
 
 - The Linux container is privileged and runs as root. Narrowing it needs a test on a real kernel. The Windows composes also run as root, because the volume belongs to it.
 - The installer is not code signed, and there is no CI pipeline or image signing.
-- The elevated installer paths have not been run on a VM: taking over an existing data folder (and renaming aside what is not admin-owned), the exit-code recovery (`sc failureflag`, the host exiting non-zero), the driver state and standalone detection, the rollback, the restart request, and whether the service manager reads the `Environment` value the installer writes. Run an install, a major upgrade and an uninstall on a test machine before relying on them.
-- The new USB behaviour is covered by fakes, not yet re-run on real hardware (see "Tested").
+- The rollback of a failed fresh install was not exercised (see "Tested").
+- Printers are untried, and the arm64 image and `.deb` are untested on a Raspberry Pi.
+- Webcams do not stream from a Linux server to a Windows client (#22); a Windows server through usbipd-win to a Linux client does.
+- The Windows client through Docker Desktop and the attach deadline on its own were not re-run on 2026-11-03.
 - `Polly.Extensions.Http` is a deprecated package that arrives through OpenIddict (`Microsoft.Extensions.Http.Polly`). Koppel code does not use it directly. `Common.Logging`, which the mDNS library used to pull in, is no longer in any lock file.
 - The UI does not show `gatewayFault` or the live `listen` status yet.
 

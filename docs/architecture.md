@@ -300,7 +300,10 @@ locked mode **without** `-r`, then publish with `--no-restore -r <rid>`; `dotnet
 against the lock files. A locked build fails with NU1004 when a package changed and the lock file did
 not: run `dotnet restore` on `Koppel.slnx` and `Koppel.Core.slnx` and commit the lock files.
 The Dockerfile pins the Node, SDK and runtime images to exact versions, fails on an architecture it
-does not know, and runs the health check.
+does not know, and runs the health check. Its Node and SDK stages run on the build machine's
+architecture and cross-compile (ReadyToRun included) for the target, and the runtime stage has no
+`RUN`, so one x64 machine builds amd64 and arm64 without QEMU. .NET does not support running under
+QEMU.
 
 To release:
 
@@ -309,6 +312,12 @@ To release:
 3. Regenerate the lock files if any package changed.
 4. For a new usbip-win2 version, run `installer/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `installer/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from. Run `installer/new-notices.ps1` when packages changed.
 5. Add the version to `CHANGELOG.md`.
+6. Build and push the image for both architectures, from `src/`, with the version and `latest`:
+
+   ```sh
+   docker buildx build -f Koppel/src/Koppel/Dockerfile --platform linux/amd64,linux/arm64 \
+     -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
+   ```
 
 ## Known limits
 

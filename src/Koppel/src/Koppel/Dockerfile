@@ -11,12 +11,16 @@
 # Node comes from the official node image (copied in below) instead of a downloaded setup script, and is
 # pinned with it. The node image is Debian and the SDK image is Ubuntu; Node needs only an older glibc than
 # Ubuntu's, so the copied binary runs (the `node --version` below proves it on every build).
+#
+# Node and the SDK run on the build machine's own architecture ($BUILDPLATFORM) and cross-compile for the
+# target, so an arm64 image builds on an x64 machine. .NET does not support running under QEMU emulation,
+# which is what buildx would otherwise use for the build stage. Only the runtime stage is the target's.
 
 # -------- Stage 0: Node ------------------------------------------------------
-FROM node:24.22.2-bookworm-slim AS node
+FROM --platform=$BUILDPLATFORM node:24.22.2-bookworm-slim AS node
 
 # -------- Stage 1: build ---------------------------------------------------
-FROM mcr.microsoft.com/dotnet/sdk:10.0.403-noble AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.403-noble AS build
 ARG BUILD_CONFIGURATION=Release
 
 # Toolchain: Node 24 (from the node stage) + pnpm 9.15.0, as in the Timebase images.
@@ -57,6 +61,10 @@ RUN case "$TARGETARCH" in \
  && dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo --no-restore \
       -r $RID --self-contained false -p:PublishReadyToRun=true -p:SkipSpaInstall=true
 
+# The volume's folders are made here and copied below, because the runtime stage has no RUN: a RUN there would
+# execute the target's binaries and so need emulation on a machine of another architecture.
+RUN mkdir -p /koppel/config /koppel/keys
+
 # -------- Stage 2: runtime -------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble AS final
 
@@ -64,7 +72,7 @@ WORKDIR /app
 COPY --from=build /publish ./
 
 # One volume root for everything Koppel writes.
-RUN mkdir -p /koppel/config /koppel/keys && chown -R $APP_UID /koppel
+COPY --from=build --chown=$APP_UID /koppel /koppel
 VOLUME /koppel
 USER $APP_UID
 

@@ -19,7 +19,8 @@ re-run on real hardware. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`
 
 ## Run it on Linux
 
-The image is `matumisoftware/koppel` on Docker Hub (amd64 for now).
+The image is `matumisoftware/koppel` on Docker Hub, for amd64 and arm64. A Raspberry Pi needs the 64-bit
+Raspberry Pi OS, which the script below treats as Debian.
 
 1. Copy [src/Koppel/deploy/prepare-host.sh](src/Koppel/deploy/prepare-host.sh) to the machine and
    run it once. It installs Docker from Docker's apt repository (Debian and Ubuntu) and loads the kernel's USB/IP

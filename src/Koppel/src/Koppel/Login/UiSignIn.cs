@@ -13,19 +13,22 @@ internal enum Verdict
     Invalid,
     NotSet,
     AlreadySet,
+    SetupClosed,
 }
 
 /// <param name="RetryAfter">With <see cref="Verdict.Locked"/>: how long until another try is allowed.</param>
-/// <param name="Problem">With <see cref="Verdict.Invalid"/>: what is wrong with the new password.</param>
+/// <param name="Problem">With <see cref="Verdict.Invalid"/>: what is wrong with the new password. With <see cref="Verdict.SetupClosed"/>: what to do now.</param>
 internal sealed record SignInResult(Verdict Verdict, TimeSpan? RetryAfter = null, string? Problem = null);
 
 /// <summary>
-/// What the sign-in endpoints decide: whether a password or setup code is right, how many wrong tries a
-/// caller has had, and what is written to the log and the activity log when one is wrong.
+/// What the sign-in endpoints decide: whether a password is right, whether setup is still open, how many
+/// wrong tries a caller has had, and what is written to the log and the activity log when one is wrong.
 /// </summary>
-internal sealed partial class UiSignIn(UiAuthStore store, UiLoginThrottle throttle, UiPasswordGate gate, IActivityRecorder activity, ILogger<UiSignIn> logger)
+internal sealed partial class UiSignIn(UiAuthStore store, UiLoginThrottle throttle, UiPasswordGate gate, UiSetupWindow window, IActivityRecorder activity, ILogger<UiSignIn> logger)
 {
     private static readonly SignInResult Busy = new(Verdict.Busy);
+
+    private SignInResult Closed => new(Verdict.SetupClosed, Problem: window.ClosedReason);
 
     public async Task<SignInResult> LoginAsync(string caller, string? password)
     {
@@ -60,15 +63,19 @@ internal sealed partial class UiSignIn(UiAuthStore store, UiLoginThrottle thrott
     }
 
     /// <summary>
-    /// Sets the first password. The code is short (about 40 bits), so each caller is limited; one
-    /// caller's wrong guesses never lock out a correct code from another. The rate limiter and the
-    /// shared hash slots hold back the rest.
+    /// Sets the first password, for whoever asks first while setup is open. There is no secret to guess,
+    /// so no caller is locked out; the rate limiter and the shared hash slots hold back a flood.
     /// </summary>
-    public async Task<SignInResult> SetupAsync(string caller, string? code, string? password, CancellationToken cancellationToken)
+    public async Task<SignInResult> SetupAsync(string caller, string? password, CancellationToken cancellationToken)
     {
         if (store.HasPassword)
         {
             return new SignInResult(Verdict.AlreadySet);
+        }
+
+        if (!store.SetupOpen)
+        {
+            return Closed;
         }
 
         if (UiPassword.Validate(password) is { } problem)
@@ -82,23 +89,15 @@ internal sealed partial class UiSignIn(UiAuthStore store, UiLoginThrottle thrott
             return Busy;
         }
 
-        var mine = $"setup:{caller}";
-        var attempt = throttle.Reserve(mine);
-        if (!attempt.Granted)
-        {
-            return new SignInResult(Verdict.Locked, attempt.Lock);
-        }
-
-        switch (await store.SetFirstPasswordAsync(code, password!, cancellationToken))
+        switch (await store.SetFirstPasswordAsync(password!, cancellationToken))
         {
             case SetupOutcome.Done:
-                throttle.Clear(mine);
+                LogPasswordSet(caller);
                 return new SignInResult(Verdict.Ok);
             case SetupOutcome.AlreadySet:
                 return new SignInResult(Verdict.AlreadySet);
             default:
-                await FailAsync(attempt, caller, "Setup with the setup code");
-                return new SignInResult(Verdict.Wrong);
+                return Closed;
         }
     }
 
@@ -152,12 +151,15 @@ internal sealed partial class UiSignIn(UiAuthStore store, UiLoginThrottle thrott
                 ActivityReason.SignInFailed,
                 ActivityOutcome.Failed,
                 $"{what} failed {attempt.Failures} times from {caller}, which is locked out for {(int)Math.Ceiling(attempt.Lock.TotalSeconds)} seconds",
-                "Wrong password or setup code.");
+                "Wrong password.");
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "{What} failed from {Caller}: wrong password or setup code ({Failures} recent tries)")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "{What} failed from {Caller}: wrong password ({Failures} recent tries)")]
     private partial void LogFailed(string what, string caller, int failures);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The first UI password was set from {Caller}")]
+    private partial void LogPasswordSet(string caller);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "The UI password was changed from {Caller}; other sessions are signed out")]
     private partial void LogPasswordChanged(string caller);

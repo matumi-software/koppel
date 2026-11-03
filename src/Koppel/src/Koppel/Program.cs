@@ -26,12 +26,14 @@ builder.Host.UseSystemd();
 // One HTTPS port, 5240, with the server's own self-signed certificate, serves the UI and everything other
 // Koppel machines do, USB traffic included; clients pin the certificate's fingerprint. Ports:Network moves
 // the second onto a port of its own, and discovery answers on UDP at the network port's number unless
-// Discovery:Port says otherwise. Ui:AllowFrom says who may use the UI (UiAccess).
+// Discovery:Port says otherwise. Ui:AllowFrom says who may use the UI (UiAccess), and Ui:SetupWindowMinutes how
+// long a machine without a password takes its first one (UiSetupWindow).
 var uiPort = builder.Configuration.GetValue("Ports:Ui", 5240);
 var networkPort = builder.Configuration.GetValue("Ports:Network", uiPort);
 var discoveryPort = builder.Configuration.GetValue("Discovery:Port", networkPort);
 var listenAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting]);
 var uiReach = UiAccess.Resolve(builder.Configuration[UiAccess.Setting], builder.Environment.IsDevelopment());
+var setupWindow = UiSetupWindow.Resolve(builder.Configuration[UiSetupWindow.Setting]);
 
 // A one-off command for the Docker health check: ask the UI port whether Koppel answers, and exit.
 if (HealthProbe.Requested(args))
@@ -75,13 +77,14 @@ paths.Prepare();
 if (UiPasswordReset.Requested(args))
 {
     using var resetBox = SecretBoxFactory.Create(paths, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
-    return await UiPasswordReset.RunAsync(paths, resetBox, Console.Out);
+    return await UiPasswordReset.RunAsync(paths, resetBox, setupWindow, Console.Out);
 }
 
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, uiPort, networkPort, discoveryPort));
 builder.Services.AddSingleton(new UiAccess(uiReach));
+builder.Services.AddSingleton(new UiSetupWindow(setupWindow, $"https://{Environment.MachineName}:{uiPort}"));
 builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>(), logger: sp.GetRequiredService<ILogger<InMemoryActivityStore>>()));
 builder.Services.AddSingleton<IActivityRecorder>(sp => sp.GetRequiredService<InMemoryActivityStore>());
 builder.Services.AddSingleton<IActivityReader>(sp => sp.GetRequiredService<InMemoryActivityStore>());

@@ -3,9 +3,11 @@ using Microsoft.AspNetCore.Authentication;
 
 namespace Koppel.Login;
 
-internal sealed record UiAuthState(bool SignedIn, bool PasswordSet, string MachineName);
+/// <param name="SetupOpen">True while no password is set and the first one may still be set.</param>
+/// <param name="SetupUntil">While no password is set: when setup closes, or closed. Null once there is a password.</param>
+internal sealed record UiAuthState(bool SignedIn, bool PasswordSet, string MachineName, bool SetupOpen, DateTimeOffset? SetupUntil);
 
-internal sealed record SetupRequest(string? SetupCode, string? Password);
+internal sealed record SetupRequest(string? Password);
 
 internal sealed record LoginRequest(string? Password);
 
@@ -15,9 +17,9 @@ internal static class UiAuthEndpoints
 {
     /// <summary>
     /// Sign-in for the UI. State, setup and login are anonymous (see <c>Surface.Anonymous</c>); logout
-    /// and password change need the session. Success is 204 with a cookie, a wrong password or code is
-    /// 401, 403 or 400 with <c>{ error }</c>, and a caller who tried too often, or arrives while the
-    /// server is busy hashing other passwords, gets 429 with Retry-After.
+    /// and password change need the session. Success is 204 with a cookie, a wrong password is 401 or 400
+    /// and setup after its window 403, each with <c>{ error }</c>, and a caller who tried too often, or
+    /// arrives while the server is busy hashing other passwords, gets 429 with Retry-After.
     /// </summary>
     public static IEndpointRouteBuilder MapUiAuthEndpoints(this IEndpointRouteBuilder app)
     {
@@ -26,18 +28,19 @@ internal static class UiAuthEndpoints
         group.MapGet("/state", async (HttpContext context, UiAuthStore store) =>
         {
             var session = await context.AuthenticateAsync(UiSession.Scheme);
-            return TypedResults.Ok(new UiAuthState(session.Succeeded, store.HasPassword, Environment.MachineName));
+            return TypedResults.Ok(new UiAuthState(session.Succeeded, store.HasPassword, Environment.MachineName, store.SetupOpen, store.SetupUntil));
         });
 
         group.MapPost("/setup", async Task<IResult> (SetupRequest request, HttpContext context, UiAuthStore store, UiSignIn signIn, TimeProvider time, CancellationToken cancellationToken) =>
         {
-            var result = await signIn.SetupAsync(UiSignIn.Caller(context), request.SetupCode, request.Password, cancellationToken);
+            var result = await signIn.SetupAsync(UiSignIn.Caller(context), request.Password, cancellationToken);
             if (result.Verdict == Verdict.Ok)
             {
                 await UiSession.SignInAsync(context, UiSession.NewPrincipal(store.SecurityStamp, time.GetUtcNow()));
             }
 
-            return Answer(context, result, wrong: StatusCodes.Status403Forbidden, wrongText: "That setup code is not right.");
+            // Setup has no secret, so it is never wrong: a refusal is Invalid, AlreadySet or SetupClosed.
+            return Answer(context, result, wrong: StatusCodes.Status400BadRequest, wrongText: "The password was not set.");
         });
 
         group.MapPost("/login", async Task<IResult> (LoginRequest request, HttpContext context, UiAuthStore store, UiSignIn signIn, TimeProvider time) =>
@@ -94,10 +97,12 @@ internal static class UiAuthEndpoints
                 return TypedResults.Json(new { error = "The server is busy checking another password. Try again in a moment." }, statusCode: StatusCodes.Status429TooManyRequests);
             case Verdict.Invalid:
                 return TypedResults.Json(new { error = result.Problem }, statusCode: StatusCodes.Status400BadRequest);
+            case Verdict.SetupClosed:
+                return TypedResults.Json(new { error = result.Problem }, statusCode: StatusCodes.Status403Forbidden);
             case Verdict.AlreadySet:
                 return TypedResults.Json(new { error = "A password is already set." }, statusCode: StatusCodes.Status409Conflict);
             case Verdict.NotSet:
-                return TypedResults.Json(new { error = "No password is set yet. Set one with the setup code." }, statusCode: StatusCodes.Status409Conflict);
+                return TypedResults.Json(new { error = "No password is set yet. Open the UI to set one." }, statusCode: StatusCodes.Status409Conflict);
             default:
                 return TypedResults.Json(new { error = wrongText }, statusCode: wrong);
         }

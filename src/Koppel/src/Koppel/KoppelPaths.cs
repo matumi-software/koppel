@@ -19,11 +19,8 @@ internal sealed record KoppelPaths(string ConfigDirectory, string KeysDirectory,
     /// <summary>The UI's password hash and security stamp. Encrypted.</summary>
     public string UiAuthFile => Path.Combine(ConfigDirectory, "ui-auth.json");
 
-    /// <summary>
-    /// The one-time setup code, while no UI password is set. It sits in the config directory, which
-    /// <see cref="Prepare"/> restricts to administrators.
-    /// </summary>
-    public string SetupCodeFile => Path.Combine(ConfigDirectory, "setup-code.txt");
+    /// <summary>Where earlier versions wrote a one-time setup code. Nothing uses it now; it is deleted on start.</summary>
+    public string OldSetupCodeFile => Path.Combine(ConfigDirectory, "setup-code.txt");
 
     /// <summary>
     /// Creates the config and keys directories and restricts both to administrators, before anything is written to them.

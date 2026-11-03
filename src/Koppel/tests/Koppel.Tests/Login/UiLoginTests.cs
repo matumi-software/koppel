@@ -26,9 +26,9 @@ public sealed class UiLoginTests : IDisposable
         }
     }
 
-    private KoppelFactory Host()
+    private KoppelFactory Host(ManualTimeProvider? clock = null, IReadOnlyDictionary<string, string>? configuration = null)
     {
-        var host = new KoppelFactory(kestrel: true);
+        var host = new KoppelFactory(kestrel: true, configuration: configuration, services: clock is null ? null : s => s.AddSingleton<TimeProvider>(clock));
         _disposables.Add(host);
         return host;
     }
@@ -51,7 +51,7 @@ public sealed class UiLoginTests : IDisposable
     private static async Task<string> SetPasswordAsync(KoppelFactory host)
     {
         using var client = host.CreateAnonymousUiClient();
-        using var response = await client.PostAsJsonAsync("/api/auth/setup", new { setupCode = host.SetupCode, password = KoppelFactory.Password }, TestContext.Current.CancellationToken);
+        using var response = await client.PostAsJsonAsync("/api/auth/setup", new { password = KoppelFactory.Password }, TestContext.Current.CancellationToken);
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
         return CookieOf(response);
     }
@@ -94,6 +94,7 @@ public sealed class UiLoginTests : IDisposable
         var state = await anonymous.GetFromJsonAsync<JsonElement>("/api/auth/state", ct);
         state.GetProperty("signedIn").GetBoolean().Should().BeFalse();
         state.GetProperty("passwordSet").GetBoolean().Should().BeFalse();
+        state.GetProperty("setupOpen").GetBoolean().Should().BeTrue();
         state.GetProperty("machineName").GetString().Should().Be(Environment.MachineName);
     }
 
@@ -114,35 +115,93 @@ public sealed class UiLoginTests : IDisposable
     }
 
     [Fact]
-    public async Task Setup_needs_the_code_and_works_once()
+    public async Task Setup_takes_only_the_password_while_open_and_works_once()
     {
         var ct = TestContext.Current.CancellationToken;
-        var host = Host();
+        var clock = new ManualTimeProvider();
+        var host = Host(clock);
         var anonymous = Own(host.CreateAnonymousUiClient());
-        var code = host.SetupCode;
-        code.Should().MatchRegex("^[A-HJKMNP-Z2-9]{8}$");
+        var before = await anonymous.GetFromJsonAsync<JsonElement>("/api/auth/state", ct);
+        before.GetProperty("setupOpen").GetBoolean().Should().BeTrue();
+        before.GetProperty("setupUntil").GetDateTimeOffset().Should().Be(clock.GetUtcNow() + UiSetupWindow.DefaultLength);
+        clock.Advance(UiSetupWindow.DefaultLength - TimeSpan.FromSeconds(1));
 
-        using var wrong = await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = "AAAA-AAAA", password = KoppelFactory.Password }, ct);
-        wrong.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        wrong.Headers.Contains("Set-Cookie").Should().BeFalse();
-        using var missing = await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = KoppelFactory.Password }, ct);
-        missing.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await anonymous.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        using var right = await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = KoppelFactory.Password }, ct);
 
-        // The code as it is shown, dash and lower case included.
-        var shown = $"{code[..4]}-{code[4..]}".ToLowerInvariant();
-        using var right = await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = shown, password = KoppelFactory.Password }, ct);
         right.StatusCode.Should().Be(HttpStatusCode.NoContent);
         var signedIn = WithCookie(host, CookieOf(right));
         (await signedIn.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var after = await anonymous.GetFromJsonAsync<JsonElement>("/api/auth/state", ct);
+        after.GetProperty("passwordSet").GetBoolean().Should().BeTrue();
+        after.GetProperty("setupOpen").GetBoolean().Should().BeFalse();
+        after.GetProperty("setupUntil").ValueKind.Should().Be(JsonValueKind.Null);
 
-        using var again = await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = code, password = NewPassword }, ct);
+        using var again = await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = NewPassword }, ct);
         again.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        host.Services.GetRequiredService<UiAuthStore>().SetupCode.Should().BeNull();
+        (await ErrorOf(again, ct)).Should().Be("A password is already set.");
+        (await anonymous.PostAsJsonAsync("/api/auth/login", new { password = NewPassword }, ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the second setup changed nothing");
     }
 
     [Fact]
-    public async Task Setup_refuses_a_weak_password_and_keeps_the_code()
+    public async Task Setup_is_refused_once_the_window_has_closed()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var clock = new ManualTimeProvider();
+        var host = Host(clock);
+        var anonymous = Own(host.CreateAnonymousUiClient());
+        clock.Advance(UiSetupWindow.DefaultLength);
+
+        using var late = await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = KoppelFactory.Password }, ct);
+
+        late.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        late.Headers.Contains("Set-Cookie").Should().BeFalse();
+        (await ErrorOf(late, ct)).Should().Contain("timed out").And.Contain("10 minutes").And.Contain("Restart Koppel");
+        host.Services.GetRequiredService<UiAuthStore>().HasPassword.Should().BeFalse();
+        var state = await anonymous.GetFromJsonAsync<JsonElement>("/api/auth/state", ct);
+        state.GetProperty("passwordSet").GetBoolean().Should().BeFalse();
+        state.GetProperty("setupOpen").GetBoolean().Should().BeFalse();
+        state.GetProperty("setupUntil").GetDateTimeOffset().Should().Be(clock.GetUtcNow(), "the UI says when it closed");
+    }
+
+    [Fact]
+    public async Task The_setup_window_follows_its_setting()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var clock = new ManualTimeProvider();
+        var host = Host(clock, new Dictionary<string, string> { [UiSetupWindow.Setting] = "2" });
+        var anonymous = Own(host.CreateAnonymousUiClient());
+
+        var state = await anonymous.GetFromJsonAsync<JsonElement>("/api/auth/state", ct);
+        state.GetProperty("setupUntil").GetDateTimeOffset().Should().Be(clock.GetUtcNow() + TimeSpan.FromMinutes(2));
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        using var late = await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = KoppelFactory.Password }, ct);
+        late.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorOf(late, ct)).Should().Contain("2 minutes");
+    }
+
+    [Theory]
+    [InlineData(null, 10)]
+    [InlineData("", 10)]
+    [InlineData(" 5 ", 5)]
+    [InlineData("1440", 1440)]
+    public void The_setup_window_setting_is_whole_minutes(string? setting, int minutes) =>
+        UiSetupWindow.Resolve(setting).Should().Be(TimeSpan.FromMinutes(minutes));
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("1.5")]
+    [InlineData("1441")]
+    [InlineData("ten")]
+    public void A_bad_setup_window_setting_stops_the_start_and_names_it(string setting)
+    {
+        var resolve = () => UiSetupWindow.Resolve(setting);
+        resolve.Should().Throw<InvalidOperationException>().WithMessage($"*{UiSetupWindow.Setting}*");
+    }
+
+    [Fact]
+    public async Task Setup_refuses_a_weak_password_and_stays_open()
     {
         var ct = TestContext.Current.CancellationToken;
         var host = Host();
@@ -150,45 +209,12 @@ public sealed class UiLoginTests : IDisposable
 
         foreach (var weak in new[] { "short", "KOPPEL", "Password", "" })
         {
-            using var response = await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = host.SetupCode, password = weak }, ct);
+            using var response = await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = weak }, ct);
             response.StatusCode.Should().Be(HttpStatusCode.BadRequest, weak);
         }
 
         host.Services.GetRequiredService<UiAuthStore>().HasPassword.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task Wrong_setup_codes_are_rate_limited()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        var host = Host();
-        var anonymous = Own(host.CreateAnonymousUiClient());
-        var code = host.SetupCode;
-
-        for (var i = 0; i < UiLoginThrottle.FreeFailures; i++)
-        {
-            (await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = "AAAA-AAAA", password = KoppelFactory.Password }, ct)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        }
-
-        using var locked = await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = code, password = KoppelFactory.Password }, ct);
-        locked.StatusCode.Should().Be(HttpStatusCode.TooManyRequests, "the right code does not help during a lock");
-        locked.Headers.RetryAfter!.Delta.Should().BeGreaterThan(TimeSpan.Zero);
-    }
-
-    [Fact]
-    public async Task Wrong_setup_codes_from_one_caller_do_not_block_a_correct_code_from_another()
-    {
-        var host = Host();
-        var signIn = host.Services.GetRequiredService<UiSignIn>();
-        var code = host.SetupCode;
-
-        for (var i = 0; i < UiLoginThrottle.FreeFailures + 3; i++)
-        {
-            await signIn.SetupAsync("attacker", "AAAA-AAAA", KoppelFactory.Password, TestContext.Current.CancellationToken);
-        }
-
-        (await signIn.SetupAsync("attacker", code, KoppelFactory.Password, TestContext.Current.CancellationToken)).Verdict.Should().Be(Verdict.Locked);
-        (await signIn.SetupAsync("admin", code, KoppelFactory.Password, TestContext.Current.CancellationToken)).Verdict.Should().Be(Verdict.Ok);
+        host.Services.GetRequiredService<UiAuthStore>().SetupOpen.Should().BeTrue();
     }
 
     [Fact]
@@ -249,7 +275,7 @@ public sealed class UiLoginTests : IDisposable
         }
 
         (await anonymous.PostAsJsonAsync("/api/auth/login", new { password = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
-        (await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = "x", password = "y" }, ct)).StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        (await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = "y" }, ct)).StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
         (await anonymous.GetAsync("/api/auth/state", ct)).StatusCode.Should().Be(HttpStatusCode.OK, "the UI polls state, so it is not limited");
     }
 
@@ -304,17 +330,13 @@ public sealed class UiLoginTests : IDisposable
     }
 
     [Fact]
-    public async Task The_setup_code_is_written_to_a_file_and_removed_once_a_password_is_set()
+    public async Task No_setup_code_file_is_written_and_the_password_file_is_encrypted()
     {
         var host = Host();
-        var file = host.ConfigFile("setup-code.txt");
-
-        File.Exists(file).Should().BeTrue();
-        File.ReadAllText(file).Trim().Replace("-", "").Should().Be(host.SetupCode);
 
         await SetPasswordAsync(host);
 
-        File.Exists(file).Should().BeFalse();
+        File.Exists(host.ConfigFile("setup-code.txt")).Should().BeFalse();
         File.Exists(host.ConfigFile("ui-auth.json")).Should().BeTrue();
         File.ReadAllText(host.ConfigFile("ui-auth.json")).Should().NotContain(KoppelFactory.Password, "the file is encrypted");
     }
@@ -374,7 +396,7 @@ public sealed class UiLoginTests : IDisposable
         var host = Host();
         var anonymous = Own(host.CreateAnonymousUiClient());
 
-        using var response = await anonymous.PostAsJsonAsync("/api/auth/setup", new { setupCode = host.SetupCode, password = KoppelFactory.Password }, ct);
+        using var response = await anonymous.PostAsJsonAsync("/api/auth/setup", new { password = KoppelFactory.Password }, ct);
 
         var cookie = response.Headers.GetValues("Set-Cookie").Single();
         cookie.Should().StartWith("koppel.ui=");
@@ -451,19 +473,22 @@ public sealed class UiLoginTests : IDisposable
     }
 
     [Fact]
-    public async Task Resetting_the_password_clears_it_ends_sessions_and_issues_a_new_setup_code()
+    public async Task Resetting_the_password_clears_it_ends_sessions_and_opens_setup_again()
     {
         var ct = TestContext.Current.CancellationToken;
-        var host = Host();
+        var clock = new ManualTimeProvider();
+        var host = Host(clock);
         var cookie = await SetPasswordAsync(host);
         var paths = host.Services.GetRequiredService<KoppelPaths>();
         var store = host.Services.GetRequiredService<UiAuthStore>();
         var output = new StringWriter();
+        // Long after the window Koppel opened at start.
+        clock.Advance(TimeSpan.FromHours(1));
 
-        var exit = await UiPasswordReset.RunAsync(paths, host.Services.GetRequiredService<SecretBox>(), output);
+        var exit = await UiPasswordReset.RunAsync(paths, host.Services.GetRequiredService<SecretBox>(), UiSetupWindow.DefaultLength, output);
 
         exit.Should().Be(0);
-        output.ToString().Should().Contain("setup code").And.Contain(paths.SetupCodeFile);
+        output.ToString().Should().Contain("10 minutes").And.NotContain("setup code");
 
         // The running host sees the file change.
         var deadline = DateTime.UtcNow.AddSeconds(15);
@@ -473,45 +498,60 @@ public sealed class UiLoginTests : IDisposable
         }
 
         store.HasPassword.Should().BeFalse();
-        store.SetupCode.Should().NotBeNull();
-        File.Exists(host.ConfigFile("setup-code.txt")).Should().BeTrue();
+        store.SetupOpen.Should().BeTrue("a reset opens setup again at once");
+        store.SetupUntil.Should().Be(clock.GetUtcNow() + UiSetupWindow.DefaultLength);
         (await WithCookie(host, cookie).GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         using var login = await Own(host.CreateAnonymousUiClient()).PostAsJsonAsync("/api/auth/login", new { password = KoppelFactory.Password }, ct);
         login.StatusCode.Should().Be(HttpStatusCode.Conflict);
 
         await SetPasswordAsync(host);
-        File.Exists(host.ConfigFile("setup-code.txt")).Should().BeFalse();
+        store.SetupOpen.Should().BeFalse();
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Setup_code_is_logged_only_where_the_log_is_not_shared(bool logIsShared)
+    [Fact]
+    public async Task A_reset_while_stopped_opens_setup_on_the_next_start()
+    {
+        var host = Host();
+        await SetPasswordAsync(host);
+        var paths = host.Services.GetRequiredService<KoppelPaths>();
+        host.Stop();
+        using (var box = Koppel.Security.SecretBoxFactory.Create(paths, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance))
+        {
+            (await UiPasswordReset.RunAsync(paths, box, UiSetupWindow.DefaultLength, new StringWriter())).Should().Be(0);
+        }
+
+        var clock = new ManualTimeProvider();
+        var restarted = new KoppelFactory(kestrel: true, restartOf: host, services: s => s.AddSingleton<TimeProvider>(clock));
+        _disposables.Add(restarted);
+
+        var store = restarted.Services.GetRequiredService<UiAuthStore>();
+        store.HasPassword.Should().BeFalse();
+        store.SetupUntil.Should().Be(clock.GetUtcNow() + UiSetupWindow.DefaultLength);
+        await SetPasswordAsync(restarted);
+    }
+
+    [Fact]
+    public async Task The_log_says_where_to_set_the_first_password_and_until_when_and_an_old_code_file_goes()
     {
         var directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
         try
         {
             var paths = new KoppelPaths(Path.Combine(directory, "config"), Path.Combine(directory, "keys"));
             paths.Prepare();
+            await File.WriteAllTextAsync(paths.OldSetupCodeFile, "ABCD-2345", TestContext.Current.CancellationToken);
             using var box = new SecretBox(paths.KeysDirectory, "Koppel.Secrets.v1");
             var logger = new CapturingLogger();
-            using var store = new UiAuthStore(paths, box, logger, logIsShared);
+            var clock = new ManualTimeProvider();
+            var window = new UiSetupWindow(UiSetupWindow.DefaultLength, "https://bench-pc:5240");
+            using var store = new UiAuthStore(paths, box, window, clock, logger);
 
             await store.StartAsync(TestContext.Current.CancellationToken);
 
-            var code = store.SetupCode!;
-            var shown = $"{code[..4]}-{code[4..]}";
-            File.ReadAllText(paths.SetupCodeFile).Trim().Should().Be(shown);
-            var logged = string.Join(' ', logger.Messages);
-            logged.Should().Contain(paths.SetupCodeFile);
-            if (logIsShared)
-            {
-                logged.Should().NotContain(shown).And.NotContain(code);
-            }
-            else
-            {
-                logged.Should().Contain(shown);
-            }
+            File.Exists(paths.OldSetupCodeFile).Should().BeFalse();
+            var until = TimeZoneInfo.ConvertTime(clock.GetUtcNow() + window.Length, clock.LocalTimeZone);
+            logger.Messages.Should().ContainSingle(m => m.Contains("waiting for its first password"))
+                .Which.Should().Contain("https://bench-pc:5240").And.Contain(until.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture));
+            store.SetupOpen.Should().BeTrue();
 
             await store.StopAsync(TestContext.Current.CancellationToken);
         }
@@ -543,12 +583,12 @@ public sealed class UiLoginTests : IDisposable
             paths.Prepare();
             using var box = new SecretBox(paths.KeysDirectory, "Koppel.Secrets.v1");
 
-            (await UiPasswordReset.RunAsync(paths, box, new StringWriter())).Should().Be(0);
+            (await UiPasswordReset.RunAsync(paths, box, UiSetupWindow.DefaultLength, new StringWriter())).Should().Be(0);
             File.Exists(paths.UiAuthFile).Should().BeTrue();
 
             await File.WriteAllTextAsync(paths.UiAuthFile, "not encrypted at all", TestContext.Current.CancellationToken);
-            (await UiPasswordReset.RunAsync(paths, box, new StringWriter())).Should().Be(0);
-            using var store = new UiAuthStore(paths, box, Microsoft.Extensions.Logging.Abstractions.NullLogger<UiAuthStore>.Instance);
+            (await UiPasswordReset.RunAsync(paths, box, UiSetupWindow.DefaultLength, new StringWriter())).Should().Be(0);
+            using var store = new UiAuthStore(paths, box, new UiSetupWindow(UiSetupWindow.DefaultLength, "https://localhost:5240"), TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<UiAuthStore>.Instance);
             await store.StartAsync(TestContext.Current.CancellationToken);
             store.HasPassword.Should().BeFalse();
             await store.StopAsync(TestContext.Current.CancellationToken);

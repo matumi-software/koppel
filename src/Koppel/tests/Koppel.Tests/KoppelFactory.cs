@@ -145,7 +145,7 @@ public sealed class KoppelFactory : IDisposable
 
     /// <summary>
     /// A client on the UI side that is signed in, sending the header the UI sends on every
-    /// request. The first one sets the password with the setup code; later ones share its session.
+    /// request. The first one sets the password, as the first visitor of a new install does; later ones share its session.
     /// </summary>
     public HttpClient CreateUiClient()
     {
@@ -170,9 +170,6 @@ public sealed class KoppelFactory : IDisposable
         return client;
     }
 
-    /// <summary>The setup code of a host that has no password yet.</summary>
-    public string SetupCode => Services.GetRequiredService<Koppel.Login.UiAuthStore>().SetupCode ?? throw new InvalidOperationException("A password is already set.");
-
     private string SessionCookie()
     {
         lock (_session)
@@ -181,10 +178,10 @@ public sealed class KoppelFactory : IDisposable
             {
                 using var client = CreateAnonymousUiClient();
                 // A test that set the password itself leaves nothing to set up: sign in instead.
-                var passwordSet = Services.GetRequiredService<Koppel.Login.UiAuthStore>().SetupCode is null;
+                var passwordSet = Services.GetRequiredService<Koppel.Login.UiAuthStore>().HasPassword;
                 using var response = (passwordSet
                     ? client.PostAsJsonAsync("/api/auth/login", new { password = Password })
-                    : client.PostAsJsonAsync("/api/auth/setup", new { setupCode = SetupCode, password = Password })).GetAwaiter().GetResult();
+                    : client.PostAsJsonAsync("/api/auth/setup", new { password = Password })).GetAwaiter().GetResult();
                 response.EnsureSuccessStatusCode();
                 _cookie = response.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
             }

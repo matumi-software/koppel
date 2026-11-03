@@ -79,7 +79,7 @@ sudo apt install ./koppel_0.1.0_arm64.deb
 ```
 
 The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Read the
-setup code with `sudo cat /var/lib/koppel/config/setup-code.txt` (or `sudo journalctl -u koppel`) and open
+setup code with `sudo cat /var/lib/koppel/config/setup-code.txt` and open
 `https://<machine>:5240`. If a module will not load, the install says so; the fix is the same as above.
 
 - Config and keys live in `/var/lib/koppel`. An upgrade (`sudo apt install` of a newer `.deb`) and

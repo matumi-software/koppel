@@ -69,9 +69,6 @@ Settings that move them:
 | `Gateway:Address` | `127.0.0.1` | Where the gateway listens |
 | `RateLimits:TokenPerMinute`, `RateLimits:PairPerMinute`, `RateLimits:AuthPerMinute` | 60, 120, 30 | See "Guards on the web surface" |
 
-The USB port must not equal the HTTP, HTTPS or gateway port. That is checked on a change and when
-`settings.json` is loaded.
-
 `GET /healthz` is on the UI port, anonymous, answers `ok` in any role and needs no header. The Docker
 image's health check is Koppel itself (`dotnet Koppel.dll --healthcheck`, `Web/HealthProbe.cs`), because the port is HTTPS and the image has no curl or openssl. It calls `/healthz` on `Ports__HttpAddress` and `Ports__Http` (any-address and unset mean loopback), then on 127.0.0.1, and accepts any certificate, since it sends nothing secret. Plain Docker only marks the container unhealthy and does not restart it; `restart:` acts on exits. Swarm and Kubernetes act on it, and with plain Docker something such as an autoheal container has to.
 

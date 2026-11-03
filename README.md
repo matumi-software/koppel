@@ -68,7 +68,7 @@ Build the installer from `src/Koppel/installer`:
 ```
 
 That makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows service, usbip-win2's signed
-driver, the Visual C++ runtime, and a firewall rule that lets Koppel find servers. Open
+driver and the Visual C++ runtime. It adds no firewall rule: finding servers works without one. Open
 https://localhost:5240 afterwards and accept the browser's certificate warning. The first time, it asks for a setup code: it is in
 `%ProgramData%\Koppel\config\setup-code.txt`. The UI answers on this machine only. See
 [docs/windows.md](docs/windows.md) for what the installer does to `%ProgramData%\Koppel` and the driver.

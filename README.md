@@ -58,25 +58,19 @@ docker compose pull && docker compose up -d
 Settings, the server's certificate, registered clients and the encryption keys live in the `koppel`
 volume, not in the image, so an upgrade keeps them.
 
-To run your own build on another machine instead, see "Running on another machine" in
-[docs/architecture.md](docs/architecture.md).
-
 ### Without Docker
 
 A `.deb` package runs Koppel as a systemd service on Debian 12 and 13, Ubuntu 22.04 and later, and
-64-bit Raspberry Pi OS, for amd64 and arm64. It needs no .NET and no Docker. Build the packages from
-`src/Koppel/installer/linux` (it needs Docker on the build machine only):
-
-```powershell
-.\build.ps1
-```
-
-They land in `bin\` as `koppel_<version>_amd64.deb` and `koppel_<version>_arm64.deb`. Copy the one for the
-machine over and install it:
+64-bit Raspberry Pi OS, for amd64 and arm64. It needs no .NET and no Docker. Download the package for
+the machine from the [latest release](https://github.com/matumi-software/koppel/releases/latest) and
+install it:
 
 ```sh
-sudo apt install ./koppel_0.1.0_arm64.deb
+wget https://github.com/matumi-software/koppel/releases/download/v0.1.0/koppel_0.1.0_amd64.deb
+sudo apt install ./koppel_0.1.0_amd64.deb
 ```
+
+On a Raspberry Pi, take `koppel_0.1.0_arm64.deb` instead.
 
 The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Read the
 setup code with `sudo cat /var/lib/koppel/config/setup-code.txt` and open
@@ -90,13 +84,8 @@ setup code with `sudo cat /var/lib/koppel/config/setup-code.txt` and open
 
 ## Run it on Windows
 
-Build the installer from `src/Koppel/installer`:
-
-```powershell
-.\build.ps1
-```
-
-That makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows service, usbip-win2's signed
+Download `Koppel-Setup.exe` from the [latest release](https://github.com/matumi-software/koppel/releases/latest)
+and run it. It installs Koppel as a Windows service, usbip-win2's signed
 driver and the Visual C++ runtime. It also adds an inbound firewall rule for the Koppel program on Private and Domain networks, so a Windows server can be reached without one added by hand. Open
 https://localhost:5240 afterwards and accept the browser's certificate warning. The first time, it asks for a setup code: it is in
 `%ProgramData%\Koppel\config\setup-code.txt`. The UI answers on this machine only. See
@@ -139,7 +128,9 @@ a new setup code and set a new password.
 ## Develop
 
 See the commands in [CLAUDE.md](CLAUDE.md) and the design in
-[docs/architecture.md](docs/architecture.md).
+[docs/architecture.md](docs/architecture.md). To build the Windows installer, the Linux packages or the
+image yourself, see "Building and releasing" there; to run your own build on another machine, see
+"Running on another machine".
 
 ## License
 

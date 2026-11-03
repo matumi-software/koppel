@@ -124,7 +124,7 @@ docker compose exec koppel dotnet Koppel.dll --reset-password
 
 ## The native install
 
-`src\Koppel\installer\build.ps1` makes `bin\Koppel-Setup.exe`. It installs Koppel as a Windows
+`Koppel-Setup.exe` comes with each [release](https://github.com/matumi-software/koppel/releases/latest). It installs Koppel as a Windows
 service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, the Visual C++
 runtime. It adds an inbound firewall rule for `Koppel.exe` (TCP and UDP, any port, so it
 follows a changed `Ports` setting) on Private and Domain networks, never Public. It is removed on uninstall and kept on repair and

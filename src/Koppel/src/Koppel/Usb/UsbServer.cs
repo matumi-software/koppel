@@ -139,7 +139,11 @@ internal sealed partial class UsbServer(
         try
         {
             var device = (await host.ListDevicesAsync(cancellationToken)).FirstOrDefault(d => d.BusId == busId);
-            failure = await ApplyChoiceAsync(busId, share, device, cancellationToken);
+            // Only a device that is plugged in and can be shared is remembered. A hub is not listed, and a port with
+            // nothing on it has nothing to remember, so neither may turn up later as an unplugged device.
+            failure = share && device is null
+                ? Fail(busId, "There is no shareable device on this bus ID. A hub cannot be shared.")
+                : await ApplyChoiceAsync(busId, share, device, cancellationToken);
             if (failure is null)
             {
                 await SaveChoiceAsync(busId, share, device, cancellationToken);
@@ -596,10 +600,12 @@ internal sealed partial class UsbServer(
                 [.. d.Interfaces.Select(i => InterfaceClassName(i.Class)).Distinct()]));
         }
 
-        // Shared devices that are unplugged stay visible, so the user knows they come back shared.
+        // A device the user shared that is gone stays visible, so they know it comes back shared. Only a bus ID
+        // with a remembered VID:PID counts: one without never held a device Koppel saw, so there is nothing to show as gone.
+        var remembered = _shared.Current.VidPids;
         views.AddRange(intent
-            .Where(busId => devices.All(d => d.BusId != busId))
-            .Select(busId => new DeviceView(busId, "", _names.GetValueOrDefault(busId, "Unplugged device"), null, "", "offline", null, null, _faults.GetValueOrDefault(busId))));
+            .Where(busId => remembered?.ContainsKey(busId) == true && devices.All(d => d.BusId != busId))
+            .Select(busId => new DeviceView(busId, remembered![busId], _names.GetValueOrDefault(busId, "Unplugged device"), null, "", "offline", null, null, _faults.GetValueOrDefault(busId))));
 
         return new ServerDevices([.. views.OrderBy(v => v.BusId, StringComparer.Ordinal)], host.Unavailable);
     }

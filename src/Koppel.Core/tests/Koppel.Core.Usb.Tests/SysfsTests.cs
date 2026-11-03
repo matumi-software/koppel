@@ -40,6 +40,21 @@ public sealed class SysfsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_hub_is_not_listed_but_the_devices_behind_it_are()
+    {
+        // The hub's own interface folder (3-1:1.0) sits in the tree too, as it does on a real machine; on Windows it cannot be created.
+        AddDevice("3-1", "05e3", "0610", "09", "480", "hub");
+        AddDevice("3-1.1", "046d", "0825", "ef", "480", "uvcvideo", product: "Webcam C270");
+        AddDevice("3-1.2", "0781", "5567", "00", "480", "usb-storage", product: "Cruzer Blade");
+        AddDevice("3-2", "05e3", "0610", "09", "480", "hub");
+        var host = new SysfsUsbHost(_sys);
+
+        var devices = await host.ListDevicesAsync(TestContext.Current.CancellationToken);
+
+        devices.Select(d => d.BusId).Should().Equal("3-1.1", "3-1.2");
+    }
+
+    [Fact]
     public async Task Devices_attached_from_another_server_are_not_listed()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Needs real symlinks, as sysfs has; runs in the Linux container.");

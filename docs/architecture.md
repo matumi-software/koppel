@@ -207,7 +207,8 @@ What it does not cover:
 
 - **Running the tests:** `dotnet test` runs everything. The discovery round trip (`DiscoveryTests.A_browser_finds_a_server_and_drops_it_when_it_stops_answering`) runs over loopback, so it needs no network.
 - **Fakes:** the protocol encoding, the sysfs adapters against a fake `/sys`, and a full server-to-client run on real Kestrel with fake kernels on both ends (token, pinning, hub, WebSocket, import, byte round trip). The server and client changes listed above (deadlines, revocation, the exportable rule, reconciliation, the gateway check, detach on stop) have fake-based tests, and most were also run on real hardware on 2026-11-03 (below).
-- **Not re-run on real hardware:** the Windows client through Docker Desktop, and the attach deadline on its own (the gateway only served the kernel's connections).
+- **Windows client through Docker Desktop (2026-11-03):** `usbip.exe attach -r 127.0.0.1` through the container's gateway attaches without elevation, Windows enumerates the device, Koppel shows it attached through the gateway, and Koppel's Detach removes it.
+- **Not exercised on real hardware:** the attach deadline on its own (the gateway only served the kernel's connections).
 - **Real kernel (2026-11-02, WSL2 6.6, software USB device):** sharing binds the device to `usbip-host`, both kernels take Koppel's sockets, and the device enumerates through both relays and TLS up to `SET_CONFIGURATION`. That step deadlocks because the test device and its attached copy sit on the same virtual controller, the only one the WSL kernel has; the same happens with no Koppel in the path. Configuration and bulk data still need a client on a second machine.
 - **Real hardware (2026-11-02, first run):** a Debian thin client runs the server in Docker and shares a Logitech USB receiver. A Windows 11 client attaches it through the installed service and usbip-win2, and through Docker Desktop's gateway, and it works as keyboard and mouse there.
 - **Real hardware (2026-11-03):** a Debian 13 machine runs the server in Docker and shares two Logitech receivers, a flash drive and a webcam. A native Windows 11 client attaches the receivers and the drive, and they keep working across an installer upgrade. A 256 MB file written to the drive and read back after a detach and reattach matched its checksum (about 8 MB/s). A 75 second network drop was recovered from by itself: the server freed the devices after about 50 seconds and they reattached within 2 seconds of the traffic returning. Rotating a client's secret ended its sessions at once, and stopping the client service removed the devices. A Windows 11 PC running a real usbipd-win shared a webcam to the Debian machine, which streamed it at 30 fps, so isochronous transfers cross the relay in that direction. A Logitech C270 webcam from the Linux server to the Windows client attaches but delivers no frames (#22).
@@ -370,7 +371,7 @@ To release:
 - The rollback of a failed fresh install was not exercised (see "Tested").
 - Printers are untried, and the arm64 image and `.deb` are untested on a Raspberry Pi.
 - Webcams do not stream from a Linux server to a Windows client (#22); a Windows server through usbipd-win to a Linux client does.
-- The Windows client through Docker Desktop and the attach deadline on its own were not re-run on 2026-11-03.
+- The attach deadline on its own was not exercised on real hardware; it is covered by tests with fakes.
 - `Polly.Extensions.Http` is a deprecated package that arrives through OpenIddict (`Microsoft.Extensions.Http.Polly`). Koppel code does not use it directly. `Common.Logging`, which the mDNS library used to pull in, is no longer in any lock file.
 - The UI does not show `gatewayFault` or the live `listen` status yet.
 

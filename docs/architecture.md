@@ -48,7 +48,9 @@ One HTTPS port, 5240, with the server's own self-signed certificate, serves both
 people who run this machine, and the network surface, for other Koppel machines. `Ports:Network` moves
 the network surface onto a port of its own. Which port serves what is decided by the local port the
 connection arrived on, never the `Host` header. A request for a surface that is not on that port, or
-that this machine's current role does not have, gets 404. The role is read from the settings on every request, so a role change takes effect at once.
+that this machine's current role does not have, gets 404. Plain HTTP on a web port gets a 301 to the
+same host, port and path over HTTPS, answered before TLS from the first byte of the connection
+(`Web/PlainHttpRedirect.cs`); it never reaches the app. The role is read from the settings on every request, so a role change takes effect at once.
 The table is `Surface.Listed` in `src/Koppel/Web/SurfaceGuard.cs`; a path not listed counts as the UI's,
 so a new route is never exposed to remote clients by accident.
 
@@ -113,7 +115,7 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 ### Guards on the web surface
 
 - **Origin and header (UI surface):** an `Origin` that does not match the request's own scheme, host and port gets 403 on any `/api/*` call, the hub's WebSocket upgrade included. Behind a TLS proxy the scheme comes from `X-Forwarded-Proto`. A change (anything but GET or HEAD) also needs `X-Koppel-UI: 1`, otherwise 403. A page on another site cannot add that header without a CORS preflight, which this server never grants. The UI adds it in `api/http.ts` (`uiFetch`, used by every mutating fetch). The hub is exempt from the header only, because an upgrade cannot carry one.
-- **Host header:** `AllowedHosts` stays `*` and is configurable. A DNS rebinding page is stopped by HTTPS: the browser checks Koppel's certificate against the rebinding page's own host name and the request fails, and a page that tries plain HTTP gets no answer from a TLS port. The SameSite=Strict cookie and the Origin and header checks stand behind that, not the host name.
+- **Host header:** `AllowedHosts` stays `*` and is configurable. A DNS rebinding page is stopped by HTTPS: the browser checks Koppel's certificate against the rebinding page's own host name and the request fails, and a page that tries plain HTTP is only redirected to HTTPS at its own host name, where the same check fails. The SameSite=Strict cookie and the Origin and header checks stand behind that, not the host name.
 - **Security headers** on every response: `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` (only that, so it cannot break the app), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
 - **Rate limits:** a fixed one-minute window per remote IP, answering 429. `/connect/token` allows 60 (`RateLimits:TokenPerMinute`), `/api/pair*` allows 120 (`RateLimits:PairPerMinute`; a waiting client polls 30 times a minute), and `/api/auth/setup`, `/login` and `/password` allow 30 (`RateLimits:AuthPerMinute`), counted per IPv4 address or IPv6 /64. The limiter sits after the port and role check, so a request for a surface that is not there does not use up an allowance.
 - **Remote hub:** mapped with `CloseOnAuthenticationExpiration`, so a connection ends when its token runs out. The client makes the link again 30 seconds before that, with a fresh token, and shows nothing of it: no "connecting" and no entry in the activity log. A close within 10 seconds of the token's end counts as the same expiry.

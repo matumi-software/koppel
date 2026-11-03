@@ -39,7 +39,8 @@ if (HealthProbe.Requested(args))
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
-    void Https(ListenOptions listen) => listen.UseHttps(https =>
+    // Plain HTTP on the port gets a redirect to HTTPS rather than nothing (PlainHttpRedirect).
+    void Https(ListenOptions listen) => listen.UsePlainHttpRedirect().UseHttps(https =>
         https.ServerCertificateSelector = (_, _) => kestrel.ApplicationServices.GetRequiredService<ServerSecretsStore>().Certificate);
 
     void Listen(int port)

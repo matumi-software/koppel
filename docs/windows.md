@@ -104,15 +104,19 @@ machine that also runs usbipd-win cannot use both at once.
 
 ## Signing in
 
-The UI asks for a password. The first time, it also asks for a one-time setup code, so only someone
-with access to this machine can set the first password.
+The UI asks for a password. The first time, whoever opens the UI sets it, within 10 minutes of
+Koppel starting (`Ui:SetupWindowMinutes`). After that the UI says setup has timed out: restart Koppel
+(`Restart-Service Koppel` from an elevated prompt, or `docker compose restart` for Docker Desktop) and
+open it again.
 
-- Docker Desktop: `docker logs <container>` shows `Koppel setup code: XXXX-XXXX`.
-- Native install: open `%ProgramData%\Koppel\config\setup-code.txt` (an administrator can read it).
+- Native install: the UI answers this machine only, so only someone at this machine can set it.
+- Docker Desktop: every caller looks like the same address, so `Ui:AllowFrom` cannot keep the
+  network out. With the server compose file, which publishes 5240 on every address, set the password
+  right after the first start, or publish the UI on `127.0.0.1` only as described above.
 
 The sign-in lasts 12 hours of use. After five wrong tries the UI locks that caller for a minute, and
-the lock doubles with each further failure, up to an hour. If you forget the password, reset it and
-read a new setup code:
+the lock doubles with each further failure, up to an hour. If you forget the password, reset it, then
+set a new one in the UI within 10 minutes:
 
 ```powershell
 # native install, elevated prompt
@@ -157,6 +161,7 @@ address by hand there, or use the native install, which finds servers.
 | `Gateway:Address` | client | Address it listens on. `127.0.0.1` unless set. The compose file sets `0.0.0.0` inside the container |
 | `Usb:AttachTimeoutSeconds` | client | How long an attach may take before it fails with a readable error. 20 |
 | `Ui:AllowFrom` | both | Who may use the UI: `local`, `lan` or `any`. `lan` unless set; the native installer sets `local` |
+| `Ui:SetupWindowMinutes` | both | How long after a start, or a password reset, the first password may be set. 10 |
 | `Ports:Network` | both | A port of its own for what other Koppel machines do. The UI's port (5240) unless set |
 
 In a compose file these are environment variables with `__` for `:`, such as `Usb__Upstream`.

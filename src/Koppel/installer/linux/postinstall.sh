@@ -22,19 +22,9 @@ if [ -d /run/systemd/system ]; then
   # A service that will not start is reported, not a failed install: the package is in place and the log
   # says why.
   if systemctl restart koppel.service; then
-    # The service writes the setup code on start, and only while no password is set (not on an upgrade).
-    code=/var/lib/koppel/config/setup-code.txt
-    tries=0
-    while [ ! -f "$code" ] && [ "$tries" -lt 5 ]; do
-      sleep 1
-      tries=$((tries + 1))
-    done
-    if [ -f "$code" ]; then
-      echo "Koppel is running. Open https://$(hostname):5240/ and enter the setup code from"
-      echo "  sudo cat $code"
-    else
-      echo "Koppel is running at https://$(hostname):5240/"
-    fi
+    echo "Koppel is running. Open https://$(hostname):5240/"
+    echo "On a new install, set the password there within 10 minutes; whoever opens it first sets it."
+    echo "After that, sudo systemctl restart koppel opens setup again."
     echo "The browser warns about Koppel's own certificate the first time."
   else
     echo "Koppel did not start. See sudo journalctl -u koppel." >&2

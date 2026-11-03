@@ -35,9 +35,9 @@ adds a web UI, sign-in and encrypted transport around it.
 
 ### Security
 
-- The UI needs a password. The first one needs a one-time setup code: `docker logs` in Docker,
-  `sudo cat /var/lib/koppel/config/setup-code.txt` for the Linux package, or
-  `%ProgramData%\Koppel\config\setup-code.txt` on Windows. `Koppel --reset-password` clears a forgotten one.
+- The UI needs a password. The first person to open the UI sets it, within 10 minutes of Koppel starting
+  (`Ui:SetupWindowMinutes`); after that the UI says setup has timed out and to restart Koppel.
+  `Ui:AllowFrom` limits who can reach it. `Koppel --reset-password` clears a forgotten one and opens setup again.
   Wrong tries are slowed down. Changing or resetting the password ends every session, and signing out ends
   that session for good, also after a restart.
 - The UI is served over HTTPS with the server's own certificate; `http://` is redirected. The UI answers

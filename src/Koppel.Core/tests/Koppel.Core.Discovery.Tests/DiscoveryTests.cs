@@ -120,18 +120,19 @@ public sealed class DiscoveryTests
     [Fact]
     public void One_address_cannot_fill_the_list_and_only_pushes_out_its_own_entries()
     {
+        // Entries expire after 35 seconds, so the clock moves in milliseconds: the entries differ in age but none expire.
         var time = new ManualTimeProvider();
         using var browser = new ServerBrowser(time);
         for (var i = 0; i < 10; i++)
         {
             browser.Add(Server($"real-{i}", i, $"10.0.0.{i + 10}"), 0);
-            time.Advance(TimeSpan.FromSeconds(1));
+            time.Advance(TimeSpan.FromMilliseconds(1));
         }
 
         for (var i = 0; i < 500; i++)
         {
             browser.Add(Server($"squat-{i}", 1000 + i, "10.0.0.66"), 0);
-            time.Advance(TimeSpan.FromSeconds(1));
+            time.Advance(TimeSpan.FromMilliseconds(1));
         }
 
         var servers = browser.Servers;
@@ -144,17 +145,18 @@ public sealed class DiscoveryTests
     [Fact]
     public void A_full_list_makes_room_by_dropping_the_stalest_entry_of_the_address_holding_the_most()
     {
+        // Entries expire after 35 seconds, so the clock moves in milliseconds: the entries differ in age but none expire.
         var time = new ManualTimeProvider();
         using var browser = new ServerBrowser(time);
         // 7 addresses with 8 entries each fill 56, and 8 single entries from other addresses fill the rest. The first of those is the oldest of all.
         browser.Add(Server("old-single", 5000, "10.9.9.9"), 0);
-        time.Advance(TimeSpan.FromSeconds(1));
+        time.Advance(TimeSpan.FromMilliseconds(1));
         for (var a = 0; a < 7; a++)
         {
             for (var i = 0; i < ServerBrowser.MaxEntriesPerAddress; i++)
             {
                 browser.Add(Server($"a{a}-{i}", a * 100 + i, $"10.1.0.{a + 1}"), 0);
-                time.Advance(TimeSpan.FromSeconds(1));
+                time.Advance(TimeSpan.FromMilliseconds(1));
             }
         }
 

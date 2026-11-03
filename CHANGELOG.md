@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (2026-11-02)
+## 0.1.0 (2026-11-03)
 
 First release. If you ran a development build, read Installer and deploy before upgrading.
 

@@ -222,7 +222,16 @@ internal sealed partial class UsbDataPlane(
     private async Task EndServingAsync()
     {
         var ending = Interlocked.Exchange(ref _serving, new CancellationTokenSource());
-        await ending.CancelAsync();
+        try
+        {
+            await ending.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The host disposes this service while it is stopping it, and can stop it once more afterwards. Nothing is left to end.
+            return;
+        }
+
         var running = _sessions.Keys.ToArray();
         try
         {

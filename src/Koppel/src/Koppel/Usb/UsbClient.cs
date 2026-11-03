@@ -1144,7 +1144,7 @@ internal sealed partial class UsbClient(
             await socket.ConnectAsync(new UriBuilder(link.Server) { Scheme = "wss", Path = "/api/remote/usb" }.Uri, cancellationToken);
             return WebSocketStream.Create(socket, WebSocketMessageType.Binary, closeTimeout: TimeSpan.FromSeconds(2));
         }
-        catch (WebSocketException ex)
+        catch (WebSocketException ex) when (!RemoteFailure.IsUnreachable(ex))
         {
             socket.Dispose();
             throw new InvalidOperationException($"The server refused the USB connection: {ex.Message}", ex);

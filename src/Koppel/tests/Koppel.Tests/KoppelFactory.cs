@@ -47,8 +47,6 @@ public sealed class KoppelFactory : IDisposable
     {
         _kestrel = kestrel;
         Directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
-        HttpPort = FreePort();
-        HttpsPort = singlePort ? HttpPort : FreePort();
 
         // Seed settings so parallel hosts never fight over the default USB port.
         System.IO.Directory.CreateDirectory(Path.Combine(Directory, "config"));
@@ -59,7 +57,40 @@ public sealed class KoppelFactory : IDisposable
             File.WriteAllText(ConfigFile("devices.json"), """{ "busIds": ["1-1.4"], "vidPids": { "1-1.4": "064f:2af9" } }""");
         }
 
-        var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        // A free port can be taken by another process between FreePort and the host binding it. On a
+        // Kestrel host that is a failed start: try again with new ports, a few times, before giving up.
+        for (var attempt = 1; ; attempt++)
+        {
+            HttpPort = FreePort();
+            HttpsPort = singlePort ? HttpPort : FreePort();
+            var factory = Create(services, configuration);
+            if (!kestrel)
+            {
+                _factory = factory;
+                break;
+            }
+
+            factory.UseKestrel();
+            try
+            {
+                factory.StartServer();
+                _factory = factory;
+                break;
+            }
+            catch (Exception ex) when (attempt < MaxStartAttempts && IsPortTaken(ex))
+            {
+                factory.Dispose();
+            }
+        }
+    }
+
+    private const int MaxStartAttempts = 3;
+
+    private static bool IsPortTaken(Exception ex) =>
+        ex is Microsoft.AspNetCore.Connections.AddressInUseException || ex.InnerException is Microsoft.AspNetCore.Connections.AddressInUseException;
+
+    private WebApplicationFactory<Program> Create(Action<IServiceCollection>? services, IReadOnlyDictionary<string, string>? configuration) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Paths:Config", Path.Combine(Directory, "config"));
@@ -78,7 +109,7 @@ public sealed class KoppelFactory : IDisposable
             builder.ConfigureTestServices(s =>
             {
                 // A test server has no listener port; give each request the one its scheme stands for.
-                if (!kestrel)
+                if (!_kestrel)
                 {
                     s.AddTransient<IStartupFilter>(_ => new TestListenerPorts(HttpPort, HttpsPort));
                 }
@@ -90,20 +121,12 @@ public sealed class KoppelFactory : IDisposable
                 services?.Invoke(s);
             });
         });
-        if (kestrel)
-        {
-            factory.UseKestrel();
-            factory.StartServer();
-        }
-
-        _factory = factory;
-    }
 
     public string Directory { get; }
 
-    public int HttpPort { get; }
+    public int HttpPort { get; private set; }
 
-    public int HttpsPort { get; }
+    public int HttpsPort { get; private set; }
 
     public IServiceProvider Services => _factory.Services;
 
@@ -235,7 +258,7 @@ public sealed class KoppelFactory : IDisposable
 
     // Ports are handed out once per process, so parallel hosts never get the same one even when the
     // first host has not bound it yet. The OS picks each one (port 0); another process can still take
-    // it before the host binds, which a fixed port in Program cannot avoid.
+    // it before the host binds, which is why a Kestrel host retries its start on new ports.
     private static readonly HashSet<int> Taken = [];
 
     public static int FreePort()

@@ -34,24 +34,32 @@ public sealed class TestListenerPorts(int httpPort, int httpsPort) : IStartupFil
 /// server. With <c>kestrel: true</c> it listens on real free ports, so two hosts can talk as server
 /// and client, and the HTTPS ports can be reached. The UI and network ports are separate, as with
 /// <c>Ports:Network</c> set, unless <c>singlePort</c>, the default outside tests. With <c>shareDongle</c>
-/// the test device's share is already saved.
+/// the test device's share is already saved. With <c>restartOf</c> (a host that was <see cref="Stop"/>ped)
+/// it runs over that host's config and key folders instead of new ones.
 /// </summary>
 public sealed class KoppelFactory : IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly bool _kestrel;
+    private readonly bool _ownsDirectory;
+    private bool _stopped;
     private readonly object _session = new();
     private string? _cookie;
 
-    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server", bool shareDongle = false, bool shareOnStartup = true, bool singlePort = false)
+    public KoppelFactory(bool kestrel = false, Action<IServiceCollection>? services = null, IReadOnlyDictionary<string, string>? configuration = null, string role = "server", bool shareDongle = false, bool shareOnStartup = true, bool singlePort = false, KoppelFactory? restartOf = null)
     {
         _kestrel = kestrel;
-        Directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
+        _ownsDirectory = restartOf is null;
+        Directory = restartOf?.Directory ?? Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
 
-        // Seed settings so parallel hosts never fight over the default USB port.
+        // Seed settings so parallel hosts never fight over the default USB port. A restart finds them, and everything else, as the host before it left them.
         System.IO.Directory.CreateDirectory(Path.Combine(Directory, "config"));
-        File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "{{role}}", "shareOnStartup": {{(shareOnStartup ? "true" : "false")}} }""");
-        if (shareDongle)
+        if (restartOf is null)
+        {
+            File.WriteAllText(ConfigFile("settings.json"), $$"""{ "role": "{{role}}", "shareOnStartup": {{(shareOnStartup ? "true" : "false")}} }""");
+        }
+
+        if (shareDongle && restartOf is null)
         {
             // What a person saved by sharing the device in the UI; the share is applied when the host starts.
             File.WriteAllText(ConfigFile("devices.json"), """{ "busIds": ["1-1.4"], "vidPids": { "1-1.4": "064f:2af9" } }""");
@@ -247,10 +255,23 @@ public sealed class KoppelFactory : IDisposable
         options.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback = (_, certificate, _, _) => Usb.RemoteAccess.Pinned(this, certificate);
     }
 
+    /// <summary>
+    /// Stops the host and leaves its folders, so a host built with <c>restartOf</c> starts over them, as a
+    /// service restart does. The folders go when the first host is disposed.
+    /// </summary>
+    public void Stop()
+    {
+        if (!_stopped)
+        {
+            _stopped = true;
+            _factory.Dispose();
+        }
+    }
+
     public void Dispose()
     {
-        _factory.Dispose();
-        if (System.IO.Directory.Exists(Directory))
+        Stop();
+        if (_ownsDirectory && System.IO.Directory.Exists(Directory))
         {
             System.IO.Directory.Delete(Directory, recursive: true);
         }

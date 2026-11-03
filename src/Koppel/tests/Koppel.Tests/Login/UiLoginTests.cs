@@ -271,6 +271,25 @@ public sealed class UiLoginTests : IDisposable
     }
 
     [Fact]
+    public async Task A_copied_cookie_is_still_refused_after_the_host_restarts()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var host = Host();
+        var cookie = await SetPasswordAsync(host);
+        using var login = await Own(host.CreateAnonymousUiClient()).PostAsJsonAsync("/api/auth/login", new { password = KoppelFactory.Password }, ct);
+        var other = CookieOf(login);
+        using var logout = await WithCookie(host, cookie).PostAsync("/api/auth/logout", null, ct);
+        logout.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        host.Stop();
+
+        var restarted = new KoppelFactory(kestrel: true, restartOf: host);
+        _disposables.Add(restarted);
+
+        (await WithCookie(restarted, cookie).GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the sign-out was written to ui-auth.json");
+        (await WithCookie(restarted, other).GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK, "a session that did not sign out is not affected");
+    }
+
+    [Fact]
     public async Task The_ui_hub_closes_when_the_cookie_expires()
     {
         var ct = TestContext.Current.CancellationToken;

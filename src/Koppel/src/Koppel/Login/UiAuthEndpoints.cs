@@ -51,10 +51,11 @@ internal static class UiAuthEndpoints
             return Answer(context, result, wrong: StatusCodes.Status401Unauthorized, wrongText: "That password is not right.");
         });
 
-        group.MapPost("/logout", async (HttpContext context, UiConnections connections, UiRevokedSessions revoked) =>
+        group.MapPost("/logout", async (HttpContext context, UiConnections connections, UiRevokedSessions revoked, CancellationToken cancellationToken) =>
         {
-            // The cookie is only removed from this browser; revoking the id is what makes a copy of it useless.
-            revoked.Revoke(UiSession.SessionOf(context.User), UiSession.EndOf(context.User));
+            // The cookie is only removed from this browser; revoking the id, which is written to
+            // ui-auth.json so it holds across a restart, is what makes a copy of it useless.
+            await revoked.RevokeAsync(UiSession.SessionOf(context.User), UiSession.EndOf(context.User), cancellationToken);
             connections.CloseSession(UiSession.SessionOf(context.User));
             await context.SignOutAsync(UiSession.Scheme);
             return TypedResults.NoContent();

@@ -14,6 +14,7 @@ re-run on real hardware. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`
 | Platform | Server | Client |
 |---|---|---|
 | Linux (Docker) | Yes | Yes |
+| Linux (.deb, no Docker) | Yes | Yes |
 | Windows (installer) | Not yet | Yes, with usbip-win2's driver bundled |
 | Windows (Docker Desktop) | Through usbipd-win, see [docs/windows.md](docs/windows.md) | Through usbip-win2, see [docs/windows.md](docs/windows.md) |
 
@@ -60,6 +61,33 @@ volume, not in the image, so an upgrade keeps them.
 To run your own build on another machine instead, see "Running on another machine" in
 [docs/architecture.md](docs/architecture.md).
 
+### Without Docker
+
+A `.deb` package runs Koppel as a systemd service on Debian 12 and 13, Ubuntu 22.04 and later, and
+64-bit Raspberry Pi OS, for amd64 and arm64. It needs no .NET and no Docker. Build the packages from
+`src/Koppel/installer/linux` (it needs Docker on the build machine only):
+
+```powershell
+.\build.ps1
+```
+
+They land in `bin\` as `koppel_<version>_amd64.deb` and `koppel_<version>_arm64.deb`. Copy the one for the
+machine over and install it:
+
+```sh
+sudo apt install ./koppel_0.1.0_arm64.deb
+```
+
+The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Read the
+setup code with `sudo cat /var/lib/koppel/config/setup-code.txt` (or `sudo journalctl -u koppel`) and open
+`https://<machine>:5240`. If a module will not load, the install says so; the fix is the same as above.
+
+- Config and keys live in `/var/lib/koppel`. An upgrade (`sudo apt install` of a newer `.deb`) and
+  `sudo apt remove koppel` keep them; `sudo apt purge koppel` deletes them.
+- Settings go in `/etc/default/koppel` as environment variables, one per line, e.g. `Ui__AllowFrom=lan`.
+  Then `sudo systemctl restart koppel`.
+- The service runs as root, as the container does, and restarts if it stops.
+
 ## Run it on Windows
 
 Build the installer from `src/Koppel/installer`:
@@ -101,7 +129,7 @@ trust, check that its SHA-256 fingerprint is the one under Clients before you ac
 docker compose exec koppel dotnet Koppel.dll --reset-password
 ```
 
-On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then read
+With the Linux package, run `sudo koppel --reset-password`. On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then read
 a new setup code and set a new password.
 
 ## Develop

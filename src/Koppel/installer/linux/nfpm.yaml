@@ -1,0 +1,49 @@
+# nfpm config for Koppel's .deb. Built by the Dockerfile's linux-packages target (see build.ps1), which sets
+# VERSION from <Version> in src/Directory.Build.props and ARCH to amd64 or arm64, and publishes Koppel to /stage.
+name: koppel
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Matumi Software <https://github.com/matumi-software/koppel>
+vendor: Matumi Software
+homepage: https://github.com/matumi-software/koppel
+license: MIT
+description: |-
+  Share USB devices over the network.
+  Koppel shares USB devices from a server to clients over USB/IP, carried over
+  TLS, with a web UI on port 5240. It runs as the koppel systemd service.
+
+# Koppel is self-contained, so it needs no .NET, only the native libraries .NET loads. The OpenSSL and ICU
+# package names change between releases (libssl3t64 from Ubuntu 24.04 and Debian 13; one libicuNN per ICU
+# version), so they are listed as alternatives covering Debian 12 and 13 and Ubuntu 22.04 to 26.04.
+depends:
+  - libc6
+  - libgcc-s1
+  - libstdc++6
+  - zlib1g
+  - libssl3t64 | libssl3
+  - libicu78 | libicu76 | libicu74 | libicu72 | libicu70
+
+# A Windows checkout gives every file in the build context mode 0755, so the plain files set theirs.
+contents:
+  - src: /stage/
+    dst: /usr/lib/koppel
+    type: tree
+  - src: /usr/lib/koppel/Koppel
+    dst: /usr/bin/koppel
+    type: symlink
+  - src: ./koppel.service
+    dst: /usr/lib/systemd/system/koppel.service
+    file_info:
+      mode: 0644
+  - src: ./modules-load.conf
+    dst: /usr/lib/modules-load.d/koppel.conf
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: ./postinstall.sh
+  preremove: ./preremove.sh
+  postremove: ./postremove.sh

@@ -92,6 +92,7 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 
 - **First run:** while no password is set, `POST /api/auth/setup` needs a one-time 8 character setup code, even from the same machine. The code is made of letters and digits without I, O, L, 0 and 1. Koppel logs it at Warning and writes it to `setup-code.txt` in the config directory. Setting the password removes the file.
   - Docker: `docker logs <container>`, or `/koppel/config/setup-code.txt` in the container.
+  - Linux package: `sudo journalctl -u koppel`, or `/var/lib/koppel/config/setup-code.txt` (root only).
   - Windows: `%ProgramData%\Koppel\config\setup-code.txt` (administrators and SYSTEM can read it).
   - Setup is step 1 of the first-run wizard in the UI.
 - **Password:** at least 10 characters, at most 128, and not "koppel" or "password" in any case. It is hashed with PBKDF2-SHA256, 600,000 iterations and a 16 byte salt, and kept with a security stamp in the encrypted `ui-auth.json`.
@@ -105,6 +106,7 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 
   ```sh
   docker compose exec koppel dotnet Koppel.dll --reset-password   # or: docker compose run --rm koppel --reset-password, if it is not running
+  sudo koppel --reset-password                                    # Linux package
   ```
 
   ```powershell
@@ -307,6 +309,22 @@ architecture and cross-compile (ReadyToRun included) for the target, and the run
 `RUN`, so one x64 machine builds amd64 and arm64 without QEMU. .NET does not support running under
 QEMU.
 
+The Linux packages come from the same Dockerfile (`--target linux-packages`, run by
+`installer/linux/build.ps1`). That target publishes Koppel self-contained for `linux-x64` and `linux-arm64`
+and packs each with nfpm (pinned image, `installer/linux/nfpm.yaml`). Each `.deb` holds:
+
+- the app in `/usr/lib/koppel`, with `/usr/bin/koppel` linked to it
+- `koppel.service`: `Type=notify` (Koppel calls `UseSystemd`), root, `StateDirectory=koppel` with mode 0700,
+  an optional `/etc/default/koppel` for settings, `Restart=always`
+- `/usr/lib/modules-load.d/koppel.conf`, which loads `usbip-host` and `vhci-hcd` at boot
+- scripts that load the modules and enable and (re)start the service on install and upgrade, stop it on
+  remove, and delete `/var/lib/koppel` only on purge. A service that will not start is reported, not a
+  failed install.
+
+The package depends on the native libraries .NET loads. The OpenSSL and ICU package names differ between
+releases, so it lists alternatives (`libssl3t64 | libssl3`, `libicu78 | ... | libicu70`). A distro with a
+newer ICU needs its name added to `nfpm.yaml`.
+
 To release:
 
 1. Set `<Version>` in `src/Directory.Build.props`.
@@ -320,6 +338,7 @@ To release:
    docker buildx build -f Koppel/src/Koppel/Dockerfile --platform linux/amd64,linux/arm64 \
      -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
    ```
+7. Build the Linux packages with `installer/linux/build.ps1` and publish the two `.deb` files.
 
 ## Known limits
 

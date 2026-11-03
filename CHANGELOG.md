@@ -53,6 +53,7 @@ First release. If you ran a development build, read Installer and deploy before 
 - `prepare-host.sh` is run with `sudo bash`, installs Docker from Docker's apt repository and hints at `linux-modules-extra` when a module will not load.
 - The image has a health check on `/healthz`, at the configured UI address. Plain Docker does not restart an unhealthy container.
 - The image is built for amd64 and arm64 (64-bit Raspberry Pi OS). The build cross-compiles on the build machine, so an x64 machine builds both without emulation.
+- Linux without Docker: a `.deb` for amd64 and arm64 (`installer/linux/build.ps1`) installs Koppel self-contained as the `koppel` systemd service, loads the USB/IP modules at boot, and keeps `/var/lib/koppel` until a purge. `sudo koppel --reset-password` resets the UI password.
 
 ### Known limits
 
@@ -62,4 +63,5 @@ First release. If you ran a development build, read Installer and deploy before 
 - The UI's certificate is self-signed. Accepting the browser's warning on a network you do not trust could let an impostor collect the password; the fingerprint under Clients is the one to compare.
 - Windows can be a client; a Windows server needs usbipd-win and `Usb:Upstream`, and has not been tried with real usbipd-win.
 - Storage and printers (bulk transfers) are untried on real hardware.
-- The arm64 image is untried on a Raspberry Pi.
+- The arm64 image and the arm64 `.deb` are untried on a Raspberry Pi. The amd64 `.deb` was installed, upgraded, removed and purged under systemd in a Debian 12 container, and installed and started on Debian 13 and Ubuntu 22.04 and 24.04, but not on a machine with real USB.
+- There is no apt repository yet, so the `.deb` is installed from a file and upgraded the same way.

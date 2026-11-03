@@ -9,6 +9,7 @@
     <!-- Host -->
     <!-- Dev server proxy; exact version, not a floating range. -->
     <PackageVersion Include="Microsoft.AspNetCore.SpaProxy" Version="10.0.14" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.14" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
 
     <!-- Discovery: mDNS. See Koppel.Core.Discovery.csproj for why two packages. -->

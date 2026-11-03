@@ -48,31 +48,44 @@ COPY Koppel ./Koppel
 # restore too, so it fetches the ahead-of-time compiler pack the publish needs.
 RUN dotnet restore Koppel/src/Koppel/Koppel.csproj -p:RestoreLockedMode=true -p:PublishReadyToRun=true --nologo
 
+# -------- Stage 2: publish for the image ----------------------------------
+FROM build AS publish
+ARG BUILD_CONFIGURATION=Release
+
 # PublishRunWebpack builds the SPA and stages dist/ into wwwroot/. ReadyToRun compiles ahead of time:
 # without it a low-power thin client spends seconds compiling on its first request (8 to 14 s measured
 # on an AMD GX-212JC), long enough for a client's first token or pairing request to time out.
 # An architecture this does not know fails the build, rather than quietly building x64.
 ARG TARGETARCH
-RUN case "$TARGETARCH" in \
-      amd64) RID=linux-x64 ;; \
-      arm64) RID=linux-arm64 ;; \
-      *) echo "Unsupported TARGETARCH '$TARGETARCH': build with BuildKit (docker buildx build or compose) for linux/amd64 or linux/arm64." >&2; exit 1 ;; \
-    esac \
- && dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo --no-restore \
-      -r $RID --self-contained false -p:PublishReadyToRun=true -p:SkipSpaInstall=true
+RUN case "$TARGETARCH" in       amd64) RID=linux-x64 ;;       arm64) RID=linux-arm64 ;;       *) echo "Unsupported TARGETARCH '$TARGETARCH': build with BuildKit (docker buildx build or compose) for linux/amd64 or linux/arm64." >&2; exit 1 ;;     esac  && dotnet publish Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /publish --nologo --no-restore       -r $RID --self-contained false -p:PublishReadyToRun=true -p:SkipSpaInstall=true
 
 # The volume's folders are made here and copied below, because the runtime stage has no RUN: a RUN there would
 # execute the target's binaries and so need emulation on a machine of another architecture.
 RUN mkdir -p /koppel/config /koppel/keys
 
-# -------- Stage 2: runtime -------------------------------------------------
+# -------- Linux packages (not part of the image) -----------------------------
+# Built only on request, through installer/linux/build.ps1 (--target linux-packages). Koppel is published
+# self-contained, so the machine needs no .NET, for amd64 and arm64, and nfpm wraps each in a .deb with the
+# files in installer/linux.
+FROM --platform=$BUILDPLATFORM goreleaser/nfpm:v2.48.0 AS nfpm
+
+FROM build AS deb
+ARG BUILD_CONFIGURATION=Release
+COPY --from=nfpm /usr/bin/nfpm /usr/local/bin/nfpm
+WORKDIR /build/Koppel/installer/linux
+RUN VERSION="$(dotnet msbuild /build/Koppel/src/Koppel/Koppel.csproj -getProperty:Version)" && export VERSION  && for ARCH in amd64 arm64; do       case "$ARCH" in amd64) RID=linux-x64 ;; arm64) RID=linux-arm64 ;; esac;       rm -rf /stage       && dotnet publish /build/Koppel/src/Koppel/Koppel.csproj -c $BUILD_CONFIGURATION -o /stage --nologo --no-restore            -r $RID --self-contained -p:PublishReadyToRun=true -p:SkipSpaInstall=true       && mkdir -p /packages       && ARCH=$ARCH nfpm package --config nfpm.yaml --packager deb --target /packages/       || exit 1;     done
+
+FROM scratch AS linux-packages
+COPY --from=deb /packages/ /
+
+# -------- Stage 3: runtime -------------------------------------------------
 FROM mcr.microsoft.com/dotnet/aspnet:10.0.14-noble AS final
 
 WORKDIR /app
-COPY --from=build /publish ./
+COPY --from=publish /publish ./
 
 # One volume root for everything Koppel writes.
-COPY --from=build --chown=$APP_UID /koppel /koppel
+COPY --from=publish --chown=$APP_UID /koppel /koppel
 VOLUME /koppel
 USER $APP_UID
 

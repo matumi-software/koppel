@@ -18,8 +18,10 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Runs as a Windows service when the installer registers it as one; a no-op otherwise.
+// Runs as a Windows service when the installer registers it as one, and as a systemd service (readiness and
+// journal log levels) when the Linux package starts it; each is a no-op otherwise.
 builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
+builder.Host.UseSystemd();
 
 // One HTTPS port, 5240, with the server's own self-signed certificate, serves the UI and everything other
 // Koppel machines do, USB traffic included; clients pin the certificate's fingerprint. Ports:Network moves

@@ -23,12 +23,12 @@ internal static class UiPasswordReset
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             await output.WriteLineAsync($"Could not reset the password: {ex.Message}");
-            await output.WriteLineAsync("Run this as an administrator (Windows) or as the user Koppel runs as (Docker: docker compose exec koppel dotnet Koppel.dll --reset-password).");
+            await output.WriteLineAsync("Run this as an administrator (Windows), as root (Linux package: sudo koppel --reset-password) or as the user Koppel runs as (Docker: docker compose exec koppel dotnet Koppel.dll --reset-password).");
             return 1;
         }
 
         await output.WriteLineAsync("The UI password is cleared and every signed-in session is ended.");
-        await output.WriteLineAsync($"Koppel issues a new setup code when it starts, or at once if it is running. Read it from the log (docker logs <container>) or from {paths.SetupCodeFile}, then open the UI and set a new password.");
+        await output.WriteLineAsync($"Koppel issues a new setup code when it starts, or at once if it is running. Read it from the log (docker logs <container>, or journalctl -u koppel for the Linux package) or from {paths.SetupCodeFile}, then open the UI and set a new password.");
         return 0;
     }
 }

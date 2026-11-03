@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Security.Authentication;
 using System.Text.Json;
 using Koppel.Core.Auth;
@@ -15,6 +16,7 @@ internal static class RemoteFailure
         AuthenticationException => "The server's certificate does not match the saved fingerprint, or the secure connection could not be set up.",
         HttpRequestException { InnerException: AuthenticationException } => Describe(new AuthenticationException()),
         HttpRequestException http => $"Could not reach the server: {http.InnerException?.Message ?? http.Message}",
+        WebSocketException socketOpen when IsUnreachable(socketOpen) => $"Could not reach the server: {socketOpen.InnerException?.Message ?? socketOpen.Message}",
         JsonException => "The server did not answer like a Koppel server.",
         SocketException socket => $"Could not connect to the server: {socket.Message}",
         IOException io => $"The connection to the server was lost: {io.Message}",

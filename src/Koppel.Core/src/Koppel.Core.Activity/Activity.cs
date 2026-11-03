@@ -46,7 +46,7 @@ public enum ActivityOutcome
 /// One thing that happened, as the server saw it. <see cref="Summary"/> is the sentence the UI shows;
 /// <see cref="Detail"/> carries the reason when <see cref="Outcome"/> is Failed.
 /// </summary>
-/// <remarks>Same shape as Timebase.Core.Activity's ActivityEvent, plus a ready-made summary.</remarks>
+/// <remarks>Carries a ready-made summary.</remarks>
 public sealed record ActivityEvent(
     string Id,
     DateTimeOffset TimestampUtc,
@@ -69,7 +69,7 @@ public interface IActivityReader
 }
 
 /// <summary>
-/// A bounded in-memory log, like Timebase's InMemoryActivityStore: it survives page reloads and is
+/// A bounded in-memory log: it survives page reloads and is
 /// shared by every browser, but starts empty when the process restarts.
 /// </summary>
 public sealed class InMemoryActivityStore(TimeProvider time, int capacity = 500, ILogger<InMemoryActivityStore>? logger = null) : IActivityRecorder, IActivityReader

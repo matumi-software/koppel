@@ -23,7 +23,7 @@ FROM --platform=$BUILDPLATFORM node:24.22.2-bookworm-slim AS node
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0.403-noble AS build
 ARG BUILD_CONFIGURATION=Release
 
-# Toolchain: Node 24 (from the node stage) + pnpm 9.15.0, as in the Timebase images.
+# Toolchain: Node 24 (from the node stage) + pnpm 9.15.0.
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \

@@ -11,7 +11,7 @@ namespace Koppel.Server;
 
 /// <summary>
 /// A client allowed to use this server. The secret is kept, inside the encrypted file, so an admin can
-/// copy it again later, as Timebase Pulse does. Clients made before that have only the hash.
+/// copy it again later. Clients made before that have only the hash.
 /// </summary>
 internal sealed record RegisteredClient(string Id, string Name, string SecretHash, DateTimeOffset CreatedAt, string? Secret = null, int Generation = 1);
 

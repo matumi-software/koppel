@@ -9,7 +9,7 @@ find servers on the local network and pair by typing a code, so nobody copies se
 Status: version 0.1.0, early. A Linux server in Docker shares a real USB keyboard and mouse receiver
 to a Windows 11 client through the installed service. Storage and printers are the devices we aim to support
 next, and are untried on real hardware. The newest USB changes are covered by tests with fakes and not yet
-re-run on real hardware. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`; `main` holds releases.
+re-run on real hardware, and the arm64 image and `.deb` are untried on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`; `main` holds releases.
 
 | Platform | Server | Client |
 |---|---|---|

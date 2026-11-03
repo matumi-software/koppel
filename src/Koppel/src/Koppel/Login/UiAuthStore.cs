@@ -1,10 +1,7 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
+using System.Globalization;
 using Koppel.Core.Configuration;
 using Koppel.Core.Security;
-using Microsoft.Extensions.Hosting.Systemd;
-using Microsoft.Extensions.Hosting.WindowsServices;
 
 namespace Koppel.Login;
 
@@ -32,38 +29,35 @@ internal enum SetupOutcome
 {
     Done,
     AlreadySet,
-    WrongCode,
+    Closed,
 }
 
 /// <summary>
-/// Owns <c>ui-auth.json</c> and the one-time setup code. While no password is set the code exists, in
-/// memory, in <c>setup-code.txt</c> and, except under a Windows service or systemd, in the log; setting the password removes it, and clearing the
-/// password (the reset command, or the file edited away) issues a new one. Same write-then-raise rule
-/// as the other config files.
+/// Owns <c>ui-auth.json</c> and the first-run setup window. While no password is set, whoever reaches the
+/// UI may set one, but only within <see cref="UiSetupWindow.Length"/> of Koppel starting without a
+/// password, or of the password being cleared while it runs (the reset command, or the file edited away).
+/// Setting the password closes the window. Same write-then-raise rule as the other config files.
 /// </summary>
 internal sealed partial class UiAuthStore : IHostedService, IDisposable
 {
-    // No I, O, L, 0 or 1: nobody mistakes one for another when reading the code off a log.
-    private const string CodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-    private const int CodeLength = 8;
-
     private readonly JsonConfigFile<UiCredentials> _file;
     private readonly KoppelPaths _paths;
+    private readonly UiSetupWindow _window;
+    private readonly TimeProvider _time;
     private readonly ILogger<UiAuthStore> _logger;
-    private readonly bool _logIsShared;
     private readonly SemaphoreSlim _setup = new(1, 1);
-    private readonly Lock _codeGate = new();
-    private string? _setupCode;
+    private readonly Lock _windowGate = new();
+    private DateTimeOffset? _setupUntil;
     private string _seenStamp = string.Empty;
     private int _passwordChecks;
     private readonly ConcurrentDictionary<string, string> _keepSessions = new();
 
-    /// <param name="logIsShared">Whether the log is readable by users who cannot read the config folder. Left out, it is true under a Windows service or systemd; tests set it.</param>
-    public UiAuthStore(KoppelPaths paths, SecretBox box, ILogger<UiAuthStore> logger, bool? logIsShared = null)
+    public UiAuthStore(KoppelPaths paths, SecretBox box, UiSetupWindow window, TimeProvider time, ILogger<UiAuthStore> logger)
     {
         _paths = paths;
+        _window = window;
+        _time = time;
         _logger = logger;
-        _logIsShared = logIsShared ?? (WindowsServiceHelpers.IsWindowsService() || SystemdHelpers.IsSystemdService());
         _file = new JsonConfigFile<UiCredentials>(paths.UiAuthFile, UiCredentials.Empty, KoppelJson.Files, logger, box.AsFileCodec(), UiCredentials.Invalid);
         _file.Changed += OnChangedAsync;
     }
@@ -82,23 +76,27 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
     public Task UpdateRevokedSessionsAsync(Func<IReadOnlyDictionary<string, DateTimeOffset>, IReadOnlyDictionary<string, DateTimeOffset>> change, CancellationToken cancellationToken) =>
         _file.UpdateAsync(current => current with { RevokedSessions = change(current.RevokedSessions ?? UiCredentials.NoSessions) }, cancellationToken);
 
-    /// <summary>The code that sets the first password, or null once there is one.</summary>
-    public string? SetupCode
+    /// <summary>Until when the first password may be set, or null once there is one. It may lie in the past: setup has timed out.</summary>
+    public DateTimeOffset? SetupUntil
     {
         get
         {
-            lock (_codeGate)
+            lock (_windowGate)
             {
-                return _setupCode;
+                return HasPassword ? null : _setupUntil;
             }
         }
     }
+
+    /// <summary>True while no password is set and the setup window has not closed.</summary>
+    public bool SetupOpen => SetupUntil is { } until && _time.GetUtcNow() < until;
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         await _file.StartAsync(cancellationToken);
         _seenStamp = _file.Current.SecurityStamp;
-        SyncSetupCode();
+        DeleteOldCodeFile();
+        SyncWindow(reopen: false);
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
@@ -121,8 +119,8 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
         return UiPassword.Verify(password, hash);
     }
 
-    /// <summary>Sets the first password when the code is right. Works once: later calls find a password and are refused.</summary>
-    public async Task<SetupOutcome> SetFirstPasswordAsync(string? code, string password, CancellationToken cancellationToken)
+    /// <summary>Sets the first password while setup is open. Works once: later calls find a password and are refused.</summary>
+    public async Task<SetupOutcome> SetFirstPasswordAsync(string password, CancellationToken cancellationToken)
     {
         await _setup.WaitAsync(cancellationToken);
         try
@@ -132,9 +130,9 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
                 return SetupOutcome.AlreadySet;
             }
 
-            if (!CodeMatches(code))
+            if (!SetupOpen)
             {
-                return SetupOutcome.WrongCode;
+                return SetupOutcome.Closed;
             }
 
             var hash = UiPassword.Hash(password);
@@ -189,7 +187,8 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
 
     private Task OnChangedAsync(UiCredentials credentials)
     {
-        SyncSetupCode();
+        // No password under a new stamp is a reset, which opens setup again even if the window was still open.
+        SyncWindow(reopen: credentials.SecurityStamp != _seenStamp);
         if (credentials.SecurityStamp == _seenStamp)
         {
             return Task.CompletedTask;
@@ -200,89 +199,46 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
         return StampChanged.RaiseAsync(new UiStampChange(credentials.SecurityStamp, keep), _logger);
     }
 
-    private bool CodeMatches(string? code)
+    // A password closes the window. No password opens it when there was none open yet (a start, or the
+    // password edited out of the file), or again when asked (a reset).
+    private void SyncWindow(bool reopen)
     {
-        var expected = SetupCode;
-        if (expected is null || code is null)
-        {
-            return false;
-        }
-
-        var given = new string([.. code.Where(char.IsLetterOrDigit)]).ToUpperInvariant();
-        return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(given), Encoding.UTF8.GetBytes(expected));
-    }
-
-    // A password means no code and no code file; no password means a code, new if there was none.
-    private void SyncSetupCode()
-    {
-        string? issued = null;
-        lock (_codeGate)
+        DateTimeOffset? opened = null;
+        lock (_windowGate)
         {
             if (HasPassword)
             {
-                _setupCode = null;
+                _setupUntil = null;
             }
-            else if (_setupCode is null)
+            else if (_setupUntil is null || reopen)
             {
-                _setupCode = issued = new string(RandomNumberGenerator.GetItems<char>(CodeAlphabet, CodeLength));
+                _setupUntil = opened = _time.GetUtcNow() + _window.Length;
             }
         }
 
-        if (issued is not null)
+        if (opened is { } until)
         {
-            var shown = $"{issued[..4]}-{issued[4..]}";
-            if (_logIsShared)
-            {
-                // A Windows service logs to the Application event log, which every interactive user can
-                // read, and a systemd service logs to the journal, which members of adm and
-                // systemd-journal can read. The code would let any of them set the first password, so the
-                // log only says where the root-only or administrators-only file is. Docker is neither: its
-                // log is readable only by whoever can run docker, so the code stays there.
-                LogSetupCodeInFile(_paths.SetupCodeFile);
-            }
-            else
-            {
-                LogSetupCode(shown, _paths.SetupCodeFile);
-            }
-
-            WriteCodeFile(shown);
-        }
-        else if (HasPassword)
-        {
-            DeleteCodeFile();
+            var local = TimeZoneInfo.ConvertTime(until, _time.LocalTimeZone);
+            LogWaitingForPassword(_window.Address, local.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture));
         }
     }
 
-    private void WriteCodeFile(string shown)
+    // Earlier versions wrote a setup code here. It does nothing now, so it should not lie around.
+    private void DeleteOldCodeFile()
     {
         try
         {
-            File.WriteAllText(_paths.SetupCodeFile, $"{shown}{Environment.NewLine}");
+            File.Delete(_paths.OldSetupCodeFile);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            LogCodeFileFailed(_paths.SetupCodeFile, ex.Message);
+            LogOldCodeFileNotDeleted(_paths.OldSetupCodeFile, ex.Message);
         }
     }
 
-    private void DeleteCodeFile()
-    {
-        try
-        {
-            File.Delete(_paths.SetupCodeFile);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            LogCodeFileFailed(_paths.SetupCodeFile, ex.Message);
-        }
-    }
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel is waiting for its first password. Open {Address} and set it before {Until}. Whoever opens the UI first sets it. After that time, restart Koppel to set it.")]
+    private partial void LogWaitingForPassword(string address, string until);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel setup code: {Code}. Enter it in the UI to set the admin password. It is also in {File} while no password is set.")]
-    private partial void LogSetupCode(string code, string file);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel needs an admin password. The setup code to set it is in {File}, which only administrators and root can read.")]
-    private partial void LogSetupCodeInFile(string file);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not write or remove the setup code file {File} ({Reason}). The code in the log still works.")]
-    private partial void LogCodeFileFailed(string file, string reason);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not delete {File}, left by an older version ({Reason}). The setup code in it no longer does anything.")]
+    private partial void LogOldCodeFileNotDeleted(string file, string reason);
 }

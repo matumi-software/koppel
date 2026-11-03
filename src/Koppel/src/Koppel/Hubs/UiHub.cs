@@ -20,6 +20,9 @@ public interface IUiClient
     /// <summary>Server role: the registered clients after a create or revoke.</summary>
     Task ClientsChanged(IReadOnlyList<ClientView> clients);
 
+    /// <summary>Server role: the certificate and token signing key after a rotation, a prepare, a cancel or a switch.</summary>
+    Task ServerKeysChanged(ServerKeysView keys);
+
     /// <summary>Client role: the stored server connection, without the secret.</summary>
     Task ConnectionChanged(ConnectionView connection);
 
@@ -77,6 +80,7 @@ internal sealed class UiHubRelay(
     {
         settings.Changed += PushSettingsAsync;
         secrets.ClientsChanged += PushClientsAsync;
+        secrets.KeysChanged += PushKeysAsync;
         connection.Changed += PushConnectionAsync;
         usbServer.Changed += PushServerDevicesAsync;
         usbClient.Changed += PushClientDevicesAsync;
@@ -91,6 +95,7 @@ internal sealed class UiHubRelay(
     {
         settings.Changed -= PushSettingsAsync;
         secrets.ClientsChanged -= PushClientsAsync;
+        secrets.KeysChanged -= PushKeysAsync;
         connection.Changed -= PushConnectionAsync;
         usbServer.Changed -= PushServerDevicesAsync;
         usbClient.Changed -= PushClientDevicesAsync;
@@ -104,6 +109,13 @@ internal sealed class UiHubRelay(
     private Task PushSettingsAsync(KoppelSettings value) => hub.Clients.All.SettingsChanged(value);
 
     private Task PushClientsAsync(IReadOnlyList<ClientView> value) => hub.Clients.All.ClientsChanged(value);
+
+    /// <summary>The UI gets the whole state; paired clients get the certificates, so they learn the next one or stop trusting a cancelled one.</summary>
+    private async Task PushKeysAsync(ServerKeysView value)
+    {
+        await hub.Clients.All.ServerKeysChanged(value);
+        await remote.Clients.Clients(live.RemoteConnectionIds()).CertificatesChanged(new RemoteCertificates(value.Fingerprint, value.NextFingerprint));
+    }
 
     private Task PushConnectionAsync(ConnectionView value) => hub.Clients.All.ConnectionChanged(value);
 

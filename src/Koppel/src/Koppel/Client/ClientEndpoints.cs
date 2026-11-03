@@ -13,8 +13,7 @@ internal sealed record ConnectionUpdate(string? ServerUrl, string? ServerFingerp
             errors["serverUrl"] = ["Use the server's HTTPS address, such as https://lab-rack-3:5240."];
         }
 
-        var hex = new string((ServerFingerprint ?? "").Where(Uri.IsHexDigit).ToArray());
-        if (hex.Length != 64)
+        if (!IsFingerprint(ServerFingerprint))
         {
             errors["serverFingerprint"] = ["Paste the SHA-256 fingerprint shown in the server's Clients section."];
         }
@@ -27,10 +26,13 @@ internal sealed record ConnectionUpdate(string? ServerUrl, string? ServerFingerp
         return errors;
     }
 
-    /// <summary>True when the update points at the server the connection already has: same address and same fingerprint.</summary>
+    /// <summary>
+    /// True when the update points at the server the connection already has: same address, and its fingerprint
+    /// or the next one that server announced (as when its admin switched before this client was told).
+    /// </summary>
     public bool KeepsServer(ClientConnection current) =>
         string.Equals(current.ServerUrl, new Uri(ServerUrl!).GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase)
-        && SameFingerprint(current.ServerFingerprint, ServerFingerprint);
+        && (SameFingerprint(current.ServerFingerprint, ServerFingerprint) || SameFingerprint(current.NextServerFingerprint, ServerFingerprint));
 
     /// <summary>
     /// The stored secret was issued by the stored server, so it carries over only when the server is
@@ -42,15 +44,21 @@ internal sealed record ConnectionUpdate(string? ServerUrl, string? ServerFingerp
         ServerFingerprint = Normalize(ServerFingerprint!),
         ClientId = ClientId!.Trim(),
         ClientSecret = !string.IsNullOrEmpty(ClientSecret) ? ClientSecret : KeepsServer(current) ? current.ClientSecret : null,
+        // The next certificate belongs to the server that announced it, and is not needed once it is the pinned one.
+        NextServerFingerprint = KeepsServer(current) && !SameFingerprint(current.NextServerFingerprint, ServerFingerprint) ? current.NextServerFingerprint : null,
     };
 
     /// <summary>Fingerprints compare by their hex digits alone.</summary>
     public static bool SameFingerprint(string? a, string? b) =>
         string.Equals(Digits(a), Digits(b), StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>A SHA-256 fingerprint: 64 hex digits, with or without separators.</summary>
+    public static bool IsFingerprint(string? fingerprint) => Digits(fingerprint).Length == 64;
+
     private static string Digits(string? fingerprint) => new((fingerprint ?? "").Where(Uri.IsHexDigit).ToArray());
 
-    private static string Normalize(string fingerprint)
+    /// <summary>The spelling Koppel stores: upper case hex in pairs, separated by colons.</summary>
+    public static string Normalize(string fingerprint)
     {
         var hex = new string(fingerprint.Where(Uri.IsHexDigit).ToArray()).ToUpperInvariant();
         return string.Join(':', Enumerable.Range(0, hex.Length / 2).Select(i => hex.Substring(i * 2, 2).ToString(CultureInfo.InvariantCulture)));

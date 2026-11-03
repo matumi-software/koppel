@@ -25,7 +25,7 @@ internal sealed partial class RemoteServer(ConnectionStore connection, TimeProvi
         }
 
         var server = new Uri(settings.ServerUrl!);
-        using var handler = ServerCertificate.CreatePinnedHandler(settings.ServerFingerprint!);
+        using var handler = ServerCertificate.CreatePinnedHandler(settings.Trusts);
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
         using var tokens = new KoppelTokenClient(http, time);
         try

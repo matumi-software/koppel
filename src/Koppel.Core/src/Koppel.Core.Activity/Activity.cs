@@ -28,6 +28,10 @@ public enum ActivityReason
     LinkDown,
     SignInFailed,
     PasswordChanged,
+    SigningKeyRotated,
+    CertificatePrepared,
+    CertificateCancelled,
+    CertificateSwitched,
 }
 
 /// <summary>Whether the thing the event describes happened.</summary>

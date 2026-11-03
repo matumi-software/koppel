@@ -2,9 +2,12 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Primitives;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server;
+using OpenIddict.Validation;
 using OpenIddict.Validation.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 using static OpenIddict.Server.OpenIddictServerEvents;
@@ -23,10 +26,21 @@ public interface IClientCredentialValidator
     ValueTask<int?> ValidateAsync(string clientId, string clientSecret, CancellationToken cancellationToken);
 }
 
-/// <summary>Supplies the key the server signs access tokens with. It must survive restarts.</summary>
+/// <summary>
+/// Supplies the keys the server signs and checks access tokens with. They must survive restarts. After a
+/// rotation the key it replaced stays among <see cref="ValidationKeys"/> until every token it signed has
+/// expired, so a rotation logs nobody out.
+/// </summary>
 public interface ISigningKeySource
 {
+    /// <summary>The key new tokens are signed with. It needs a key id, which goes in each token's header.</summary>
     SecurityKey SigningKey { get; }
+
+    /// <summary>Every key a token that is still valid may have been signed with: the signing key and the ones it replaced.</summary>
+    IReadOnlyList<SecurityKey> ValidationKeys { get; }
+
+    /// <summary>Fires when the keys change, so the token server and the validation pick them up.</summary>
+    IChangeToken GetChangeToken();
 }
 
 /// <summary>
@@ -41,6 +55,9 @@ public static class KoppelAuthServer
     /// <summary>The claim that carries the client's credential generation (see <see cref="IClientCredentialValidator.ValidateAsync"/>).</summary>
     public const string GenerationClaim = "koppel_generation";
 
+    /// <summary>How long an access token lasts. A replaced signing key is kept for validation at least this long.</summary>
+    public static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(30);
+
     /// <summary>The authorization policy for endpoints only registered clients may call.</summary>
     public const string ClientPolicy = "koppel-client";
 
@@ -52,7 +69,7 @@ public static class KoppelAuthServer
     /// <see cref="IClientCredentialValidator"/> and an <see cref="ISigningKeySource"/>.
     /// Token requests must arrive over HTTPS.
     /// </summary>
-    public static IServiceCollection AddKoppelAuthServer(this IServiceCollection services, TimeSpan? accessTokenLifetime = null)
+    public static IServiceCollection AddKoppelAuthServer(this IServiceCollection services)
     {
         services.AddOpenIddict()
             .AddServer(options =>
@@ -60,7 +77,7 @@ public static class KoppelAuthServer
                 options.EnableDegradedMode();
                 options.SetTokenEndpointUris(TokenPath);
                 options.AllowClientCredentialsFlow();
-                options.SetAccessTokenLifetime(accessTokenLifetime ?? TimeSpan.FromMinutes(30));
+                options.SetAccessTokenLifetime(AccessTokenLifetime);
 
                 // Only access tokens are issued, and they are signed, not encrypted. The encryption key
                 // OpenIddict insists on is never used, so a random one per start is enough. It is
@@ -82,9 +99,27 @@ public static class KoppelAuthServer
                 options.UseAspNetCore();
             });
 
+        // Only the current key signs. Validation also takes the keys it replaced, which are still live: the
+        // local server integration copies the server's signing keys into the validation's configuration
+        // first, and this adds the rest after it. Both option sets are built again when the keys change.
         services.AddOptions<OpenIddictServerOptions>()
             .Configure<ISigningKeySource>((options, keys) =>
                 options.SigningCredentials.Add(new SigningCredentials(keys.SigningKey, SecurityAlgorithms.RsaSha256)));
+        services.AddOptions<OpenIddictValidationOptions>()
+            .Configure<ISigningKeySource>((options, keys) =>
+            {
+                if (options.Configuration is not { } configuration)
+                {
+                    return;
+                }
+
+                foreach (var key in keys.ValidationKeys.Where(key => configuration.SigningKeys.All(known => known.KeyId != key.KeyId)))
+                {
+                    configuration.SigningKeys.Add(key);
+                }
+            });
+        services.AddSingleton<IOptionsChangeTokenSource<OpenIddictServerOptions>, SigningKeyChange<OpenIddictServerOptions>>();
+        services.AddSingleton<IOptionsChangeTokenSource<OpenIddictValidationOptions>, SigningKeyChange<OpenIddictValidationOptions>>();
 
         services.AddAuthentication(Scheme);
         services.AddAuthorizationBuilder()
@@ -109,6 +144,14 @@ public static class KoppelAuthServer
     {
         ArgumentNullException.ThrowIfNull(principal);
         return int.TryParse(principal.FindFirst(GenerationClaim)?.Value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var generation) ? generation : null;
+    }
+
+    /// <summary>Tells the options system to build the token server's and the validation's options again when the keys change.</summary>
+    private sealed class SigningKeyChange<TOptions>(ISigningKeySource keys) : IOptionsChangeTokenSource<TOptions>
+    {
+        public string Name => Options.DefaultName;
+
+        public IChangeToken GetChangeToken() => keys.GetChangeToken();
     }
 
     /// <summary>The key under which validation hands the verified generation to the issuing handler.</summary>

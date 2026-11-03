@@ -8,7 +8,8 @@ namespace Koppel.Discovery;
 
 /// <summary>
 /// Server role: announces this server on the local network so clients can find it, and stops when
-/// the machine becomes a client only. <c>Discovery:Enabled=false</c> turns it off.
+/// the machine becomes a client only. A switch to a new certificate is announced at once.
+/// <c>Discovery:Enabled=false</c> turns it off.
 /// </summary>
 internal sealed partial class ServerAnnouncerService(
     ServerAnnouncer announcer,
@@ -18,7 +19,9 @@ internal sealed partial class ServerAnnouncerService(
     IConfiguration configuration,
     ILogger<ServerAnnouncerService> logger) : IHostedService
 {
+    private readonly Lock _gate = new();
     private bool _enabled;
+    private string? _announced;
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
@@ -26,6 +29,7 @@ internal sealed partial class ServerAnnouncerService(
         if (_enabled)
         {
             settings.Changed += ApplyAsync;
+            secrets.KeysChanged += ApplyKeysAsync;
             Apply(settings.Current);
         }
 
@@ -35,6 +39,7 @@ internal sealed partial class ServerAnnouncerService(
     public Task StopAsync(CancellationToken cancellationToken)
     {
         settings.Changed -= ApplyAsync;
+        secrets.KeysChanged -= ApplyKeysAsync;
         announcer.Stop();
         return Task.CompletedTask;
     }
@@ -45,10 +50,26 @@ internal sealed partial class ServerAnnouncerService(
         return Task.CompletedTask;
     }
 
+    private Task ApplyKeysAsync(ServerKeysView value)
+    {
+        Apply(settings.Current);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Under one lock, so a settings change and a certificate switch at once cannot leave the old fingerprint announced.</summary>
     private void Apply(KoppelSettings value)
     {
+        lock (_gate)
+        {
+            ApplyLocked(value);
+        }
+    }
+
+    private void ApplyLocked(KoppelSettings value)
+    {
         var shouldAnnounce = value.Role != KoppelRole.Client;
-        if (shouldAnnounce == announcer.IsAnnouncing)
+        var fingerprint = secrets.Fingerprint;
+        if (shouldAnnounce == announcer.IsAnnouncing && (!shouldAnnounce || fingerprint == _announced))
         {
             return;
         }
@@ -57,7 +78,8 @@ internal sealed partial class ServerAnnouncerService(
         {
             if (shouldAnnounce)
             {
-                announcer.Announce(new ServerAnnouncement(Environment.MachineName, host.NetworkPort, secrets.Fingerprint, SystemEndpoints.Version), host.DiscoveryPort);
+                announcer.Announce(new ServerAnnouncement(Environment.MachineName, host.NetworkPort, fingerprint, SystemEndpoints.Version), host.DiscoveryPort);
+                _announced = fingerprint;
             }
             else
             {

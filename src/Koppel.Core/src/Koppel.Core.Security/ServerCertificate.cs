@@ -51,6 +51,23 @@ public static class ServerCertificate
         ServerCertificateCustomValidationCallback = (_, certificate, _, _) => Matches(certificate, pinnedFingerprint),
     };
 
+    /// <summary>
+    /// An HTTP handler that accepts a server certificate only when <paramref name="accept"/> says so, for a
+    /// pin that can hold more than one fingerprint, such as the server's next certificate during a handover.
+    /// </summary>
+    public static HttpClientHandler CreatePinnedHandler(Func<X509Certificate2?, bool> accept)
+    {
+        ArgumentNullException.ThrowIfNull(accept);
+        return new() { ServerCertificateCustomValidationCallback = (_, certificate, _, _) => accept(certificate) };
+    }
+
+    /// <summary>True when <paramref name="certificate"/> has any of the pinned fingerprints. Null and empty ones match nothing.</summary>
+    public static bool MatchesAny(X509Certificate2? certificate, params IEnumerable<string?> pinnedFingerprints)
+    {
+        ArgumentNullException.ThrowIfNull(pinnedFingerprints);
+        return pinnedFingerprints.Any(pinned => Matches(certificate, pinned));
+    }
+
     /// <summary>True when <paramref name="certificate"/> has the pinned fingerprint. Spaces, colons and case are ignored.</summary>
     public static bool Matches(X509Certificate2? certificate, string? pinnedFingerprint)
     {

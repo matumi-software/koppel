@@ -30,7 +30,8 @@ public sealed record ClientDevices(string Link, string? LinkMessage, IReadOnlyLi
 /// again whenever the server offers them and they are not attached here: after a restart, an upgrade,
 /// a dropped link, or the device being plugged back in on the server. Detaching forgets the device.
 /// </summary>
-/// <param name="ServerFingerprint">The server the bus IDs belong to. Another server starts a new list.</param>
+/// <param name="ServerFingerprint">The server the bus IDs belong to. Another server starts a new list; the same server
+/// switching to its next certificate carries the list over.</param>
 /// <param name="VidPids">The VID:PID each bus ID had when it was attached. A bus ID is a port on the
 /// server, so a different device plugged into that port is not attached without asking.</param>
 internal sealed record AttachedDevices(string? ServerFingerprint, IReadOnlyList<string> BusIds, IReadOnlyDictionary<string, string>? VidPids = null)
@@ -43,7 +44,8 @@ internal sealed record AttachedDevices(string? ServerFingerprint, IReadOnlyList<
 
 /// <summary>
 /// A device on a server. A bus ID is only a port on one server, so attachments are told apart by the
-/// server's fingerprint as well: the same bus ID on another server is another device.
+/// server as well: the same bus ID on another server is another device. The server is named by the client
+/// ID it issued, which stays the same when the server switches to a new certificate.
 /// </summary>
 internal readonly record struct AttachKey(string Server, string BusId);
 
@@ -130,13 +132,12 @@ internal sealed partial class UsbClient(
     {
         get
         {
-            var fingerprint = connection.Current.ServerFingerprint ?? "";
             return new(
                 _link,
                 _linkMessage,
                 [.. _remote.Devices.Select(d =>
                 {
-                    var a = _attachments.GetValueOrDefault(new AttachKey(fingerprint, d.BusId));
+                    var a = _attachments.GetValueOrDefault(KeyOf(d.BusId));
                     return new ClientDeviceView(d, a is not null, a?.Port, a?.Since, _faults.GetValueOrDefault(d.BusId), a?.Via);
                 })],
                 UsesDriver ? null : _gatewayFault ?? attacher.Unavailable,
@@ -375,14 +376,17 @@ internal sealed partial class UsbClient(
     /// <summary>
     /// A new server, new credentials, or a role that is no longer Client or Both ends every attachment
     /// first, so nothing stays attached to a server the user moved away from, and then restarts the link.
-    /// A change that touches neither (the listen port, say) leaves the link alone. The release runs in the
-    /// background, because the driver's own command may take 30 seconds and the settings update, and with it
-    /// the UI's confirmation, waits for this handler. An attach that starts meanwhile waits for the release.
+    /// A change that touches neither (the listen port, say) leaves the link alone, and so does the same
+    /// server announcing or switching to its next certificate (<see cref="ClientConnection.Continues"/>).
+    /// The release runs in the background, because the driver's own command may take 30 seconds and the
+    /// settings update, and with it the UI's confirmation, waits for this handler. An attach that starts
+    /// meanwhile waits for the release.
     /// </summary>
     private async Task OnChangedAsync()
     {
-        Task previous;
-        TaskCompletionSource done;
+        var previous = Task.CompletedTask;
+        TaskCompletionSource? done = null;
+        ClientConnection was;
         lock (_gate)
         {
             // Read inside the lock, so two changes at once cannot store each other's stale state.
@@ -392,10 +396,29 @@ internal sealed partial class UsbClient(
                 return;
             }
 
+            was = _applied.Connection;
+            var sameServer = _applied.Client == now.Client && now.Connection.Continues(was);
             _applied = now;
-            previous = _releasing;
-            done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _releasing = done.Task;
+            if (sameServer)
+            {
+                // The server announced or switched to its next certificate: the link and the attachments carry on.
+                if (_serverLink is { } link && now.Connection.Continues(link.Connection))
+                {
+                    link.Connection = now.Connection;
+                }
+            }
+            else
+            {
+                previous = _releasing;
+                done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _releasing = done.Task;
+            }
+        }
+
+        if (done is null)
+        {
+            await CarryOverRememberedAsync(was);
+            return;
         }
 
         Interlocked.Increment(ref _changesApplied);
@@ -437,6 +460,28 @@ internal sealed partial class UsbClient(
 
         CancelSession();
         await RaiseAsync();
+    }
+
+    /// <summary>
+    /// The server switched to its next certificate: the devices remembered for it stay remembered under the
+    /// new fingerprint, so they attach again after a restart. Nothing to do when only the next one changed.
+    /// </summary>
+    private async Task CarryOverRememberedAsync(ClientConnection before)
+    {
+        var after = connection.Current.ServerFingerprint;
+        if (after is null || after == before.ServerFingerprint)
+        {
+            return;
+        }
+
+        try
+        {
+            await _remembered.UpdateAsync(r => r.ServerFingerprint == before.ServerFingerprint ? r with { ServerFingerprint = after } : r, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogChangeFailed(ex);
+        }
     }
 
     /// <summary>Cancels in-flight attaches. They check this before and after they register.</summary>
@@ -602,9 +647,9 @@ internal sealed partial class UsbClient(
                     Volatile.Write(ref expiresAt, ends.UtcTicks);
                     return token;
                 };
-                options.HttpMessageHandlerFactory = _ => ServerCertificate.CreatePinnedHandler(c.ServerFingerprint!);
+                options.HttpMessageHandlerFactory = _ => ServerCertificate.CreatePinnedHandler(certificate => Trusted(serverLink, certificate));
                 options.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback =
-                    (_, certificate, _, _) => ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, c.ServerFingerprint);
+                    (_, certificate, _, _) => Trusted(serverLink, certificate as System.Security.Cryptography.X509Certificates.X509Certificate2);
             })
             .WithAutomaticReconnect()
             .AddJsonProtocol(options => KoppelJson.Configure(options.PayloadSerializerOptions))
@@ -618,6 +663,7 @@ internal sealed partial class UsbClient(
             await RaiseAsync();
             AttachRemembered();
         });
+        hub.On<RemoteCertificates>("CertificatesChanged", certificates => LearnCertificatesAsync(hub, serverLink, certificates));
         hub.Reconnecting += _ => retiring || Expiring() ? Task.CompletedTask : SetLinkAsync("connecting", null);
         hub.Reconnected += _ => SetLinkAsync("connected", null);
         hub.Closed += ex =>
@@ -688,6 +734,53 @@ internal sealed partial class UsbClient(
             // Disposing the hub raises Closed, which is not a failure.
             retiring = true;
         }
+    }
+
+    /// <summary>
+    /// The server told this link which certificate it presents and which one it will switch to. The link is
+    /// pinned to a certificate this client trusts, so it may vouch for the next one: it is stored as a second
+    /// trusted fingerprint, or becomes the pinned one once the server presents it. The client then tells the
+    /// server it has it, which the server's UI shows. A fingerprint that is not one is ignored.
+    /// </summary>
+    private async Task LearnCertificatesAsync(HubConnection hub, ServerLink link, RemoteCertificates? certificates)
+    {
+        if (certificates is null || !ConnectionUpdate.IsFingerprint(certificates.Fingerprint)
+            || (certificates.NextFingerprint is not null && !ConnectionUpdate.IsFingerprint(certificates.NextFingerprint)))
+        {
+            LogInvalidCertificates();
+            return;
+        }
+
+        try
+        {
+            var stored = await connection.LearnCertificatesAsync(link.Connection, certificates.Fingerprint, certificates.NextFingerprint, CancellationToken.None);
+            if (certificates.NextFingerprint is { } next && ConnectionUpdate.SameFingerprint(stored.NextServerFingerprint, next))
+            {
+                await hub.InvokeAsync("NextCertificateReceived", next);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The server says it again on the next link; until then the old certificate still works.
+            LogCertificatesNotStored(ex);
+        }
+    }
+
+    /// <summary>
+    /// Whether the server may present this certificate on <paramref name="link"/>: one the link's connection
+    /// trusts, or one the saved connection trusts now if it is the same server with its certificate moved on.
+    /// So a link that outlives a switch still trusts the new certificate when it reconnects.
+    /// </summary>
+    private bool Trusted(ServerLink link, System.Security.Cryptography.X509Certificates.X509Certificate2? certificate)
+    {
+        var pinned = link.Connection;
+        if (pinned.Trusts(certificate))
+        {
+            return true;
+        }
+
+        var now = connection.Current;
+        return now.Continues(pinned) && now.Trusts(certificate);
     }
 
     /// <summary>
@@ -953,7 +1046,8 @@ internal sealed partial class UsbClient(
 
     /// <summary>
     /// The one token client for the saved connection, with its pinned HTTP client. A new one is built
-    /// when the connection changes, so a token for another server or secret is never reused.
+    /// when the connection changes, so a token for another server or secret is never reused. The same
+    /// server with its certificate moved on keeps it (<see cref="ClientConnection.Continues"/>).
     /// </summary>
     internal ServerLink ServerLinkFor()
     {
@@ -965,10 +1059,15 @@ internal sealed partial class UsbClient(
                 throw new InvalidOperationException("Not connected to a server.");
             }
 
+            if (_serverLink is not null && _serverLink.Connection != c && c.Continues(_serverLink.Connection))
+            {
+                _serverLink.Connection = c;
+            }
+
             if (_serverLink is null || _serverLink.Connection != c)
             {
                 _serverLink?.Dispose();
-                _serverLink = new ServerLink(c, time);
+                _serverLink = new ServerLink(c, time, Trusted);
             }
 
             return _serverLink;
@@ -1014,7 +1113,7 @@ internal sealed partial class UsbClient(
             socket.Options.KeepAliveInterval = UsbDataPlane.KeepAliveInterval;
             socket.Options.KeepAliveTimeout = UsbDataPlane.KeepAliveTimeout;
             socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
-                ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, c.ServerFingerprint);
+                Trusted(link, certificate as System.Security.Cryptography.X509Certificates.X509Certificate2);
             await socket.ConnectAsync(new UriBuilder(link.Server) { Scheme = "wss", Path = "/api/remote/usb" }.Uri, cancellationToken);
             return WebSocketStream.Create(socket, WebSocketMessageType.Binary, closeTimeout: TimeSpan.FromSeconds(2));
         }
@@ -1241,7 +1340,7 @@ internal sealed partial class UsbClient(
         await RaiseAsync();
     }
 
-    private AttachKey KeyOf(string busId) => new(connection.Current.ServerFingerprint ?? "", busId);
+    private AttachKey KeyOf(string busId) => new(connection.Current.ClientId ?? "", busId);
 
     private EntityRef Device(string busId) => new(busId, NameOf(busId), "device");
 
@@ -1267,15 +1366,21 @@ internal sealed partial class UsbClient(
     {
         private readonly HttpClient _http;
 
-        public ServerLink(ClientConnection connection, TimeProvider time)
+        /// <param name="trusted">Whether the server may present a certificate on this link; see <see cref="UsbClient.Trusted"/>.</param>
+        public ServerLink(ClientConnection connection, TimeProvider time, Func<ServerLink, System.Security.Cryptography.X509Certificates.X509Certificate2?, bool> trusted)
         {
             Connection = connection;
             Server = new Uri(connection.ServerUrl!);
-            _http = new HttpClient(ServerCertificate.CreatePinnedHandler(connection.ServerFingerprint!));
+            _http = new HttpClient(ServerCertificate.CreatePinnedHandler(certificate => trusted(this, certificate)));
             Tokens = new KoppelTokenClient(_http, time);
         }
 
-        public ClientConnection Connection { get; }
+        /// <summary>The connection this link is for. It moves on, under the client's lock, when the server announces or switches certificates.</summary>
+        public ClientConnection Connection
+        {
+            get => Volatile.Read(ref field);
+            set => Volatile.Write(ref field, value);
+        }
 
         public Uri Server { get; }
 
@@ -1336,6 +1441,12 @@ internal sealed partial class UsbClient(
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ignored {Count} devices from the server with a bus ID that is not valid")]
     private partial void LogInvalidDevices(int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Ignored certificates from the server with a fingerprint that is not one")]
+    private partial void LogInvalidCertificates();
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not store the server's next certificate")]
+    private partial void LogCertificatesNotStored(Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Could not apply a change of connection or role")]
     private partial void LogChangeFailed(Exception exception);

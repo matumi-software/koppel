@@ -85,7 +85,70 @@ internal static class ServerEndpoints
             return TypedResults.Ok(new ClientSecretResponse(secret));
         });
 
+        MapKeyEndpoints(group);
         return app;
+    }
+
+    /// <summary>
+    /// The certificate and the token signing key. Each change answers 202; the new state reaches the UI over
+    /// SignalR (<c>ServerKeysChanged</c>) once <c>secrets.json</c> is written, and the paired clients hear of
+    /// the next certificate over the remote hub. A change the current state does not allow answers 400.
+    /// </summary>
+    private static void MapKeyEndpoints(RouteGroupBuilder group)
+    {
+        var machine = new EntityRef("machine", Environment.MachineName, "machine");
+
+        group.MapGet("/keys", (ServerSecretsStore secrets) => TypedResults.Ok(secrets.KeysView));
+
+        group.MapPost("/keys/signing-key/rotate", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        {
+            var id = await secrets.RotateSigningKeyAsync(cancellationToken);
+            await activity.RecordAsync(machine, ActivityReason.SigningKeyRotated, ActivityOutcome.Succeeded, $"The token signing key was rotated, to {id}");
+            return TypedResults.Accepted((string?)null);
+        });
+
+        group.MapPost("/keys/next-certificate", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        {
+            if (await secrets.PrepareCertificateAsync(cancellationToken) is not { } next)
+            {
+                return Refused("A new certificate is already prepared. Switch to it or cancel it first.");
+            }
+
+            await activity.RecordAsync(machine, ActivityReason.CertificatePrepared, ActivityOutcome.Succeeded, $"A new certificate was prepared, fingerprint {Short(next)}");
+            return TypedResults.Accepted((string?)null);
+        });
+
+        group.MapDelete("/keys/next-certificate", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        {
+            var next = secrets.NextFingerprint;
+            if (next is null || !await secrets.CancelCertificateAsync(cancellationToken))
+            {
+                return Refused("There is no new certificate to cancel.");
+            }
+
+            await activity.RecordAsync(machine, ActivityReason.CertificateCancelled, ActivityOutcome.Succeeded, $"The new certificate {Short(next)} was cancelled");
+            return TypedResults.Accepted((string?)null);
+        });
+
+        group.MapPost("/keys/next-certificate/switch", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        {
+            if (await secrets.SwitchCertificateAsync(cancellationToken) is not { } done)
+            {
+                return Refused("There is no new certificate to switch to. Prepare one first.");
+            }
+
+            var summary = done.NotReceived.Count == 0
+                ? $"The server switched to its new certificate, fingerprint {Short(done.To)}"
+                : $"The server switched to its new certificate, fingerprint {Short(done.To)}. Not received by {string.Join(", ", done.NotReceived)}";
+            await activity.RecordAsync(machine, ActivityReason.CertificateSwitched, ActivityOutcome.Succeeded, summary);
+            return TypedResults.Accepted((string?)null);
+        });
+
+        static IResult Refused(string reason) =>
+            TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["certificate"] = [reason] });
+
+        // The first four bytes, as the UI shows them, so a line in the log can be matched to the fingerprint.
+        static string Short(string fingerprint) => $"{fingerprint[..11]}…";
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Koppel.Core.Configuration;
 using Koppel.Core.Security;
+using Microsoft.Extensions.Hosting.Systemd;
 using Microsoft.Extensions.Hosting.WindowsServices;
 
 namespace Koppel.Login;
@@ -31,7 +32,7 @@ internal enum SetupOutcome
 
 /// <summary>
 /// Owns <c>ui-auth.json</c> and the one-time setup code. While no password is set the code exists, in
-/// memory, in the log and in <c>setup-code.txt</c>; setting the password removes it, and clearing the
+/// memory, in <c>setup-code.txt</c> and, except under a Windows service or systemd, in the log; setting the password removes it, and clearing the
 /// password (the reset command, or the file edited away) issues a new one. Same write-then-raise rule
 /// as the other config files.
 /// </summary>
@@ -44,6 +45,7 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
     private readonly JsonConfigFile<UiCredentials> _file;
     private readonly KoppelPaths _paths;
     private readonly ILogger<UiAuthStore> _logger;
+    private readonly bool _logIsShared;
     private readonly SemaphoreSlim _setup = new(1, 1);
     private readonly Lock _codeGate = new();
     private string? _setupCode;
@@ -51,10 +53,12 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
     private int _passwordChecks;
     private readonly ConcurrentDictionary<string, string> _keepSessions = new();
 
-    public UiAuthStore(KoppelPaths paths, SecretBox box, ILogger<UiAuthStore> logger)
+    /// <param name="logIsShared">Whether the log is readable by users who cannot read the config folder. Left out, it is true under a Windows service or systemd; tests set it.</param>
+    public UiAuthStore(KoppelPaths paths, SecretBox box, ILogger<UiAuthStore> logger, bool? logIsShared = null)
     {
         _paths = paths;
         _logger = logger;
+        _logIsShared = logIsShared ?? (WindowsServiceHelpers.IsWindowsService() || SystemdHelpers.IsSystemdService());
         _file = new JsonConfigFile<UiCredentials>(paths.UiAuthFile, UiCredentials.Empty, KoppelJson.Files, logger, box.AsFileCodec(), UiCredentials.Invalid);
         _file.Changed += OnChangedAsync;
     }
@@ -215,11 +219,13 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
         if (issued is not null)
         {
             var shown = $"{issued[..4]}-{issued[4..]}";
-            if (WindowsServiceHelpers.IsWindowsService())
+            if (_logIsShared)
             {
                 // A Windows service logs to the Application event log, which every interactive user can
-                // read. The code would let any local user set the first password, so the log only says
-                // where the administrators-only file is.
+                // read, and a systemd service logs to the journal, which members of adm and
+                // systemd-journal can read. The code would let any of them set the first password, so the
+                // log only says where the root-only or administrators-only file is. Docker is neither: its
+                // log is readable only by whoever can run docker, so the code stays there.
                 LogSetupCodeInFile(_paths.SetupCodeFile);
             }
             else
@@ -262,7 +268,7 @@ internal sealed partial class UiAuthStore : IHostedService, IDisposable
     [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel setup code: {Code}. Enter it in the UI to set the admin password. It is also in {File} while no password is set.")]
     private partial void LogSetupCode(string code, string file);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel needs an admin password. The setup code to set it is in {File}, which only administrators can read.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Koppel needs an admin password. The setup code to set it is in {File}, which only administrators and root can read.")]
     private partial void LogSetupCodeInFile(string file);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not write or remove the setup code file {File} ({Reason}). The code in the log still works.")]

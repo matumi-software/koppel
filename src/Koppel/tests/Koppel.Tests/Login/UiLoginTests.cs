@@ -464,6 +464,56 @@ public sealed class UiLoginTests : IDisposable
         File.Exists(host.ConfigFile("setup-code.txt")).Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Setup_code_is_logged_only_where_the_log_is_not_shared(bool logIsShared)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new KoppelPaths(Path.Combine(directory, "config"), Path.Combine(directory, "keys"));
+            paths.Prepare();
+            using var box = new SecretBox(paths.KeysDirectory, "Koppel.Secrets.v1");
+            var logger = new CapturingLogger();
+            using var store = new UiAuthStore(paths, box, logger, logIsShared);
+
+            await store.StartAsync(TestContext.Current.CancellationToken);
+
+            var code = store.SetupCode!;
+            var shown = $"{code[..4]}-{code[4..]}";
+            File.ReadAllText(paths.SetupCodeFile).Trim().Should().Be(shown);
+            var logged = string.Join(' ', logger.Messages);
+            logged.Should().Contain(paths.SetupCodeFile);
+            if (logIsShared)
+            {
+                logged.Should().NotContain(shown).And.NotContain(code);
+            }
+            else
+            {
+                logged.Should().Contain(shown);
+            }
+
+            await store.StopAsync(TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<UiAuthStore>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
+    }
+
     [Fact]
     public async Task Reset_works_on_a_machine_that_never_ran_and_on_an_unreadable_file()
     {

@@ -1,9 +1,9 @@
 {
-  "name": "Protect main and dev",
+  "name": "Protect main",
   "target": "branch",
   "enforcement": "active",
   "conditions": {
-    "ref_name": { "include": ["refs/heads/main", "refs/heads/dev"], "exclude": [] }
+    "ref_name": { "include": ["refs/heads/main"], "exclude": [] }
   },
   "rules": [
     { "type": "deletion" },

@@ -9,7 +9,7 @@ find servers on the local network and pair by typing a code, so nobody copies se
 Status: version 0.1.0, early. On real hardware, a Debian 13 server shares USB receivers and a flash drive to a
 Windows 11 client, and a Windows server through usbipd-win shares a webcam to a Linux client. Printers are
 untried, webcams do not stream from a Linux server to a Windows client yet, and the arm64 image and `.deb`
-are untested on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens on `dev`; `main` holds releases.
+are untested on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests; releases are tags on `main`.
 
 | Platform | Server | Client |
 |---|---|---|

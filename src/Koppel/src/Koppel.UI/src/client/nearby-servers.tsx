@@ -138,7 +138,8 @@ export function NearbyServers({ locked }: { locked: boolean }) {
 /**
  * Anyone on the network can announce any name, so the list says when a name cannot be trusted
  * alone: two servers with one name, or a server that wears the name of the one this machine is
- * connected to but has another fingerprint.
+ * connected to but has another fingerprint. It also says when more than one address answers with a
+ * fingerprint, which a machine on two networks does, and so does one copying another's fingerprint.
  */
 function warningFor(server: DiscoveredServer, all: DiscoveredServer[], linkedTo: string | undefined, linkedHost: string | undefined) {
   const name = server.name.toLowerCase();
@@ -147,6 +148,10 @@ function warningFor(server: DiscoveredServer, all: DiscoveredServer[], linkedTo:
   }
   if (linkedTo && hex(server.fingerprint) !== linkedTo && linkedHost && (name === linkedHost || name === linkedHost.split('.')[0])) {
     return 'This name matches the server you are connected to, but the fingerprint is different. It may be a new server, or not the one you think.';
+  }
+  const others = server.otherAddresses;
+  if (others.length > 0) {
+    return `${others.join(', ')} also ${others.length === 1 ? 'answers' : 'answer'} with this fingerprint. A server on more than one network does that; if this one is not, another machine is copying its fingerprint. Check the address before you pair.`;
   }
   return undefined;
 }

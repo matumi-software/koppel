@@ -14,6 +14,7 @@ const server = (name: string, digit: string): DiscoveredServer => ({
   fingerprint: fp(digit),
   version: '1.0',
   url: `https://10.0.0.5:5241/${digit}`,
+  otherAddresses: [],
 });
 
 const idle: PairingStatus = { state: 'idle', serverName: null, serverUrl: null, code: null, message: null, expiresAt: null, serverFingerprint: null };
@@ -54,6 +55,13 @@ describe('nearby servers', () => {
     renderApp(<NearbyServers locked={false} />);
 
     expect(await screen.findByText(/matches the server you are connected to, but the fingerprint is different/)).toBeTruthy();
+  });
+
+  it('warns when other addresses answer with the same fingerprint', async () => {
+    mockFetch(routes([{ ...server('lab', 'a'), otherAddresses: ['10.0.0.7', '10.0.0.8:6000'] }]));
+    renderApp(<NearbyServers locked={false} />);
+
+    expect(await screen.findByText(/10\.0\.0\.7, 10\.0\.0\.8:6000 also answer with this fingerprint/)).toBeTruthy();
   });
 
   it('shows no warning for a lone server', async () => {

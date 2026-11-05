@@ -697,49 +697,22 @@ Microsoft.AspNetCore.SignalR.Client 10.0.14: MIT; © Microsoft Corporation. All 
 Microsoft.AspNetCore.SignalR.Client.Core 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://asp.net/
 Microsoft.AspNetCore.SpaProxy 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://asp.net/
 Microsoft.Bcl.Cryptography 10.0.2: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.AmbientMetadata.Application 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.Compliance.Abstractions 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.DependencyInjection.AutoActivation 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.Diagnostics.ExceptionSummarization 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.Extensions.Hosting.Systemd 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.Extensions.Hosting.WindowsServices 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.Http.Diagnostics 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.Http.Polly 10.0.11: MIT; © Microsoft Corporation. All rights reserved.; https://asp.net/
-Microsoft.Extensions.Http.Resilience 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.Resilience 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.Telemetry 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
-Microsoft.Extensions.Telemetry.Abstractions 10.8.0: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 Microsoft.IdentityModel.Abstractions 8.19.2: MIT; © Microsoft Corporation. All rights reserved.; https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet
 Microsoft.IdentityModel.JsonWebTokens 8.19.2: MIT; © Microsoft Corporation. All rights reserved.; https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet
 Microsoft.IdentityModel.Logging 8.19.2: MIT; © Microsoft Corporation. All rights reserved.; https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet
 Microsoft.IdentityModel.Protocols 8.19.2: MIT; © Microsoft Corporation. All rights reserved.; https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet
 Microsoft.IdentityModel.Tokens 8.19.2: MIT; © Microsoft Corporation. All rights reserved.; https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet
-OpenIddict 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
 OpenIddict.Abstractions 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.AspNetCore 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Client 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Client.AspNetCore 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Client.DataProtection 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Client.SystemIntegration 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Client.SystemNetHttp 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Client.WebIntegration 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Core 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
 OpenIddict.Server 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
 OpenIddict.Server.AspNetCore 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Server.DataProtection 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
 OpenIddict.Validation 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
 OpenIddict.Validation.AspNetCore 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Validation.DataProtection 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
 OpenIddict.Validation.ServerIntegration 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-OpenIddict.Validation.SystemNetHttp 7.7.2: Apache-2.0; © Kévin Chalet. All rights reserved.; https://openiddict.com/
-Polly 7.2.4: BSD-3-Clause; Copyright (c) 2023, App vNext; https://github.com/App-vNext/Polly
-Polly.Core 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://github.com/App-vNext/Polly
-Polly.Extensions 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://github.com/App-vNext/Polly
-Polly.Extensions.Http 3.0.0: BSD-3-Clause; Copyright (c) 2019, App vNext; https://github.com/App-vNext/Polly.Extensions.Http
-Polly.RateLimiting 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://github.com/App-vNext/Polly
-Skakel.Client 0.1.0-preview: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
-Skakel.Protocol 0.1.0-preview: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
-Skakel.Server 0.1.0-preview: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
+Skakel.Client 0.1.0: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
+Skakel.Protocol 0.1.0: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
+Skakel.Server 0.1.0: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
 System.ServiceProcess.ServiceController 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 
 == npm packages ==
@@ -1936,22 +1909,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
-----
-
-BSD-3-Clause (applies to the packages above that name it; their copyright holders are listed there)
-
-Copyright (c) <year> <owner>. 
-
-Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ----
 

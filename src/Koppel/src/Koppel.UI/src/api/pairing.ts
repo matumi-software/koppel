@@ -1,6 +1,9 @@
 import { getJson, sendChange } from './http';
 
-/** Mirrors Koppel.Discovery.DiscoveredServer: a server found on the local network. */
+/**
+ * Mirrors Koppel.Discovery.DiscoveredServer: a server found on the local network. `otherAddresses`: other
+ * addresses that answered with the same fingerprint.
+ */
 export interface DiscoveredServer {
   name: string;
   address: string;
@@ -8,6 +11,7 @@ export interface DiscoveredServer {
   fingerprint: string;
   version: string | null;
   url: string;
+  otherAddresses: string[];
 }
 
 /** `confirm`: the server approved, but saving replaces the connection to another server, so the person decides. */

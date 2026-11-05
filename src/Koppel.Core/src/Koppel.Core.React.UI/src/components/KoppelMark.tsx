@@ -1,6 +1,6 @@
 export interface KoppelMarkProps {
   size?: number;
-  /** Accessible name. Leave out when the word "Koppel" sits next to the mark. */
+  /** Accessible name. Leave out when the wordmark "koppel" sits next to the mark. */
   title?: string;
 }
 

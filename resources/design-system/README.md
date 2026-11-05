@@ -48,7 +48,7 @@ Every change goes to the server over REST and is only shown as done when the ser
 ## Iconography
 
 - The mark is a K whose arms end in a circle and an arrow, two of the shapes on the USB trident. Use `assets/Logos/koppel-mark.svg` on light grounds and `koppel-mark-on-dark.svg` on dark grounds. Keep clear space of half the mark's width around it and never draw it below 16px.
-- The wordmark is "Koppel" set in Instrument Sans 600 next to the mark, with the mark's height matched to the cap height plus ascender. There is no outlined wordmark file yet; set it in type.
+- The wordmark is "koppel", always lowercase like the other Matumi Software wordmarks, set in Instrument Sans 600 next to the mark, with the mark's height matched to the cap height plus ascender. There is no outlined wordmark file yet; set it in type.
 - The social preview for GitHub and link cards is `assets/Social/koppel-social-preview.png` (1280x640). Its source is `koppel-social-preview.html` next to it: open it in a browser at 1280x640 and screenshot the card to regenerate it.
 - UI icons: use Lucide (outline, 1.5px stroke, 16px in controls and 20px in headings), drawn in `currentColor`. No emoji anywhere in the product.
 

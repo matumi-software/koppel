@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <!-- packages.lock.json beside every project, committed. The installer and Docker builds restore with
          -p:RestoreLockedMode=true, so a build fails instead of picking up a different package. Regenerate with
          `dotnet restore` after changing a package version. -->

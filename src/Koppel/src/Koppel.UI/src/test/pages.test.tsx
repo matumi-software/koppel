@@ -1,15 +1,17 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react';
+import type { HubConnection } from '@microsoft/signalr';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionView } from '@/api/client';
 import type { KoppelSettings } from '@/api/settings';
 import { App } from '@/app';
 import { AuthContext } from '@/auth/auth-context';
+import { HubContext } from '@/hub/hub-context';
 import { confirmTimeoutMs } from '@/pending/domains';
 import { ConfigurationPage } from '@/settings/configuration-page';
 import { SetupPage } from '@/setup/setup-page';
 import { FrameContext, type FrameApi } from '@/shell/frame-context';
-import { accepted, deferred, json, mockFetch, renderApp } from './harness';
+import { accepted, deferred, FakeHub, json, mockFetch, renderApp } from './harness';
 
 const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true };
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
@@ -125,6 +127,77 @@ describe('sign out', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
 
     expect(await screen.findByText('Not signed out: the server answered 500.')).toBeTruthy();
+  });
+});
+
+describe('the status card', () => {
+  beforeEach(() => {
+    window.location.hash = '#overview';
+  });
+
+  const card = () => document.querySelector('.kp-shell__side .kp-status-card') as HTMLElement;
+
+  /** The app with the live link in a given state, under the harness's own hub. */
+  const appWithLink = (state: 'live' | 'reconnecting' | 'down', retry = () => {}) => (
+    <HubContext.Provider value={{ connection: new FakeHub() as unknown as HubConnection, state, retry }}>
+      <App />
+    </HubContext.Provider>
+  );
+
+  it('shows the machine name and the version from the system info, fetched once', async () => {
+    const { count } = mockFetch(baseRoutes);
+    renderApp(<App />);
+
+    await waitFor(() => expect(within(card()).getByText('v1.0.0')).toBeTruthy());
+    expect(within(card()).getByText('bench-pc')).toBeTruthy();
+    expect(within(card()).getByRole('status').textContent).toBe('Live');
+    expect(count('GET /api/system/info')).toBe(1);
+  });
+
+  it('says changes are paused while the link reconnects', async () => {
+    mockFetch(baseRoutes);
+    renderApp(appWithLink('reconnecting'));
+
+    await waitFor(() => expect(card().dataset.state).toBe('reconnecting'));
+    expect(within(card()).getByText('Changes are paused until the link is back.')).toBeTruthy();
+    expect(within(card()).queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('offers Retry while the link is down', async () => {
+    mockFetch(baseRoutes);
+    const retry = vi.fn();
+    renderApp(appWithLink('down', retry));
+
+    await waitFor(() => expect(card().dataset.state).toBe('down'));
+    expect(within(card()).getByRole('alert').textContent).toBe('Disconnected');
+
+    await userEvent.click(within(card()).getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['connected', 'Linked to lab.'],
+    ['connecting', 'Connecting to lab…'],
+    ['error', 'Cannot reach lab.'],
+    ['unconfigured', 'No server connection yet.'],
+  ] as const)('tells a client whose server link is %s what it is linked to', async (link, text) => {
+    mockFetch({
+      ...baseRoutes,
+      'GET /api/settings': () => json({ ...settings, role: 'client' }),
+      'GET /api/client/devices': () => json({ link, linkMessage: null, devices: [], unavailable: null, gateway: false }),
+    });
+    renderApp(<App />);
+
+    await waitFor(() => expect(within(card()).getByText(text)).toBeTruthy());
+  });
+
+  it('does not say what a server is linked to', async () => {
+    mockFetch(baseRoutes);
+    renderApp(<App />);
+
+    await waitFor(() => expect(within(card()).getByText('v1.0.0')).toBeTruthy());
+    expect(within(card()).queryByText(/Linked to|Cannot reach|Connecting to|No server connection/)).toBeNull();
   });
 });
 

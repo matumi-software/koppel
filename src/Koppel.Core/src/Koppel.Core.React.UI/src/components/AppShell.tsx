@@ -3,11 +3,10 @@ import { Button, Dialog, Link, Modal, ModalOverlay } from 'react-aria-components
 import { KoppelMark } from './KoppelMark';
 
 export interface AppShellProps {
-  /** Sidebar content: NavGroups and the link status at the bottom. Also shown in the phone menu. */
+  /** Sidebar content: NavGroups. Also shown in the phone menu. */
   nav: ReactNode;
-  /** Shown at the bottom of the sidebar, such as LinkBanner. */
+  /** Shown at the bottom of the sidebar and the phone menu, such as StatusCard. */
   navFoot?: ReactNode;
-  navFootState?: 'live' | 'reconnecting' | 'down';
   /**
    * Right column: activity, or the selected item's details. One panel for every page, whose width
    * the user sets by dragging its edge and its content never changes. Folds below the page at phone width.
@@ -30,7 +29,7 @@ export interface AppShellProps {
  * The app frame: sidebar navigation, the page, and an aside. At phone width the sidebar moves into
  * a menu behind a top-bar button and the aside folds below the page, so nothing scrolls sideways.
  */
-export function AppShell({ nav, navFoot, navFootState, aside, defaultAsideWidth, onAsideWidthChange, title, status, isMenuOpen, onMenuOpenChange, children }: AppShellProps) {
+export function AppShell({ nav, navFoot, aside, defaultAsideWidth, onAsideWidthChange, title, status, isMenuOpen, onMenuOpenChange, children }: AppShellProps) {
   const [asideWidth, setAsideWidth] = useState(() => clampAside(defaultAsideWidth ?? asideDefault));
   const [isResizing, setResizing] = useState(false);
   const brand = (
@@ -39,11 +38,7 @@ export function AppShell({ nav, navFoot, navFootState, aside, defaultAsideWidth,
       <span>koppel</span>
     </div>
   );
-  const foot = navFoot && (
-    <div className="kp-shell__foot" data-state={navFootState}>
-      {navFoot}
-    </div>
-  );
+  const foot = navFoot && <div className="kp-shell__foot">{navFoot}</div>;
 
   return (
     <div className="kp-shell" data-resizing={isResizing ? 'true' : undefined}>

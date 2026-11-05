@@ -14,4 +14,5 @@ export { CopyValue, SecretValue, type SecretValueProps } from './components/Secr
 export { SegmentedControl, type SegmentedControlProps, type SegmentOption } from './components/SegmentedControl';
 export { RoleCards, SetupChecks, Steps, type RoleCardsProps, type RoleOption, type SetupCheck } from './components/Setup';
 export { StatusBadge, type DeviceState, type StatusBadgeProps } from './components/StatusBadge';
+export { StatusCard, type ServerLinkState, type StatusCardProps } from './components/StatusCard';
 export { Switch, switchState, type SwitchProps, type SwitchState } from './components/Switch';

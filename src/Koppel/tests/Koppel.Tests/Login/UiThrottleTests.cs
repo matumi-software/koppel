@@ -124,3 +124,14 @@ public sealed class UiSessionTests
         UiSession.EndOf(renewed).Should().Be(UiSession.EndOf(principal), "a password change does not restart the cap");
     }
 }
+
+public sealed class UiCallerTests
+{
+    [Theory]
+    [InlineData("192.168.1.20", "192.168.1.20")]
+    [InlineData("::ffff:192.168.1.20", "192.168.1.20")]
+    [InlineData("2001:db8:1:2::10", "2001:db8:1:2::10")]
+    [InlineData("fe80::1", "fe80::1")]
+    public void AddressKey_is_the_whole_address_with_mapped_IPv4_folded(string address, string key) =>
+        UiSignIn.AddressKey(System.Net.IPAddress.Parse(address)).Should().Be(key);
+}

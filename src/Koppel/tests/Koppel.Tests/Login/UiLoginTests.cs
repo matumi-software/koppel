@@ -239,6 +239,24 @@ public sealed class UiLoginTests : IDisposable
     }
 
     [Fact]
+    public async Task A_locked_out_IPv6_host_does_not_lock_out_its_neighbour_on_the_same_network()
+    {
+        var host = Host();
+        await SetPasswordAsync(host);
+        var signIn = host.Services.GetRequiredService<UiSignIn>();
+        var noisy = UiSignIn.AddressKey(IPAddress.Parse("2001:db8:1:2::10"));
+        var neighbour = UiSignIn.AddressKey(IPAddress.Parse("2001:db8:1:2::11"));
+
+        for (var i = 0; i < UiLoginThrottle.FreeFailures; i++)
+        {
+            (await signIn.LoginAsync(noisy, "wrong" + i)).Verdict.Should().Be(Verdict.Wrong);
+        }
+
+        (await signIn.LoginAsync(noisy, KoppelFactory.Password)).Verdict.Should().Be(Verdict.Locked);
+        (await signIn.LoginAsync(neighbour, KoppelFactory.Password)).Verdict.Should().Be(Verdict.Ok, "a neighbour in the same /64 is another caller");
+    }
+
+    [Fact]
     public async Task A_busy_server_answers_at_once_and_does_not_count_the_try()
     {
         var host = Host();

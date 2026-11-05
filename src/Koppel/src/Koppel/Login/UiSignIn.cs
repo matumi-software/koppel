@@ -134,26 +134,15 @@ internal sealed partial class UiSignIn(UiAuthStore store, UiLoginThrottle thrott
         return new SignInResult(Verdict.Ok);
     }
 
-    /// <summary>What a caller's limit counts: one IPv4 address, or one IPv6 /64, as Skakel's pairing does.</summary>
+    /// <summary>What a caller's limit counts: one whole address, as Skakel's limits do.</summary>
     public static string Caller(HttpContext context) => AddressKey(context.Connection.RemoteIpAddress);
 
-    /// <summary>One IPv4 address, or one IPv6 /64, which is what a single network hands a host.</summary>
-    internal static string AddressKey(System.Net.IPAddress? address)
-    {
-        if (address is null)
-        {
-            return "unknown";
-        }
-
-        if (address.IsIPv4MappedToIPv6)
-        {
-            address = address.MapToIPv4();
-        }
-
-        return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
-            ? $"{Convert.ToHexString(address.GetAddressBytes().AsSpan(0, 8))}/64"
-            : address.ToString();
-    }
+    /// <summary>
+    /// The whole address, with IPv4-mapped IPv6 folded to IPv4. Not an IPv6 /64: every host on a network
+    /// shares its /64, so one host's wrong passwords would lock all of them out of the UI.
+    /// </summary>
+    internal static string AddressKey(System.Net.IPAddress? address) =>
+        address is null ? "unknown" : (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString();
 
     private static EntityRef Machine => new("ui", Environment.MachineName, "machine");
 

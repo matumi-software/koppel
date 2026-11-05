@@ -36,7 +36,7 @@ export function AppShell({ nav, navFoot, navFootState, aside, defaultAsideWidth,
   const brand = (
     <div className="kp-brand">
       <KoppelMark size={26} />
-      <span>Koppel</span>
+      <span>koppel</span>
     </div>
   );
   const foot = navFoot && (

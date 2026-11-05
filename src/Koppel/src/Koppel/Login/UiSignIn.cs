@@ -134,8 +134,26 @@ internal sealed partial class UiSignIn(UiAuthStore store, UiLoginThrottle thrott
         return new SignInResult(Verdict.Ok);
     }
 
-    /// <summary>What a caller's limit counts: one IPv4 address, or one IPv6 /64, as pairing does.</summary>
-    public static string Caller(HttpContext context) => PairingStore.AddressKey(context.Connection.RemoteIpAddress);
+    /// <summary>What a caller's limit counts: one IPv4 address, or one IPv6 /64, as Skakel's pairing does.</summary>
+    public static string Caller(HttpContext context) => AddressKey(context.Connection.RemoteIpAddress);
+
+    /// <summary>One IPv4 address, or one IPv6 /64, which is what a single network hands a host.</summary>
+    internal static string AddressKey(System.Net.IPAddress? address)
+    {
+        if (address is null)
+        {
+            return "unknown";
+        }
+
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        return address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+            ? $"{Convert.ToHexString(address.GetAddressBytes().AsSpan(0, 8))}/64"
+            : address.ToString();
+    }
 
     private static EntityRef Machine => new("ui", Environment.MachineName, "machine");
 

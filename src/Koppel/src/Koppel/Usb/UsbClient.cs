@@ -4,12 +4,10 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using Koppel.Client;
 using Koppel.Core.Activity;
-using Koppel.Core.Auth;
 using Koppel.Core.Configuration;
-using Koppel.Core.Security;
 using Koppel.Core.Usb;
 using Koppel.Settings;
-using Microsoft.AspNetCore.SignalR.Client;
+using Skakel.Client;
 
 namespace Koppel.Usb;
 
@@ -50,34 +48,31 @@ internal sealed record AttachedDevices(string? ServerFingerprint, IReadOnlyList<
 internal readonly record struct AttachKey(string Server, string BusId);
 
 /// <summary>
-/// Client role: keeps a live SignalR link to the configured server for its device list, and attaches
-/// and detaches devices. An attach opens a TLS connection to the server's USB port, authenticates with
-/// the bearer token, imports the device over USB/IP, then hands one end of a loopback pair to the
-/// kernel's virtual host controller and relays the other end through TLS.
+/// Client role: keeps a Skakel link to the configured server for its device list, and attaches and
+/// detaches devices. An attach opens a <c>usb</c> stream on the link (a WebSocket over TLS, pinned to the
+/// server's certificate, with the link's token), imports the device over USB/IP, then hands one end of a
+/// loopback pair to the kernel's virtual host controller and relays the other end through the stream.
 /// </summary>
+/// <remarks>
+/// The link keeps the hub connected, renews it before its token runs out, follows the server to another
+/// address on the local network, and learns the server's next certificate. What it learns is saved in
+/// <c>connection.json</c> here, and the attached devices carry on through all of it.
+/// </remarks>
 internal sealed partial class UsbClient(
     KoppelPaths paths,
     ConnectionStore connection,
     SettingsStore settings,
-    ServerMoves moves,
+    SkakelBrowser browser,
     IUsbAttacher attacher,
     IUsbIpDriver driver,
     TimeProvider time,
     IActivityRecorder activity,
     IConfiguration configuration,
+    ILoggerFactory loggers,
     ILogger<UsbClient> logger) : BackgroundService
 {
     /// <summary>How often a remembered device that is not attached yet is tried again.</summary>
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(5);
-
-    private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(60);
-
-    /// <summary>How long before its token ends the link is made again.</summary>
-    private static readonly TimeSpan RefreshAhead = TimeSpan.FromSeconds(30);
-
-    /// <summary>A close this near the end of the token is the server's expiry. It allows for the server's clock and the trip.</summary>
-    private static readonly TimeSpan ExpiryGrace = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// One deadline for everything before USB traffic flows: the token, connecting, TLS, the WebSocket, the
@@ -107,9 +102,8 @@ internal sealed partial class UsbClient(
     private volatile bool _listed;
     private string _link = "unconfigured";
     private string? _linkMessage;
-    private CancellationTokenSource? _session;
     private CancellationTokenSource _epoch = new();
-    private ServerLink? _serverLink;
+    private RemoteLink? _remoteLink;
     private (bool Client, ClientConnection Connection) _applied;
     private Task _releasing = Task.CompletedTask;
     private int _attachStarts;
@@ -205,14 +199,11 @@ internal sealed partial class UsbClient(
     public override void Dispose()
     {
         _remembered.Dispose();
-        lock (_gate)
-        {
-            _serverLink?.Dispose();
-            _serverLink = null;
-        }
-
         base.Dispose();
     }
+
+    /// <summary>The link to the saved server, or null while there is none. For tests that check it is kept.</summary>
+    internal RemoteLink? Remote => Volatile.Read(ref _remoteLink);
 
     /// <summary>
     /// Remembers the device, then starts attaching it in the background. The outcome reaches the UI
@@ -379,7 +370,8 @@ internal sealed partial class UsbClient(
     /// first, so nothing stays attached to a server the user moved away from, and then restarts the link.
     /// A change that touches neither (the listen port, say) leaves the link alone, and so does the same
     /// server announcing or switching to its next certificate (<see cref="ClientConnection.Continues"/>).
-    /// The same server at another address keeps the attachments, but the link starts again there.
+    /// The same server at another address keeps the attachments, and the link too when the link followed
+    /// the server there itself; an address the person typed starts the link again there.
     /// The release runs in the background, because the driver's own command may take 30 seconds and the
     /// settings update, and with it the UI's confirmation, waits for this handler. An attach that starts
     /// meanwhile waits for the release.
@@ -389,7 +381,6 @@ internal sealed partial class UsbClient(
         var previous = Task.CompletedTask;
         TaskCompletionSource? done = null;
         ClientConnection was;
-        var moved = false;
         lock (_gate)
         {
             // Read inside the lock, so two changes at once cannot store each other's stale state.
@@ -402,18 +393,7 @@ internal sealed partial class UsbClient(
             was = _applied.Connection;
             var sameServer = _applied.Client == now.Client && now.Connection.Continues(was);
             _applied = now;
-            if (sameServer)
-            {
-                // The server announced or switched to its next certificate: the link and the attachments carry on.
-                // At another address the attachments carry on, and the link is made again there.
-                if (_serverLink is { } link && link.CarriesOn(now.Connection))
-                {
-                    link.Connection = now.Connection;
-                }
-
-                moved = now.Connection.ServerUrl != was.ServerUrl;
-            }
-            else
+            if (!sameServer)
             {
                 previous = _releasing;
                 done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -423,11 +403,8 @@ internal sealed partial class UsbClient(
 
         if (done is null)
         {
-            if (moved)
-            {
-                CancelSession();
-            }
-
+            // The same server: the attachments carry on, and so does the link unless it is at another address.
+            await ApplyLinkAsync();
             await CarryOverRememberedAsync(was);
             return;
         }
@@ -469,7 +446,7 @@ internal sealed partial class UsbClient(
             await RaiseAsync();
         });
 
-        CancelSession();
+        await ApplyLinkAsync();
         await RaiseAsync();
     }
 
@@ -516,22 +493,10 @@ internal sealed partial class UsbClient(
         }
     }
 
-    /// <summary>The link's token is cancelled under the lock that also ends its life, so it is never cancelled after it was disposed.</summary>
-    private void CancelSession()
-    {
-        lock (_gate)
-        {
-            try
-            {
-                _session?.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // The link ended on its own just now.
-            }
-        }
-    }
-
+    /// <summary>
+    /// Keeps the link, while the role is Client or Both and the saved connection is complete, and tries the
+    /// remembered devices again every few seconds while it is up.
+    /// </summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stopping = stoppingToken;
@@ -544,263 +509,179 @@ internal sealed partial class UsbClient(
 
         connection.Changed += Restart;
         settings.Changed += Restart;
-        var backoff = MinBackoff;
-        var refreshing = false;
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
+            await ApplyLinkAsync();
+
+            // A remembered device that could not be attached yet, because it was in use or the server was
+            // still starting, is tried again while the link is up.
+            using var retry = new PeriodicTimer(RetryInterval, time);
+            while (await retry.WaitForNextTickAsync(stoppingToken))
             {
-                using var session = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                lock (_gate)
-                {
-                    _session = session;
-                }
-
-                try
-                {
-                    refreshing = await RunLinkAsync(refreshing, session.Token);
-                    backoff = MinBackoff;
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (OperationCanceledException)
-                {
-                    // Settings or connection changed; start over with the new values.
-                    backoff = MinBackoff;
-                    refreshing = false;
-                }
-                catch (Exception ex)
-                {
-                    // Whatever went wrong, the host keeps running and the UI says what happened.
-                    refreshing = false;
-                    var reason = RemoteFailure.Describe(ex);
-                    LogLinkFailed(reason, ex);
-                    try
-                    {
-                        await SetLinkAsync("error", reason);
-                        // A server that moved on the local network is followed; the move ends this wait.
-                        if (LinkConnection() is { } failed)
-                        {
-                            await moves.LinkFailedAsync(failed, ex);
-                        }
-
-                        await Task.Delay(backoff, session.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        // Stopping, or the settings changed and the next try may differ.
-                    }
-                    catch (Exception inner)
-                    {
-                        LogLinkFailed(inner.Message, inner);
-                    }
-
-                    backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxBackoff.Ticks));
-                }
-                finally
-                {
-                    lock (_gate)
-                    {
-                        _session = null;
-                    }
-                }
+                AttachRemembered();
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Stopping.
         }
         finally
         {
             connection.Changed -= Restart;
             settings.Changed -= Restart;
+            ReplaceLink(null);
         }
     }
 
     /// <summary>
-    /// The link ends one of three ways: it throws, it closes (and is tried again after a pause), or its
-    /// token is about to run out. The server closes a hub at its token's expiry, so the link is made again
-    /// a little before that, with a fresh token, and neither the UI nor the activity log hears of it.
+    /// Makes the link the saved connection needs, or none. The same server at the address the link is at
+    /// keeps its link, so a certificate it switched to or an address it followed changes nothing here. A
+    /// link that is replaced stops in the background: stopping waits for the link's own handlers, and one
+    /// of them may be the save that led here.
     /// </summary>
-    /// <param name="refreshing">This link replaces one that ended because its token was about to expire.</param>
-    /// <returns>True when the link ended for that reason, so the next one is a refresh.</returns>
-    private async Task<bool> RunLinkAsync(bool refreshing, CancellationToken cancellationToken)
+    private async Task ApplyLinkAsync()
     {
         var c = connection.Current;
-        if (settings.Current.Role == KoppelRole.Server || !c.IsComplete)
+        var wanted = settings.Current.Role != KoppelRole.Server && c.IsComplete && !_stopping.IsCancellationRequested;
+        RemoteLink? made = null;
+        lock (_gate)
+        {
+            var current = _remoteLink;
+            if (wanted && current is not null && c.Continues(current.Connection) && SameAddress(c, current.Link.Address))
+            {
+                current.Connection = c;
+                return;
+            }
+
+            if (wanted)
+            {
+                made = NewLink(c);
+            }
+
+            // Current before it starts, so the first thing it reports is heard.
+            ReplaceLinkLocked(made);
+            made?.Link.Start();
+        }
+
+        if (made is null)
         {
             _remote = new([]);
             _listed = false;
             await SetLinkAsync("unconfigured", null);
-            await Task.Delay(Timeout.Infinite, cancellationToken);
-            return false;
-        }
-
-        if (!refreshing)
-        {
-            await SetLinkAsync("connecting", null);
-        }
-
-        // The same token client serves the hub, every attach and every gateway session, so a token is
-        // fetched once and reused until shortly before it expires.
-        var serverLink = ServerLinkFor();
-        var server = serverLink.Server;
-        long expiresAt = 0;
-        long refreshAt = 0;
-        var planned = false;
-        var retiring = false;
-
-        // A close or a reconnect this close to the token's end is the server's expiry, not a failure.
-        bool Expiring() => Volatile.Read(ref expiresAt) is var ends and > 0 && time.GetUtcNow().UtcTicks >= ends - ExpiryGrace.Ticks;
-
-        await using var hub = new HubConnectionBuilder()
-            .WithUrl(new Uri(server, "/api/hubs/remote"), options =>
-            {
-                options.AccessTokenProvider = async () =>
-                {
-                    var (token, ends) = await serverLink.Tokens.GetAccessTokenWithExpiryAsync(server, c.ClientId!, c.ClientSecret!, cancellationToken);
-                    var now = time.GetUtcNow();
-                    // Renew half a minute ahead; a token with less than a minute left is renewed on the spot.
-                    var margin = TimeSpan.FromTicks(Math.Min(RefreshAhead.Ticks, (ends - now).Ticks / 2));
-                    Volatile.Write(ref refreshAt, (ends - margin).UtcTicks);
-                    Volatile.Write(ref expiresAt, ends.UtcTicks);
-                    return token;
-                };
-                options.HttpMessageHandlerFactory = _ => ServerCertificate.CreatePinnedHandler(certificate => Trusted(serverLink, certificate));
-                options.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback =
-                    (_, certificate, _, _) => Trusted(serverLink, certificate as System.Security.Cryptography.X509Certificates.X509Certificate2);
-            })
-            .WithAutomaticReconnect()
-            .AddJsonProtocol(options => KoppelJson.Configure(options.PayloadSerializerOptions))
-            .Build();
-
-        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        hub.On<RemoteDevices>("DevicesChanged", async devices =>
-        {
-            _remote = Sanitize(devices);
-            _listed = true;
-            await RaiseAsync();
-            AttachRemembered();
-        });
-        hub.On<RemoteCertificates>("CertificatesChanged", certificates => LearnCertificatesAsync(hub, serverLink, certificates));
-        hub.Reconnecting += _ => retiring || Expiring() ? Task.CompletedTask : SetLinkAsync("connecting", null);
-        hub.Reconnected += _ => SetLinkAsync("connected", null);
-        hub.Closed += ex =>
-        {
-            if (retiring || Expiring())
-            {
-                planned |= !retiring;
-                closed.TrySetResult();
-                return Task.CompletedTask;
-            }
-
-            closed.TrySetResult();
-            return SetLinkAsync("error", ex is null ? "The server closed the link." : RemoteFailure.Describe(ex));
-        };
-
-        try
-        {
-            await hub.StartAsync(cancellationToken);
-            await SetLinkAsync("connected", null);
-
-            // A remembered device that could not be attached yet, because it was in use or the server was
-            // still starting, is tried again until the link closes.
-            using var retry = new PeriodicTimer(RetryInterval, time);
-            CancellationTokenSource? armed = null;
-            Task refresh = new TaskCompletionSource().Task;
-            var armedFor = 0L;
-            try
-            {
-                while (!closed.Task.IsCompleted)
-                {
-                    AttachRemembered();
-                    var due = Volatile.Read(ref refreshAt);
-                    if (due != armedFor)
-                    {
-                        // A new token (the hub reconnected) moves the end, so the wait for it starts again.
-                        armedFor = due;
-                        armed?.Cancel();
-                        armed?.Dispose();
-                        armed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                        var wait = new DateTimeOffset(due, TimeSpan.Zero) - time.GetUtcNow();
-                        refresh = Task.Delay(wait > TimeSpan.Zero ? wait : TimeSpan.Zero, time, armed.Token);
-                    }
-
-                    var finished = await Task.WhenAny(closed.Task, retry.WaitForNextTickAsync(cancellationToken).AsTask(), refresh);
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (finished == refresh && refresh.IsCompletedSuccessfully)
-                    {
-                        planned = true;
-                        break;
-                    }
-                }
-            }
-            finally
-            {
-                armed?.Dispose();
-            }
-
-            if (planned)
-            {
-                return true;
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
-            return false;
-        }
-        finally
-        {
-            // Disposing the hub raises Closed, which is not a failure.
-            retiring = true;
         }
     }
 
-    /// <summary>
-    /// The server told this link which certificate it presents and which one it will switch to. The link is
-    /// pinned to a certificate this client trusts, so it may vouch for the next one: it is stored as a second
-    /// trusted fingerprint, or becomes the pinned one once the server presents it. The client then tells the
-    /// server it has it, which the server's UI shows. A fingerprint that is not one is ignored.
-    /// </summary>
-    private async Task LearnCertificatesAsync(HubConnection hub, ServerLink link, RemoteCertificates? certificates)
+    private static bool SameAddress(ClientConnection c, Uri address) =>
+        string.Equals(c.GetAddress().Authority, address.Authority, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A link for <paramref name="c"/>, wired to this client. Not started.</summary>
+    private RemoteLink NewLink(ClientConnection c)
     {
-        if (certificates is null || !ConnectionUpdate.IsFingerprint(certificates.Fingerprint)
-            || (certificates.NextFingerprint is not null && !ConnectionUpdate.IsFingerprint(certificates.NextFingerprint)))
+        var options = new SkakelClientOptions
         {
-            LogInvalidCertificates();
+            LoggerFactory = loggers,
+            TimeProvider = time,
+            HubPath = RemoteHub.Path,
+            Browser = configuration.GetValue("Discovery:Enabled", true) ? browser : null,
+            ConfigureHubJson = KoppelJson.Configure,
+        };
+        var remote = new RemoteLink(c, new SkakelLink(c.GetAddress(), c.GetPins(), c.GetCredentials(), options));
+        remote.Link.StatusChanged += status => OnLinkStatusAsync(remote, status);
+        remote.Link.PinsChanged += pins => OnPinsChangedAsync(remote, pins);
+        remote.Link.AddressChanged += to => OnLinkMovedAsync(remote, to);
+        remote.Link.On<RemoteDevices>("DevicesChanged", devices => OnDevicesAsync(remote, devices));
+        return remote;
+    }
+
+    private void ReplaceLink(RemoteLink? next)
+    {
+        lock (_gate)
+        {
+            ReplaceLinkLocked(next);
+        }
+    }
+
+    private void ReplaceLinkLocked(RemoteLink? next)
+    {
+        var previous = _remoteLink;
+        Volatile.Write(ref _remoteLink, next);
+        if (previous is not null)
+        {
+            _tasks.Run("stop the old link", async () => await previous.Link.DisposeAsync());
+        }
+    }
+
+    private bool IsCurrent(RemoteLink remote) => ReferenceEquals(Volatile.Read(ref _remoteLink), remote);
+
+    /// <summary>The link to the saved server, or null while there is none.</summary>
+    private RemoteLink? CurrentLink() => Volatile.Read(ref _remoteLink);
+
+    /// <summary>
+    /// Where the link stands, as the UI shows it. A revoke or a rotation on the server closes the link for
+    /// good, with words that say to pair again. Renewing it before its token runs out is not a change.
+    /// </summary>
+    private async Task OnLinkStatusAsync(RemoteLink remote, SkakelLinkStatus status)
+    {
+        if (!IsCurrent(remote))
+        {
             return;
         }
 
-        try
+        switch (status.State)
         {
-            var stored = await connection.LearnCertificatesAsync(link.Connection, certificates.Fingerprint, certificates.NextFingerprint, CancellationToken.None);
-            if (certificates.NextFingerprint is { } next && ConnectionUpdate.SameFingerprint(stored.NextServerFingerprint, next))
-            {
-                await hub.InvokeAsync("NextCertificateReceived", next);
-            }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            // The server says it again on the next link; until then the old certificate still works.
-            LogCertificatesNotStored(ex);
+            case SkakelLinkState.Connecting:
+                await SetLinkAsync("connecting", null);
+                break;
+            case SkakelLinkState.Connected:
+                await SetLinkAsync("connected", null);
+                AttachRemembered();
+                break;
+            case SkakelLinkState.Failed or SkakelLinkState.Closed:
+                LogLinkFailed(status.Failure?.Code ?? "unknown");
+                await SetLinkAsync("error", status.Failure?.Message ?? SkakelFailure.Of(SkakelFailureKind.ConnectionLost).Message);
+                break;
         }
     }
 
-    /// <summary>
-    /// Whether the server may present this certificate on <paramref name="link"/>: one the link's connection
-    /// trusts, or one the saved connection trusts now if it is the same server with its certificate moved on.
-    /// So a link that outlives a switch still trusts the new certificate when it reconnects.
-    /// </summary>
-    private bool Trusted(ServerLink link, System.Security.Cryptography.X509Certificates.X509Certificate2? certificate)
+    private async Task OnDevicesAsync(RemoteLink remote, RemoteDevices devices)
     {
-        var pinned = link.Connection;
-        if (pinned.Trusts(certificate))
+        if (!IsCurrent(remote))
         {
-            return true;
+            return;
         }
 
-        var now = connection.Current;
-        return now.Continues(pinned) && now.Trusts(certificate);
+        _remote = Sanitize(devices);
+        _listed = true;
+        await RaiseAsync();
+        AttachRemembered();
     }
 
     /// <summary>
+    /// The server told the link of its next certificate, switched to it, or cancelled it. Saved in
+    /// <c>connection.json</c> before the link tells the server it has it; a save that fails, or a saved
+    /// connection that is another server's by now, throws, and the server says it again on the next link.
+    /// </summary>
+    private Task OnPinsChangedAsync(RemoteLink remote, SkakelPins pins) => connection.SavePinsAsync(remote.Connection, pins, CancellationToken.None);
+
+    /// <summary>
+    /// The server moved on the local network and the link followed it. The saved connection follows too,
+    /// unless the person saved another one meanwhile, and the activity log says so.
+    /// </summary>
+    internal async Task OnLinkMovedAsync(RemoteLink remote, Uri to)
+    {
+        var was = remote.Connection.GetAddress().Authority;
+        var url = to.GetLeftPart(UriPartial.Authority);
+        if (!await connection.MoveServerAsync(remote.Connection, url, CancellationToken.None))
+        {
+            return;
+        }
+
+        LogMoved(was, to.Authority);
+        await activity.RecordAsync(new EntityRef("link", to.Host, "link"), ActivityReason.ServerMoved, ActivityOutcome.Succeeded, $"Server moved from {was} to {to.Authority}");
+    }
+
+    /// <summary>
+    /// What a server sends is only trusted once it is checked    /// <summary>
     /// What a server sends is only trusted once it is checked: a bus ID that is not one is dropped, so it
     /// never reaches the UI, a log line, or a command line.
     /// </summary>
@@ -994,8 +875,8 @@ internal sealed partial class UsbClient(
                 {
                     await using (var session = await OpenSessionAsync(token))
                     {
-                        await session.WriteAsync(UsbIpProtocol.DevListRequest(), token);
-                        await session.CopyToAsync(plain, token);
+                        await session.Stream.WriteAsync(UsbIpProtocol.DevListRequest(), token);
+                        await session.Stream.CopyToAsync(plain, token);
                     }
 
                     return true;
@@ -1061,46 +942,6 @@ internal sealed partial class UsbClient(
         }
     }
 
-    /// <summary>
-    /// The one token client for the saved connection, with its pinned HTTP client. A new one is built
-    /// when the connection changes, so a token for another server or secret is never reused. The same
-    /// server with its certificate moved on keeps it (<see cref="ServerLink.CarriesOn"/>); at another
-    /// address it gets a new one.
-    /// </summary>
-    internal ServerLink ServerLinkFor()
-    {
-        lock (_gate)
-        {
-            var c = connection.Current;
-            if (!c.IsComplete)
-            {
-                throw new InvalidOperationException("Not connected to a server.");
-            }
-
-            if (_serverLink is not null && _serverLink.Connection != c && _serverLink.CarriesOn(c))
-            {
-                _serverLink.Connection = c;
-            }
-
-            if (_serverLink is null || _serverLink.Connection != c)
-            {
-                _serverLink?.Dispose();
-                _serverLink = new ServerLink(c, time, Trusted);
-            }
-
-            return _serverLink;
-        }
-    }
-
-    /// <summary>The connection the current link was made for, or null before the first.</summary>
-    private ClientConnection? LinkConnection()
-    {
-        lock (_gate)
-        {
-            return _serverLink?.Connection;
-        }
-    }
-
     /// <summary>Runs <paramref name="work"/> under the handshake deadline; running out of time is a <see cref="TimeoutException"/>, not a cancel.</summary>
     private async Task<T> UnderDeadlineAsync<T>(Func<CancellationToken, Task<T>> work, CancellationToken cancellationToken)
     {
@@ -1117,43 +958,25 @@ internal sealed partial class UsbClient(
     }
 
     /// <summary>
-    /// Opens the USB data plane: a WebSocket on the server's network port, pinned to its certificate and
-    /// carrying this client's bearer token. USB/IP follows inside it. Both ends ping, so a server that
-    /// vanishes without a goodbye ends the session in under a minute, not never. The caller sets the
-    /// deadline through <paramref name="cancellationToken"/>.
+    /// Opens the USB data plane: a <c>usb</c> stream on the link, pinned to the server's certificate and
+    /// carrying the link's token. USB/IP follows inside it. Both ends ping, so a server that vanishes
+    /// without a goodbye ends the session in under a minute, not never. The caller sets the deadline
+    /// through <paramref name="cancellationToken"/>.
     /// </summary>
-    private async Task<Stream> OpenSessionAsync(CancellationToken cancellationToken)
+    private async Task<RemoteStream> OpenSessionAsync(CancellationToken cancellationToken)
     {
-        var link = ServerLinkFor();
-        if (!_listed)
+        if (CurrentLink() is not { } remote || !_listed)
         {
             throw new InvalidOperationException("Not connected to a server.");
         }
 
-        var c = link.Connection;
-        var token = await link.Tokens.GetAccessTokenAsync(link.Server, c.ClientId!, c.ClientSecret!, cancellationToken);
+        var opened = await remote.Link.OpenStreamAsync(UsbDataPlane.StreamType, null, cancellationToken);
+        if (!opened.IsOpen)
+        {
+            throw new InvalidOperationException($"The server refused the USB connection: {opened.Refusal.Message}");
+        }
 
-        var socket = new ClientWebSocket();
-        try
-        {
-            socket.Options.SetRequestHeader("Authorization", $"Bearer {token}");
-            socket.Options.KeepAliveInterval = UsbDataPlane.KeepAliveInterval;
-            socket.Options.KeepAliveTimeout = UsbDataPlane.KeepAliveTimeout;
-            socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
-                Trusted(link, certificate as System.Security.Cryptography.X509Certificates.X509Certificate2);
-            await socket.ConnectAsync(new UriBuilder(link.Server) { Scheme = "wss", Path = "/api/remote/usb" }.Uri, cancellationToken);
-            return WebSocketStream.Create(socket, WebSocketMessageType.Binary, closeTimeout: TimeSpan.FromSeconds(2));
-        }
-        catch (WebSocketException ex) when (!RemoteFailure.IsUnreachable(ex))
-        {
-            socket.Dispose();
-            throw new InvalidOperationException($"The server refused the USB connection: {ex.Message}", ex);
-        }
-        catch
-        {
-            socket.Dispose();
-            throw;
-        }
+        return new RemoteStream(opened.Stream);
     }
 
     /// <summary>Connects and imports <paramref name="busId"/>, all within one deadline. Returns the session and the server's device record.</summary>
@@ -1162,15 +985,15 @@ internal sealed partial class UsbClient(
         var session = await OpenSessionAsync(token);
         try
         {
-            await session.WriteAsync(UsbIpProtocol.ImportRequest(busId), token);
-            var header = await UsbIpProtocol.ReadHeaderAsync(session, token);
+            await session.Stream.WriteAsync(UsbIpProtocol.ImportRequest(busId), token);
+            var header = await UsbIpProtocol.ReadHeaderAsync(session.Stream, token);
             if (header.Code != UsbIpProtocol.OpRepImport || header.Status != UsbIpProtocol.StatusOk)
             {
                 throw new InvalidOperationException("The server could not export the device. Someone else may be using it.");
             }
 
             var record = new byte[UsbIpProtocol.DeviceSize];
-            await session.ReadExactlyAsync(record, token);
+            await session.Stream.ReadExactlyAsync(record, token);
             return new RemoteImport(session, record);
         }
         catch
@@ -1355,11 +1178,6 @@ internal sealed partial class UsbClient(
         var previous = _link;
         _link = link;
         _linkMessage = message;
-        if (link == "connected")
-        {
-            moves.LinkUp();
-        }
-
         if (previous != link && (link == "connected" || (previous == "connected" && link is "error" or "connecting")))
         {
             var server = connection.Current.ServerUrl is { } url ? new Uri(url).Host : "the server";
@@ -1380,55 +1198,38 @@ internal sealed partial class UsbClient(
 
     private Task RaiseAsync() => Changed.RaiseAsync(Current, logger);
 
-    /// <summary>The WebSocket session to the server for one imported device, and the device record it sent.</summary>
-    private sealed class RemoteImport(Stream session, byte[] record) : IAsyncDisposable
+    /// <summary>The link to one saved server, and the connection it was made for, which moves on as the link learns.</summary>
+    internal sealed class RemoteLink(ClientConnection connection, SkakelLink link)
     {
-        public Stream Session { get; } = session;
-
-        public byte[] Record { get; } = record;
-
-        public ValueTask DisposeAsync() => Session.DisposeAsync();
-    }
-
-    /// <summary>
-    /// The saved connection with the one token client and pinned HTTP client made for it. Everything that
-    /// talks to the server over HTTPS shares this, so the cached token is reused.
-    /// </summary>
-    internal sealed class ServerLink : IDisposable
-    {
-        private readonly HttpClient _http;
-
-        /// <param name="trusted">Whether the server may present a certificate on this link; see <see cref="UsbClient.Trusted"/>.</param>
-        public ServerLink(ClientConnection connection, TimeProvider time, Func<ServerLink, System.Security.Cryptography.X509Certificates.X509Certificate2?, bool> trusted)
-        {
-            Connection = connection;
-            Server = new Uri(connection.ServerUrl!);
-            _http = new HttpClient(ServerCertificate.CreatePinnedHandler(certificate => trusted(this, certificate)));
-            Tokens = new KoppelTokenClient(_http, time);
-        }
-
-        /// <summary>The connection this link is for. It moves on, under the client's lock, when the server announces or switches certificates.</summary>
         public ClientConnection Connection
         {
             get => Volatile.Read(ref field);
             set => Volatile.Write(ref field, value);
-        }
+        } = connection;
 
-        public Uri Server { get; }
+        public SkakelLink Link { get; } = link;
+    }
 
-        public KoppelTokenClient Tokens { get; }
+    /// <summary>A <c>usb</c> stream as a byte stream. Disposing it closes the stream normally.</summary>
+    private sealed class RemoteStream(SkakelStreamConnection connection) : IAsyncDisposable
+    {
+        public Stream Stream { get; } = WebSocketStream.Create(connection.WebSocket, WebSocketMessageType.Binary, ownsWebSocket: false);
 
-        /// <summary>
-        /// This link can serve <paramref name="now"/>: the same server (<see cref="ClientConnection.Continues"/>)
-        /// at the same address. A token or an HTTP client is never taken to another address.
-        /// </summary>
-        public bool CarriesOn(ClientConnection now) => now.ServerUrl == Connection.ServerUrl && now.Continues(Connection);
-
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
-            Tokens.Dispose();
-            _http.Dispose();
+            await Stream.DisposeAsync();
+            await connection.DisposeAsync();
         }
+    }
+
+    /// <summary>The stream to the server for one imported device, and the device record it sent.</summary>
+    private sealed class RemoteImport(RemoteStream remote, byte[] record) : IAsyncDisposable
+    {
+        public Stream Session => remote.Stream;
+
+        public byte[] Record { get; } = record;
+
+        public ValueTask DisposeAsync() => remote.DisposeAsync();
     }
 
     /// <param name="Port">The virtual port, or the driver's port for a driver attach; null for another gateway attach.</param>
@@ -1474,17 +1275,14 @@ internal sealed partial class UsbClient(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Detaching {BusId} failed: {Reason}")]
     private partial void LogDetachFailed(string busId, string reason);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "The link to the server failed: {Reason}")]
-    private partial void LogLinkFailed(string reason, Exception exception);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The link to the server failed: {Failure}")]
+    private partial void LogLinkFailed(string failure);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "The server moved from {OldAddress} to {NewAddress}; the saved connection follows it")]
+    private partial void LogMoved(string oldAddress, string newAddress);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Ignored {Count} devices from the server with a bus ID that is not valid")]
     private partial void LogInvalidDevices(int count);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Ignored certificates from the server with a fingerprint that is not one")]
-    private partial void LogInvalidCertificates();
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not store the server's next certificate")]
-    private partial void LogCertificatesNotStored(Exception exception);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Could not apply a change of connection or role")]
     private partial void LogChangeFailed(Exception exception);

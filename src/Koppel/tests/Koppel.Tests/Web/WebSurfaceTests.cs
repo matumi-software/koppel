@@ -61,13 +61,13 @@ public sealed class WebSurfaceTests : IDisposable
         var https = Own(host.CreateHttpsClient());
         var form = new Dictionary<string, string> { ["grant_type"] = "client_credentials", ["client_id"] = "x", ["client_secret"] = "y" };
 
-        (await ui.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await https.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the endpoint is there and refuses the credentials");
-        (await ui.GetAsync("/api/remote/hello", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await https.GetAsync("/api/remote/hello", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        (await ui.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await https.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await ui.PostAsync("/api/hubs/remote/negotiate?negotiateVersion=1", null, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await ui.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the endpoint is there and refuses the credentials");
+        (await ui.GetAsync("/skakel/v1/hello", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.GetAsync("/skakel/v1/hello", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await ui.PostAsJsonAsync("/skakel/v1/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.PostAsJsonAsync("/skakel/v1/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await ui.PostAsync("/skakel/v1/hub/negotiate?negotiateVersion=1", null, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -82,9 +82,9 @@ public sealed class WebSurfaceTests : IDisposable
         host.HttpsPort.Should().Be(host.HttpPort);
         (await ui.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.OK);
         (await remote.GetAsync("/api/settings", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "the UI is there, and needs a session");
-        (await remote.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a remote client sends no X-Koppel-UI header, and the UI's guard is not its business");
-        (await remote.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await remote.GetAsync("/api/remote/hello", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await remote.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a remote client sends no X-Koppel-UI header, and the UI's guard is not its business");
+        (await remote.PostAsJsonAsync("/skakel/v1/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await remote.GetAsync("/skakel/v1/hello", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -116,10 +116,10 @@ public sealed class WebSurfaceTests : IDisposable
             (await ui.GetAsync(path, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound, path);
         }
 
-        (await https.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>()), ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await https.GetAsync("/api/remote/hello", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await https.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await https.PostAsync("/api/hubs/remote/negotiate?negotiateVersion=1", null, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(new Dictionary<string, string>()), ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.GetAsync("/skakel/v1/hello", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.PostAsJsonAsync("/skakel/v1/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await https.PostAsync("/skakel/v1/hub/negotiate?negotiateVersion=1", null, ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
 
         // What the UI shows in every role keeps working.
         foreach (var path in new[] { "/api/settings", "/api/system/info", "/api/system/checks", "/api/activity", "/api/client/connection", "/api/client/devices" })
@@ -242,7 +242,7 @@ public sealed class WebSurfaceTests : IDisposable
         var tokens = new List<HttpStatusCode>();
         for (var i = 0; i < 5; i++)
         {
-            tokens.Add((await https.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct)).StatusCode);
+            tokens.Add((await https.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(form), ct)).StatusCode);
         }
 
         tokens.Should().Equal(HttpStatusCode.Unauthorized, HttpStatusCode.Unauthorized, HttpStatusCode.Unauthorized, HttpStatusCode.TooManyRequests, HttpStatusCode.TooManyRequests);
@@ -250,7 +250,7 @@ public sealed class WebSurfaceTests : IDisposable
         var pairs = new List<HttpStatusCode>();
         for (var i = 0; i < 5; i++)
         {
-            pairs.Add((await https.GetAsync("/api/pair/nothing", ct)).StatusCode);
+            pairs.Add((await https.GetAsync("/skakel/v1/pair/nothing", ct)).StatusCode);
         }
 
         pairs.Should().Equal(HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.TooManyRequests);

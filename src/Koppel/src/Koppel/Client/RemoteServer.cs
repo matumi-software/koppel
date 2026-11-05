@@ -1,19 +1,16 @@
-using System.Net;
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
-using System.Security.Authentication;
-using Koppel.Core.Auth;
-using Koppel.Core.Security;
-using Koppel.Server;
+using Skakel.Client;
 
 namespace Koppel.Client;
 
-/// <summary>Talks to the configured Koppel server over HTTPS, pinned to its fingerprint, with a bearer token.</summary>
-internal sealed partial class RemoteServer(ConnectionStore connection, TimeProvider time, ILogger<RemoteServer> logger)
+/// <summary>Tests the saved connection: Skakel's hello, over HTTPS pinned to the server's certificate, with a token.</summary>
+internal sealed class RemoteServer(ConnectionStore connection, TimeProvider time, ILoggerFactory loggers)
 {
+    /// <summary>How long the test may take, the token request and the hello together.</summary>
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
+
     /// <summary>
     /// Gets a token and calls the server's hello endpoint. The answer is one of a fixed set of outcomes
-    /// with fixed wording; what went wrong in detail is logged here and never sent to the caller, so
+    /// with fixed wording; what went wrong in detail is logged by Skakel and never sent to the caller, so
     /// the test cannot be used to probe addresses and ports.
     /// </summary>
     public async Task<ConnectionTestResult> TestAsync(CancellationToken cancellationToken)
@@ -24,48 +21,18 @@ internal sealed partial class RemoteServer(ConnectionStore connection, TimeProvi
             return ConnectionTestResult.Of(ConnectionTestOutcome.Incomplete);
         }
 
-        var server = new Uri(settings.ServerUrl!);
-        using var handler = ServerCertificate.CreatePinnedHandler(settings.Trusts);
-        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
-        using var tokens = new KoppelTokenClient(http, time);
+        var options = new SkakelClientOptions { LoggerFactory = loggers, TimeProvider = time, RequestTimeout = Timeout };
+        await using var link = new SkakelLink(settings.GetAddress(), settings.GetPins(), settings.GetCredentials(), options);
         try
         {
-            var token = await tokens.GetAccessTokenAsync(server, settings.ClientId!, settings.ClientSecret!, cancellationToken);
-            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(server, "/api/remote/hello"));
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            using var response = await http.SendAsync(request, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
-            {
-                return ConnectionTestResult.Of(ConnectionTestOutcome.ClientUnknown);
-            }
-
-            response.EnsureSuccessStatusCode();
-            var hello = await response.Content.ReadFromJsonAsync<RemoteHello>(cancellationToken);
-            return ConnectionTestResult.Of(ConnectionTestOutcome.Ok, $"Connected to {hello?.Server} as {hello?.ClientId}.");
+            var hello = await link.HelloAsync(cancellationToken);
+            return ConnectionTestResult.Of(ConnectionTestOutcome.Ok, $"Connected to {hello.Server} as {hello.ClientId}.");
         }
-        catch (TokenRequestException ex) when (ex.Error == "invalid_client")
+        catch (SkakelException ex)
         {
-            return ConnectionTestResult.Of(ConnectionTestOutcome.RejectedCredentials);
-        }
-        catch (HttpRequestException ex) when (ex.InnerException is AuthenticationException)
-        {
-            LogTestFailed(ex, server.Authority);
-            return ConnectionTestResult.Of(ConnectionTestOutcome.CertificateMismatch);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TokenRequestException or System.Text.Json.JsonException)
-        {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-
-            LogTestFailed(ex, server.Authority);
-            return ConnectionTestResult.Of(ConnectionTestOutcome.Unreachable);
+            return ConnectionTestResult.From(ex.Failure);
         }
     }
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "The connection test to {Server} failed.")]
-    private partial void LogTestFailed(Exception exception, string server);
 }
 
 /// <summary>How a connection test ended. A fixed set: the UI shows the message, tests and scripts read the outcome.</summary>
@@ -77,6 +44,9 @@ internal enum ConnectionTestOutcome
     CertificateMismatch,
     RejectedCredentials,
     ClientUnknown,
+    VersionMismatch,
+    UnexpectedAnswer,
+    TooManyRequests,
 }
 
 internal sealed record ConnectionTestResult(bool Ok, ConnectionTestOutcome Outcome, string Message)
@@ -88,6 +58,24 @@ internal sealed record ConnectionTestResult(bool Ok, ConnectionTestOutcome Outco
         ConnectionTestOutcome.Unreachable => "Could not reach the server. Check the address and that the server is running.",
         ConnectionTestOutcome.CertificateMismatch => "The server's certificate does not match the fingerprint. Copy the fingerprint from the server's Clients section again.",
         ConnectionTestOutcome.RejectedCredentials => "The server refused the client ID or secret. Check them, or ask for a new client.",
+        ConnectionTestOutcome.VersionMismatch => SkakelFailure.Of(SkakelFailureKind.VersionMismatch).Message,
+        ConnectionTestOutcome.UnexpectedAnswer => "The server did not answer like a Koppel server. Check the address and the port.",
+        ConnectionTestOutcome.TooManyRequests => SkakelFailure.Of(SkakelFailureKind.TooManyRequests).Message,
         _ => "The server accepted the token but no longer knows this client. Ask for a new client.",
     });
+
+    /// <summary>
+    /// Skakel's failure as one of the outcomes. A version mismatch keeps Skakel's wording, which names both
+    /// sides' versions. Anything a test cannot run into counts as unreachable.
+    /// </summary>
+    public static ConnectionTestResult From(SkakelFailure failure) => failure.Kind switch
+    {
+        SkakelFailureKind.CertificateMismatch => Of(ConnectionTestOutcome.CertificateMismatch),
+        SkakelFailureKind.RejectedCredentials => Of(ConnectionTestOutcome.RejectedCredentials),
+        SkakelFailureKind.ClientUnknown or SkakelFailureKind.Revoked or SkakelFailureKind.Rotated => Of(ConnectionTestOutcome.ClientUnknown),
+        SkakelFailureKind.VersionMismatch => new(false, ConnectionTestOutcome.VersionMismatch, failure.Message),
+        SkakelFailureKind.UnexpectedAnswer => Of(ConnectionTestOutcome.UnexpectedAnswer),
+        SkakelFailureKind.TooManyRequests => Of(ConnectionTestOutcome.TooManyRequests),
+        _ => Of(ConnectionTestOutcome.Unreachable),
+    };
 }

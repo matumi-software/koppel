@@ -1,15 +1,15 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Koppel.Core.Security;
 using Koppel.Tests.Usb;
-using Microsoft.AspNetCore.SignalR.Client;
+using Skakel.Protocol;
 
 namespace Koppel.Tests.Server;
 
 /// <summary>
 /// Two real Koppel hosts pairing the way a person does it: the client asks, shows a code, and the
-/// code is typed on the server. Covers the commitment protocol, wrong codes and the confirm rule.
+/// code is typed on the server. Covers Koppel's screens on both ends, wrong codes and the confirm rule;
+/// Skakel's own tests cover the protocol underneath.
 /// </summary>
 public sealed class PairingTests : IDisposable
 {
@@ -113,52 +113,12 @@ public sealed class PairingTests : IDisposable
     }
 
     [Fact]
-    public async Task A_nonce_that_does_not_match_its_commitment_is_refused()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        using var https = PinnedClient(await FingerprintAsync(ct));
-        using var opened = await https.PostAsJsonAsync("/api/pair", new { clientName = "mallory", commitment = PairingCode.Commit("one nonce") }, ct);
-        var requestId = (await opened.EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("requestId").GetString();
-
-        using var revealed = await https.PostAsJsonAsync($"/api/pair/{requestId}/reveal", new { clientNonce = "another nonce" }, ct);
-
-        revealed.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        using var serverUi = _server.CreateUiClient();
-        (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/pairing", ct)).GetProperty("requests").GetArrayLength().Should().Be(0);
-    }
-
-    [Fact]
-    public async Task Poll_and_withdraw_without_the_token_from_the_open_reply_are_refused()
-    {
-        var ct = TestContext.Current.CancellationToken;
-        using var https = PinnedClient(await FingerprintAsync(ct));
-        var nonce = PairingCode.NewNonce();
-        using var opened = await https.PostAsJsonAsync("/api/pair", new { clientName = "bench", commitment = PairingCode.Commit(nonce) }, ct);
-        var reply = await opened.EnsureSuccessStatusCode().Content.ReadFromJsonAsync<JsonElement>(ct);
-        var requestId = reply.GetProperty("requestId").GetString();
-        var token = reply.GetProperty("pollToken").GetString()!;
-        (await https.PostAsJsonAsync($"/api/pair/{requestId}/reveal", new { clientNonce = nonce }, ct)).EnsureSuccessStatusCode();
-
-        (await https.GetAsync($"/api/pair/{requestId}", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await SendAsync(https, HttpMethod.Get, requestId, "not-the-token", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await https.DeleteAsync($"/api/pair/{requestId}", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        (await SendAsync(https, HttpMethod.Delete, requestId, "not-the-token", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound);
-        using var serverUi = _server.CreateUiClient();
-        var listed = await serverUi.GetStringAsync("/api/server/pairing", ct);
-        listed.Should().Contain(requestId!).And.NotContain(token, "the token goes to the opener only");
-
-        (await SendAsync(https, HttpMethod.Get, requestId, token, ct)).StatusCode.Should().Be(HttpStatusCode.OK);
-        (await SendAsync(https, HttpMethod.Delete, requestId, token, ct)).StatusCode.Should().Be(HttpStatusCode.NoContent);
-        (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/pairing", ct)).GetProperty("requests").GetArrayLength().Should().Be(0);
-    }
-
-    [Fact]
     public async Task Pairing_is_only_offered_over_https()
     {
         var ct = TestContext.Current.CancellationToken;
         using var plain = _server.CreateUiClient();
 
-        using var response = await plain.PostAsJsonAsync("/api/pair", new { clientName = "x", commitment = PairingCode.Commit("n") }, ct);
+        using var response = await plain.PostAsJsonAsync("/skakel/v1/pair", new { clientName = "x", commitment = PairingCode.Commit("n") }, ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
@@ -178,16 +138,6 @@ public sealed class PairingTests : IDisposable
     {
         using var serverUi = _server.CreateUiClient();
         return (await serverUi.GetFromJsonAsync<JsonElement>("/api/server/identity", ct)).GetProperty("fingerprint").GetString()!;
-    }
-
-    private HttpClient PinnedClient(string fingerprint) =>
-        new(ServerCertificate.CreatePinnedHandler(fingerprint)) { BaseAddress = new Uri($"https://localhost:{_server.HttpsPort}") };
-
-    private static Task<HttpResponseMessage> SendAsync(HttpClient https, HttpMethod method, string? requestId, string token, CancellationToken ct)
-    {
-        var request = new HttpRequestMessage(method, $"/api/pair/{requestId}");
-        request.Headers.Add("X-Pair-Token", token);
-        return https.SendAsync(request, ct);
     }
 
     private static string Wrong(string code) => code == "000000" ? "111111" : "000000";

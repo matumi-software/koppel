@@ -1,49 +1,41 @@
 using System.Collections.Concurrent;
 using System.Net.WebSockets;
-using System.Security.Claims;
 using Koppel.Core.Activity;
-using Koppel.Core.Auth;
 using Koppel.Core.Usb;
-using Koppel.Server;
 using Koppel.Settings;
+using Skakel.Protocol;
+using Skakel.Server;
 
 namespace Koppel.Usb;
 
 /// <summary>
-/// The encrypted USB data plane (server role). A client opens a WebSocket at <c>/api/remote/usb</c> on
-/// the network port, pinned to the server's certificate and carrying its bearer token, then speaks plain
-/// USB/IP inside it. On import the host relays the stream to the device, so USB traffic never crosses
+/// The encrypted USB data plane (server role): Koppel's <c>usb</c> stream type on Skakel. A client opens
+/// a stream at <c>/skakel/v1/streams/usb</c> on the network port, pinned to the server's certificate and
+/// carrying its bearer token, then speaks plain USB/IP inside it: a device list, or an import followed by
+/// the device's traffic. On import the host relays the stream to the device, so USB traffic never crosses
 /// the network unencrypted, and Koppel needs no port of its own for it.
 /// </summary>
 /// <remarks>
-/// Kestrel and the remote group do what the USB port's own listener used to: TLS, the token, the
-/// client's generation (<see cref="ServerSecretsStore.IsCurrent(ClaimsPrincipal?)"/>), and the surface
-/// guard, which only lets the request in while the role is server or both. A session ends when its
-/// client is revoked or its secret is rotated (see <see cref="LiveSessions"/>), when the role leaves the
-/// server side, when either end stops answering pings, or when Koppel stops.
+/// Skakel checks the token and the client's generation before the stream opens, and ends the stream when
+/// the client is revoked or rotated, when either end stops answering pings, or when Koppel stops. The
+/// surface guard only lets the request in while the role is server or both, and leaving the server role
+/// closes the streams that are open with <see cref="SkakelCloseCodes.Stopping"/>.
 /// </remarks>
 internal sealed partial class UsbDataPlane(
     UsbServer usb,
-    ServerSecretsStore secrets,
-    LiveSessions live,
     IActivityRecorder activity,
     SettingsStore settings,
     ILogger<UsbDataPlane> logger) : IHostedService, IDisposable
 {
-    /// <summary>
-    /// Both ends ping this often, and a peer that has not answered within <see cref="KeepAliveTimeout"/> is
-    /// gone: a sleeping laptop or a pulled cable frees the device in under a minute, not at the next restart.
-    /// </summary>
-    public static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(15);
-
-    public static readonly TimeSpan KeepAliveTimeout = TimeSpan.FromSeconds(30);
+    /// <summary>The stream type, at <c>/skakel/v1/streams/usb</c>. It carries USB/IP as the Linux kernel documents it, with no query string.</summary>
+    public const string StreamType = "usb";
 
     /// <summary>Time for an authenticated client to ask for the device list or an import.</summary>
     private static readonly TimeSpan RequestBudget = TimeSpan.FromSeconds(10);
 
     private static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(5);
 
-    private readonly ConcurrentDictionary<Task, byte> _sessions = new();
+    private readonly ConcurrentDictionary<SkakelStreamSession, Task> _sessions = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _busLocks = new(StringComparer.Ordinal);
     private CancellationTokenSource _serving = new();
 
@@ -61,10 +53,14 @@ internal sealed partial class UsbDataPlane(
 
     public void Dispose() => _serving.Dispose();
 
-    /// <summary>Serves one WebSocket for a client the remote group already let in, until the session ends.</summary>
-    public async Task ServeAsync(Stream session, ClaimsPrincipal user, CancellationToken requestAborted)
+    /// <summary>Skakel let the client in. The stream opens; what it is for comes as USB/IP inside it.</summary>
+    public ValueTask<SkakelStreamResult> OpenAsync(SkakelStreamRequest request) =>
+        ValueTask.FromResult(SkakelStreamResult.Accept(session => ServeAsync(session, request.ClientId, request.ClientName)));
+
+    /// <summary>Serves one stream until the session ends.</summary>
+    private async Task ServeAsync(SkakelStreamSession session, string clientId, string clientName)
     {
-        using var abort = CancellationTokenSource.CreateLinkedTokenSource(requestAborted);
+        using var abort = CancellationTokenSource.CreateLinkedTokenSource(session.Ending);
         CancellationTokenRegistration serving;
         try
         {
@@ -77,15 +73,23 @@ internal sealed partial class UsbDataPlane(
         }
 
         using (serving)
-        using (live.Add(user.GetClientId()!, user.GetGeneration()!.Value, abort.Cancel))
         {
-            var run = ServeCoreAsync(session, user.GetClientId()!, abort.Token);
-            Track(run);
-            await run;
+            // Skakel closes the WebSocket when this returns, so the stream does not own it.
+            await using var stream = WebSocketStream.Create(session.WebSocket, WebSocketMessageType.Binary, ownsWebSocket: false);
+            var run = ServeCoreAsync(stream, clientId, clientName, abort.Token);
+            _sessions[session] = run;
+            try
+            {
+                await run;
+            }
+            finally
+            {
+                _sessions.TryRemove(session, out _);
+            }
         }
     }
 
-    private async Task ServeCoreAsync(Stream session, string clientId, CancellationToken cancellationToken)
+    private async Task ServeCoreAsync(Stream session, string clientId, string clientName, CancellationToken cancellationToken)
     {
         try
         {
@@ -107,7 +111,7 @@ internal sealed partial class UsbDataPlane(
             }
             else if (busId is not null)
             {
-                await ImportAsync(session, busId, clientId, cancellationToken);
+                await ImportAsync(session, busId, clientId, clientName, cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -125,7 +129,7 @@ internal sealed partial class UsbDataPlane(
         }
     }
 
-    private async Task ImportAsync(Stream session, string busId, string clientId, CancellationToken cancellationToken)
+    private async Task ImportAsync(Stream session, string busId, string clientId, string clientName, CancellationToken cancellationToken)
     {
         if (!UsbBusId.IsValid(busId))
         {
@@ -170,7 +174,6 @@ internal sealed partial class UsbDataPlane(
                 }
             }
 
-            var clientName = secrets.NameOf(clientId) ?? clientId;
             var deviceName = device.Product ?? busId;
             var attached = false;
             try
@@ -212,16 +215,15 @@ internal sealed partial class UsbDataPlane(
     /// <summary>A machine that stops being a server ends what it serves. New sessions are kept out by the surface guard.</summary>
     private Task OnSettingsAsync(KoppelSettings next) => Serves(next.Role) ? Task.CompletedTask : EndServingAsync();
 
-    private void Track(Task session)
-    {
-        _sessions[session] = 0;
-        _ = session.ContinueWith(done => _sessions.TryRemove(done, out _), TaskScheduler.Default);
-    }
-
-    /// <summary>Ends every session and waits a little for them to finish, so nothing outlives its owner.</summary>
+    /// <summary>
+    /// Ends every session, telling each client the server no longer serves USB, and waits a little for them
+    /// to finish, so nothing outlives its owner.
+    /// </summary>
     private async Task EndServingAsync()
     {
         var ending = Interlocked.Exchange(ref _serving, new CancellationTokenSource());
+        var running = _sessions.ToArray();
+        await Task.WhenAll(running.Select(s => CloseAsync(s.Key)));
         try
         {
             await ending.CancelAsync();
@@ -232,12 +234,11 @@ internal sealed partial class UsbDataPlane(
             return;
         }
 
-        var running = _sessions.Keys.ToArray();
         try
         {
             if (running.Length > 0)
             {
-                await Task.WhenAll(running).WaitAsync(StopGrace);
+                await Task.WhenAll(running.Select(s => s.Value)).WaitAsync(StopGrace);
             }
         }
         catch (TimeoutException)
@@ -247,6 +248,18 @@ internal sealed partial class UsbDataPlane(
         finally
         {
             ending.Dispose();
+        }
+    }
+
+    private static async Task CloseAsync(SkakelStreamSession session)
+    {
+        try
+        {
+            await session.CloseAsync(SkakelCloseCodes.Stopping, "This machine no longer serves USB.");
+        }
+        catch (ObjectDisposedException)
+        {
+            // It ended by itself first.
         }
     }
 

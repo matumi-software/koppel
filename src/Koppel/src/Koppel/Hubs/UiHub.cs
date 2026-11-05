@@ -1,12 +1,11 @@
 using Koppel.Client;
 using Koppel.Core.Activity;
-using Koppel.Core.Discovery;
 using Koppel.Discovery;
 using Koppel.Login;
-using Koppel.Server;
 using Koppel.Settings;
 using Koppel.Usb;
 using Microsoft.AspNetCore.SignalR;
+using Skakel.Server;
 
 namespace Koppel.Hubs;
 
@@ -17,11 +16,11 @@ public interface IUiClient
     /// <summary>The UI treats a settings change as done only when this arrives.</summary>
     Task SettingsChanged(KoppelSettings settings);
 
-    /// <summary>Server role: the registered clients after a create or revoke.</summary>
-    Task ClientsChanged(IReadOnlyList<ClientView> clients);
+    /// <summary>Server role: the registered clients after a create, a pairing, a revoke or a rotation.</summary>
+    Task ClientsChanged(IReadOnlyList<SkakelClientView> clients);
 
     /// <summary>Server role: the certificate and token signing key after a rotation, a prepare, a cancel or a switch.</summary>
-    Task ServerKeysChanged(ServerKeysView keys);
+    Task ServerKeysChanged(SkakelKeysView keys);
 
     /// <summary>Client role: the stored server connection, without the secret.</summary>
     Task ConnectionChanged(ConnectionView connection);
@@ -42,7 +41,7 @@ public interface IUiClient
     Task PairingStatusChanged(PairingStatus status);
 
     /// <summary>Server role: the pairing requests waiting for someone to type their code.</summary>
-    Task PairingRequestsChanged(PairingOverview pairing);
+    Task PairingRequestsChanged(SkakelPairingOverview pairing);
 }
 
 /// <summary>The UI's live link, mapped at <c>/api/hubs/ui</c>. Push only; commands go over REST.</summary>
@@ -64,23 +63,23 @@ internal sealed class UiHub(UiConnections connections) : Hub<IUiClient>
 /// <summary>Forwards every confirmed change from the stores to all connected UIs.</summary>
 internal sealed class UiHubRelay(
     SettingsStore settings,
-    ServerSecretsStore secrets,
+    SkakelClients clients,
+    SkakelKeys keys,
     ConnectionStore connection,
     UsbServer usbServer,
     UsbClient usbClient,
-    LiveSessions live,
     InMemoryActivityStore activity,
     ServerFinder finder,
     PairingClient pairingClient,
-    PairingStore pairingRequests,
+    SkakelPairing pairingRequests,
     IHubContext<UiHub, IUiClient> hub,
     IHubContext<RemoteHub, IRemoteClient> remote) : IHostedService
 {
     public Task StartAsync(CancellationToken cancellationToken)
     {
         settings.Changed += PushSettingsAsync;
-        secrets.ClientsChanged += PushClientsAsync;
-        secrets.KeysChanged += PushKeysAsync;
+        clients.Changed += PushClientsAsync;
+        keys.Changed += PushKeysAsync;
         connection.Changed += PushConnectionAsync;
         usbServer.Changed += PushServerDevicesAsync;
         usbClient.Changed += PushClientDevicesAsync;
@@ -94,8 +93,8 @@ internal sealed class UiHubRelay(
     public Task StopAsync(CancellationToken cancellationToken)
     {
         settings.Changed -= PushSettingsAsync;
-        secrets.ClientsChanged -= PushClientsAsync;
-        secrets.KeysChanged -= PushKeysAsync;
+        clients.Changed -= PushClientsAsync;
+        keys.Changed -= PushKeysAsync;
         connection.Changed -= PushConnectionAsync;
         usbServer.Changed -= PushServerDevicesAsync;
         usbClient.Changed -= PushClientDevicesAsync;
@@ -108,14 +107,10 @@ internal sealed class UiHubRelay(
 
     private Task PushSettingsAsync(KoppelSettings value) => hub.Clients.All.SettingsChanged(value);
 
-    private Task PushClientsAsync(IReadOnlyList<ClientView> value) => hub.Clients.All.ClientsChanged(value);
+    private Task PushClientsAsync(IReadOnlyList<SkakelClientView> value) => hub.Clients.All.ClientsChanged(value);
 
-    /// <summary>The UI gets the whole state; paired clients get the certificates, so they learn the next one or stop trusting a cancelled one.</summary>
-    private async Task PushKeysAsync(ServerKeysView value)
-    {
-        await hub.Clients.All.ServerKeysChanged(value);
-        await remote.Clients.Clients(live.RemoteConnectionIds()).CertificatesChanged(new RemoteCertificates(value.Fingerprint, value.NextFingerprint));
-    }
+    /// <summary>The UI gets the whole state. Skakel tells the paired clients of the certificates itself.</summary>
+    private Task PushKeysAsync(SkakelKeysView value) => hub.Clients.All.ServerKeysChanged(value);
 
     private Task PushConnectionAsync(ConnectionView value) => hub.Clients.All.ConnectionChanged(value);
 
@@ -125,9 +120,9 @@ internal sealed class UiHubRelay(
         await PushRemoteDevicesAsync(value);
     }
 
-    /// <summary>Only clients that are still registered at their current generation get the list.</summary>
+    /// <summary>Every linked client gets the list. Skakel ends a client's connections as soon as it is revoked or rotated.</summary>
     private Task PushRemoteDevicesAsync(ServerDevices devices) =>
-        remote.Clients.Clients(live.RemoteConnectionIds()).DevicesChanged(devices.ForRemote());
+        remote.Clients.All.DevicesChanged(devices.ForRemote());
 
     private Task PushClientDevicesAsync(ClientDevices value) => hub.Clients.All.ClientDevicesChanged(value);
 
@@ -137,5 +132,5 @@ internal sealed class UiHubRelay(
 
     private Task PushPairingStatusAsync(PairingStatus value) => hub.Clients.All.PairingStatusChanged(value);
 
-    private Task PushPairingRequestsAsync(PairingOverview value) => hub.Clients.All.PairingRequestsChanged(value);
+    private Task PushPairingRequestsAsync(SkakelPairingOverview value) => hub.Clients.All.PairingRequestsChanged(value);
 }

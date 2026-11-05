@@ -195,7 +195,7 @@ public sealed class KoppelFactory : IDisposable
     /// to the real UI port and trusts exactly the server's own certificate.
     /// </summary>
     public HttpClient CreatePlainClient() => _kestrel
-        ? new HttpClient(Koppel.Core.Security.ServerCertificate.CreatePinnedHandler(Usb.RemoteAccess.Fingerprint(this))) { BaseAddress = new Uri($"https://localhost:{HttpPort}") }
+        ? new HttpClient(Pinning.Handler(Usb.RemoteAccess.Fingerprint(this))) { BaseAddress = new Uri($"https://localhost:{HttpPort}") }
         : _factory.CreateClient();
 
     /// <summary>
@@ -248,7 +248,7 @@ public sealed class KoppelFactory : IDisposable
     /// <summary>Lets a hub connection to this Kestrel host trust exactly the server's own certificate, over HTTP and WebSockets.</summary>
     public void TrustCertificate(Microsoft.AspNetCore.Http.Connections.Client.HttpConnectionOptions options)
     {
-        options.HttpMessageHandlerFactory = _ => Koppel.Core.Security.ServerCertificate.CreatePinnedHandler(Usb.RemoteAccess.Fingerprint(this));
+        options.HttpMessageHandlerFactory = _ => Pinning.Handler(Usb.RemoteAccess.Fingerprint(this));
         options.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback = (_, certificate, _, _) => Usb.RemoteAccess.Pinned(this, certificate);
     }
 

@@ -9,6 +9,7 @@ using Koppel.Core.Usb;
 using Koppel.Usb;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Skakel.Client;
 
 namespace Koppel.Tests.Usb;
 
@@ -85,20 +86,19 @@ public sealed class UsbClientFailureTests : IDisposable
     }
 
     [Fact]
-    public async Task Attaches_and_the_link_share_one_token_client_until_the_connection_changes()
+    public async Task Attaches_and_the_hub_share_one_link_until_the_connection_changes()
     {
         var ct = TestContext.Current.CancellationToken;
         await using var hub = await LinkAsync(ct);
         var usb = _client.Services.GetRequiredService<UsbClient>();
-        var before = usb.ServerLinkFor();
+        var before = usb.Remote!.Link;
 
         await AttachAsync(hub, ct);
-        usb.ServerLinkFor().Should().BeSameAs(before);
-        usb.ServerLinkFor().Tokens.Should().BeSameAs(before.Tokens);
+        usb.Remote!.Link.Should().BeSameAs(before, "the attach opened its stream on the link, with the link's token");
 
-        // New credentials are a new connection, so they get their own token client.
+        // New credentials are a new connection, so they get their own link.
         await Link.ConnectAsync(_server, _client, ct);
-        usb.ServerLinkFor().Should().NotBeSameAs(before);
+        usb.Remote!.Link.Should().NotBeSameAs(before);
     }
 
     [Fact]
@@ -271,10 +271,9 @@ public sealed class UsbClientFailureTests : IDisposable
     [Fact]
     public void Failures_are_described_for_a_person()
     {
-        RemoteFailure.Describe(new AuthenticationException()).Should().Contain("fingerprint");
-        RemoteFailure.Describe(new HttpRequestException("x", new AuthenticationException())).Should().Contain("fingerprint");
-        RemoteFailure.Describe(new HttpRequestException("Connection refused")).Should().StartWith("Could not reach the server");
-        RemoteFailure.Describe(new JsonException("bad")).Should().Contain("did not answer like a Koppel server");
+        RemoteFailure.Describe(new SkakelException(SkakelFailure.Of(SkakelFailureKind.CertificateMismatch), new AuthenticationException("detail"))).Should().StartWith("The server's certificate does not match").And.NotContain("detail");
+        RemoteFailure.Describe(new SkakelException(SkakelFailure.Of(SkakelFailureKind.Unreachable))).Should().StartWith("Could not reach the server");
+        RemoteFailure.Describe(new System.Net.WebSockets.WebSocketException("reset")).Should().Be("The connection to the server was lost.");
         RemoteFailure.Describe(new TimeoutException("too slow")).Should().Be("too slow");
     }
 

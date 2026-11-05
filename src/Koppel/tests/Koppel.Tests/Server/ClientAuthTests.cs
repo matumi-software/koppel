@@ -6,7 +6,10 @@ using Microsoft.AspNetCore.SignalR.Client;
 
 namespace Koppel.Tests.Server;
 
-/// <summary>The server as an OAuth server: registered clients get tokens, and only they reach the remote API.</summary>
+/// <summary>
+/// The clients Koppel's UI registers with Skakel: they get tokens, and only they reach Skakel's hello and
+/// Koppel's own remote API.
+/// </summary>
 public sealed class ClientAuthTests : IDisposable
 {
     private readonly KoppelFactory _koppel = new();
@@ -24,9 +27,11 @@ public sealed class ClientAuthTests : IDisposable
         token.StatusCode.Should().Be(HttpStatusCode.OK);
         var accessToken = (await token.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("access_token").GetString();
 
-        using var hello = await GetHelloAsync(https, accessToken!, ct);
+        using var hello = await GetAsync(https, "/skakel/v1/hello", accessToken!, ct);
         hello.StatusCode.Should().Be(HttpStatusCode.OK);
         (await hello.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("clientId").GetString().Should().Be(clientId);
+        using var devices = await GetAsync(https, "/api/remote/devices", accessToken!, ct);
+        devices.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -68,8 +73,10 @@ public sealed class ClientAuthTests : IDisposable
         using var revoke = await ui.DeleteAsync($"/api/server/clients/{clientId}", ct);
         revoke.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
-        using var hello = await GetHelloAsync(https, accessToken, ct);
+        using var hello = await GetAsync(https, "/skakel/v1/hello", accessToken, ct);
         hello.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        using var devices = await GetAsync(https, "/api/remote/devices", accessToken, ct);
+        devices.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         using var again = await RequestTokenAsync(https, clientId, secret, ct);
         again.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
@@ -137,16 +144,16 @@ public sealed class ClientAuthTests : IDisposable
     }
 
     private static Task<HttpResponseMessage> RequestTokenAsync(HttpClient http, string clientId, string secret, CancellationToken ct) =>
-        http.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        http.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "client_credentials",
             ["client_id"] = clientId,
             ["client_secret"] = secret,
         }), ct);
 
-    private static Task<HttpResponseMessage> GetHelloAsync(HttpClient http, string accessToken, CancellationToken ct)
+    private static Task<HttpResponseMessage> GetAsync(HttpClient http, string path, string accessToken, CancellationToken ct)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/remote/hello");
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         return http.SendAsync(request, ct);
     }

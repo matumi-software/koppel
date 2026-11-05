@@ -65,33 +65,6 @@ public sealed class SecurityTests : IDisposable
     }
 
     [Fact]
-    public void Pinned_fingerprint_matches_regardless_of_format()
-    {
-        using var certificate = ServerCertificate.Load(ServerCertificate.CreatePfx("lab-rack-3"));
-        var fingerprint = ServerCertificate.Fingerprint(certificate);
-
-        ServerCertificate.Matches(certificate, fingerprint).Should().BeTrue();
-        ServerCertificate.Matches(certificate, fingerprint.Replace(":", "", StringComparison.Ordinal).ToLowerInvariant()).Should().BeTrue();
-        using var other = ServerCertificate.Load(ServerCertificate.CreatePfx("lab-rack-3"));
-        ServerCertificate.Matches(other, fingerprint).Should().BeFalse();
-    }
-
-    [Fact]
-    public void MatchesAny_accepts_either_pinned_fingerprint_and_skips_empty_ones()
-    {
-        using var current = ServerCertificate.Load(ServerCertificate.CreatePfx("lab-rack-3"));
-        using var next = ServerCertificate.Load(ServerCertificate.CreatePfx("lab-rack-3"));
-        using var stranger = ServerCertificate.Load(ServerCertificate.CreatePfx("lab-rack-3"));
-        var pinned = ServerCertificate.Fingerprint(current);
-        var announced = ServerCertificate.Fingerprint(next);
-
-        ServerCertificate.MatchesAny(current, pinned, announced).Should().BeTrue();
-        ServerCertificate.MatchesAny(next, pinned, announced).Should().BeTrue();
-        ServerCertificate.MatchesAny(stranger, pinned, announced).Should().BeFalse();
-        ServerCertificate.MatchesAny(current, null, "").Should().BeFalse();
-    }
-
-    [Fact]
     public async Task Encrypted_config_file_round_trips_and_is_refused_without_the_key_ring()
     {
         var ct = TestContext.Current.CancellationToken;

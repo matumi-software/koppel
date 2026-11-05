@@ -1,8 +1,6 @@
 using System.Net;
-using System.Net.Http.Json;
 using Koppel.Core.Configuration;
-using Koppel.Core.Security;
-using Koppel.Server;
+using Skakel.Client;
 
 namespace Koppel.Client;
 
@@ -19,32 +17,44 @@ public sealed record PairingStatus(string State, string? ServerName = null, stri
 
 internal sealed record PairStartRequest(string? ServerUrl, string? ServerFingerprint, string? ServerName);
 
+/// <summary>One pairing request on a server, as a run sees it: Skakel's pairing client, or a fake in tests.</summary>
+internal interface IPairingRequest : IAsyncDisposable
+{
+    /// <summary>The six-digit code the person types on the server.</summary>
+    string Code { get; }
+
+    DateTimeOffset ExpiresAt { get; }
+
+    /// <summary>Waits for the person to type the code on the server, and returns the credentials.</summary>
+    Task<SkakelCredentials> WaitAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>
-/// Client role: pairs with a server instead of having its credentials typed in. Opens a request over
-/// HTTPS pinned to the server's announced fingerprint, shows the code, and waits for the person on the
-/// server to type it. On approval the credentials go straight into <c>connection.json</c>, and the
-/// usual <c>ConnectionChanged</c> confirms it, unless the client is already connected to another
-/// server: then they wait for <see cref="ConfirmAsync"/>. See <see cref="PairingCode"/> for the protocol.
+/// Client role: pairs with a server instead of having its credentials typed in. Skakel opens the request
+/// over HTTPS pinned to the server's announced fingerprint and works out the code (see Skakel's
+/// <c>docs/protocol.md</c>); this shows the code and waits for the person on the server to type it. On
+/// approval the credentials go straight into <c>connection.json</c>, and the usual <c>ConnectionChanged</c>
+/// confirms it, unless the client is already connected to another server: then they wait for
+/// <see cref="ConfirmAsync"/>.
 /// </summary>
 internal sealed partial class PairingClient : IDisposable
 {
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
-
     /// <summary>Generous: a server on slow hardware can take many seconds over its first request after a start.</summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(60);
 
     private readonly ConnectionStore _connection;
-    private readonly TimeProvider _time;
     private readonly ILogger<PairingClient> _logger;
     private readonly Lock _lock = new();
     private Run? _run;
     private PairingStatus _status = PairingStatus.Idle;
 
-    public PairingClient(ConnectionStore connection, TimeProvider time, ILogger<PairingClient> logger)
+    public PairingClient(ConnectionStore connection, TimeProvider time, ILoggerFactory loggers)
     {
         _connection = connection;
-        _time = time;
-        _logger = logger;
+        _logger = loggers.CreateLogger<PairingClient>();
+        var options = new SkakelClientOptions { LoggerFactory = loggers, TimeProvider = time, RequestTimeout = RequestTimeout };
+        Open = async (server, fingerprint, cancellationToken) =>
+            new SkakelRequest(await SkakelPairingClient.OpenAsync(server, fingerprint, Environment.MachineName, options, cancellationToken));
         _connection.Changed += OnConnectionChangedAsync;
     }
 
@@ -52,13 +62,13 @@ internal sealed partial class PairingClient : IDisposable
 
     public PairingStatus Current => _status;
 
-    /// <summary>How a run reaches the server. The default pins the server's fingerprint; tests bring a fake.</summary>
-    internal Func<string, HttpMessageHandler> HandlerFactory { get; init; } = ServerCertificate.CreatePinnedHandler;
+    /// <summary>Opens a request on the server at the address, pinned to the fingerprint. Skakel's unless a test brings a fake.</summary>
+    internal Func<Uri, string, CancellationToken, Task<IPairingRequest>> Open { get; init; }
 
     /// <summary>Starts pairing in the background, replacing one already under way. The task ends with the run.</summary>
     public Task Begin(string serverUrl, string fingerprint, string? serverName)
     {
-        var run = new Run(serverUrl, fingerprint, serverName ?? new Uri(serverUrl).Host, PairingStore.Lifetime + TimeSpan.FromSeconds(30), _time);
+        var run = new Run(serverUrl, fingerprint, serverName ?? new Uri(serverUrl).Host);
         lock (_lock)
         {
             _run?.Cancel();
@@ -136,79 +146,25 @@ internal sealed partial class PairingClient : IDisposable
         var status = new PairingStatus("requesting", run.ServerName, run.ServerUrl, ServerFingerprint: run.Fingerprint);
         await SetAsync(run, status);
         var cancellationToken = run.Token;
-        using var http = new HttpClient(HandlerFactory(run.Fingerprint)) { BaseAddress = new Uri(run.ServerUrl), Timeout = RequestTimeout };
-        string? requestId = null;
-        string? pollToken = null;
         try
         {
-            var nonce = PairingCode.NewNonce();
-            using var open = await http.PostAsJsonAsync("/api/pair", new PairOpenRequest(Environment.MachineName, PairingCode.Commit(nonce)), KoppelJson.Files, cancellationToken);
-            if (open.StatusCode == HttpStatusCode.TooManyRequests)
-            {
-                await SetAsync(run, status with { State = "failed", Message = $"{run.ServerName} has too many pairing requests open. Try again in a few minutes." });
-                return;
-            }
-
-            if (open.StatusCode == HttpStatusCode.NotFound)
-            {
-                await SetAsync(run, status with { State = "failed", Message = $"{run.ServerName} does not take pairing requests. It may be set up as a client only." });
-                return;
-            }
-
-            open.EnsureSuccessStatusCode();
-            var opened = await open.Content.ReadFromJsonAsync<PairOpened>(KoppelJson.Files, cancellationToken);
-            if (opened is not { RequestId.Length: > 0, ServerNonce.Length: > 0, PollToken.Length: > 0 })
-            {
-                throw new InvalidDataException("The server's reply was not what Koppel expects.");
-            }
-
-            requestId = opened.RequestId;
-            pollToken = opened.PollToken;
-            using (var revealed = await http.PostAsJsonAsync($"/api/pair/{opened.RequestId}/reveal", new PairRevealRequest(nonce), KoppelJson.Files, cancellationToken))
-            {
-                revealed.EnsureSuccessStatusCode();
-            }
-
-            status = status with { State = "waiting", Code = PairingCode.Compute(run.Fingerprint, nonce, opened.ServerNonce), ExpiresAt = opened.ExpiresAt };
+            // Disposing a request that is still waiting withdraws it, so a cancelled one does not sit on the server's Clients page.
+            await using var request = await Open(new Uri(run.ServerUrl), run.Fingerprint, cancellationToken);
+            status = status with { State = "waiting", Code = request.Code, ExpiresAt = request.ExpiresAt };
             await SetAsync(run, status);
             LogWaiting(run.ServerName);
 
-            while (true)
-            {
-                await Task.Delay(PollInterval, _time, cancellationToken);
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/pair/{opened.RequestId}");
-                request.Headers.Add(PairingEndpoints.TokenHeader, opened.PollToken);
-                using var response = await http.SendAsync(request, cancellationToken);
-                var poll = response.StatusCode == HttpStatusCode.NotFound
-                    ? new PairingPoll("expired")
-                    : await response.EnsureSuccessStatusCode().Content.ReadFromJsonAsync<PairingPoll>(KoppelJson.Files, cancellationToken);
-                switch (poll?.State)
-                {
-                    case "approved":
-                        await ApprovedAsync(run, status, poll);
-                        return;
-                    case "denied":
-                        await SetAsync(run, status with { State = "denied", Code = null, Message = $"{run.ServerName} refused the request." });
-                        return;
-                    case "expired":
-                        await SetAsync(run, status with { State = "expired", Code = null, Message = "Nobody typed the code in time. Start again." });
-                        return;
-                }
-            }
+            var credentials = await request.WaitAsync(cancellationToken);
+            await ApprovedAsync(run, status, credentials);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Cancelled, replaced by another pairing, or out of time. Withdraw the request, so it does
-            // not sit on the server's Clients page until it expires.
-            await WithdrawAsync(http, requestId, pollToken);
-
-            // Only a run that is still the current one, and so ran out of time, may say so.
-            await SetAsync(run, status with { State = "expired", Code = null, Message = "Nobody typed the code in time. Start again." });
+            // Cancelled, or replaced by another pairing; the cancel or the newer run has the status.
         }
-        catch (TaskCanceledException)
+        catch (SkakelException ex)
         {
-            LogFailed(run.ServerName, "timed out");
-            await SetAsync(run, status with { State = "failed", Code = null, Message = $"{run.ServerName} did not answer in time." });
+            LogFailed(run.ServerName, ex.Failure.Code);
+            await SetAsync(run, Failed(run, status, ex));
         }
         catch (Exception ex)
         {
@@ -217,14 +173,27 @@ internal sealed partial class PairingClient : IDisposable
         }
     }
 
+    /// <summary>Skakel's failure as the status the UI shows.</summary>
+    private static PairingStatus Failed(Run run, PairingStatus status, SkakelException ex) => ex.Failure.Kind switch
+    {
+        SkakelFailureKind.PairingDenied => status with { State = "denied", Code = null, Message = $"{run.ServerName} refused the request." },
+        SkakelFailureKind.PairingExpired => status with { State = "expired", Code = null, Message = ex.Failure.Message },
+        SkakelFailureKind.TooManyRequests => status with { State = "failed", Code = null, Message = $"{run.ServerName} has too many pairing requests open. Try again in a few minutes." },
+
+        // A machine that is a client only answers 404 to everything a pairing client asks.
+        SkakelFailureKind.UnexpectedAnswer when ex.InnerException is HttpRequestException { StatusCode: HttpStatusCode.NotFound } =>
+            status with { State = "failed", Code = null, Message = $"{run.ServerName} does not take pairing requests. It may be set up as a client only." },
+        _ => status with { State = "failed", Code = null, Message = $"Could not pair with {run.ServerName}: {ex.Failure.Message}" },
+    };
+
     /// <summary>
     /// The server approved. The credentials must be whole, and they become the connection as they are:
     /// nothing of the stored secret is carried over. Saved at once for a client with no connection, or
     /// one for the same server; otherwise held until the person confirms.
     /// </summary>
-    private async Task ApprovedAsync(Run run, PairingStatus status, PairingPoll poll)
+    private async Task ApprovedAsync(Run run, PairingStatus status, SkakelCredentials credentials)
     {
-        if (string.IsNullOrWhiteSpace(poll.ClientId) || string.IsNullOrEmpty(poll.ClientSecret))
+        if (string.IsNullOrWhiteSpace(credentials.ClientId) || string.IsNullOrEmpty(credentials.ClientSecret))
         {
             LogFailed(run.ServerName, "approved without credentials");
             await SetAsync(run, status with { State = "failed", Code = null, Message = $"{run.ServerName} approved the request but did not send credentials. Start again." });
@@ -240,7 +209,7 @@ internal sealed partial class PairingClient : IDisposable
             }
         }
 
-        var update = new ConnectionUpdate(run.ServerUrl, run.Fingerprint, poll.ClientId, poll.ClientSecret);
+        var update = new ConnectionUpdate(run.ServerUrl, run.Fingerprint, credentials.ClientId, credentials.ClientSecret);
         var existing = _connection.Current;
         if ((existing.ServerUrl is not null || existing.ClientId is not null) && !update.KeepsServer(existing))
         {
@@ -280,25 +249,6 @@ internal sealed partial class PairingClient : IDisposable
     }
 
     private static PairingStatus Paired(Run run) => new("paired", run.ServerName, run.ServerUrl, ServerFingerprint: run.Fingerprint);
-
-    private static async Task WithdrawAsync(HttpClient http, string? requestId, string? pollToken)
-    {
-        if (requestId is null || pollToken is null)
-        {
-            return;
-        }
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/pair/{requestId}");
-            request.Headers.Add(PairingEndpoints.TokenHeader, pollToken);
-            using var withdrawn = await http.SendAsync(request, CancellationToken.None);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
-        {
-            // The server expires it on its own.
-        }
-    }
 
     /// <summary>Sets the status for a run, unless another run or a cancel has taken over since.</summary>
     private Task SetAsync(Run run, PairingStatus status)
@@ -351,9 +301,9 @@ internal sealed partial class PairingClient : IDisposable
     private partial void LogFailed(string server, string reason);
 
     /// <summary>One pairing attempt. Its identity decides who may set the status; its credentials wait here for a confirmation.</summary>
-    private sealed class Run(string serverUrl, string fingerprint, string serverName, TimeSpan lifetime, TimeProvider time) : IDisposable
+    private sealed class Run(string serverUrl, string fingerprint, string serverName) : IDisposable
     {
-        private readonly CancellationTokenSource _cts = new(lifetime, time);
+        private readonly CancellationTokenSource _cts = new();
 
         public string ServerUrl { get; } = serverUrl;
         public string Fingerprint { get; } = fingerprint;
@@ -379,5 +329,17 @@ internal sealed partial class PairingClient : IDisposable
         }
 
         public void Dispose() => _cts.Dispose();
+    }
+
+    /// <summary>Skakel's pairing client as a run sees it.</summary>
+    private sealed class SkakelRequest(SkakelPairingClient pairing) : IPairingRequest
+    {
+        public string Code => pairing.Code;
+
+        public DateTimeOffset ExpiresAt => pairing.ExpiresAt;
+
+        public Task<SkakelCredentials> WaitAsync(CancellationToken cancellationToken) => pairing.WaitAsync(cancellationToken);
+
+        public ValueTask DisposeAsync() => pairing.DisposeAsync();
     }
 }

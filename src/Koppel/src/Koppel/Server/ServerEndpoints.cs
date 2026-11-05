@@ -1,5 +1,6 @@
 using Koppel.Core.Activity;
-using Koppel.Core.Auth;
+using Koppel.Usb;
+using Skakel.Server;
 
 namespace Koppel.Server;
 
@@ -15,20 +16,20 @@ internal sealed record ClientSecretResponse(string ClientSecret);
 internal static class ServerEndpoints
 {
     /// <summary>
-    /// UI endpoints for the server role: the server's identity and its registered clients. Creating
-    /// a client answers 201 with the one-time secret; the client list itself reaches the UI over
-    /// SignalR (<c>ClientsChanged</c>) once <c>secrets.json</c> is written. Revoking answers 202.
+    /// UI endpoints for the server role: the server's identity and its registered clients, which Skakel
+    /// keeps. Creating a client answers 201 with the one-time secret; the client list itself reaches the
+    /// UI over SignalR (<c>ClientsChanged</c>) once <c>secrets.json</c> is written. Revoking answers 202.
     /// </summary>
     public static IEndpointRouteBuilder MapServerEndpoints(this IEndpointRouteBuilder app, int httpsPort)
     {
         var group = app.MapGroup("/api/server");
 
-        group.MapGet("/identity", (ServerSecretsStore secrets) =>
-            TypedResults.Ok(new ServerIdentity(Environment.MachineName, secrets.Fingerprint, httpsPort)));
+        group.MapGet("/identity", (SkakelKeys keys) =>
+            TypedResults.Ok(new ServerIdentity(Environment.MachineName, keys.Fingerprint, httpsPort)));
 
-        group.MapGet("/clients", (ServerSecretsStore secrets) => TypedResults.Ok(secrets.Clients));
+        group.MapGet("/clients", (SkakelClients clients) => TypedResults.Ok(clients.All));
 
-        group.MapPost("/clients", async Task<IResult> (CreateClientRequest request, ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapPost("/clients", async Task<IResult> (CreateClientRequest request, SkakelClients clients, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
             var name = request.Name?.Trim();
             if (string.IsNullOrEmpty(name) || name.Length > 80)
@@ -39,15 +40,15 @@ internal static class ServerEndpoints
                 });
             }
 
-            var (client, secret) = await secrets.CreateClientAsync(name, cancellationToken);
-            await activity.RecordAsync(new EntityRef(client.Id, client.Name, "client"), ActivityReason.ClientAdded, ActivityOutcome.Succeeded, $"Client {client.Name} was added");
-            return TypedResults.Created($"/api/server/clients/{client.Id}", new CreatedClient(client.Id, secret, client.Name));
+            var client = await clients.RegisterAsync(name, cancellationToken);
+            await activity.RecordAsync(new EntityRef(client.ClientId, client.Name, "client"), ActivityReason.ClientAdded, ActivityOutcome.Succeeded, $"Client {client.Name} was added");
+            return TypedResults.Created($"/api/server/clients/{client.ClientId}", new CreatedClient(client.ClientId, client.ClientSecret, client.Name));
         });
 
-        group.MapDelete("/clients/{clientId}", async Task<IResult> (string clientId, ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapDelete("/clients/{clientId}", async Task<IResult> (string clientId, SkakelClients clients, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
-            var name = secrets.NameOf(clientId) ?? clientId;
-            if (!await secrets.RevokeClientAsync(clientId, cancellationToken))
+            var name = clients.NameOf(clientId) ?? clientId;
+            if (!await clients.RevokeAsync(clientId, cancellationToken))
             {
                 return TypedResults.NotFound();
             }
@@ -57,30 +58,28 @@ internal static class ServerEndpoints
         });
 
         // One client's secret, fetched only when someone reveals or copies it.
-        group.MapGet("/clients/{clientId}/secret", IResult (string clientId, ServerSecretsStore secrets) =>
+        group.MapGet("/clients/{clientId}/secret", IResult (string clientId, SkakelClients clients) =>
         {
-            try
-            {
-                return secrets.SecretOf(clientId) is { } secret
-                    ? TypedResults.Ok(new ClientSecretResponse(secret))
-                    : TypedResults.Conflict(new { error = "This client was added before secrets were kept. Rotate the secret to get one you can copy." });
-            }
-            catch (KeyNotFoundException)
+            if (clients.NameOf(clientId) is null)
             {
                 return TypedResults.NotFound();
             }
+
+            return clients.SecretOf(clientId) is { } secret
+                ? TypedResults.Ok(new ClientSecretResponse(secret))
+                : TypedResults.Conflict(new { error = "This client was added before secrets were kept. Rotate the secret to get one you can copy." });
         });
 
         // A new secret, returned once in the response; the client list follows over SignalR.
-        group.MapPost("/clients/{clientId}/rotate", async Task<IResult> (string clientId, ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapPost("/clients/{clientId}/rotate", async Task<IResult> (string clientId, SkakelClients clients, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
-            var secret = await secrets.RotateSecretAsync(clientId, cancellationToken);
+            var secret = await clients.RotateSecretAsync(clientId, cancellationToken);
             if (secret is null)
             {
                 return TypedResults.NotFound();
             }
 
-            var name = secrets.NameOf(clientId) ?? clientId;
+            var name = clients.NameOf(clientId) ?? clientId;
             await activity.RecordAsync(new EntityRef(clientId, name, "client"), ActivityReason.SecretRotated, ActivityOutcome.Succeeded, $"The secret for {name} was rotated");
             return TypedResults.Ok(new ClientSecretResponse(secret));
         });
@@ -91,25 +90,25 @@ internal static class ServerEndpoints
 
     /// <summary>
     /// The certificate and the token signing key. Each change answers 202; the new state reaches the UI over
-    /// SignalR (<c>ServerKeysChanged</c>) once <c>secrets.json</c> is written, and the paired clients hear of
-    /// the next certificate over the remote hub. A change the current state does not allow answers 400.
+    /// SignalR (<c>ServerKeysChanged</c>) once <c>secrets.json</c> is written, and Skakel tells the paired
+    /// clients of the next certificate over the remote hub. A change the current state does not allow answers 400.
     /// </summary>
     private static void MapKeyEndpoints(RouteGroupBuilder group)
     {
         var machine = new EntityRef("machine", Environment.MachineName, "machine");
 
-        group.MapGet("/keys", (ServerSecretsStore secrets) => TypedResults.Ok(secrets.KeysView));
+        group.MapGet("/keys", (SkakelKeys keys) => TypedResults.Ok(keys.View));
 
-        group.MapPost("/keys/signing-key/rotate", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapPost("/keys/signing-key/rotate", async Task<IResult> (SkakelKeys keys, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
-            var id = await secrets.RotateSigningKeyAsync(cancellationToken);
+            var id = await keys.RotateSigningKeyAsync(cancellationToken);
             await activity.RecordAsync(machine, ActivityReason.SigningKeyRotated, ActivityOutcome.Succeeded, $"The token signing key was rotated, to {id}");
             return TypedResults.Accepted((string?)null);
         });
 
-        group.MapPost("/keys/next-certificate", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapPost("/keys/next-certificate", async Task<IResult> (SkakelKeys keys, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
-            if (await secrets.PrepareCertificateAsync(cancellationToken) is not { } next)
+            if (await keys.PrepareNextCertificateAsync(cancellationToken) is not { } next)
             {
                 return Refused("A new certificate is already prepared. Switch to it or cancel it first.");
             }
@@ -118,10 +117,10 @@ internal static class ServerEndpoints
             return TypedResults.Accepted((string?)null);
         });
 
-        group.MapDelete("/keys/next-certificate", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapDelete("/keys/next-certificate", async Task<IResult> (SkakelKeys keys, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
-            var next = secrets.NextFingerprint;
-            if (next is null || !await secrets.CancelCertificateAsync(cancellationToken))
+            var next = keys.NextFingerprint;
+            if (next is null || !await keys.CancelNextCertificateAsync(cancellationToken))
             {
                 return Refused("There is no new certificate to cancel.");
             }
@@ -130,9 +129,9 @@ internal static class ServerEndpoints
             return TypedResults.Accepted((string?)null);
         });
 
-        group.MapPost("/keys/next-certificate/switch", async Task<IResult> (ServerSecretsStore secrets, IActivityRecorder activity, CancellationToken cancellationToken) =>
+        group.MapPost("/keys/next-certificate/switch", async Task<IResult> (SkakelKeys keys, IActivityRecorder activity, CancellationToken cancellationToken) =>
         {
-            if (await secrets.SwitchCertificateAsync(cancellationToken) is not { } done)
+            if (await keys.SwitchCertificateAsync(cancellationToken) is not { } done)
             {
                 return Refused("There is no new certificate to switch to. Prepare one first.");
             }
@@ -152,27 +151,14 @@ internal static class ServerEndpoints
     }
 
     /// <summary>
-    /// Endpoints remote Koppel clients call with a bearer token, over HTTPS only. A revoked client is
-    /// refused at once, even while an earlier token has not expired, and so is a token issued before the
-    /// client's secret was rotated.
+    /// Koppel's own endpoints for remote clients, beside Skakel's: a bearer token from a client still
+    /// registered at its current generation, over HTTPS. Skakel's <c>/skakel/v1/hello</c> is what a
+    /// client calls to check its credentials.
     /// </summary>
     public static RouteGroupBuilder MapRemoteEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/remote").RequireAuthorization(KoppelAuthServer.ClientPolicy);
-        group.AddEndpointFilter(async (context, next) =>
-        {
-            var secrets = context.HttpContext.RequestServices.GetRequiredService<ServerSecretsStore>();
-            return secrets.IsCurrent(context.HttpContext.User)
-                ? await next(context)
-                : TypedResults.Unauthorized();
-        });
-
-        group.MapGet("/hello", (HttpContext http) =>
-            TypedResults.Ok(new RemoteHello(Environment.MachineName, http.User.GetClientId()!)));
-
+        var group = app.MapGroup("/api/remote").RequireSkakelClient();
+        group.MapGet("/devices", (UsbServer usb) => TypedResults.Ok(usb.Current.ForRemote()));
         return group;
     }
 }
-
-/// <summary>What a client sees when its credentials work.</summary>
-internal sealed record RemoteHello(string Server, string ClientId);

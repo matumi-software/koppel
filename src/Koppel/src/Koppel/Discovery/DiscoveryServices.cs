@@ -1,10 +1,141 @@
+using System.Net;
 using System.Net.Sockets;
 using Koppel.Core.Configuration;
-using Koppel.Core.Discovery;
-using Koppel.Server;
 using Koppel.Settings;
+using Skakel.Client;
+using Skakel.Protocol;
+using Skakel.Server;
 
 namespace Koppel.Discovery;
+
+/// <summary>A server found on the local network, as the UI shows it.</summary>
+/// <param name="Address">Where its answer came from, which is where to reach it.</param>
+/// <param name="Version">Koppel's version on that server.</param>
+public sealed record DiscoveredServer(string Name, string Address, int HttpsPort, string Fingerprint, string? Version)
+{
+    public string Url => IPAddress.TryParse(Address, out var ip) && ip.AddressFamily == AddressFamily.InterNetworkV6
+        ? $"https://[{Address}]:{HttpsPort}"
+        : $"https://{Address}:{HttpsPort}";
+
+    public static DiscoveredServer From(SkakelDiscoveredServer server) =>
+        new(server.Name, server.Address.ToString(), server.Port, server.Fingerprint, server.App.Version);
+}
+
+/// <summary>
+/// Answers Skakel discovery probes for this server on UDP, in the protocol's format (see Skakel's
+/// <c>docs/protocol.md</c>). Koppel answers them itself rather than through Skakel's discovery service,
+/// because it answers only while its role is server or both, and the role changes while it runs.
+/// </summary>
+internal sealed partial class ServerAnnouncer(ILogger<ServerAnnouncer> logger) : IDisposable
+{
+    private readonly Lock _lock = new();
+    private Socket? _socket;
+    private CancellationTokenSource? _stop;
+
+    public bool IsAnnouncing
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _socket is not null;
+            }
+        }
+    }
+
+    /// <summary>Starts answering on UDP <paramref name="udpPort"/> with <paramref name="answer"/>, or replaces what the answers say.</summary>
+    public void Announce(DiscoveryAnswer answer, int udpPort)
+    {
+        ArgumentNullException.ThrowIfNull(answer);
+        var reply = SkakelDiscovery.CreateAnswer(answer);
+        lock (_lock)
+        {
+            StopLocked();
+            var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                socket.Bind(new IPEndPoint(IPAddress.Any, udpPort));
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+
+            _socket = socket;
+            _stop = new CancellationTokenSource();
+            _ = AnswerAsync(socket, reply, _stop.Token);
+            LogAnnouncing(answer.Name, udpPort);
+        }
+    }
+
+    public void Stop()
+    {
+        lock (_lock)
+        {
+            StopLocked();
+        }
+    }
+
+    public void Dispose() => Stop();
+
+    private void StopLocked()
+    {
+        if (_socket is null)
+        {
+            return;
+        }
+
+        _stop?.Cancel();
+        _stop?.Dispose();
+        _socket.Dispose();
+        _stop = null;
+        _socket = null;
+        LogStopped();
+    }
+
+    /// <summary>Answers a full-size probe only, and never with more bytes than it had, so nobody can use this server to multiply traffic.</summary>
+    private async Task AnswerAsync(Socket socket, byte[] reply, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[2048];
+        var anyone = new IPEndPoint(IPAddress.Any, 0);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var received = await socket.ReceiveFromAsync(buffer, SocketFlags.None, anyone, cancellationToken);
+                if (SkakelDiscovery.IsProbe(buffer.AsSpan(0, received.ReceivedBytes)) && reply.Length <= received.ReceivedBytes)
+                {
+                    await socket.SendToAsync(reply, SocketFlags.None, received.RemoteEndPoint, cancellationToken);
+                }
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+            {
+                return;
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode is SocketError.ConnectionReset or SocketError.NetworkReset or SocketError.MessageSize)
+            {
+                // Windows reports these on the next receive, each about one datagram: an earlier answer that could
+                // not be delivered or ran out of hops, or a datagram larger than the buffer, which it drops. Anyone
+                // on the network can send the last one, so none of them may stop the answers.
+            }
+            catch (SocketException ex)
+            {
+                LogAnswerFailed(ex);
+                return;
+            }
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Answering discovery on the local network as {Name} (UDP port {Port})")]
+    private partial void LogAnnouncing(string name, int port);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Stopped answering discovery on the local network")]
+    private partial void LogStopped();
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Stopped answering discovery after a network error")]
+    private partial void LogAnswerFailed(Exception exception);
+}
 
 /// <summary>
 /// Server role: announces this server on the local network so clients can find it, and stops when
@@ -14,7 +145,7 @@ namespace Koppel.Discovery;
 internal sealed partial class ServerAnnouncerService(
     ServerAnnouncer announcer,
     SettingsStore settings,
-    ServerSecretsStore secrets,
+    SkakelKeys keys,
     HostInfo host,
     IConfiguration configuration,
     ILogger<ServerAnnouncerService> logger) : IHostedService
@@ -29,7 +160,7 @@ internal sealed partial class ServerAnnouncerService(
         if (_enabled)
         {
             settings.Changed += ApplyAsync;
-            secrets.KeysChanged += ApplyKeysAsync;
+            keys.Changed += ApplyKeysAsync;
             Apply(settings.Current);
         }
 
@@ -39,7 +170,7 @@ internal sealed partial class ServerAnnouncerService(
     public Task StopAsync(CancellationToken cancellationToken)
     {
         settings.Changed -= ApplyAsync;
-        secrets.KeysChanged -= ApplyKeysAsync;
+        keys.Changed -= ApplyKeysAsync;
         announcer.Stop();
         return Task.CompletedTask;
     }
@@ -50,7 +181,7 @@ internal sealed partial class ServerAnnouncerService(
         return Task.CompletedTask;
     }
 
-    private Task ApplyKeysAsync(ServerKeysView value)
+    private Task ApplyKeysAsync(SkakelKeysView value)
     {
         Apply(settings.Current);
         return Task.CompletedTask;
@@ -68,7 +199,7 @@ internal sealed partial class ServerAnnouncerService(
     private void ApplyLocked(KoppelSettings value)
     {
         var shouldAnnounce = value.Role != KoppelRole.Client;
-        var fingerprint = secrets.Fingerprint;
+        var fingerprint = keys.Fingerprint;
         if (shouldAnnounce == announcer.IsAnnouncing && (!shouldAnnounce || fingerprint == _announced))
         {
             return;
@@ -78,7 +209,8 @@ internal sealed partial class ServerAnnouncerService(
         {
             if (shouldAnnounce)
             {
-                announcer.Announce(new ServerAnnouncement(Environment.MachineName, host.NetworkPort, fingerprint, SystemEndpoints.Version), host.DiscoveryPort);
+                var app = new SkakelApp(SystemEndpoints.AppId, SystemEndpoints.Version);
+                announcer.Announce(new DiscoveryAnswer(Environment.MachineName, host.NetworkPort, fingerprint, app, SkakelProtocol.Versions), host.DiscoveryPort);
                 _announced = fingerprint;
             }
             else
@@ -88,7 +220,7 @@ internal sealed partial class ServerAnnouncerService(
         }
         catch (SocketException ex)
         {
-            // No multicast on this network, or another responder holds the port exclusively. Pairing by address still works.
+            // Another program holds the UDP port. Clients can still enter this server's address.
             LogAnnounceFailed(ex);
         }
     }
@@ -97,24 +229,17 @@ internal sealed partial class ServerAnnouncerService(
     private partial void LogAnnounceFailed(Exception exception);
 }
 
-/// <summary>The servers this machine hears on the local network, leaving out itself. A test can stand in for the network.</summary>
-internal interface IDiscoveredServers
-{
-    event Func<IReadOnlyList<DiscoveredServer>, Task>? Changed;
-
-    IReadOnlyList<DiscoveredServer> Servers { get; }
-}
-
 /// <summary>
-/// Client role: finds servers on the local network while this machine can be a client, leaving out
-/// itself. <c>Discovery:Enabled=false</c> turns it off.
+/// Client role: finds Koppel servers on the local network with Skakel's browser while this machine can be
+/// a client, leaving out itself. The same browser lets the link follow its server to another address.
+/// <c>Discovery:Enabled=false</c> turns it off.
 /// </summary>
 internal sealed partial class ServerFinder(
-    ServerBrowser browser,
+    SkakelBrowser browser,
     SettingsStore settings,
-    ServerSecretsStore secrets,
+    SkakelKeys keys,
     IConfiguration configuration,
-    ILogger<ServerFinder> logger) : IHostedService, IDiscoveredServers
+    ILogger<ServerFinder> logger) : IHostedService
 {
     public event Func<IReadOnlyList<DiscoveredServer>, Task>? Changed;
 
@@ -165,11 +290,11 @@ internal sealed partial class ServerFinder(
         }
     }
 
-    /// <summary>The browser calls one list at a time, in order, and waits for this, so a push cannot overtake an earlier one.</summary>
-    private Task OnChangedAsync(IReadOnlyList<DiscoveredServer> servers) => Changed.RaiseAsync(Others(servers), logger);
+    /// <summary>The browser raises one list at a time, in order, and waits for this, so a push cannot overtake an earlier one.</summary>
+    private Task OnChangedAsync(IReadOnlyList<SkakelDiscoveredServer> servers) => Changed.RaiseAsync(Others(servers), logger);
 
-    private IReadOnlyList<DiscoveredServer> Others(IReadOnlyList<DiscoveredServer> servers) =>
-        [.. servers.Where(s => !string.Equals(s.Fingerprint, secrets.Fingerprint, StringComparison.OrdinalIgnoreCase))];
+    private List<DiscoveredServer> Others(IReadOnlyList<SkakelDiscoveredServer> servers) =>
+        [.. servers.Where(s => !Fingerprints.AreEqual(s.Fingerprint, keys.Fingerprint)).Select(DiscoveredServer.From)];
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not look for servers on the local network; enter the server's address instead")]
     private partial void LogBrowseFailed(Exception exception);

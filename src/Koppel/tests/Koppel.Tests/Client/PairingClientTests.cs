@@ -1,17 +1,15 @@
 using System.Net;
-using System.Text;
-using System.Text.Json;
 using Koppel.Client;
-using Koppel.Core.Configuration;
 using Koppel.Core.Security;
-using Koppel.Server;
 using Microsoft.Extensions.Logging.Abstractions;
+using Skakel.Client;
 
 namespace Koppel.Tests.Client;
 
 /// <summary>
-/// The client side of pairing against a fake server and a manual clock: who may set the status, what
-/// an approval must carry, and when credentials are saved straight away or wait for the person.
+/// The client side of pairing against fake requests: who may set the status, what an approval must carry,
+/// how Skakel's failures read, and when credentials are saved straight away or wait for the person. The
+/// protocol underneath is Skakel's, with tests of its own; <c>Server/PairingTests</c> runs it end to end.
 /// </summary>
 public sealed class PairingClientTests : IAsyncLifetime
 {
@@ -21,10 +19,10 @@ public sealed class PairingClientTests : IAsyncLifetime
     private const string UrlB = "https://server-b.test:5241";
 
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "koppel-tests", Guid.NewGuid().ToString("N"));
-    private readonly ManualTimeProvider _time = new();
-    private readonly Dictionary<string, FakeServer> _servers = [];
+    private readonly Dictionary<string, Func<FakeRequest>> _servers = [];
     private readonly List<(Func<PairingStatus, bool> Match, TaskCompletionSource<PairingStatus> Done)> _waiters = [];
     private readonly List<PairingStatus> _statuses = [];
+    private readonly List<FakeRequest> _opened = [];
     private readonly Lock _sync = new();
     private SecretBox _box = null!;
     private ConnectionStore _connection = null!;
@@ -35,7 +33,7 @@ public sealed class PairingClientTests : IAsyncLifetime
         _box = new SecretBox(Path.Combine(_directory, "keys"), "test");
         _connection = new ConnectionStore(new KoppelPaths(Path.Combine(_directory, "config"), Path.Combine(_directory, "keys")), _box, NullLogger<ConnectionStore>.Instance);
         await _connection.StartAsync(TestContext.Current.CancellationToken);
-        _client = new PairingClient(_connection, _time, NullLogger<PairingClient>.Instance) { HandlerFactory = fingerprint => _servers[fingerprint] };
+        _client = new PairingClient(_connection, TimeProvider.System, NullLoggerFactory.Instance) { Open = OpenAsync };
         _client.Changed += status =>
         {
             lock (_sync)
@@ -68,7 +66,7 @@ public sealed class PairingClientTests : IAsyncLifetime
     [Fact]
     public async Task Approval_for_a_client_with_no_connection_is_saved_as_given()
     {
-        _servers[FingerprintA] = FakeServer.Approving("client-1", "new-secret");
+        _servers[FingerprintA] = () => FakeRequest.Approving("client-1", "new-secret");
 
         await PairAsync(UrlA, FingerprintA, "paired");
 
@@ -80,13 +78,12 @@ public sealed class PairingClientTests : IAsyncLifetime
 
     [Theory]
     [InlineData("client-1", "")]
-    [InlineData("client-1", null)]
     [InlineData("", "secret")]
-    [InlineData(null, null)]
-    public async Task Approval_without_credentials_fails_and_saves_nothing(string? clientId, string? secret)
+    [InlineData(" ", "secret")]
+    public async Task Approval_without_credentials_fails_and_saves_nothing(string clientId, string secret)
     {
         await _connection.UpdateAsync(_ => new ClientConnection(UrlA, FingerprintA, "old-id", "old-secret"), TestContext.Current.CancellationToken);
-        _servers[FingerprintA] = FakeServer.Approving(clientId, secret);
+        _servers[FingerprintA] = () => FakeRequest.Approving(clientId, secret);
 
         var status = await PairAsync(UrlA, FingerprintA, "failed");
 
@@ -99,7 +96,7 @@ public sealed class PairingClientTests : IAsyncLifetime
     {
         var ct = TestContext.Current.CancellationToken;
         await _connection.UpdateAsync(_ => new ClientConnection(UrlB, FingerprintB, "old-id", "old-secret"), ct);
-        _servers[FingerprintA] = FakeServer.Approving("client-1", "new-secret");
+        _servers[FingerprintA] = () => FakeRequest.Approving("client-1", "new-secret");
 
         var held = await PairAsync(UrlA, FingerprintA, "confirm");
 
@@ -122,7 +119,7 @@ public sealed class PairingClientTests : IAsyncLifetime
         var ct = TestContext.Current.CancellationToken;
         var old = new ClientConnection(UrlB, FingerprintB, "old-id", "old-secret");
         await _connection.UpdateAsync(_ => old, ct);
-        _servers[FingerprintA] = FakeServer.Approving("client-1", "new-secret");
+        _servers[FingerprintA] = () => FakeRequest.Approving("client-1", "new-secret");
         await PairAsync(UrlA, FingerprintA, "confirm");
 
         await _client.CancelAsync();
@@ -136,7 +133,7 @@ public sealed class PairingClientTests : IAsyncLifetime
     public async Task Approval_for_the_server_already_connected_replaces_the_credentials_without_asking()
     {
         await _connection.UpdateAsync(_ => new ClientConnection(UrlA, FingerprintA, "old-id", "old-secret"), TestContext.Current.CancellationToken);
-        _servers[FingerprintA] = FakeServer.Approving("client-2", "fresh-secret");
+        _servers[FingerprintA] = () => FakeRequest.Approving("client-2", "fresh-secret");
 
         await PairAsync(UrlA, FingerprintA, "paired");
 
@@ -148,15 +145,8 @@ public sealed class PairingClientTests : IAsyncLifetime
     public async Task A_run_that_was_replaced_cannot_overwrite_the_status_of_the_newer_one()
     {
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _servers[FingerprintA] = new FakeServer
-        {
-            Open = async _ =>
-            {
-                await release.Task;
-                return new HttpResponseMessage(HttpStatusCode.TooManyRequests);
-            },
-        };
-        _servers[FingerprintB] = FakeServer.Waiting();
+        _servers[FingerprintA] = () => new FakeRequest { Opening = release.Task, Fails = new SkakelException(SkakelFailure.Of(SkakelFailureKind.TooManyRequests)) };
+        _servers[FingerprintB] = () => new FakeRequest();
         var older = _client.Begin(UrlA, FingerprintA, "old");
         await WaitForAsync(s => s.State == "requesting" && s.ServerName == "old");
 
@@ -180,22 +170,10 @@ public sealed class PairingClientTests : IAsyncLifetime
     public async Task An_approval_that_arrives_for_a_replaced_run_is_not_saved()
     {
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var polling = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _servers[FingerprintA] = new FakeServer
-        {
-            Poll = async _ =>
-            {
-                polling.SetResult();
-                await release.Task;
-                return FakeServer.Json(new PairingPoll("approved", "client-1", "new-secret"));
-            },
-        };
-        _servers[FingerprintB] = FakeServer.Waiting();
+        _servers[FingerprintA] = () => new FakeRequest { Approval = release.Task.ContinueWith(_ => new SkakelCredentials("client-1", "new-secret"), TaskScheduler.Default), IgnoresCancel = true };
+        _servers[FingerprintB] = () => new FakeRequest();
         var older = _client.Begin(UrlA, FingerprintA, "old");
         await WaitForAsync(s => s.State == "waiting" && s.ServerName == "old");
-        await _time.WhenTimersAsync(2);
-        _time.Advance(TimeSpan.FromSeconds(2));
-        await polling.Task;
 
         var newer = _client.Begin(UrlB, FingerprintB, "new");
         await WaitForAsync(s => s.State == "waiting" && s.ServerName == "new");
@@ -208,62 +186,55 @@ public sealed class PairingClientTests : IAsyncLifetime
         await newer;
     }
 
-    [Fact]
-    public async Task A_reply_the_client_cannot_read_ends_as_a_readable_failure()
+    [Theory]
+    [InlineData(SkakelFailureKind.PairingDenied, "denied", "server-a.test refused the request.")]
+    [InlineData(SkakelFailureKind.PairingExpired, "expired", "Nobody typed the code on the server in time. Start again.")]
+    [InlineData(SkakelFailureKind.TooManyRequests, "failed", "server-a.test has too many pairing requests open. Try again in a few minutes.")]
+    [InlineData(SkakelFailureKind.CertificateMismatch, "failed", "Could not pair with server-a.test: The server's certificate does not match the one this app trusts. If the server has a new certificate, pair with it again.")]
+    public async Task Skakels_failures_end_the_run_in_fixed_words(SkakelFailureKind kind, string state, string message)
     {
-        _servers[FingerprintA] = new FakeServer { Open = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>proxy</html>", Encoding.UTF8, "text/html") }) };
+        _servers[FingerprintA] = () => new FakeRequest { Approval = Task.FromException<SkakelCredentials>(new SkakelException(SkakelFailure.Of(kind))) };
 
-        var status = await PairAsync(UrlA, FingerprintA, "failed");
+        var status = await PairAsync(UrlA, FingerprintA, state);
 
-        status.Message.Should().StartWith("Could not pair with server-a.test");
+        status.Message.Should().Be(message);
+        status.Code.Should().BeNull();
     }
 
     [Fact]
-    public async Task An_open_reply_without_a_poll_token_is_a_failure()
+    public async Task A_machine_that_is_a_client_only_is_named_as_one()
     {
-        _servers[FingerprintA] = new FakeServer { Open = _ => Task.FromResult(FakeServer.Json(new PairOpened("req-1", "server-nonce", _time.GetUtcNow().AddMinutes(5), ""))) };
+        var notFound = new HttpRequestException("Not found", null, HttpStatusCode.NotFound);
+        _servers[FingerprintA] = () => new FakeRequest { Fails = new SkakelException(SkakelFailure.Of(SkakelFailureKind.UnexpectedAnswer), notFound) };
 
         var status = await PairAsync(UrlA, FingerprintA, "failed");
 
-        status.Message.Should().Contain("not what Koppel expects");
+        status.Message.Should().Be("server-a.test does not take pairing requests. It may be set up as a client only.");
     }
 
     [Fact]
-    public async Task A_server_error_while_polling_is_a_failure_not_a_silent_stop()
+    public async Task Cancelling_disposes_the_request_so_it_is_withdrawn()
     {
-        _servers[FingerprintA] = new FakeServer
-        {
-            Poll = _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)),
-        };
-
-        var status = await PairAsync(UrlA, FingerprintA, "failed");
-
-        status.Message.Should().Contain("500");
-    }
-
-    [Fact]
-    public async Task Polls_and_the_withdraw_present_the_poll_token()
-    {
-        var server = FakeServer.Waiting();
-        _servers[FingerprintA] = server;
+        _servers[FingerprintA] = () => new FakeRequest();
         var run = _client.Begin(UrlA, FingerprintA, null);
         await WaitForAsync(s => s.State == "waiting");
-        await _time.WhenTimersAsync(2);
-        _time.Advance(TimeSpan.FromSeconds(2));
-        await server.PolledAsync;
 
         await _client.CancelAsync();
         await run;
 
-        server.Calls.Should().Contain(c => c.Method == "GET" && c.Token == "tok-1");
-        server.Calls.Should().Contain(c => c.Method == "DELETE" && c.Token == "tok-1");
+        lock (_sync)
+        {
+            _opened.Should().ContainSingle().Which.Disposed.Should().BeTrue();
+        }
+
+        _client.Current.State.Should().Be("idle");
     }
 
     [Fact]
     public async Task Paired_is_cleared_once_the_stored_connection_is_another_one()
     {
         var ct = TestContext.Current.CancellationToken;
-        _servers[FingerprintA] = FakeServer.Approving("client-1", "new-secret");
+        _servers[FingerprintA] = () => FakeRequest.Approving("client-1", "new-secret");
         await PairAsync(UrlA, FingerprintA, "paired");
         var cleared = WaitForAsync(s => s.State == "idle");
 
@@ -273,21 +244,25 @@ public sealed class PairingClientTests : IAsyncLifetime
         _client.Current.State.Should().Be("idle");
     }
 
-    /// <summary>Starts a run and drives the clock until it reaches <paramref name="state"/>.</summary>
+    private async Task<IPairingRequest> OpenAsync(Uri server, string fingerprint, CancellationToken cancellationToken)
+    {
+        var request = _servers[fingerprint]();
+        lock (_sync)
+        {
+            _opened.Add(request);
+        }
+
+        await request.Opening;
+        cancellationToken.ThrowIfCancellationRequested();
+        return request.Fails is { } failure ? throw failure : request;
+    }
+
+    /// <summary>Starts a run and waits until it reaches <paramref name="state"/>.</summary>
     private async Task<PairingStatus> PairAsync(string url, string fingerprint, string state)
     {
         var done = WaitForAsync(s => s.State == state);
-        var run = _client.Begin(url, fingerprint, null);
-        while (!done.IsCompleted && !run.IsCompleted)
-        {
-            await Task.WhenAny(done, run, _time.WhenTimersAsync(2));
-            if (!done.IsCompleted && !run.IsCompleted)
-            {
-                _time.Advance(TimeSpan.FromSeconds(2));
-            }
-        }
-
-        return await done.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        await _client.Begin(url, fingerprint, null);
+        return await done;
     }
 
     private Task<PairingStatus> WaitForAsync(Func<PairingStatus, bool> match)
@@ -305,55 +280,33 @@ public sealed class PairingClientTests : IAsyncLifetime
         }
     }
 
-    /// <summary>A server that answers the three pairing calls, each replaceable.</summary>
-    private sealed class FakeServer : HttpMessageHandler
+    /// <summary>A pairing request on a fake server: it opens when <see cref="Opening"/> completes, and approves with <see cref="Approval"/>, or waits.</summary>
+    private sealed class FakeRequest : IPairingRequest
     {
-        private readonly TaskCompletionSource _polled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Opening { get; init; } = Task.CompletedTask;
 
-        public Func<HttpRequestMessage, Task<HttpResponseMessage>>? Open { get; init; }
+        public Exception? Fails { get; init; }
 
-        public Func<HttpRequestMessage, Task<HttpResponseMessage>>? Poll { get; init; }
+        public Task<SkakelCredentials> Approval { get; init; } = new TaskCompletionSource<SkakelCredentials>().Task;
 
-        public List<(string Method, string Token)> Calls { get; } = [];
+        /// <summary>The answer comes even after the run stopped waiting, as one already on its way does.</summary>
+        public bool IgnoresCancel { get; init; }
 
-        public Task PolledAsync => _polled.Task;
+        public bool Disposed { get; private set; }
 
-        public static FakeServer Waiting() => new() { Poll = _ => Task.FromResult(Json(new PairingPoll("waiting"))) };
+        public string Code => "482913";
 
-        public static FakeServer Approving(string? clientId, string? secret) =>
-            new() { Poll = _ => Task.FromResult(Json(new PairingPoll("approved", clientId, secret))) };
+        public DateTimeOffset ExpiresAt => DateTimeOffset.UtcNow.AddMinutes(5);
 
-        public static HttpResponseMessage Json<T>(T value) =>
-            new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(value, KoppelJson.Files), Encoding.UTF8, "application/json") };
+        public static FakeRequest Approving(string clientId, string secret) => new() { Approval = Task.FromResult(new SkakelCredentials(clientId, secret)) };
 
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public Task<SkakelCredentials> WaitAsync(CancellationToken cancellationToken) =>
+            IgnoresCancel ? Approval : Approval.WaitAsync(cancellationToken);
+
+        public ValueTask DisposeAsync()
         {
-            var token = request.Headers.TryGetValues(PairingEndpoints.TokenHeader, out var values) ? values.Single() : "";
-            lock (Calls)
-            {
-                Calls.Add((request.Method.Method, token));
-            }
-
-            var path = request.RequestUri!.AbsolutePath;
-            if (request.Method == HttpMethod.Post && path == "/api/pair")
-            {
-                return Open is null
-                    ? Json(new PairOpened("req-1", "server-nonce", DateTimeOffset.UtcNow.AddMinutes(5), "tok-1"))
-                    : await Open(request);
-            }
-
-            if (request.Method == HttpMethod.Post && path.EndsWith("/reveal", StringComparison.Ordinal))
-            {
-                return new HttpResponseMessage(HttpStatusCode.NoContent);
-            }
-
-            if (request.Method == HttpMethod.Get)
-            {
-                _polled.TrySetResult();
-                return Poll is null ? Json(new PairingPoll("waiting")) : await Poll(request);
-            }
-
-            return new HttpResponseMessage(HttpStatusCode.NoContent);
+            Disposed = true;
+            return ValueTask.CompletedTask;
         }
     }
 }

@@ -121,10 +121,11 @@ public sealed class SignInRuleTests
     [InlineData("/", false)]
     [InlineData("/index.html", false)]
     [InlineData("/assets/app.js", false)]
-    [InlineData("/connect/token", false)]
-    [InlineData("/api/remote/hello", false)]
-    [InlineData("/api/hubs/remote", false)]
-    [InlineData("/api/pair", false)]
+    [InlineData("/skakel/v1/token", false)]
+    [InlineData("/skakel/v1/hello", false)]
+    [InlineData("/skakel/v1/hub", false)]
+    [InlineData("/skakel/v1/pair", false)]
+    [InlineData("/api/remote/devices", false)]
     public void RequiresSignIn_protects_the_ui_api_by_default(string path, bool required) =>
         Surface.RequiresSignIn(path).Should().Be(required);
 }

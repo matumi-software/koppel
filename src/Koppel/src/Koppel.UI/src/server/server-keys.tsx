@@ -75,7 +75,7 @@ export function ServerKeys({ host, httpsPort, clients, locked }: ServerKeysProps
       <span className="kp-row">
         <code className="kp-id">{current.signingKeyId}</code>
         <span className="kp-type-caption" style={{ color: 'var(--text-tertiary)' }}>
-          {current.signingKeySince ? `Since ${dateFormat.format(new Date(current.signingKeySince))}` : 'Since this server was set up'}
+          {`Since ${dateFormat.format(new Date(current.signingKeySince))}`}
         </span>
       </span>
       <span className="kp-field__help">

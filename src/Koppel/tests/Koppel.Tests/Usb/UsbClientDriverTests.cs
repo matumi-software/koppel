@@ -8,6 +8,7 @@ using Koppel.Core.Usb;
 using Koppel.Usb;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Skakel.Server;
 
 namespace Koppel.Tests.Usb;
 
@@ -182,8 +183,9 @@ public sealed class UsbClientDriverTests : IDisposable
             d.GetProperty("link").GetString() == "connected" && d.GetProperty("devices").GetArrayLength() == 1);
         await Link.ConnectAsync(_server, client, ct);
         await Link.WithLastAsync(linked, hub, ct);
-        var sessions = _server.Services.GetRequiredService<LiveSessions>();
-        var first = sessions.RemoteConnectionIds().Should().ContainSingle().Subject;
+        // The server notes when a client last took a token; the renewal takes a new one.
+        var clients = _server.Services.GetRequiredService<SkakelClients>();
+        var first = clients.All.Should().ContainSingle().Subject.LastSeen;
         lock (links)
         {
             links.Clear();
@@ -192,7 +194,8 @@ public sealed class UsbClientDriverTests : IDisposable
         // The server's token lasts 30 minutes; the client renews half a minute ahead.
         clock.Advance(TimeSpan.FromMinutes(29) + TimeSpan.FromSeconds(45));
 
-        await EventuallyAsync(() => sessions.RemoteConnectionIds() is [var id] && id != first, ct);
+        await EventuallyAsync(() => clients.All is [{ LastSeen: var seen }] && seen > first, ct);
+        await EventuallyAsync(() => client.Services.GetRequiredService<UsbClient>().Current.Link == "connected", ct);
         lock (links)
         {
             links.Should().NotContain(l => l != "connected");

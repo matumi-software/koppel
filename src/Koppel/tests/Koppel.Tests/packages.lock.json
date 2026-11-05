@@ -454,6 +454,14 @@
           "Microsoft.Extensions.Options": "10.0.14"
         }
       },
+      "Microsoft.Extensions.Logging.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "SwcbEBtkECq3D2oywvHkm46fyrX9Dd2JPWphDnHUc2+cUWR1Mdo41atAjh/9iZjgQxuvbKfZKXqostT/LZfefA==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14"
+        }
+      },
       "Microsoft.Extensions.Logging.Configuration": {
         "type": "Transitive",
         "resolved": "10.0.14",
@@ -702,6 +710,20 @@
           "Microsoft.IdentityModel.Tokens": "8.19.2"
         }
       },
+      "OpenIddict.AspNetCore": {
+        "type": "Transitive",
+        "resolved": "7.7.2",
+        "contentHash": "b6cqAcvJfo0OhKVD7YZkfwcRq7PsXCAb39MaHE+/NGHZ9thmXH9VtlLEdxdH5nnH4pdsWppqsLJ3cprfr9gJrA==",
+        "dependencies": {
+          "OpenIddict": "7.7.2",
+          "OpenIddict.Client.AspNetCore": "7.7.2",
+          "OpenIddict.Client.DataProtection": "7.7.2",
+          "OpenIddict.Server.AspNetCore": "7.7.2",
+          "OpenIddict.Server.DataProtection": "7.7.2",
+          "OpenIddict.Validation.AspNetCore": "7.7.2",
+          "OpenIddict.Validation.DataProtection": "7.7.2"
+        }
+      },
       "OpenIddict.Client": {
         "type": "Transitive",
         "resolved": "7.7.2",
@@ -883,6 +905,11 @@
           "System.Threading.RateLimiting": "8.0.0"
         }
       },
+      "Skakel.Protocol": {
+        "type": "Transitive",
+        "resolved": "0.1.0-preview",
+        "contentHash": "sAXMpIsMc4C0M1+5iYRgO61LU/ifocZnemXGcu5UXsxs7g7uF6NPFAtSUqJxZGE9ImddXaBI/ESjQovAHFE4Zw=="
+      },
       "System.Diagnostics.EventLog": {
         "type": "Transitive",
         "resolved": "10.0.14",
@@ -972,13 +999,14 @@
         "type": "Project",
         "dependencies": {
           "Koppel.Core.Activity": "[0.1.0, )",
-          "Koppel.Core.Auth": "[0.1.0, )",
-          "Koppel.Core.Discovery": "[0.1.0, )",
+          "Koppel.Core.Security": "[0.1.0, )",
           "Koppel.Core.Usb": "[0.1.0, )",
           "Microsoft.AspNetCore.SignalR.Client": "[10.0.14, )",
           "Microsoft.AspNetCore.SpaProxy": "[10.0.14, )",
           "Microsoft.Extensions.Hosting.Systemd": "[10.0.14, )",
-          "Microsoft.Extensions.Hosting.WindowsServices": "[10.0.14, )"
+          "Microsoft.Extensions.Hosting.WindowsServices": "[10.0.14, )",
+          "Skakel.Client": "[0.1.0-preview, )",
+          "Skakel.Server": "[0.1.0-preview, )"
         }
       },
       "koppel.core.activity": {
@@ -987,22 +1015,8 @@
           "Koppel.Core.Configuration": "[0.1.0, )"
         }
       },
-      "koppel.core.auth": {
-        "type": "Project",
-        "dependencies": {
-          "Koppel.Core.Security": "[0.1.0, )",
-          "OpenIddict.AspNetCore": "[7.7.2, )"
-        }
-      },
       "koppel.core.configuration": {
         "type": "Project"
-      },
-      "koppel.core.discovery": {
-        "type": "Project",
-        "dependencies": {
-          "Koppel.Core.Configuration": "[0.1.0, )",
-          "Microsoft.Extensions.Logging.Abstractions": "[10.0.14, )"
-        }
       },
       "koppel.core.security": {
         "type": "Project",
@@ -1039,28 +1053,24 @@
           "System.ServiceProcess.ServiceController": "10.0.14"
         }
       },
-      "Microsoft.Extensions.Logging.Abstractions": {
+      "Skakel.Client": {
         "type": "CentralTransitive",
-        "requested": "[10.0.14, )",
-        "resolved": "10.0.14",
-        "contentHash": "SwcbEBtkECq3D2oywvHkm46fyrX9Dd2JPWphDnHUc2+cUWR1Mdo41atAjh/9iZjgQxuvbKfZKXqostT/LZfefA==",
+        "requested": "[0.1.0-preview, )",
+        "resolved": "0.1.0-preview",
+        "contentHash": "9GhJNknGtbXep3LOzBhnCzxqVYni3oOB3NicWmcw89y6DTm5qRTkoUicMECzvYbgPOq4ye0FEmvd4EketSaidg==",
         "dependencies": {
-          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.14"
+          "Microsoft.AspNetCore.SignalR.Client": "10.0.14",
+          "Skakel.Protocol": "0.1.0-preview"
         }
       },
-      "OpenIddict.AspNetCore": {
+      "Skakel.Server": {
         "type": "CentralTransitive",
-        "requested": "[7.7.2, )",
-        "resolved": "7.7.2",
-        "contentHash": "b6cqAcvJfo0OhKVD7YZkfwcRq7PsXCAb39MaHE+/NGHZ9thmXH9VtlLEdxdH5nnH4pdsWppqsLJ3cprfr9gJrA==",
+        "requested": "[0.1.0-preview, )",
+        "resolved": "0.1.0-preview",
+        "contentHash": "uFETKU/qYv1FAR3XdjSpYU0HcFlhYYy1ueJpDZ1IEYa8Xv5l/v7iMWW0pP7Gl+ONEc3anvS6eJjSNHOcKrk/Ng==",
         "dependencies": {
-          "OpenIddict": "7.7.2",
-          "OpenIddict.Client.AspNetCore": "7.7.2",
-          "OpenIddict.Client.DataProtection": "7.7.2",
-          "OpenIddict.Server.AspNetCore": "7.7.2",
-          "OpenIddict.Server.DataProtection": "7.7.2",
-          "OpenIddict.Validation.AspNetCore": "7.7.2",
-          "OpenIddict.Validation.DataProtection": "7.7.2"
+          "OpenIddict.AspNetCore": "7.7.2",
+          "Skakel.Protocol": "0.1.0-preview"
         }
       },
       "System.Security.Cryptography.Pkcs": {

@@ -1,20 +1,13 @@
 using System.Threading.RateLimiting;
-using Koppel.Core.Auth;
-using Koppel.Server;
+using Koppel.Login;
 
 namespace Koppel.Web;
 
 /// <summary>Response headers and rate limits that guard the whole host.</summary>
 internal static class WebProtection
 {
-    /// <summary>Real clients ask for a token about every 30 minutes and on each attach, so this is far above use.</summary>
-    private const int DefaultTokenPerMinute = 60;
-
     /// <summary>Setup, login and password change: each one is a password guess or a hash, so far fewer than a person needs.</summary>
     private const int DefaultAuthPerMinute = 30;
-
-    /// <summary>Pairing polls every 2 seconds, 30 a minute for each client waiting.</summary>
-    private const int DefaultPairPerMinute = 120;
 
     /// <summary>
     /// No framing (clickjacking on one-click Share and Revoke), no content sniffing, no referrer.
@@ -31,14 +24,12 @@ internal static class WebProtection
     });
 
     /// <summary>
-    /// Rate limits by remote IP on the token endpoint, the pairing endpoints and the UI's setup, login
-    /// and password routes, the ones a stranger on the network can reach before it has credentials.
-    /// Over the limit answers 429.
+    /// Rate limits by caller on the UI's setup, login and password routes, which a stranger on the network
+    /// can reach before signing in. Over the limit answers 429. Skakel limits its own token and pairing
+    /// endpoints (<c>RateLimits:TokenPerMinute</c> and <c>RateLimits:PairPerMinute</c>, set in Program.cs).
     /// </summary>
     public static IServiceCollection AddKoppelRateLimits(this IServiceCollection services, IConfiguration configuration)
     {
-        var tokens = configuration.GetValue("RateLimits:TokenPerMinute", DefaultTokenPerMinute);
-        var pairing = configuration.GetValue("RateLimits:PairPerMinute", DefaultPairPerMinute);
         var auth = configuration.GetValue("RateLimits:AuthPerMinute", DefaultAuthPerMinute);
         return services.AddRateLimiter(options =>
         {
@@ -46,29 +37,16 @@ internal static class WebProtection
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
             {
                 var path = context.Request.Path;
-                if (path.StartsWithSegments(KoppelAuthServer.TokenPath))
-                {
-                    return Window($"token:{RemoteAddress(context)}", tokens);
-                }
-
-                if (path.StartsWithSegments("/api/pair"))
-                {
-                    return Window($"pair:{RemoteAddress(context)}", pairing);
-                }
 
                 // Counted per IPv4 address or IPv6 /64, as the sign-in throttle is. State and logout are left out: the UI polls state.
                 return AuthPaths.Any(p => path.StartsWithSegments(p))
-                    ? Window($"auth:{PairingStore.AddressKey(context.Connection.RemoteIpAddress)}", auth)
+                    ? Window($"auth:{UiSignIn.Caller(context)}", auth)
                     : RateLimitPartition.GetNoLimiter("none");
             });
         });
     }
 
     private static readonly string[] AuthPaths = ["/api/auth/setup", "/api/auth/login", "/api/auth/password"];
-
-    /// <summary>The caller's address, with an IPv4 address in its IPv6 form folded back to IPv4.</summary>
-    internal static string RemoteAddress(HttpContext context) =>
-        context.Connection.RemoteIpAddress is { } ip ? (ip.IsIPv4MappedToIPv6 ? ip.MapToIPv4() : ip).ToString() : "unknown";
 
     private static RateLimitPartition<string> Window(string key, int permits) =>
         RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions

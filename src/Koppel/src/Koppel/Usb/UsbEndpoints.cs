@@ -1,5 +1,5 @@
-using System.Net.WebSockets;
 using Koppel.Core.Usb;
+using Skakel.Server;
 
 namespace Koppel.Usb;
 
@@ -35,31 +35,14 @@ internal static class UsbEndpoints
     }
 
     /// <summary>
-    /// Remote clients: the shared devices, and the USB data plane as a WebSocket on the network port. Added
-    /// to the remote group, which checks the token and the client.
+    /// Remote clients: the USB data plane, Koppel's <c>usb</c> stream type at <c>/skakel/v1/streams/usb</c>.
+    /// Skakel checks the token and the client before <see cref="UsbDataPlane.OpenAsync"/> runs.
     /// </summary>
-    public static RouteGroupBuilder MapUsbRemoteEndpoints(this RouteGroupBuilder remote)
+    public static IEndpointRouteBuilder MapUsbStream(this IEndpointRouteBuilder app)
     {
-        remote.MapGet("/devices", (UsbServer usb) => TypedResults.Ok(usb.Current.ForRemote()));
-
-        // Map rather than MapGet: a WebSocket over HTTP/2 arrives as CONNECT.
-        remote.Map("/usb", async Task<IResult> (HttpContext http, UsbDataPlane plane) =>
-        {
-            if (!http.WebSockets.IsWebSocketRequest)
-            {
-                return TypedResults.BadRequest();
-            }
-
-            var socket = await http.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext
-            {
-                KeepAliveInterval = UsbDataPlane.KeepAliveInterval,
-                KeepAliveTimeout = UsbDataPlane.KeepAliveTimeout,
-            });
-            await using var session = WebSocketStream.Create(socket, WebSocketMessageType.Binary, closeTimeout: TimeSpan.FromSeconds(2));
-            await plane.ServeAsync(session, http.User, http.RequestAborted);
-            return TypedResults.Empty;
-        });
-        return remote;
+        var plane = app.ServiceProvider.GetRequiredService<UsbDataPlane>();
+        app.MapSkakelStream(UsbDataPlane.StreamType, plane.OpenAsync);
+        return app;
     }
 
     /// <summary>

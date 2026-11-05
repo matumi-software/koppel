@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
-import { AppShell, Button, LinkBanner, NavGroup, NavItem } from '@koppel/react-ui';
+import { AppShell, NavGroup, NavItem, StatusCard } from '@koppel/react-ui';
 import { getClients } from '@/api/server';
 import { getConnection } from '@/api/client';
 import { getSettings } from '@/api/settings';
@@ -18,10 +18,11 @@ import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
 import { FrameContext, usePageFromHash, type Page } from '@/shell/frame-context';
 import { useActivity } from '@/activity/activity-context';
 import { clientsKey, connectionKey, settingsKey } from '@/query-keys';
-import { useMachineName } from '@/shared/use-machine-name';
+import { useKoppelVersion, useMachineName } from '@/shared/use-machine-name';
 
 export function App() {
   const host = useMachineName();
+  const version = useKoppelVersion();
   const { state: link, retry } = useHub();
   const { signOut } = useAuth();
   const { items } = useActivity();
@@ -94,42 +95,18 @@ export function App() {
   );
 
   const navFoot = (
-    <>
-      <LinkBanner
-        state={link}
-        serverName={host}
-        retry={
-          <Button variant="secondary" onPress={retry}>
-            Retry
-          </Button>
-        }
-      />
-      <Button
-        variant="ghost"
-        onPress={() => {
-          setSignOutFailure(undefined);
-          signOut().catch((error: unknown) => setSignOutFailure(error instanceof Error ? error.message : 'the request failed.'));
-        }}
-      >
-        Sign out
-      </Button>
-      {signOutFailure && (
-        <p className="app-error kp-type-caption" role="status">
-          Not signed out: {signOutFailure}
-        </p>
-      )}
-      {isClient && client.data && (
-        <span className="kp-type-caption" style={{ color: client.data.link === 'connected' ? 'var(--text-tertiary)' : 'var(--pending-text)' }}>
-          {client.data.link === 'connected'
-            ? `Linked to ${remote}.`
-            : client.data.link === 'unconfigured'
-              ? 'No server connection yet.'
-              : client.data.link === 'connecting'
-                ? `Connecting to ${remote ?? 'the server'}…`
-                : `Cannot reach ${remote ?? 'the server'}.`}
-        </span>
-      )}
-    </>
+    <StatusCard
+      state={link}
+      machineName={host}
+      version={version}
+      server={isClient && client.data ? { link: client.data.link, name: remote } : undefined}
+      onRetry={retry}
+      onSignOut={() => {
+        setSignOutFailure(undefined);
+        signOut().catch((error: unknown) => setSignOutFailure(error instanceof Error ? error.message : 'the request failed.'));
+      }}
+      signOutError={signOutFailure}
+    />
   );
 
   const status = (
@@ -159,7 +136,6 @@ export function App() {
       <AppShell
         nav={nav}
         navFoot={navFoot}
-        navFootState={link}
         aside={<div ref={setAsideSlot} style={{ display: 'contents' }} />}
         defaultAsideWidth={storedAsideWidth()}
         onAsideWidthChange={storeAsideWidth}

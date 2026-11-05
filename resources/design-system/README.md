@@ -25,7 +25,7 @@ Every change goes to the server over REST and is only shown as done when the ser
 - Text is `text-primary`, supporting text `text-secondary`, captions and placeholders `text-tertiary`. All three pass 4.5:1 on `bg-page`, `bg-surface` and `bg-inset` in both themes.
 - `accent` (canopy green) is the only accent. Use it for the primary action, the selected tab or segment, links and the mark, and at most one accent button per view. Text on an accent fill is `on-accent`.
 - Device state has its own colors, separate from the accent: `shared` Shared (canopy, Matumi's healthy colour), `attached` Attached (river), `pending` Pending, `fault` Offline. Each has a `-subtle` background and a `-text` foreground for badges.
-- State is never told by color alone. Every state carries its word and its glyph: a circle for Shared, a square for Attached, a stripe for Pending, a cross for Offline and an empty ring for Not shared. The circle and square are the two terminals of the mark.
+- State is never told by color alone. Every state carries its word and its glyph: a circle for Shared, a square for Attached, a stripe for Pending, a cross for Offline and an empty ring for Not shared. The circle is the mark's terminal and the square comes from the USB trident.
 - Dark is the primary theme; light is a full equal. Check both before shipping a screen.
 
 ## Type
@@ -47,8 +47,9 @@ Every change goes to the server over REST and is only shown as done when the ser
 
 ## Iconography
 
-- The mark is a K whose arms end in a circle and a square, the shapes used on the USB trident's ends. Use `assets/Logos/koppel-mark.svg` on light grounds and `koppel-mark-on-dark.svg` on dark grounds. Keep clear space of half the mark's width around it and never draw it below 16px.
+- The mark is a K whose arms end in a circle and an arrow, two of the shapes on the USB trident. Use `assets/Logos/koppel-mark.svg` on light grounds and `koppel-mark-on-dark.svg` on dark grounds. Keep clear space of half the mark's width around it and never draw it below 16px.
 - The wordmark is "Koppel" set in Instrument Sans 600 next to the mark, with the mark's height matched to the cap height plus ascender. There is no outlined wordmark file yet; set it in type.
+- The social preview for GitHub and link cards is `assets/Social/koppel-social-preview.png` (1280x640). Its source is `koppel-social-preview.html` next to it: open it in a browser at 1280x640 and screenshot the card to regenerate it.
 - UI icons: use Lucide (outline, 1.5px stroke, 16px in controls and 20px in headings), drawn in `currentColor`. No emoji anywhere in the product.
 
 ## Layout

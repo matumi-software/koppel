@@ -3,8 +3,8 @@
   <g transform="translate(32 32) scale(0.66) translate(-31.5 -31)" fill="#FBF9F4" stroke="#FBF9F4">
     <rect x="9" y="8" width="11" height="48" rx="2" stroke="none"/>
     <path d="M20 32 L41 15" stroke-width="9" fill="none"/>
-    <path d="M20 32 L40 49" stroke-width="9" fill="none"/>
+    <path d="M20 32 L41.7 47.8" stroke-width="9" fill="none"/>
     <circle cx="46" cy="12" r="8" stroke="none"/>
-    <rect x="38" y="42" width="16" height="16" rx="2" stroke="none"/>
+    <path d="M53 56 L35.6 54.5 L46.2 39.9 Z" stroke-width="3" stroke-linejoin="round"/>
   </g>
 </svg>

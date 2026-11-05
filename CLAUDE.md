@@ -22,7 +22,7 @@ folder per solution, each with its own `src/` and `tests/`.
 - **No new UI primitives in the app.** Add them to `@koppel/react-ui` and to the design system.
 - **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (`Surface.RequiresSignIn`); list it in `Surface.Anonymous` only when it must work signed out. A route for remote clients goes in `Surface.Listed` on the HTTPS listener. See "Ports and what they serve" in `docs/architecture.md`.
 - **Reusable code goes in `Koppel.Core`**, product wiring in `Koppel`. Core never references the product.
-- **MIT licence.** Do not copy code from GPL projects.
+- **GPL-3.0-or-later.** Code from projects under GPL-3.0, GPL-3.0-or-later, GPL-2.0-or-later, LGPL or a permissive licence may come in: keep its copyright and licence notice in the file and list it in `THIRD-PARTY-NOTICES.txt`. Never copy code from GPL-2.0-only projects (the Linux kernel, for one) or from projects without a licence.
 - C#: file-scoped namespaces, internal by default, `[LoggerMessage]` for logging. Tests are named `Method_does_thing`.
 
 ## Commands

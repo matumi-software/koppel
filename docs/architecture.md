@@ -384,8 +384,8 @@ To release:
 - **Platforms:**
   - Linux server: the kernel's `usbip-host`, driven through sysfs. Docker image, privileged.
   - Linux client: the kernel's `vhci-hcd`, driven through sysfs. Attached devices appear on the host kernel, not only in the container.
-  - Windows server: start by driving an installed usbipd-win through its CLI (not bundled, so its GPL licence does not reach us). Our own libusb/UsbDk engine only if that CLI becomes a limit.
+  - Windows server: start by driving an installed usbipd-win through its CLI (not bundled). Our own libusb/UsbDk engine only if that CLI becomes a limit.
   - Windows client: the usbip-win2 driver (BSD-2-Clause) in a native install.
   - macOS client: not possible (no supported virtual host controller).
-- **Licence: MIT.** Never copy code from GPL projects such as usbipd-win; reading them for reference is fine.
+- **Licence: GPL-3.0-or-later** (0.1.0 and earlier: MIT). Code from compatible projects, such as usbipd-win (GPL-3.0), may come in with its notices; GPL-2.0-only code, such as the Linux kernel's, may not. See the rule in `CLAUDE.md`.
 - **Expectations:** dongles, serial adapters, HID, storage and printers work well. Webcams and audio (isochronous) work on a good LAN but not perfectly.

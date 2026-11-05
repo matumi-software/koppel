@@ -98,6 +98,22 @@ $out.Add('Koppel includes the following third-party software.')
 $out.Add('')
 $out.Add('== Koppel ==')
 $out.Add('')
+# LICENSE holds the bare GPL text, so the copyright and the or-later grant come first.
+$out.Add(@'
+Koppel
+Copyright (C) 2026 Matumi Software
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
+License for more details.
+
+Source code: https://github.com/matumi-software/koppel
+'@)
+$out.Add('')
 $out.Add((Get-Content (Join-Path $repo 'LICENSE') -Raw).Trim())
 $out.Add('')
 

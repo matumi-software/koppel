@@ -38,7 +38,7 @@ internal static class WebProtection
             {
                 var path = context.Request.Path;
 
-                // Counted per IPv4 address or IPv6 /64, as the sign-in throttle is. State and logout are left out: the UI polls state.
+                // Counted per address, as the sign-in throttle is. State and logout are left out: the UI polls state.
                 return AuthPaths.Any(p => path.StartsWithSegments(p))
                     ? Window($"auth:{UiSignIn.Caller(context)}", auth)
                     : RateLimitPartition.GetNoLimiter("none");

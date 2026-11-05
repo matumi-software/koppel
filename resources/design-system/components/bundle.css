@@ -27,7 +27,8 @@
   to { background-position: 11.31px 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .kp-stripe, .kp-switch[data-state^="pending"] .kp-switch__track, .kp-link[data-state="live"] .kp-link__dot { animation: none; }
+  .kp-stripe, .kp-switch[data-state^="pending"] .kp-switch__track, .kp-link[data-state="live"] .kp-link__dot,
+  .kp-status-card[data-state="live"] .kp-status-card__state .kp-glyph { animation: none; }
 }
 
 /* ---------- Button ---------- */
@@ -200,6 +201,57 @@
 .kp-link[data-state="down"] .kp-link__detail { color: var(--fault-text); }
 @keyframes kp-breathe { 50% { opacity: 0.35; } }
 
+/* ---------- Status card ---------- */
+/* The foot of the sidebar and the phone menu, as one card: the live link, this machine and the
+   Koppel version it runs, what a client is linked to, and Sign out. The card takes the link's
+   colours when the link is not live. */
+.kp-status-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-inset);
+  border: 1px solid var(--border-default);
+}
+.kp-status-card[data-state="reconnecting"] { background: var(--pending-subtle); border-color: var(--pending); }
+.kp-status-card[data-state="down"] { background: var(--fault-subtle); border-color: var(--fault); }
+.kp-status-card__head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.kp-status-card__state { display: inline-flex; align-items: center; gap: var(--space-2); font: 500 12px/16px var(--font-sans); color: var(--text-secondary); }
+.kp-status-card[data-state="live"] .kp-status-card__state .kp-glyph { animation: kp-breathe 2.4s ease-in-out infinite; }
+.kp-status-card[data-state="reconnecting"] .kp-status-card__state { color: var(--pending-text); }
+.kp-status-card[data-state="down"] .kp-status-card__state { color: var(--fault-text); }
+.kp-status-card__version {
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  font: 400 12px/16px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+/* Tertiary text drops below 4.5:1 on the tinted grounds, so the version steps up to secondary there. */
+.kp-status-card:not([data-state="live"]) .kp-status-card__version { color: var(--text-secondary); border-color: currentColor; }
+.kp-status-card__body { display: grid; gap: 2px; min-width: 0; }
+.kp-status-card__name { font: 600 14px/20px var(--font-sans); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-status-card__line { margin: 0; font: 400 12px/16px var(--font-sans); color: var(--text-secondary); overflow-wrap: anywhere; }
+.kp-status-card__line[data-tone="pending"] { color: var(--pending-text); }
+.kp-status-card__line[data-tone="fault"] { color: var(--fault-text); }
+.kp-status-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-default);
+}
+.kp-status-card[data-state="reconnecting"] .kp-status-card__actions { border-top-color: var(--pending); }
+.kp-status-card[data-state="down"] .kp-status-card__actions { border-top-color: var(--fault); }
+/* Sign out is the last action and sits at the end of the row, after Retry when the link is down. */
+.kp-status-card__actions > :last-child { margin-left: auto; }
+.kp-status-card__actions svg { flex: none; }
+
 /* ---------- Field ---------- */
 .kp-field { display: grid; gap: var(--space-1); min-width: 0; }
 .kp-field__label { font: 500 13px/18px var(--font-sans); color: var(--text-primary); }
@@ -284,9 +336,8 @@
 .kp-shell[data-resizing="true"] { cursor: col-resize; user-select: none; }
 .kp-shell__top { display: none; }
 .kp-brand { display: flex; align-items: center; gap: 8px; padding: 0 10px; font: 600 17px/24px var(--font-sans); white-space: nowrap; }
-.kp-shell__foot { margin-top: auto; display: grid; gap: 10px; padding: 12px; border-radius: var(--radius-lg); background: var(--bg-inset); border: 1px solid var(--border-default); }
-.kp-shell__foot[data-state="reconnecting"] { background: var(--pending-subtle); border-color: var(--pending); }
-.kp-shell__foot[data-state="down"] { background: var(--fault-subtle); border-color: var(--fault); }
+/* Holds the status card at the bottom of the sidebar and the phone menu. The card draws itself. */
+.kp-shell__foot { margin-top: auto; display: grid; min-width: 0; }
 
 /* Phone: one column, nothing wider than the screen, no sideways scrolling. */
 @media (max-width: 760px) {

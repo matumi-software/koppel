@@ -17,6 +17,18 @@ Koppel 0.1.0 and 0.1.1 cannot talk to each other. Update the server and its clie
 - A client that was revoked, or whose secret was rotated, now says it has to pair again.
 - The connection test can also answer `versionMismatch`, naming both ends' protocol versions,
   `unexpectedAnswer` and `tooManyRequests`.
+- Skakel 0.1.0 brings its own hardening: token and pairing requests are limited per address and capped at
+  4 KiB before they are read, a client gets 429 after 10 wrong secrets in a minute, client names lose
+  control and format characters, a client reads at most 64 KB of any answer, and a machine that copies a
+  server's fingerprint no longer hides the real one. Fewer packages ship: OpenIddict's client and Polly
+  are gone.
+- The servers on your network say when other addresses answer with the same fingerprint.
+- The foot of the sidebar is one status card: the link, the machine name, what a client is linked to, Sign
+  out, and the running Koppel version.
+- A probe the server could not answer, such as one from UDP port 0, stopped discovery until a restart. Now
+  only that answer is skipped.
+- The UI's sign-in lockout and rate limit counted an IPv6 /64 as one caller, so one host on a network could
+  lock every IPv6 host on it out of the UI. They now count each whole address.
 - Koppel is now licensed under GPL-3.0-or-later. 0.1.0 and earlier stay under the MIT licence they were
   released with.
 

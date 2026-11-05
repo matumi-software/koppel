@@ -1,7 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.1.1
 
+Koppel 0.1.0 and 0.1.1 cannot talk to each other. Update the server and its clients together.
+
+- Koppel's transport moved to [Skakel](https://github.com/matumi-software/skakel), a library under the MIT
+  licence: finding servers, pairing, tokens, certificate pinning and the certificate handover, the link to
+  the server, and the stream that carries USB traffic. Koppel keeps USB, its config files and the UI.
+- Skakel speaks protocol version 1, a clean break from what 0.1.0 spoke: new paths under `/skakel`, new
+  discovery packets, and a version check before anything else. Its wire format is in Skakel's
+  [`docs/protocol.md`](https://github.com/matumi-software/skakel/blob/main/docs/protocol.md).
+- A server keeps its certificate, its signing key and its clients, and a client keeps its connection, so a
+  pairing made with 0.1.0 works again once both ends run 0.1.1. A client added before Koppel kept secrets
+  in their current form is dropped, says so in the log, and pairs again. Every client pairs again if the
+  server cannot carry its 0.1.0 secrets over, which the log says too.
+- A client that was revoked, or whose secret was rotated, now says it has to pair again.
+- The connection test can also answer `versionMismatch`, naming both ends' protocol versions,
+  `unexpectedAnswer` and `tooManyRequests`.
 - Koppel is now licensed under GPL-3.0-or-later. 0.1.0 and earlier stay under the MIT licence they were
   released with.
 

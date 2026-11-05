@@ -23,7 +23,7 @@ From `src\Koppel` in the repo:
 docker compose build
 ```
 
-That builds `matumisoftware/koppel:0.1.0` (the tag in `KOPPEL_TAG`), which both Windows compose files use. The compose files name that tag, so a build made here is used as it is. To use the published image instead, skip this step and Docker pulls it.
+That builds `matumisoftware/koppel:0.1.1` (the tag in `KOPPEL_TAG`), which both Windows compose files use. The compose files name that tag, so a build made here is used as it is. To use the published image instead, skip this step and Docker pulls it.
 
 ## Windows server
 

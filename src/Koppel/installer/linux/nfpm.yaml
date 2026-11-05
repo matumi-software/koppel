@@ -9,7 +9,7 @@ priority: optional
 maintainer: Matumi Software <https://github.com/matumi-software/koppel>
 vendor: Matumi Software
 homepage: https://github.com/matumi-software/koppel
-license: MIT
+license: GPL-3.0-or-later
 description: |-
   Share USB devices over the network.
   Koppel shares USB devices from a server to clients over USB/IP, carried over

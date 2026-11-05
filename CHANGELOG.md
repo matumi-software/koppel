@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Koppel is now licensed under GPL-3.0-or-later. 0.1.0 and earlier stay under the MIT licence they were
+  released with.
+
 ## 0.1.0 (2026-11-03)
 
 The first release. Koppel shares USB devices over the network: a server shares the devices plugged into it,

@@ -150,5 +150,11 @@ image yourself, see "Building and releasing" there; to run your own build on ano
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The Windows installer bundles usbip-win2 (BSD-2-Clause); its notices
-ship as `THIRD-PARTY-NOTICES.txt`, which the setup window's licence link opens.
+Copyright (C) 2026 Matumi Software. Koppel is free software under the GNU General Public License,
+version 3 or (at your option) any later version (GPL-3.0-or-later), see [LICENSE](LICENSE).
+Releases up to and including 0.1.0 were published under the MIT licence and stay under it.
+
+The Windows installer bundles usbip-win2 (BSD-2-Clause); its notices ship as `THIRD-PARTY-NOTICES.txt`,
+which the setup window's licence link opens. The setup window's theme files
+(`installer/Koppel.Setup/KoppelTheme.*`) are adapted from WiX and stay under the Microsoft Reciprocal
+License; they only style the installer and are not part of Koppel.

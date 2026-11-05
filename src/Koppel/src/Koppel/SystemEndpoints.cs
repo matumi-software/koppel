@@ -1,6 +1,5 @@
 using System.Reflection;
 using Koppel.Core.Usb;
-using Koppel.Server;
 using Koppel.Settings;
 using Koppel.Usb;
 
@@ -17,6 +16,9 @@ internal sealed record SystemInfo(string Name, string Version, DateTimeOffset St
 
 internal static class SystemEndpoints
 {
+    /// <summary>Koppel's app id on Skakel: discovery answers and the info endpoint carry it, and a client lists only servers with it.</summary>
+    public const string AppId = "koppel";
+
     /// <summary>Koppel's version, such as 0.1.0, without the commit hash.</summary>
     public static string Version { get; } =
         typeof(SystemEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev";
@@ -37,14 +39,14 @@ internal static class SystemEndpoints
             .Concat(client.RememberedProblem is { } rememberedProblem
                 ? [new SystemCheck("attached", false, "attached.json was not used.", rememberedProblem)]
                 : []).ToArray()));
-        app.MapGet("/api/system/info", (HostInfo info, SettingsStore settings, ServerSecretsStore secrets) => TypedResults.Ok(new SystemInfo(
+        app.MapGet("/api/system/info", (HostInfo info, SettingsStore settings, Skakel.Server.SkakelKeys keys) => TypedResults.Ok(new SystemInfo(
             Environment.MachineName,
             Version,
             info.StartedAt,
             settings.Current.Role,
             info.UiPort,
             info.NetworkPort,
-            secrets.Fingerprint,
+            keys.Fingerprint,
             OsLabel())));
         return app;
     }

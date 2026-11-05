@@ -20,7 +20,7 @@ export interface ConnectionUpdate {
 
 export interface ConnectionTestResult {
   ok: boolean;
-  /** One of a fixed set, such as `unreachable` or `certificateMismatch`. */
+  /** One of a fixed set, such as `unreachable`, `certificateMismatch` or `versionMismatch`. */
   outcome?: string;
   message: string;
 }

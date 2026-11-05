@@ -32,10 +32,9 @@ internal sealed record Surface(string Prefix, Listener Listener, RoleScope Role)
     /// </summary>
     public static IReadOnlyList<Surface> Listed { get; } =
     [
-        new("/connect/token", Listener.Network, RoleScope.Server),
+        // Skakel: info, pairing, tokens, hello, the remote hub and the USB stream.
+        new("/skakel", Listener.Network, RoleScope.Server),
         new("/api/remote", Listener.Network, RoleScope.Server),
-        new("/api/hubs/remote", Listener.Network, RoleScope.Server),
-        new("/api/pair", Listener.Network, RoleScope.Server),
         new("/api/server", Listener.Ui, RoleScope.Server),
         new("/api/client", Listener.Ui, RoleScope.Client),
     ];

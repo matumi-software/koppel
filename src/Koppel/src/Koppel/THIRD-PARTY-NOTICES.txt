@@ -737,6 +737,9 @@ Polly.Core 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://github.co
 Polly.Extensions 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://github.com/App-vNext/Polly
 Polly.Extensions.Http 3.0.0: BSD-3-Clause; Copyright (c) 2019, App vNext; https://github.com/App-vNext/Polly.Extensions.Http
 Polly.RateLimiting 8.4.2: BSD-3-Clause; Copyright (c) 2024, App vNext; https://github.com/App-vNext/Polly
+Skakel.Client 0.1.0-preview: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
+Skakel.Protocol 0.1.0-preview: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
+Skakel.Server 0.1.0-preview: MIT; Copyright (c) 2026 Matumi Software; https://github.com/matumi-software/skakel
 System.ServiceProcess.ServiceController 10.0.14: MIT; © Microsoft Corporation. All rights reserved.; https://dot.net/
 
 == npm packages ==

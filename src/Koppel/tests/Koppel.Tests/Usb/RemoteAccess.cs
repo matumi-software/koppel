@@ -4,27 +4,27 @@ using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text.Json;
-using Koppel.Core.Security;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Skakel.Server;
 
 namespace Koppel.Tests.Usb;
 
 /// <summary>
-/// Plays a remote client against a server host, below the level of Koppel's own client: it takes a
-/// token, opens the USB data plane and the remote hub, pinned to the server's certificate, so a test can
-/// watch what the server does to each connection.
+/// Plays a remote client against a server host, below the level of Koppel's own client and Skakel's: it
+/// takes a token, opens the usb stream and the remote hub, pinned to the server's certificate, so a test
+/// can watch what the server does to each connection.
 /// </summary>
 internal static class RemoteAccess
 {
     public static string Fingerprint(KoppelFactory server) =>
-        server.Services.GetRequiredService<Koppel.Server.ServerSecretsStore>().Fingerprint;
+        server.Services.GetRequiredService<SkakelKeys>().Fingerprint;
 
     public static bool Pinned(KoppelFactory server, System.Security.Cryptography.X509Certificates.X509Certificate? certificate) =>
-        ServerCertificate.Matches(certificate as System.Security.Cryptography.X509Certificates.X509Certificate2, Fingerprint(server));
+        Pinning.Matches(certificate, Fingerprint(server));
 
     public static HttpClient Https(KoppelFactory server) =>
-        new(ServerCertificate.CreatePinnedHandler(Fingerprint(server))) { BaseAddress = new Uri($"https://localhost:{server.HttpsPort}") };
+        new(Pinning.Handler(Fingerprint(server))) { BaseAddress = new Uri($"https://localhost:{server.HttpsPort}") };
 
     public static async Task<(string ClientId, string Secret)> CreateClientAsync(KoppelFactory server, string name, CancellationToken ct)
     {
@@ -38,7 +38,7 @@ internal static class RemoteAccess
     public static async Task<HttpResponseMessage> RequestTokenAsync(KoppelFactory server, string clientId, string secret, CancellationToken ct)
     {
         using var https = Https(server);
-        return await https.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        return await https.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["grant_type"] = "client_credentials",
             ["client_id"] = clientId,
@@ -56,14 +56,14 @@ internal static class RemoteAccess
     public static async Task<HttpStatusCode> HelloAsync(KoppelFactory server, string token, CancellationToken ct)
     {
         using var https = Https(server);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/remote/hello");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/skakel/v1/hello");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await https.SendAsync(request, ct);
         return response.StatusCode;
     }
 
     /// <summary>
-    /// Opens the USB data plane's WebSocket with this token. Answers <c>OK</c> and the session, or
+    /// Opens the usb stream's WebSocket with this token. Answers <c>OK</c> and the session, or
     /// <c>DENIED</c> with the HTTP status and an empty stream.
     /// </summary>
     public static async Task<(Stream Session, string Answer)> OpenUsbAsync(KoppelFactory server, string token, CancellationToken ct)
@@ -74,7 +74,7 @@ internal static class RemoteAccess
         socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) => Pinned(server, certificate);
         try
         {
-            await socket.ConnectAsync(new Uri($"wss://localhost:{server.HttpsPort}/api/remote/usb"), ct);
+            await socket.ConnectAsync(new Uri($"wss://localhost:{server.HttpsPort}/skakel/v1/streams/usb"), ct);
             return (WebSocketStream.Create(socket, WebSocketMessageType.Binary, ownsWebSocket: true), "OK");
         }
         catch (WebSocketException)
@@ -98,10 +98,10 @@ internal static class RemoteAccess
     public static async Task<(HubConnection Hub, Task Closed, Task<JsonElement> First)> ConnectHubAsync(KoppelFactory server, string token, CancellationToken ct)
     {
         var hub = new HubConnectionBuilder()
-            .WithUrl($"https://localhost:{server.HttpsPort}/api/hubs/remote", options =>
+            .WithUrl($"https://localhost:{server.HttpsPort}/skakel/v1/hub", options =>
             {
                 options.AccessTokenProvider = () => Task.FromResult<string?>(token);
-                options.HttpMessageHandlerFactory = _ => ServerCertificate.CreatePinnedHandler(Fingerprint(server));
+                options.HttpMessageHandlerFactory = _ => Pinning.Handler(Fingerprint(server));
                 options.WebSocketConfiguration = ws => ws.RemoteCertificateValidationCallback = (_, certificate, _, _) => Pinned(server, certificate);
             })
             .Build();

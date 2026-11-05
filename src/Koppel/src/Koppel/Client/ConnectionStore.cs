@@ -1,6 +1,6 @@
-using System.Security.Cryptography.X509Certificates;
 using Koppel.Core.Configuration;
 using Koppel.Core.Security;
+using Skakel.Client;
 
 namespace Koppel.Client;
 
@@ -17,8 +17,15 @@ internal sealed record ClientConnection(string? ServerUrl, string? ServerFingerp
     public bool IsComplete =>
         ServerUrl is not null && ServerFingerprint is not null && ClientId is not null && ClientSecret is not null;
 
-    /// <summary>The server may present this certificate: it is the pinned one, or the next one the server announced.</summary>
-    public bool Trusts(X509Certificate2? certificate) => ServerCertificate.MatchesAny(certificate, ServerFingerprint, NextServerFingerprint);
+    // Methods, not properties: a record prints its properties, and the config file would save them.
+
+    /// <summary>The server's address, for Skakel. Only for a complete connection.</summary>
+    public Uri GetAddress() => new(ServerUrl!);
+
+    /// <summary>The certificates the server may present: the pinned one, and the next one it announced.</summary>
+    public SkakelPins GetPins() => new(ServerFingerprint!, NextServerFingerprint);
+
+    public SkakelCredentials GetCredentials() => new(ClientId!, ClientSecret!);
 
     /// <summary>
     /// This is <paramref name="previous"/>'s server, at most moved to another address or on to its next
@@ -31,28 +38,6 @@ internal sealed record ClientConnection(string? ServerUrl, string? ServerFingerp
         && ClientSecret == previous.ClientSecret
         && ServerFingerprint is not null
         && (ConnectionUpdate.SameFingerprint(ServerFingerprint, previous.ServerFingerprint) || ConnectionUpdate.SameFingerprint(ServerFingerprint, previous.NextServerFingerprint));
-
-    /// <summary>
-    /// What the server said about its certificates, over a link pinned to one this connection trusts. When it
-    /// now presents the next one, that becomes the pinned one; either way the next one is what it says, or
-    /// none. A statement about a certificate this connection does not know changes nothing.
-    /// </summary>
-    public ClientConnection WithServerCertificates(string fingerprint, string? next)
-    {
-        var current = ConnectionUpdate.SameFingerprint(fingerprint, ServerFingerprint) ? ServerFingerprint
-            : ConnectionUpdate.SameFingerprint(fingerprint, NextServerFingerprint) ? NextServerFingerprint
-            : null;
-        if (current is null)
-        {
-            return this;
-        }
-
-        return this with
-        {
-            ServerFingerprint = current,
-            NextServerFingerprint = next is null || ConnectionUpdate.SameFingerprint(next, current) ? null : ConnectionUpdate.Normalize(next),
-        };
-    }
 }
 
 /// <summary>What the UI may see about the connection: never the secret, only whether one is stored.</summary>
@@ -88,35 +73,41 @@ internal sealed class ConnectionStore : IHostedService, IDisposable
         _file.UpdateAsync(change, cancellationToken);
 
     /// <summary>
-    /// Stores what the server said about its certificates (see <see cref="ClientConnection.WithServerCertificates"/>),
-    /// as long as the saved connection is still the one <paramref name="link"/> was made for. Writes nothing
-    /// when that changes nothing, so the same message on every reconnect costs no write and no push.
+    /// Stores the certificates the link to <paramref name="link"/>'s server trusts now, after the server told
+    /// it of a next one, switched to it or cancelled it, as long as the saved connection is still that server.
+    /// Writes nothing when that changes nothing. Throws when the saved connection is another server's, so the
+    /// link does not tell the server it has the next certificate.
     /// </summary>
-    public async Task<ClientConnection> LearnCertificatesAsync(ClientConnection link, string fingerprint, string? next, CancellationToken cancellationToken)
+    public async Task SavePinsAsync(ClientConnection link, SkakelPins pins, CancellationToken cancellationToken)
     {
+        ClientConnection With(ClientConnection c) => c with { ServerFingerprint = pins.Fingerprint, NextServerFingerprint = pins.NextFingerprint };
         var current = _file.Current;
-        if (!current.Continues(link) || current.WithServerCertificates(fingerprint, next) == current)
+        if (!current.Continues(link))
         {
-            return current;
+            throw new InvalidOperationException("The saved connection is for another server now.");
         }
 
-        return await _file.UpdateAsync(c => c.Continues(link) ? c.WithServerCertificates(fingerprint, next) : c, cancellationToken);
+        if (With(current) != current)
+        {
+            await _file.UpdateAsync(c => c.Continues(link) ? With(c) : c, cancellationToken);
+        }
     }
 
     /// <summary>
     /// Points the saved connection at <paramref name="serverUrl"/>, where its server moved to, as long as the
-    /// saved connection is still the one <paramref name="link"/> was made for: whatever the person saved
-    /// meanwhile wins. Only the address changes. True when it moved.
+    /// saved connection is still <paramref name="link"/>'s server at <paramref name="link"/>'s address:
+    /// whatever the person saved meanwhile wins. Only the address changes. True when it moved.
     /// </summary>
     public async Task<bool> MoveServerAsync(ClientConnection link, string serverUrl, CancellationToken cancellationToken)
     {
-        if (_file.Current != link)
+        bool Same(ClientConnection c) => c.ServerUrl == link.ServerUrl && c.Continues(link);
+        if (!Same(_file.Current))
         {
             return false;
         }
 
-        var moved = link with { ServerUrl = serverUrl };
-        return await _file.UpdateAsync(c => c == link ? moved : c, cancellationToken) == moved;
+        var written = await _file.UpdateAsync(c => Same(c) ? c with { ServerUrl = serverUrl } : c, cancellationToken);
+        return written.ServerUrl == serverUrl && written.Continues(link);
     }
 
     public void Dispose() => _file.Dispose();

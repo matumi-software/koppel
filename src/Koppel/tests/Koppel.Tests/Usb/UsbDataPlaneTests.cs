@@ -33,7 +33,7 @@ public sealed class UsbDataPlaneTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         var token = await TokenAsync(ct);
         using var https = RemoteAccess.Https(_server);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/remote/usb");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/skakel/v1/streams/usb");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
         using var response = await https.SendAsync(request, ct);
@@ -47,7 +47,7 @@ public sealed class UsbDataPlaneTests : IDisposable
         var ct = TestContext.Current.CancellationToken;
         using var ui = _server.CreateUiClient();
 
-        using var response = await ui.GetAsync("/api/remote/usb", ct);
+        using var response = await ui.GetAsync("/skakel/v1/streams/usb", ct);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }

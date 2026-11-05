@@ -82,7 +82,7 @@ public sealed class UiAccessTests
         (await ui.GetAsync("/", ct)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ui.PostAsJsonAsync("/api/auth/setup", new { password = KoppelFactory.Password }, ct)).StatusCode.Should().Be(HttpStatusCode.Forbidden, "first-run setup is no way around it");
         host.Services.GetRequiredService<Koppel.Login.UiAuthStore>().HasPassword.Should().BeFalse();
-        (await https.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await https.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     private static IReadOnlyList<(IPAddress Network, int PrefixLength)> NoNetworks() => [];

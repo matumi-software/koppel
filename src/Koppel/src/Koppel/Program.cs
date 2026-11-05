@@ -1,8 +1,6 @@
 using Koppel;
 using Koppel.Client;
 using Koppel.Core.Activity;
-using Koppel.Core.Auth;
-using Koppel.Core.Discovery;
 using Koppel.Core.Usb;
 using Koppel.Core.Usb.Linux;
 using Koppel.Core.Usb.Windows;
@@ -15,6 +13,8 @@ using Koppel.Settings;
 using Koppel.Usb;
 using Koppel.Web;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Skakel.Client;
+using Skakel.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,7 +24,7 @@ builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
 builder.Host.UseSystemd();
 
 // One HTTPS port, 5240, with the server's own self-signed certificate, serves the UI and everything other
-// Koppel machines do, USB traffic included; clients pin the certificate's fingerprint. Ports:Network moves
+// Koppel machines do through Skakel, USB traffic included; clients pin the certificate's fingerprint. Ports:Network moves
 // the second onto a port of its own, and discovery answers on UDP at the network port's number unless
 // Discovery:Port says otherwise. Ui:AllowFrom says who may use the UI (UiAccess), and Ui:SetupWindowMinutes how
 // long a machine without a password takes its first one (UiSetupWindow).
@@ -43,9 +43,10 @@ if (HealthProbe.Requested(args))
 
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
-    // Plain HTTP on the port gets a redirect to HTTPS rather than nothing (PlainHttpRedirect).
+    // Plain HTTP on the port gets a redirect to HTTPS rather than nothing (PlainHttpRedirect). The certificate is
+    // Skakel's, the current one at each handshake, so a switch takes effect at once.
     void Https(ListenOptions listen) => listen.UsePlainHttpRedirect().UseHttps(https =>
-        https.ServerCertificateSelector = (_, _) => kestrel.ApplicationServices.GetRequiredService<ServerSecretsStore>().Certificate);
+        https.UseSkakelCertificate(kestrel.ApplicationServices));
 
     void Listen(int port)
     {
@@ -91,8 +92,23 @@ builder.Services.AddSingleton<IActivityReader>(sp => sp.GetRequiredService<InMem
 builder.Services.AddSingleton(sp => SecretBoxFactory.Create(paths, sp.GetRequiredService<ILoggerFactory>().CreateLogger("Koppel.Security")));
 SecretBoxFactory.AddAppDataProtection(builder.Services, paths);
 
-builder.Services.AddSingleton<SettingsStore>();
+// Skakel: pairing, tokens, the certificate and its handover, the remote hub and the streams. Its state is kept
+// in the encrypted secrets.json. Added before Koppel's own services, which read the certificate when they start.
+// Koppel answers discovery itself (ServerAnnouncerService), because it answers only while it is a server.
 builder.Services.AddSingleton<ServerSecretsStore>();
+builder.Services.AddSingleton<ISkakelStore>(sp => sp.GetRequiredService<ServerSecretsStore>());
+builder.Services.AddSkakelServer(options =>
+{
+    options.AppId = SystemEndpoints.AppId;
+    options.AppVersion = SystemEndpoints.Version;
+    options.Port = networkPort;
+    options.DiscoveryEnabled = false;
+    options.KeepClientSecrets = true;
+    options.TokenRequestsPerMinute = builder.Configuration.GetValue("RateLimits:TokenPerMinute", 60);
+    options.PairRequestsPerMinute = builder.Configuration.GetValue("RateLimits:PairPerMinute", 120);
+});
+
+builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<ConnectionStore>();
 builder.Services.AddSingleton<UiAuthStore>();
 builder.Services.AddSingleton<UiLoginThrottle>();
@@ -101,11 +117,8 @@ builder.Services.AddSingleton<UiRevokedSessions>();
 builder.Services.AddSingleton<UiSignIn>();
 builder.Services.AddSingleton<UiConnections>();
 builder.Services.AddUiSession();
-builder.Services.AddSingleton<IClientCredentialValidator>(sp => sp.GetRequiredService<ServerSecretsStore>());
-builder.Services.AddSingleton<ISigningKeySource>(sp => sp.GetRequiredService<ServerSecretsStore>());
 builder.Services.AddSingleton<RemoteServer>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SettingsStore>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerSecretsStore>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ConnectionStore>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UiAuthStore>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UiConnections>());
@@ -118,17 +131,18 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<LiveSessions>());
 builder.Services.AddSingleton<UsbDataPlane>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<UsbDataPlane>());
 builder.Services.AddHostedService<UsbIpGateway>();
-builder.Services.AddSingleton<PairingStore>();
+builder.Services.AddHostedService<PairingActivity>();
 builder.Services.AddSingleton<PairingClient>();
 builder.Services.AddSingleton<ServerAnnouncer>();
-// Clients look for servers on their own discovery port, 5240 unless changed.
-builder.Services.AddSingleton(sp => new ServerBrowser(sp.GetRequiredService<TimeProvider>(), sp.GetRequiredService<ILogger<ServerBrowser>>(), discoveryPort));
+// Clients look for Koppel servers on their own discovery port, 5240 unless changed. The links follow a server that moved through the same browser.
+builder.Services.AddSingleton(sp => new SkakelBrowser(discoveryPort, [SystemEndpoints.AppId], new SkakelClientOptions
+{
+    LoggerFactory = sp.GetRequiredService<ILoggerFactory>(),
+    TimeProvider = sp.GetRequiredService<TimeProvider>(),
+}));
 builder.Services.AddSingleton<ServerFinder>();
-builder.Services.AddSingleton<IDiscoveredServers>(sp => sp.GetRequiredService<ServerFinder>());
-builder.Services.AddSingleton<ServerMoves>();
 builder.Services.AddHostedService<ServerAnnouncerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerFinder>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerMoves>());
 builder.Services.AddHostedService<UiHubRelay>();
 
 // USB goes through the Linux kernel's USB/IP drivers. Other platforms report why they cannot share yet.
@@ -153,8 +167,6 @@ var bundledUsbip = Path.Combine(AppContext.BaseDirectory, "usbip", "usbip.exe");
 var usbipExe = builder.Configuration["Usb:UsbipPath"]
     ?? (File.Exists(bundledUsbip) ? bundledUsbip : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "USBip", "usbip.exe"));
 builder.Services.AddSingleton<IUsbIpDriver>(OperatingSystem.IsWindows() ? new UsbipWin2Driver(usbipExe) : unsupported);
-
-builder.Services.AddKoppelAuthServer();
 
 var app = builder.Build();
 
@@ -183,15 +195,19 @@ app.MapUiAuthEndpoints();
 app.MapSettingsEndpoints();
 app.MapServerEndpoints(networkPort);
 app.MapServerPairingEndpoints();
-app.MapPairingEndpoints();
-app.MapRemoteEndpoints().MapUsbRemoteEndpoints();
+
+// For other Koppel machines, on the network port: Skakel's info, pairing, tokens and hello, the remote hub,
+// the usb stream type, and Koppel's own remote endpoints behind a client's token.
+app.MapSkakel();
+app.MapSkakelHub<RemoteHub>(RemoteHub.Path);
+app.MapUsbStream();
+app.MapRemoteEndpoints();
 app.MapClientEndpoints();
 app.MapUsbServerEndpoints();
 app.MapUsbClientEndpoints();
 app.MapSystemEndpoints();
 app.MapActivityEndpoints();
 app.MapHub<UiHub>("/api/hubs/ui", options => options.CloseOnAuthenticationExpiration = true);
-app.MapHub<RemoteHub>("/api/hubs/remote", options => options.CloseOnAuthenticationExpiration = true);
 
 // For a container's health check: anonymous, on the UI port, whatever the role.
 app.MapGet("/healthz", () => TypedResults.Text("ok"));

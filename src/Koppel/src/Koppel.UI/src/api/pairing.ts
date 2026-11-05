@@ -1,6 +1,6 @@
 import { getJson, sendChange } from './http';
 
-/** Mirrors Koppel.Core.Discovery.DiscoveredServer: a server found on the local network. */
+/** Mirrors Koppel.Discovery.DiscoveredServer: a server found on the local network. */
 export interface DiscoveredServer {
   name: string;
   address: string;
@@ -24,7 +24,7 @@ export interface PairingStatus {
   serverFingerprint: string | null;
 }
 
-/** Mirrors Koppel.Server.PairingRequestView. The code is not in it: a person types it. `denied` shows for a moment after three wrong codes. */
+/** Mirrors Skakel.Server.SkakelPairingRequest. The code is not in it: a person types it. `denied` shows for a moment after three wrong codes. */
 export interface PairingRequest {
   id: string;
   clientName: string;
@@ -47,7 +47,7 @@ export const confirmPairing = () => sendChange('/api/client/pairing/confirm', 'P
 
 export const cancelPairing = () => sendChange('/api/client/pairing', 'DELETE');
 
-/** Mirrors Koppel.Server.PairingOverview. `budgetExhausted`: the server takes no new pairing requests until its window moves on. */
+/** Mirrors Skakel.Server.SkakelPairingOverview. `budgetExhausted`: the server takes no new pairing requests until its window moves on. */
 export interface PairingOverview {
   requests: PairingRequest[];
   budgetExhausted: boolean;

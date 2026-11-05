@@ -108,9 +108,9 @@ public sealed class UiLoginTests : IDisposable
         https.DefaultRequestHeaders.Add("Cookie", cookie);
         var form = new Dictionary<string, string> { ["grant_type"] = "client_credentials", ["client_id"] = "x", ["client_secret"] = "y" };
 
-        (await https.PostAsync("/connect/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        (await https.GetAsync("/api/remote/hello", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a UI session is not a bearer token");
-        (await https.PostAsJsonAsync("/api/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await https.PostAsync("/skakel/v1/token", new FormUrlEncodedContent(form), ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await https.GetAsync("/skakel/v1/hello", ct)).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a UI session is not a bearer token");
+        (await https.PostAsJsonAsync("/skakel/v1/pair", new { clientName = "x" }, ct)).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await https.GetAsync("/api/auth/state", ct)).StatusCode.Should().Be(HttpStatusCode.NotFound, "sign-in is the UI port's");
     }
 

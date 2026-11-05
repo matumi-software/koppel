@@ -12,13 +12,11 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.14" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.14" />
 
-    <!-- Discovery: mDNS. See Koppel.Core.Discovery.csproj for why two packages. -->
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
+    <!-- Transport: discovery, pairing, tokens, certificate pinning and handover, the hub and the streams (MIT). -->
+    <PackageVersion Include="Skakel.Client" Version="0.1.0-preview" />
+    <PackageVersion Include="Skakel.Server" Version="0.1.0-preview" />
 
-    <!-- Auth: OAuth server and token validation -->
-    <PackageVersion Include="OpenIddict.AspNetCore" Version="7.7.2" />
-
-    <!-- Security pins: OpenIddict pulls 10.0.11 of these, which have published advisories. -->
+    <!-- Security pins: OpenIddict, which Skakel.Server uses, pulls 10.0.11 of these, which have published advisories. -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.14" />
 

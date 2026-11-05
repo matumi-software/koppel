@@ -7,7 +7,7 @@ import { accepted, json, mockFetch, renderApp } from './harness';
 
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
 const next = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
-const keys: ServerKeysView = { fingerprint, nextFingerprint: null, nextPreparedAt: null, signingKeyId: 'koppel-1', signingKeySince: null, retiredKeysUntil: null };
+const keys: ServerKeysView = { fingerprint, nextFingerprint: null, nextPreparedAt: null, signingKeyId: 'koppel-1', signingKeySince: '2026-11-03T08:00:00Z', retiredKeysUntil: null };
 const client = (name: string, hasNextCertificate: boolean): ClientView => ({
   id: `client-${name}`,
   name,

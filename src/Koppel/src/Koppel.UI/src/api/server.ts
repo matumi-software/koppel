@@ -1,6 +1,6 @@
 import { getJson, rejection, sendChange, uiFetch } from './http';
 
-/** Mirrors Koppel.Server.ClientView. */
+/** Mirrors Skakel.Server.SkakelClientView, as the server pushes it. */
 export interface ClientView {
   id: string;
   name: string;
@@ -13,15 +13,15 @@ export interface ClientView {
   hasNextCertificate: boolean;
 }
 
-/** Mirrors Koppel.Server.ServerKeysView: the certificate and the token signing key. */
+/** Mirrors Skakel.Server.SkakelKeysView: the certificate and the token signing key. */
 export interface ServerKeysView {
   fingerprint: string;
   /** The prepared next certificate, or null when none is prepared. */
   nextFingerprint: string | null;
   nextPreparedAt: string | null;
   signingKeyId: string;
-  /** When a rotation made the signing key; null for the one made at first start. */
-  signingKeySince: string | null;
+  /** When the signing key was made. */
+  signingKeySince: string;
   /** While replaced keys are still accepted, when the last of them is dropped. */
   retiredKeysUntil: string | null;
 }

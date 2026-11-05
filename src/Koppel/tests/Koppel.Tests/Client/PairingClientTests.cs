@@ -189,7 +189,7 @@ public sealed class PairingClientTests : IAsyncLifetime
     [Theory]
     [InlineData(SkakelFailureKind.PairingDenied, "denied", "server-a.test refused the request.")]
     [InlineData(SkakelFailureKind.PairingExpired, "expired", "Nobody typed the code on the server in time. Start again.")]
-    [InlineData(SkakelFailureKind.TooManyRequests, "failed", "server-a.test has too many pairing requests open. Try again in a few minutes.")]
+    [InlineData(SkakelFailureKind.TooManyRequests, "failed", "server-a.test is taking no more pairing requests for now. Try again in a few minutes.")]
     [InlineData(SkakelFailureKind.CertificateMismatch, "failed", "Could not pair with server-a.test: The server's certificate does not match the one this app trusts. If the server has a new certificate, pair with it again.")]
     public async Task Skakels_failures_end_the_run_in_fixed_words(SkakelFailureKind kind, string state, string message)
     {

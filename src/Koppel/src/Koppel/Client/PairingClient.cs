@@ -178,7 +178,7 @@ internal sealed partial class PairingClient : IDisposable
     {
         SkakelFailureKind.PairingDenied => status with { State = "denied", Code = null, Message = $"{run.ServerName} refused the request." },
         SkakelFailureKind.PairingExpired => status with { State = "expired", Code = null, Message = ex.Failure.Message },
-        SkakelFailureKind.TooManyRequests => status with { State = "failed", Code = null, Message = $"{run.ServerName} has too many pairing requests open. Try again in a few minutes." },
+        SkakelFailureKind.TooManyRequests => status with { State = "failed", Code = null, Message = $"{run.ServerName} is taking no more pairing requests for now. Try again in a few minutes." },
 
         // A machine that is a client only answers 404 to everything a pairing client asks.
         SkakelFailureKind.UnexpectedAnswer when ex.InnerException is HttpRequestException { StatusCode: HttpStatusCode.NotFound } =>

@@ -11,14 +11,19 @@ namespace Koppel.Discovery;
 /// <summary>A server found on the local network, as the UI shows it.</summary>
 /// <param name="Address">Where its answer came from, which is where to reach it.</param>
 /// <param name="Version">Koppel's version on that server.</param>
-public sealed record DiscoveredServer(string Name, string Address, int HttpsPort, string Fingerprint, string? Version)
+/// <param name="OtherAddresses">
+/// Other addresses that answered with the same fingerprint, with the port when it differs. A machine on
+/// more than one network does that, and so does one that copies another server's fingerprint.
+/// </param>
+public sealed record DiscoveredServer(string Name, string Address, int HttpsPort, string Fingerprint, string? Version, IReadOnlyList<string> OtherAddresses)
 {
     public string Url => IPAddress.TryParse(Address, out var ip) && ip.AddressFamily == AddressFamily.InterNetworkV6
         ? $"https://[{Address}]:{HttpsPort}"
         : $"https://{Address}:{HttpsPort}";
 
     public static DiscoveredServer From(SkakelDiscoveredServer server) =>
-        new(server.Name, server.Address.ToString(), server.Port, server.Fingerprint, server.App.Version);
+        new(server.Name, server.Address.ToString(), server.Port, server.Fingerprint, server.App.Version,
+            [.. server.OtherEndpoints.Select(e => e.Port == server.Port ? e.Address.ToString() : e.ToString())]);
 }
 
 /// <summary>

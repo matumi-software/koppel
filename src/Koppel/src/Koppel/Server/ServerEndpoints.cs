@@ -1,5 +1,6 @@
 using Koppel.Core.Activity;
 using Koppel.Usb;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Skakel.Server;
 
 namespace Koppel.Server;
@@ -34,13 +35,20 @@ internal static class ServerEndpoints
             var name = request.Name?.Trim();
             if (string.IsNullOrEmpty(name) || name.Length > 80)
             {
-                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    ["name"] = ["Give the client a name of up to 80 characters, such as the machine it runs on."],
-                });
+                return NameProblem("Give the client a name of up to 80 characters, such as the machine it runs on.");
             }
 
-            var client = await clients.RegisterAsync(name, cancellationToken);
+            SkakelNewClient client;
+            try
+            {
+                client = await clients.RegisterAsync(name, cancellationToken);
+            }
+            catch (ArgumentException)
+            {
+                // Skakel takes control and format characters out of the name, and refuses one with nothing left.
+                return NameProblem("Nothing is left of the name once invisible characters are taken out. Type a name such as the machine it runs on.");
+            }
+
             await activity.RecordAsync(new EntityRef(client.ClientId, client.Name, "client"), ActivityReason.ClientAdded, ActivityOutcome.Succeeded, $"Client {client.Name} was added");
             return TypedResults.Created($"/api/server/clients/{client.ClientId}", new CreatedClient(client.ClientId, client.ClientSecret, client.Name));
         });
@@ -87,6 +95,9 @@ internal static class ServerEndpoints
         MapKeyEndpoints(group);
         return app;
     }
+
+    private static ValidationProblem NameProblem(string message) =>
+        TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["name"] = [message] });
 
     /// <summary>
     /// The certificate and the token signing key. Each change answers 202; the new state reaches the UI over

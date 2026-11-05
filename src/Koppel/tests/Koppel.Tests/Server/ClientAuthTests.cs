@@ -134,6 +134,32 @@ public sealed class ClientAuthTests : IDisposable
         activity[0].GetProperty("summary").GetString().Should().Be("Client bench-2 was revoked");
     }
 
+    [Fact]
+    public async Task A_name_of_only_invisible_characters_gets_400_with_a_readable_message()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var ui = _koppel.CreateUiClient();
+
+        using var response = await ui.PostAsJsonAsync("/api/server/clients", new { name = "\u200B\u0007\u202E" }, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+        problem.GetProperty("errors").GetProperty("name")[0].GetString().Should().StartWith("Nothing is left of the name");
+        (await ui.GetFromJsonAsync<JsonElement>("/api/server/clients", ct)).GetArrayLength().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_name_with_control_characters_is_kept_cleaned()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        using var ui = _koppel.CreateUiClient();
+
+        using var response = await ui.PostAsJsonAsync("/api/server/clients", new { name = "bench\u200B-2\u0007" }, ct);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        (await response.Content.ReadFromJsonAsync<JsonElement>(ct)).GetProperty("name").GetString().Should().Be("bench-2");
+    }
+
     private async Task<(string ClientId, string Secret)> CreateClientAsync(string name, CancellationToken ct)
     {
         using var ui = _koppel.CreateUiClient();

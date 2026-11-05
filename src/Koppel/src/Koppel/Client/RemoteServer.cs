@@ -60,13 +60,14 @@ internal sealed record ConnectionTestResult(bool Ok, ConnectionTestOutcome Outco
         ConnectionTestOutcome.RejectedCredentials => "The server refused the client ID or secret. Check them, or ask for a new client.",
         ConnectionTestOutcome.VersionMismatch => SkakelFailure.Of(SkakelFailureKind.VersionMismatch).Message,
         ConnectionTestOutcome.UnexpectedAnswer => "The server did not answer like a Koppel server. Check the address and the port.",
-        ConnectionTestOutcome.TooManyRequests => SkakelFailure.Of(SkakelFailureKind.TooManyRequests).Message,
+        ConnectionTestOutcome.TooManyRequests => "The server is turning requests away for now, from this address or, after too many wrong secrets, for this client. Try again in a few minutes.",
         _ => "The server accepted the token but no longer knows this client. Ask for a new client.",
     });
 
     /// <summary>
     /// Skakel's failure as one of the outcomes. A version mismatch keeps Skakel's wording, which names both
-    /// sides' versions. Anything a test cannot run into counts as unreachable.
+    /// sides' versions. An answer over Skakel's size cap or one it cannot read is an unexpected answer.
+    /// Anything a test cannot run into counts as unreachable.
     /// </summary>
     public static ConnectionTestResult From(SkakelFailure failure) => failure.Kind switch
     {

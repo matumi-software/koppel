@@ -31,7 +31,17 @@ internal sealed class RemoteHub(UsbServer usb) : SkakelHub<IRemoteClient>
             return;
         }
 
-        await Clients.Caller.DevicesChanged(usb.Current.ForRemote());
+        try
+        {
+            await Clients.Caller.DevicesChanged(usb.Current.ForRemote());
+        }
+        catch (Exception ex)
+        {
+            // SignalR does not call OnDisconnectedAsync for a connection whose OnConnectedAsync failed, such as
+            // one that dropped during this first send, so let go of the Skakel session here.
+            await base.OnDisconnectedAsync(ex);
+            throw;
+        }
     }
 }
 

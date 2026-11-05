@@ -1,0 +1,87 @@
+<!-- @dsCard group="Status" height=600 subtitle="Live on a server and a client, reconnecting, down, and a failed sign out" -->
+<div class="kp-root" style="padding: 16px; display: grid; grid-template-columns: repeat(auto-fill, 224px); gap: 16px; align-items: start;">
+  <div class="kp-status-card" data-state="live">
+    <div class="kp-status-card__head">
+      <span class="kp-status-card__state" role="status"><span class="kp-glyph" data-state="live" aria-hidden="true"></span>Live</span>
+      <span class="kp-status-card__version"><span class="kp-sr-only">Koppel </span>v0.1.1</span>
+    </div>
+    <div class="kp-status-card__body">
+      <span class="kp-status-card__name">lab-rack-3</span>
+    </div>
+    <div class="kp-status-card__actions">
+      <button class="kp-button" data-variant="ghost"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Sign out</button>
+    </div>
+  </div>
+
+  <div class="kp-status-card" data-state="live">
+    <div class="kp-status-card__head">
+      <span class="kp-status-card__state" role="status"><span class="kp-glyph" data-state="live" aria-hidden="true"></span>Live</span>
+      <span class="kp-status-card__version"><span class="kp-sr-only">Koppel </span>v0.1.1</span>
+    </div>
+    <div class="kp-status-card__body">
+      <span class="kp-status-card__name">bench-2</span>
+      <p class="kp-status-card__line">Linked to 192.168.31.122.</p>
+    </div>
+    <div class="kp-status-card__actions">
+      <button class="kp-button" data-variant="ghost"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Sign out</button>
+    </div>
+  </div>
+
+  <div class="kp-status-card" data-state="live">
+    <div class="kp-status-card__head">
+      <span class="kp-status-card__state" role="status"><span class="kp-glyph" data-state="live" aria-hidden="true"></span>Live</span>
+      <span class="kp-status-card__version"><span class="kp-sr-only">Koppel </span>v0.1.1</span>
+    </div>
+    <div class="kp-status-card__body">
+      <span class="kp-status-card__name">bench-2</span>
+      <p class="kp-status-card__line" data-tone="pending">Cannot reach 192.168.31.122.</p>
+    </div>
+    <div class="kp-status-card__actions">
+      <button class="kp-button" data-variant="ghost"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Sign out</button>
+    </div>
+  </div>
+
+  <div class="kp-status-card" data-state="reconnecting">
+    <div class="kp-status-card__head">
+      <span class="kp-status-card__state" role="status"><span class="kp-glyph" data-state="pending" aria-hidden="true"></span>Reconnecting</span>
+      <span class="kp-status-card__version"><span class="kp-sr-only">Koppel </span>v0.1.1</span>
+    </div>
+    <div class="kp-status-card__body">
+      <span class="kp-status-card__name">lab-rack-3</span>
+      <p class="kp-status-card__line" data-tone="pending">Changes are paused until the link is back.</p>
+    </div>
+    <div class="kp-status-card__actions">
+      <button class="kp-button" data-variant="ghost"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Sign out</button>
+    </div>
+  </div>
+
+  <div class="kp-status-card" data-state="down">
+    <div class="kp-status-card__head">
+      <span class="kp-status-card__state" role="alert"><span class="kp-glyph" data-state="fault" aria-hidden="true"></span>Disconnected</span>
+      <span class="kp-status-card__version"><span class="kp-sr-only">Koppel </span>v0.1.1</span>
+    </div>
+    <div class="kp-status-card__body">
+      <span class="kp-status-card__name">lab-rack-3</span>
+      <p class="kp-status-card__line" data-tone="fault">Check that lab-rack-3 is running, then retry.</p>
+    </div>
+    <div class="kp-status-card__actions">
+      <button class="kp-button" data-variant="secondary">Retry</button>
+      <button class="kp-button" data-variant="ghost"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Sign out</button>
+    </div>
+  </div>
+
+  <div class="kp-status-card" data-state="live">
+    <div class="kp-status-card__head">
+      <span class="kp-status-card__state" role="status"><span class="kp-glyph" data-state="live" aria-hidden="true"></span>Live</span>
+      <span class="kp-status-card__version"><span class="kp-sr-only">Koppel </span>v0.1.1</span>
+    </div>
+    <div class="kp-status-card__body">
+      <span class="kp-status-card__name" title="workstation-with-a-very-long-name.lab.example">workstation-with-a-very-long-name.lab.example</span>
+      <p class="kp-status-card__line" data-tone="fault" role="status">Not signed out: the server answered 500.</p>
+    </div>
+    <div class="kp-status-card__actions">
+      <button class="kp-button" data-variant="ghost"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>Sign out</button>
+    </div>
+  </div>
+</div>
+<script></script>

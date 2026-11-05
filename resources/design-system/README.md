@@ -69,6 +69,7 @@ Components here are the reference look, written as CSS classes with a `kp-` pref
 - `StatusBadge`: the five device states.
 - `DeviceCard`: one USB device with its identity, where it is and the action for this role.
 - `LinkBanner`: the live link to the server: live, reconnecting or down.
+- `StatusCard`: the foot of the sidebar: the live link, this machine and the Koppel version it runs, what a client is linked to, and Sign out.
 - `Field`: text, ID and secret inputs for auth and settings, with pending and invalid states.
 - `SegmentedControl`: the role, as a stored setting that waits for the server.
 - `AppShell`, `DeviceGroup`, `ActivityFeed`, `DeviceDrawer`, `Panel`, `Setup`, `ModalDialog`: the app frame and pages, built on react-aria-components.

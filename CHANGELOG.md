@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.1
+## 0.1.1 (2026-11-06)
 
 Koppel 0.1.0 and 0.1.1 cannot talk to each other. Update the server and its clients together.
 

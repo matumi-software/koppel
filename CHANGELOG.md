@@ -7,6 +7,8 @@
   next boot or until the service is started again. The icon comes and goes with the service.
 - **Koppel** in the Start menu opens the UI. If Koppel is not running, it offers to start it (an administrator has to
   approve), waits until the UI answers and then opens it. The tray's shut down dialog points to it.
+- The last page of the Windows installer has **Launch**, which opens the UI to set the first password. It shows after
+  an install or an upgrade, not after a repair or an uninstall.
 
 ## 0.1.1 (2026-11-06)
 

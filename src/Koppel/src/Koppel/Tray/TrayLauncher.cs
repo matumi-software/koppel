@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 using static Koppel.Tray.TrayNative;
 
@@ -10,11 +11,12 @@ namespace Koppel.Tray;
 /// <summary>
 /// Keeps a <see cref="TrayIcon"/> running in every active user session while the Windows service runs, the way Apollo
 /// does: the service owns the icons, so they come and go with it. Each icon runs as that session's user, not as
-/// LocalSystem, so the browser it opens is the user's. Its standard input is a pipe from here; disposing the pipe tells it
-/// to remove its icon and exit, and the same happens if this process dies. A tray that fails never stops Koppel.
+/// LocalSystem, so the browser it opens is the user's. Its standard input is a pipe from here, which carries what the icon
+/// shows (<see cref="TrayFeed"/>, <see cref="TrayWire"/>); disposing the pipe tells it to remove its icon and exit, and the
+/// same happens if this process dies. A tray that fails never stops Koppel.
 /// </summary>
 [SupportedOSPlatform("windows")]
-internal sealed partial class TrayLauncher(string uiUrl, ILogger<TrayLauncher> logger) : BackgroundService
+internal sealed partial class TrayLauncher(string uiUrl, TrayFeed feed, ILogger<TrayLauncher> logger) : BackgroundService
 {
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan QuickExit = TimeSpan.FromSeconds(30);
@@ -24,9 +26,13 @@ internal sealed partial class TrayLauncher(string uiUrl, ILogger<TrayLauncher> l
     private readonly Dictionary<uint, Tray> _trays = [];
     private readonly Dictionary<uint, DateTimeOffset> _notBefore = [];
 
-    /// <summary>Registers the launcher, with the UI address the icons open.</summary>
-    public static void Add(IServiceCollection services, string uiUrl) =>
-        services.AddHostedService(sp => new TrayLauncher(uiUrl, sp.GetRequiredService<ILogger<TrayLauncher>>()));
+    /// <summary>Registers the launcher, with the UI address the icons open, and the feed of what they show.</summary>
+    public static void Add(IServiceCollection services, string uiUrl)
+    {
+        services.AddSingleton<TrayFeed>();
+        services.AddHostedService(sp => sp.GetRequiredService<TrayFeed>());
+        services.AddHostedService(sp => new TrayLauncher(uiUrl, sp.GetRequiredService<TrayFeed>(), sp.GetRequiredService<ILogger<TrayLauncher>>()));
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -34,16 +40,20 @@ internal sealed partial class TrayLauncher(string uiUrl, ILogger<TrayLauncher> l
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                // Taken before the state is read, so a change while this round runs still wakes the next one.
+                var changed = feed.WaitAsync();
                 try
                 {
                     Sync();
+                    Publish();
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
                 {
                     LogSyncFailed(logger, exception);
                 }
 
-                await Task.Delay(Interval, stoppingToken).ConfigureAwait(false);
+                await Task.WhenAny(changed, Task.Delay(Interval, stoppingToken)).ConfigureAwait(false);
+                stoppingToken.ThrowIfCancellationRequested();
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -90,6 +100,16 @@ internal sealed partial class TrayLauncher(string uiUrl, ILogger<TrayLauncher> l
         }
     }
 
+    /// <summary>Tells every tray the current state, when it differs from what that tray was last told.</summary>
+    private void Publish()
+    {
+        var line = TrayWire.State(feed.Current);
+        foreach (var tray in _trays.Values)
+        {
+            tray.Send(line);
+        }
+    }
+
     private static unsafe List<uint> ActiveSessions()
     {
         if (!WTSEnumerateSessionsW(0, 0, 1, out var sessions, out var count))
@@ -130,7 +150,8 @@ internal sealed partial class TrayLauncher(string uiUrl, ILogger<TrayLauncher> l
 
         nint environment = 0;
         nint attributes = 0;
-        var pipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
+        // Room for many messages, so a tray that is slow to read never holds up this loop.
+        var pipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable, 64 * 1024);
         try
         {
             if (!CreateEnvironmentBlock(out environment, token, false))
@@ -243,6 +264,28 @@ internal sealed partial class TrayLauncher(string uiUrl, ILogger<TrayLauncher> l
         public DateTimeOffset Started { get; } = started;
 
         public bool HasExited => WaitForSingleObject(process, 0) != WAIT_TIMEOUT;
+
+        /// <summary>What this tray was last told, so a state is sent once and not every round.</summary>
+        private string? _sent;
+
+        public void Send(string line)
+        {
+            if (line == _sent)
+            {
+                return;
+            }
+
+            try
+            {
+                pipe.Write(Encoding.UTF8.GetBytes(line + "\n"));
+                pipe.Flush();
+                _sent = line;
+            }
+            catch (IOException)
+            {
+                // The tray has gone; the next round notices it exited.
+            }
+        }
 
         public void ClosePipe() => pipe.Dispose();
 

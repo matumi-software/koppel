@@ -19,6 +19,7 @@ internal static unsafe class TrayIcon
     public const string Argument = "--tray";
 
     private const uint CallbackMessage = WM_APP + 1;
+    private const uint StateMessage = WM_APP + 2;
     private const uint IconId = 1;
     private const int OpenCommand = 1;
     private const int ShutDownCommand = 2;
@@ -29,6 +30,8 @@ internal static unsafe class TrayIcon
     private static nint s_menu;
     private static uint s_taskbarCreated;
     private static string s_uiUrl = "";
+    private static nint s_attentionIcon;
+    private static TrayState s_state = TrayState.Plain;
 
     public static bool Requested(string[] args) => args.Length > 0 && args[0] == Argument;
 
@@ -88,15 +91,22 @@ internal static unsafe class TrayIcon
         return 0;
     }
 
-    /// <summary>Blocks until the service closes its end of the pipe on standard input, then closes the window.</summary>
+    /// <summary>
+    /// Reads what the service sends on standard input (<see cref="TrayWire"/>) until it closes its end of the pipe, then
+    /// closes the window. A line this tray cannot read is skipped.
+    /// </summary>
     private static void WaitForService(nint window)
     {
         try
         {
-            using var pipe = Console.OpenStandardInput();
-            var buffer = new byte[64];
-            while (pipe.Read(buffer, 0, buffer.Length) > 0)
+            using var reader = new StreamReader(Console.OpenStandardInput(), System.Text.Encoding.UTF8);
+            while (reader.ReadLine() is { } line)
             {
+                if (TrayWire.ReadState(line) is { } state)
+                {
+                    Volatile.Write(ref s_state, state);
+                    PostMessageW(window, StateMessage, 0, 0);
+                }
             }
         }
         catch (IOException)
@@ -125,6 +135,12 @@ internal static unsafe class TrayIcon
                         break;
                 }
 
+                return 0;
+            }
+
+            if (message == StateMessage)
+            {
+                ShowState();
                 return 0;
             }
 
@@ -158,11 +174,36 @@ internal static unsafe class TrayIcon
         var data = IconData();
         data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         data.uCallbackMessage = CallbackMessage;
-        data.hIcon = s_icon;
-        "Koppel".AsSpan().CopyTo(new Span<char>(data.szTip, 127));
+        SetState(ref data);
         Shell_NotifyIconW(NIM_ADD, &data);
         data.uVersion = NOTIFYICON_VERSION_4;
         Shell_NotifyIconW(NIM_SETVERSION, &data);
+    }
+
+    /// <summary>Shows the latest state from the service: the tooltip, and the icon with a dot when something needs the user.</summary>
+    private static void ShowState()
+    {
+        var data = IconData();
+        data.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+        SetState(ref data);
+        Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+
+    private static void SetState(ref NOTIFYICONDATAW data)
+    {
+        var state = Volatile.Read(ref s_state);
+        if (state.Attention && s_attentionIcon == 0)
+        {
+            s_attentionIcon = TrayAttentionIcon.Create(s_icon, GetSystemMetrics(SM_CXSMICON));
+        }
+
+        data.hIcon = state.Attention && s_attentionIcon != 0 ? s_attentionIcon : s_icon;
+        fixed (char* tip = data.szTip)
+        {
+            var span = new Span<char>(tip, 128);
+            span.Clear();
+            state.Tip.AsSpan(0, Math.Min(state.Tip.Length, 127)).CopyTo(span);
+        }
     }
 
     private static void RemoveIcon()

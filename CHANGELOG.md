@@ -5,6 +5,8 @@
 - The Windows app has a Koppel icon in the notification area for every signed-in user, the way Apollo does it. Click it
   to open the UI in your browser. Its menu also shuts Koppel down, after asking first; Koppel then stays off until the
   next boot or until the service is started again. The icon comes and goes with the service.
+- **Koppel** in the Start menu opens the UI. If Koppel is not running, it offers to start it (an administrator has to
+  approve), waits until the UI answers and then opens it. The tray's shut down dialog points to it.
 
 ## 0.1.1 (2026-11-06)
 

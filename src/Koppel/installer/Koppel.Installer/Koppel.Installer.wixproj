@@ -4,8 +4,10 @@
   <PropertyGroup>
     <OutputName>Koppel</OutputName>
     <InstallerPlatform>x64</InstallerPlatform>
-    <!-- ICE61: MajorUpgrade AllowSameVersionUpgrades is deliberate, see Package.wxs. -->
-    <SuppressIces>ICE61</SuppressIces>
+    <!-- ICE61: MajorUpgrade AllowSameVersionUpgrades is deliberate, see Package.wxs. ICE43 and ICE57: the Start menu
+         shortcut is per machine (the package is, so ProgramMenuFolder is the all-users Start menu), and these ICEs ask for
+         the HKCU key path a per-user shortcut needs. -->
+    <SuppressIces>ICE61;ICE43;ICE57</SuppressIces>
     <Logos>$(MSBuildThisFileDirectory)..\..\..\..\resources\design-system\assets\Logos</Logos>
     <DefineConstants>StagingDir=$(StagingDir);Version=$(Version);Logos=$(Logos)</DefineConstants>
   </PropertyGroup>

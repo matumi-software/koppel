@@ -11,6 +11,8 @@
     <Icon Id="KoppelIcon" SourceFile="$(var.Logos)\koppel-app-icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="KoppelIcon" />
 
+    <StandardDirectory Id="ProgramMenuFolder" />
+
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="CompanyFolder" Name="Matumi">
         <Directory Id="INSTALLFOLDER" Name="Koppel" />
@@ -43,9 +45,19 @@
         <!-- The native app's UI is used on this machine only, so it answers this machine only (Ui:AllowFrom). What other
              Koppel machines do on the same port is not affected. -->
         <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\Koppel" Name="Environment" Type="multiString" Value="Ui__AllowFrom=local" />
+        <!-- The service writes its UI address here as it starts, for the Start menu entry. Uninstall takes it away. -->
+        <RegistryKey Root="HKLM" Key="SOFTWARE\Matumi\Koppel" ForceDeleteOnUninstall="yes" />
+      </Component>
+      <!-- Koppel in the Start menu, for all users: opens the UI, and starts the service first if it is not running
+           (KoppelOpener). KoppelDesktop.exe is Koppel.exe marked as a Windows program (build.ps1), so it opens no console. -->
+      <Component Id="StartMenu">
+        <File Id="KoppelDesktopExe" Source="$(var.StagingDir)\KoppelDesktop.exe" KeyPath="yes" />
+        <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Koppel" Description="Open Koppel, and start it if it is not running"
+                  Target="[#KoppelDesktopExe]" Arguments="--open" WorkingDirectory="INSTALLFOLDER" Icon="KoppelIcon" />
       </Component>
       <Files Include="$(var.StagingDir)\**">
         <Exclude Files="$(var.StagingDir)\Koppel.exe" />
+        <Exclude Files="$(var.StagingDir)\KoppelDesktop.exe" />
       </Files>
     </ComponentGroup>
 

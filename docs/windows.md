@@ -106,7 +106,7 @@ machine that also runs usbipd-win cannot use both at once.
 
 The UI asks for a password. The first time, whoever opens the UI sets it, within 10 minutes of
 Koppel starting (`Ui:SetupWindowMinutes`). After that the UI says setup has timed out: restart Koppel
-(`Restart-Service Koppel` from an elevated prompt, or `docker compose restart` for Docker Desktop) and
+(**Restart Koppel** in the menu of the tray icon, `Restart-Service Koppel` from an elevated prompt, or `docker compose restart` for Docker Desktop) and
 open it again.
 
 - Native install: the UI answers this machine only, so only someone at this machine can set it.
@@ -136,7 +136,7 @@ upgrade. The UI is at https://localhost:5240 and answers on
 this machine only: the installer sets `Ui__AllowFrom=local` for the service. A native Windows server
 is reached on the same port, 5240, through that rule. A network Windows has marked Public gets no rule: change it to Private, or add one by hand.
 
-- **Tray icon:** while the service runs, every signed-in user gets a Koppel icon in the notification area. Windows 11 puts new icons in the overflow first; drag it onto the taskbar to keep it in sight. Click it, or pick **Open Koppel**, to open the UI in your browser. **Shut down Koppel** asks first and then stops the service: shared and attached devices stop working, and Koppel stays off until the next boot or until you start it again from **Koppel** in the Start menu. Any signed-in user can do this, not only administrators. The icon goes when the service stops and comes back when it starts.
+- **Tray icon:** while the service runs, every signed-in user gets a Koppel icon in the notification area. Windows 11 puts new icons in the overflow first; drag it onto the taskbar to keep it in sight. Click it, or pick **Open Koppel**, to open the UI in your browser. **Restart Koppel** asks first and then restarts the service, which also opens setup again when no password is set yet. **Shut down Koppel** asks first and then stops the service: shared and attached devices stop working, and Koppel stays off until the next boot or until you start it again from **Koppel** in the Start menu. Any signed-in user can do this, not only administrators. The icon goes when the service stops and comes back when it starts.
 - **Start menu:** **Koppel** in the Start menu opens the UI in your browser. If Koppel is not running, it offers to start it, which takes an administrator (a UAC prompt), waits for the UI to answer and then opens it. It opens the address the service listens on, which the service writes to `HKLM\SOFTWARE\Matumi\Koppel` as it starts.
 - **Finishing setup:** after an install or an upgrade, the last page of setup has **Launch**, which opens the UI the same way, so the first password can be set straight away. A quiet or passive install opens nothing.
 - **Data folder:** `%ProgramData%\Koppel` is created with Administrators as owner and access for SYSTEM and Administrators only. If it already exists as a file or a link, or is owned by someone who is not an administrator, the install stops and says so: rename or delete the folder (copy any keys out first) and run setup again. A folder owned by an administrator, such as one an earlier install left, is taken over: the owner and access are reset for everything under it any link inside is deleted, and a file or folder inside that is not owned by an administrator is renamed aside (`not-admin-owned-<time>`) and not used. The service also locks `%ProgramData%\Koppel` itself down on every start.

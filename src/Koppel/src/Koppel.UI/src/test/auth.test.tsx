@@ -239,6 +239,7 @@ describe('first-run password', () => {
 
     expect(screen.getByText(/Restart Koppel, then open this page again/)).toBeTruthy();
     expect(screen.getByText('sudo systemctl restart koppel')).toBeTruthy();
+    expect(screen.getByText('Restart Koppel', { selector: 'strong' })).toBeTruthy();
     expect(screen.queryByLabelText('New password')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }));
     await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));

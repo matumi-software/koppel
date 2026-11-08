@@ -30,6 +30,12 @@ if (OperatingSystem.IsWindows() && KoppelOpener.Requested(args))
     return KoppelOpener.Run(args);
 }
 
+// What the service starts as it stops for the tray's Restart Koppel: it starts the service again (ServiceRestart).
+if (OperatingSystem.IsWindows() && ServiceRestart.Requested(args))
+{
+    return ServiceRestart.Run();
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Runs as a Windows service when the installer registers it as one, and as a systemd service (readiness and

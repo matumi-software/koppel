@@ -25,7 +25,7 @@ export function SetupClosedPage({ machineName, recheck }: { machineName: string;
             Linux package: <code>sudo systemctl restart koppel</code>
           </li>
           <li>
-            On Windows, from an elevated prompt: <code>Restart-Service Koppel</code>
+            Windows app: right-click the Koppel icon in the notification area and pick <strong>Restart Koppel</strong>
           </li>
         </ul>
       </section>

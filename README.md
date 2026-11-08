@@ -89,7 +89,7 @@ Download `Koppel-Setup.exe` from the [latest release](https://github.com/matumi-
 and run it. It installs Koppel as a Windows service, usbip-win2's signed
 driver and the Visual C++ runtime. It also adds an inbound firewall rule for the Koppel program on Private and Domain networks, so a Windows server can be reached without one added by hand. Open
 https://localhost:5240 afterwards, accept the browser's certificate warning and set the password within 10 minutes
-(after that, restart the Koppel service). The UI answers on this machine only. The Koppel icon in the notification
+(after that, pick Restart Koppel in the menu of the Koppel icon in the notification area). The UI answers on this machine only. The Koppel icon in the notification
 area opens the UI, and its menu shuts Koppel down until the next boot. **Koppel** in the Start menu opens the UI
 too, and starts Koppel first if it is not running. See
 [docs/windows.md](docs/windows.md) for what the installer does to `%ProgramData%\Koppel` and the driver.

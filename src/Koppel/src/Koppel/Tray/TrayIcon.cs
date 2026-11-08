@@ -22,6 +22,7 @@ internal static unsafe class TrayIcon
     private const uint IconId = 1;
     private const int OpenCommand = 1;
     private const int ShutDownCommand = 2;
+    private const int RestartCommand = 3;
 
     private static nint s_window;
     private static nint s_icon;
@@ -69,6 +70,7 @@ internal static unsafe class TrayIcon
         s_menu = CreatePopupMenu();
         AppendMenuW(s_menu, MF_STRING, OpenCommand, "Open Koppel");
         AppendMenuW(s_menu, MF_SEPARATOR, 0, null);
+        AppendMenuW(s_menu, MF_STRING, RestartCommand, "Restart Koppel");
         AppendMenuW(s_menu, MF_STRING, ShutDownCommand, "Shut down Koppel");
         SetMenuDefaultItem(s_menu, OpenCommand, 0);
         AddIcon();
@@ -190,6 +192,9 @@ internal static unsafe class TrayIcon
             case ShutDownCommand:
                 ShutDown(hwnd);
                 break;
+            case RestartCommand:
+                Restart(hwnd);
+                break;
         }
     }
 
@@ -209,21 +214,34 @@ internal static unsafe class TrayIcon
     {
         const string question = "Shut down Koppel?\n\nDevices this PC shares or has attached stop working until Koppel starts again. "
             + "It starts again with Windows, or from Koppel in the Start menu.";
+        AskAndSend(hwnd, question, KoppelService.ShutDownCommand, "shut down");
+    }
+
+    private static void Restart(nint hwnd)
+    {
+        const string question = "Restart Koppel?\n\nDevices this PC shares or has attached pause while it restarts, and clients "
+            + "attach theirs again when it is back. If no password is set yet, setup opens again.";
+        AskAndSend(hwnd, question, KoppelService.RestartCommand, "restarted");
+    }
+
+    private static void AskAndSend(nint hwnd, string question, int command, string failed)
+    {
         if (MessageBoxW(hwnd, question, "Koppel", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
         {
             return;
         }
 
-        // Interactive users may send a service its user-defined controls but may not stop it, so the service stops itself
-        // (KoppelServiceLifetime). When it has, the pipe closes and this icon goes with it.
+        // Interactive users may send a service its user-defined controls but may not stop or start it, so the service does it
+        // itself (KoppelServiceLifetime). When it stops, the pipe closes and this icon goes with it; after a restart the
+        // service starts a new one.
         try
         {
             using var service = new ServiceController(KoppelService.Name);
-            service.ExecuteCommand(KoppelService.ShutDownCommand);
+            service.ExecuteCommand(command);
         }
         catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
-            MessageBoxW(hwnd, $"Koppel could not be shut down: {exception.InnerException?.Message ?? exception.Message}", "Koppel",
+            MessageBoxW(hwnd, $"Koppel could not be {failed}: {exception.InnerException?.Message ?? exception.Message}", "Koppel",
                 MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
         }
     }

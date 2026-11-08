@@ -16,6 +16,7 @@ internal static unsafe partial class TrayNative
 
     // Shell_NotifyIcon.
     public const uint NIM_ADD = 0;
+    public const uint NIM_MODIFY = 1;
     public const uint NIM_DELETE = 2;
     public const uint NIM_SETVERSION = 4;
     public const uint NIF_MESSAGE = 0x01;

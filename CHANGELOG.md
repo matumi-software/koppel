@@ -5,6 +5,9 @@
 - The Windows app has a Koppel icon in the notification area for every signed-in user, the way Apollo does it. Click it
   to open the UI in your browser. Its menu also shuts Koppel down, after asking first; Koppel then stays off until the
   next boot or until the service is started again. The icon comes and goes with the service.
+- The tray icon's tooltip says how Koppel is doing: what a client is linked to and how many devices it attached, or
+  what a server shares and how many are in use. An amber dot on the icon means the link is down, sharing is not
+  available, or setup is waiting.
 - **Koppel** in the Start menu opens the UI. If Koppel is not running, it offers to start it (an administrator has to
   approve), waits until the UI answers and then opens it. The tray's shut down dialog points to it.
 - The tray icon's menu has **Restart Koppel**, which any signed-in user can use, like Shut down. When setup has timed

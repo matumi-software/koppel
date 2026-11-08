@@ -2,10 +2,14 @@ import { Panel, RoleCards, Setting, SettingList, Switch } from '@koppel/react-ui
 import { ChangePassword } from './change-password';
 import { ConnectionSection } from '@/client/connection-section';
 import { Frame } from '@/shell/frame';
-import { useMachineName } from '@/shared/use-machine-name';
+import { useHasTray, useMachineName } from '@/shared/use-machine-name';
+import type { KoppelSettings } from '@/api/settings';
 import { useFrame } from '@/shell/frame-context';
 import { isClientRole, isServerRole, roleName, roleOptions } from './roles';
 import { useSettings, type SettingStatus } from './use-settings';
+
+/** The settings for the tray icon's notifications, which only the Windows app has. */
+type NotifyKey = keyof Pick<KoppelSettings, 'notifyPairing' | 'notifyLink' | 'notifyAttachFailures'>;
 
 /**
  * Everything this machine is configured with: the role first, then the settings that role uses,
@@ -15,6 +19,7 @@ export function ConfigurationPage() {
   const host = useMachineName();
   const { locked } = useFrame();
   const { query, status, requestChange } = useSettings();
+  const hasTray = useHasTray();
 
   if (!query.data) {
     return (
@@ -26,6 +31,28 @@ export function ConfigurationPage() {
 
   const role = status('role')!;
   const share = status('shareOnStartup')!;
+  const notify = (setting: NotifyKey, title: string, description: string) => {
+    const value = status(setting)!;
+    return (
+      <Setting
+        key={setting}
+        title={title}
+        description={description}
+        control={
+          <Switch
+            label={title}
+            labelHidden
+            confirmed={value.confirmed}
+            pendingTarget={value.pendingTarget}
+            failure={value.failure}
+            note={value.saved ? 'Saved' : undefined}
+            isDisabled={locked}
+            onRequestChange={(next) => requestChange(setting, next)}
+          />
+        }
+      />
+    );
+  };
 
   return (
     <Frame title="Configuration" lede={`${host}: what it does on the network and how it starts.`}>
@@ -69,6 +96,19 @@ export function ConfigurationPage() {
       )}
 
       {isClientRole(role.confirmed) && <ConnectionSection locked={locked} />}
+
+      {hasTray && (
+        <Panel title="Notifications">
+          <SettingList label="Notifications">
+            {isServerRole(role.confirmed) &&
+              notify('notifyPairing', 'When a client wants to pair', 'A Windows notification names the client. Click it to open Clients and type its code.')}
+            {isClientRole(role.confirmed) &&
+              notify('notifyLink', 'When the link to the server drops', 'Once when it drops and once when it is back, not on every retry.')}
+            {isClientRole(role.confirmed) &&
+              notify('notifyAttachFailures', 'When a device does not attach', 'Names the device and why. Koppel keeps trying by itself.')}
+          </SettingList>
+        </Panel>
+      )}
 
       <ChangePassword locked={locked} />
     </Frame>

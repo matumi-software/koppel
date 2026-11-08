@@ -8,6 +8,9 @@
 - The tray icon's tooltip says how Koppel is doing: what a client is linked to and how many devices it attached, or
   what a server shares and how many are in use. An amber dot on the icon means the link is down, sharing is not
   available, or setup is waiting.
+- The tray icon shows Windows notifications: a client waiting to pair (a click opens Clients), the link to the server
+  dropping and coming back, once each, and a device that does not attach. Windows holds them back during Do not
+  disturb. Each kind can be turned off under Configuration, Notifications, in the Windows app.
 - **Koppel** in the Start menu opens the UI. If Koppel is not running, it offers to start it (an administrator has to
   approve), waits until the UI answers and then opens it. The tray's shut down dialog points to it.
 - The tray icon's menu has **Restart Koppel**, which any signed-in user can use, like Shut down. When setup has timed

@@ -63,15 +63,15 @@ var setupWindow = UiSetupWindow.Resolve(builder.Configuration[UiSetupWindow.Sett
 
 // The tray icon in each signed-in session, only when Koppel runs as the installed Windows service. It opens the UI
 // at the address Kestrel listens on, localhost unless Listen:Address names one. The Start menu entry reads the same
-// address from the registry.
+// address from the registry. The launcher is registered further down, after the stores its icons report on.
+string? trayUiUrl = null;
 if (OperatingSystem.IsWindows() && windowsService)
 {
     var uiHost = listenAddress is null || listenAddress.Equals(System.Net.IPAddress.Any) || listenAddress.Equals(System.Net.IPAddress.IPv6Any)
         ? "localhost"
         : listenAddress.ToString();
-    var uiUrl = new UriBuilder(Uri.UriSchemeHttps, uiHost, uiPort).Uri.AbsoluteUri;
-    TrayLauncher.Add(builder.Services, uiUrl);
-    KoppelOpener.PublishUiUrl(uiUrl);
+    trayUiUrl = new UriBuilder(Uri.UriSchemeHttps, uiHost, uiPort).Uri.AbsoluteUri;
+    KoppelOpener.PublishUiUrl(trayUiUrl);
 }
 
 // A one-off command for the Docker health check: ask the UI port whether Koppel answers, and exit.
@@ -122,7 +122,7 @@ if (UiPasswordReset.Requested(args))
 
 builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, uiPort, networkPort, discoveryPort));
+builder.Services.AddSingleton(new HostInfo(DateTimeOffset.UtcNow, uiPort, networkPort, discoveryPort, windowsService));
 builder.Services.AddSingleton(new UiAccess(uiReach));
 builder.Services.AddSingleton(new UiSetupWindow(setupWindow, $"https://{Environment.MachineName}:{uiPort}"));
 builder.Services.AddSingleton<InMemoryActivityStore>(sp => new InMemoryActivityStore(sp.GetRequiredService<TimeProvider>(), logger: sp.GetRequiredService<ILogger<InMemoryActivityStore>>()));
@@ -183,6 +183,12 @@ builder.Services.AddSingleton<ServerFinder>();
 builder.Services.AddHostedService<ServerAnnouncerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ServerFinder>());
 builder.Services.AddHostedService<UiHubRelay>();
+
+// Hosted services start in the order they are added, so the tray's feed starts after the stores it listens to.
+if (OperatingSystem.IsWindows() && trayUiUrl is not null)
+{
+    TrayLauncher.Add(builder.Services, trayUiUrl);
+}
 
 // USB goes through the Linux kernel's USB/IP drivers. Other platforms report why they cannot share yet.
 // Usb:Upstream (host, host:port or [v6]:port) shares another USB/IP server's devices instead, such as usbipd-win on a

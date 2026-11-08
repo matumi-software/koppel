@@ -82,6 +82,37 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task A_settings_file_from_before_tray_notifications_has_them_all_on()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(SettingsFile, """{ "role": "client", "shareOnStartup": true, "setupComplete": true }""", TestContext.Current.CancellationToken);
+        using var store = CreateStore();
+
+        await store.StartAsync(TestContext.Current.CancellationToken);
+
+        store.Problem.Should().BeNull();
+        store.Current.Should().Be(new KoppelSettings(KoppelRole.Client, ShareOnStartup: true, SetupComplete: true));
+        store.Current.NotifyPairing.Should().BeTrue();
+        store.Current.NotifyLink.Should().BeTrue();
+        store.Current.NotifyAttachFailures.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task A_notification_setting_is_applied_and_described_for_the_activity_log()
+    {
+        using var store = CreateStore();
+        await store.StartAsync(TestContext.Current.CancellationToken);
+        var patch = new SettingsPatch(null, null, NotifyLink: false);
+
+        patch.Describe(store.Current).Should().Be("Notifications for the link to the server turned off");
+        await store.ApplyAsync(patch, TestContext.Current.CancellationToken);
+
+        ReadFile().NotifyLink.Should().BeFalse();
+        ReadFile().NotifyPairing.Should().BeTrue();
+        patch.Describe(store.Current).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Start_refuses_a_role_written_as_a_number()
     {
         Directory.CreateDirectory(_directory);

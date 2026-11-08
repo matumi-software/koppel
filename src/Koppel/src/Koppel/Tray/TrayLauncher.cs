@@ -108,6 +108,16 @@ internal sealed partial class TrayLauncher(string uiUrl, TrayFeed feed, ILogger<
         {
             tray.Send(line);
         }
+
+        // A notice goes to every tray running now, once. With nobody signed in it is dropped.
+        foreach (var notice in feed.TakeNotices())
+        {
+            var noticeLine = TrayWire.Notice(notice);
+            foreach (var tray in _trays.Values)
+            {
+                tray.Send(noticeLine, always: true);
+            }
+        }
     }
 
     private static unsafe List<uint> ActiveSessions()
@@ -265,12 +275,13 @@ internal sealed partial class TrayLauncher(string uiUrl, TrayFeed feed, ILogger<
 
         public bool HasExited => WaitForSingleObject(process, 0) != WAIT_TIMEOUT;
 
-        /// <summary>What this tray was last told, so a state is sent once and not every round.</summary>
+        /// <summary>The state this tray was last told, so a state is sent once and not every round.</summary>
         private string? _sent;
 
-        public void Send(string line)
+        /// <summary>Sends a line. A state is skipped when it is the one last sent; a notice (<paramref name="always"/>) never is.</summary>
+        public void Send(string line, bool always = false)
         {
-            if (line == _sent)
+            if (!always && line == _sent)
             {
                 return;
             }
@@ -279,7 +290,10 @@ internal sealed partial class TrayLauncher(string uiUrl, TrayFeed feed, ILogger<
             {
                 pipe.Write(Encoding.UTF8.GetBytes(line + "\n"));
                 pipe.Flush();
-                _sent = line;
+                if (!always)
+                {
+                    _sent = line;
+                }
             }
             catch (IOException)
             {

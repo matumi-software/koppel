@@ -20,6 +20,7 @@ internal static unsafe class TrayIcon
 
     private const uint CallbackMessage = WM_APP + 1;
     private const uint StateMessage = WM_APP + 2;
+    private const uint NoticeMessage = WM_APP + 3;
     private const uint IconId = 1;
     private const int OpenCommand = 1;
     private const int ShutDownCommand = 2;
@@ -32,6 +33,8 @@ internal static unsafe class TrayIcon
     private static string s_uiUrl = "";
     private static nint s_attentionIcon;
     private static TrayState s_state = TrayState.Plain;
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<TrayNotice> s_notices = new();
+    private static string s_noticePage = "";
 
     public static bool Requested(string[] args) => args.Length > 0 && args[0] == Argument;
 
@@ -107,6 +110,11 @@ internal static unsafe class TrayIcon
                     Volatile.Write(ref s_state, state);
                     PostMessageW(window, StateMessage, 0, 0);
                 }
+                else if (TrayWire.ReadNotice(line) is { } notice)
+                {
+                    s_notices.Enqueue(notice);
+                    PostMessageW(window, NoticeMessage, 0, 0);
+                }
             }
         }
         catch (IOException)
@@ -130,6 +138,9 @@ internal static unsafe class TrayIcon
                     case NIN_KEYSELECT:
                         OpenUi();
                         break;
+                    case NIN_BALLOONUSERCLICK:
+                        OpenUi(s_noticePage);
+                        break;
                     case WM_CONTEXTMENU:
                         ShowMenu(hwnd, (short)(wParam & 0xFFFF), (short)((wParam >> 16) & 0xFFFF));
                         break;
@@ -141,6 +152,16 @@ internal static unsafe class TrayIcon
             if (message == StateMessage)
             {
                 ShowState();
+                return 0;
+            }
+
+            if (message == NoticeMessage)
+            {
+                while (s_notices.TryDequeue(out var notice))
+                {
+                    ShowNotice(notice);
+                }
+
                 return 0;
             }
 
@@ -186,6 +207,23 @@ internal static unsafe class TrayIcon
         var data = IconData();
         data.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP;
         SetState(ref data);
+        Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+
+    /// <summary>
+    /// Shows a Windows notification from the icon. Windows holds it back during Do not disturb and full-screen apps
+    /// (<c>NIIF_RESPECT_QUIET_TIME</c>). A click on it opens the UI at the notice's page.
+    /// </summary>
+    private static void ShowNotice(TrayNotice notice)
+    {
+        var data = IconData();
+        data.uFlags = NIF_INFO;
+        data.dwInfoFlags = NIIF_RESPECT_QUIET_TIME; // no info icon: the notification carries Koppel's own
+        new Span<char>(data.szInfoTitle, 64).Clear();
+        notice.Title.AsSpan(0, Math.Min(notice.Title.Length, 63)).CopyTo(new Span<char>(data.szInfoTitle, 63));
+        new Span<char>(data.szInfo, 256).Clear();
+        notice.Text.AsSpan(0, Math.Min(notice.Text.Length, 255)).CopyTo(new Span<char>(data.szInfo, 255));
+        s_noticePage = notice.Page;
         Shell_NotifyIconW(NIM_MODIFY, &data);
     }
 
@@ -239,15 +277,17 @@ internal static unsafe class TrayIcon
         }
     }
 
-    private static void OpenUi()
+    /// <summary>Opens the UI in the user's browser, at <paramref name="page"/> (such as <c>#clients</c>, checked by <see cref="TrayWire"/>).</summary>
+    private static void OpenUi(string page = "")
     {
+        var url = s_uiUrl + page;
         try
         {
-            Process.Start(new ProcessStartInfo(s_uiUrl) { UseShellExecute = true })?.Dispose();
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true })?.Dispose();
         }
         catch (Win32Exception exception)
         {
-            MessageBoxW(s_window, $"Koppel could not open {s_uiUrl}: {exception.Message}", "Koppel", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+            MessageBoxW(s_window, $"Koppel could not open {url}: {exception.Message}", "Koppel", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
         }
     }
 

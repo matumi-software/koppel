@@ -22,10 +22,13 @@ internal static unsafe partial class TrayNative
     public const uint NIF_MESSAGE = 0x01;
     public const uint NIF_ICON = 0x02;
     public const uint NIF_TIP = 0x04;
+    public const uint NIF_INFO = 0x10;
     public const uint NIF_SHOWTIP = 0x80;
+    public const uint NIIF_RESPECT_QUIET_TIME = 0x80;
     public const uint NOTIFYICON_VERSION_4 = 4;
     public const uint NIN_SELECT = 0x0400;
     public const uint NIN_KEYSELECT = 0x0401;
+    public const uint NIN_BALLOONUSERCLICK = 0x0405;
 
     // Menus and message boxes.
     public const uint MF_STRING = 0x0000;

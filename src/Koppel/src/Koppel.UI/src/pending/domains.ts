@@ -27,6 +27,9 @@ const settingLabels: Record<keyof KoppelSettings, string> = {
   role: 'Role',
   shareOnStartup: 'Share saved devices on startup',
   setupComplete: 'Setup',
+  notifyPairing: 'Notify when a client wants to pair',
+  notifyLink: 'Notify when the link to the server drops',
+  notifyAttachFailures: 'Notify when a device does not attach',
 };
 
 /** The server stores only the scheme, host and port, in lower case, so compare those. */

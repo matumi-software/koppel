@@ -13,7 +13,7 @@ import { SetupPage } from '@/setup/setup-page';
 import { FrameContext, type FrameApi } from '@/shell/frame-context';
 import { accepted, deferred, FakeHub, json, mockFetch, renderApp } from './harness';
 
-const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true };
+const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
 const connection: ConnectionView = { serverUrl: 'https://lab:5241', serverFingerprint: fingerprint, clientId: 'bench-1', hasSecret: true, nextServerFingerprint: null };
 
@@ -23,7 +23,7 @@ const baseRoutes = {
   'GET /api/server/identity': () => json({ name: 'bench-pc', fingerprint, httpsPort: 5241 }),
   'GET /api/system/checks': () => json([]),
   'GET /api/system/info': () =>
-    json({ name: 'bench-pc', version: '1.0.0', startedAt: '2026-01-01T00:00:00Z', role: 'server', uiPort: 5240, httpsPort: 5241, fingerprint, os: 'test' }),
+    json({ name: 'bench-pc', version: '1.0.0', startedAt: '2026-01-01T00:00:00Z', role: 'server', uiPort: 5240, httpsPort: 5241, fingerprint, os: 'test', tray: false }),
   'GET /api/client/discovery': () => json([]),
   'GET /api/client/pairing': () => json({ state: 'idle', serverName: null, serverUrl: null, code: null, message: null, expiresAt: null }),
   'GET /api/client/connection': () => json(connection),
@@ -222,6 +222,50 @@ describe('the role', () => {
 
     await act(async () => hub.emit('SettingsChanged', { ...settings, role: 'both' }));
     await waitFor(() => expect(screen.getByText('Saved').getAttribute('role')).toBe('status'));
+  });
+});
+
+describe('notifications', () => {
+  const withTray = (role: KoppelSettings['role']) => ({
+    ...baseRoutes,
+    'GET /api/settings': () => json({ ...settings, role }),
+    'GET /api/system/info': () =>
+      json({ name: 'bench-pc', version: '1.0.0', startedAt: '2026-01-01T00:00:00Z', role, uiPort: 5240, httpsPort: 5241, fingerprint, os: 'Windows', tray: true }),
+    'PATCH /api/settings': () => accepted(),
+  });
+
+  it('are not offered without a tray icon', async () => {
+    mockFetch(baseRoutes);
+    renderApp(configuration());
+    await screen.findByText('Role');
+
+    expect(screen.queryByText('Notifications')).toBeNull();
+  });
+
+  it('offer pairing on a server, and the link and failed attaches on a client', async () => {
+    mockFetch(withTray('server'));
+    const { unmount } = renderApp(configuration());
+
+    await screen.findByRole('switch', { name: /When a client wants to pair/ });
+    expect(screen.queryByRole('switch', { name: /When the link to the server drops/ })).toBeNull();
+    unmount();
+
+    mockFetch(withTray('client'));
+    renderApp(configuration());
+    await screen.findByRole('switch', { name: /When the link to the server drops/ });
+    expect(screen.getByRole('switch', { name: /When a device does not attach/ })).toBeTruthy();
+    expect(screen.queryByRole('switch', { name: /When a client wants to pair/ })).toBeNull();
+  });
+
+  it('turn one off with a PATCH of that setting, confirmed by the push', async () => {
+    const { calls } = mockFetch(withTray('client'));
+    const { hub } = renderApp(configuration());
+
+    fireEvent.click(await screen.findByRole('switch', { name: /When the link to the server drops/ }));
+    await waitFor(() => expect(calls.filter((c) => c.key === 'PATCH /api/settings').map((c) => c.body)).toEqual([{ notifyLink: false }]));
+
+    await act(async () => hub.emit('SettingsChanged', { ...settings, role: 'client', notifyLink: false }));
+    await waitFor(() => expect((screen.getByRole('switch', { name: /When the link to the server drops/ }) as HTMLInputElement).checked).toBe(false));
   });
 });
 

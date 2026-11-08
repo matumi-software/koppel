@@ -109,4 +109,43 @@ internal static class TrayWire
             return null;
         }
     }
+
+    /// <summary>A notification balloon's title holds 63 characters and its text 255.</summary>
+    public const int MaxTitle = 63;
+    public const int MaxText = 255;
+
+    public static string Notice(TrayNotice notice) =>
+        JsonSerializer.Serialize(new { type = "notice", title = notice.Title, text = notice.Text, page = notice.Page });
+
+    /// <summary>
+    /// The notice in <paramref name="line"/>, or null when it is not one this tray can read. The page must be one of the UI's
+    /// own (<c>#</c> and letters), so a line can never send the browser anywhere else.
+    /// </summary>
+    public static TrayNotice? ReadNotice(string line)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(line);
+            var root = json.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String || type.GetString() != "notice"
+                || !root.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String
+                || !root.TryGetProperty("text", out var text) || text.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var page = root.TryGetProperty("page", out var target) && target.ValueKind == JsonValueKind.String
+                && target.GetString() is { Length: > 1 and <= 32 } value && value[0] == '#' && value[1..].All(char.IsAsciiLetterLower)
+                ? value
+                : "";
+            return new(Cut(title.GetString()!, MaxTitle), Cut(text.GetString()!, MaxText), page);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string Cut(string value, int max) => value.Length <= max ? value : value[..(max - 3)] + "...";
 }

@@ -14,3 +14,8 @@ export function useMachineName(): string {
 export function useKoppelVersion(): string | undefined {
   return useSystemInfo().data?.version;
 }
+
+/** True when this machine has a tray icon (the Windows app), so it can show notifications. False until it loads. */
+export function useHasTray(): boolean {
+  return useSystemInfo().data?.tray ?? false;
+}

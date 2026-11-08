@@ -7,6 +7,12 @@ export interface KoppelSettings {
   role: KoppelRole;
   shareOnStartup: boolean;
   setupComplete: boolean;
+  /** Windows app: the tray icon says when a client is waiting to pair. */
+  notifyPairing: boolean;
+  /** Windows app: the tray icon says when the link to the server is lost, and when it is back. */
+  notifyLink: boolean;
+  /** Windows app: the tray icon says when a device could not be attached. */
+  notifyAttachFailures: boolean;
 }
 
 export type SettingsPatch = Partial<KoppelSettings>;

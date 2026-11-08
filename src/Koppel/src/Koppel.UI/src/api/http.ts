@@ -84,6 +84,8 @@ export interface SystemInfo {
   httpsPort: number;
   fingerprint: string;
   os: string;
+  /** True when this machine has a tray icon (the Windows app), so the UI offers its notification settings. */
+  tray: boolean;
 }
 
 export const getSystemInfo = () => getJson<SystemInfo>('/api/system/info');

@@ -9,10 +9,12 @@ namespace Koppel;
 internal sealed record SystemCheck(string Id, bool Ok, string Title, string Detail);
 
 /// <summary>Facts about this process that never change while it runs. The UI and network ports are the same port unless <c>Ports:Network</c> is set.</summary>
-internal sealed record HostInfo(DateTimeOffset StartedAt, int UiPort, int NetworkPort, int DiscoveryPort);
+/// <param name="Tray">True when Koppel runs as the installed Windows service, which keeps a tray icon in each signed-in session.</param>
+internal sealed record HostInfo(DateTimeOffset StartedAt, int UiPort, int NetworkPort, int DiscoveryPort, bool Tray = false);
 
 /// <summary>What the side panel shows about this machine.</summary>
-internal sealed record SystemInfo(string Name, string Version, DateTimeOffset StartedAt, KoppelRole Role, int UiPort, int HttpsPort, string Fingerprint, string Os);
+/// <param name="Tray">True when this machine has a tray icon, so the UI offers its notification settings.</param>
+internal sealed record SystemInfo(string Name, string Version, DateTimeOffset StartedAt, KoppelRole Role, int UiPort, int HttpsPort, string Fingerprint, string Os, bool Tray);
 
 internal static class SystemEndpoints
 {
@@ -47,7 +49,8 @@ internal static class SystemEndpoints
             info.UiPort,
             info.NetworkPort,
             keys.Fingerprint,
-            OsLabel())));
+            OsLabel(),
+            info.Tray)));
         return app;
     }
 

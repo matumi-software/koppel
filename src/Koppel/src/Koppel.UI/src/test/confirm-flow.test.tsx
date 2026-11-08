@@ -8,7 +8,7 @@ import { settingsKey } from '@/query-keys';
 import { useSettings } from '@/settings/use-settings';
 import { accepted, deferred, json, mockFetch, renderApp } from './harness';
 
-const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true };
+const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
 
 /** A page that changes one setting and shows what the confirm rule says about it. */
 function SettingsPage() {

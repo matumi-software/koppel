@@ -4,6 +4,8 @@
     <SpaRoot>..\Koppel.UI\</SpaRoot>
     <SpaProxyLaunchCommand>pnpm run dev</SpaProxyLaunchCommand>
     <SpaProxyServerUrl>https://localhost:61040</SpaProxyServerUrl>
+    <!-- LibraryImport and the tray icon's window procedure (Tray/) use pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- The Windows icon for Koppel.exe. The Docker build only sees src/, and Linux has no use for it. -->

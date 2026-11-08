@@ -10,18 +10,33 @@ using Koppel.Login;
 using Koppel.Security;
 using Koppel.Server;
 using Koppel.Settings;
+using Koppel.Tray;
 using Koppel.Usb;
 using Koppel.Web;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Skakel.Client;
 using Skakel.Server;
+
+// The tray icon the Windows service starts in each signed-in session (TrayLauncher). It is a separate process that
+// needs none of what follows.
+if (OperatingSystem.IsWindows() && TrayIcon.Requested(args))
+{
+    return TrayIcon.Run(args);
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Runs as a Windows service when the installer registers it as one, and as a systemd service (readiness and
-// journal log levels) when the Linux package starts it; each is a no-op otherwise.
-builder.Host.UseWindowsService(options => options.ServiceName = "Koppel");
+// journal log levels) when the Linux package starts it; each is a no-op otherwise. As a Windows service it also
+// takes the tray icon's shut down control (KoppelServiceLifetime).
+builder.Host.UseWindowsService(options => options.ServiceName = KoppelService.Name);
 builder.Host.UseSystemd();
+var windowsService = OperatingSystem.IsWindows() && WindowsServiceHelpers.IsWindowsService();
+if (OperatingSystem.IsWindows() && windowsService)
+{
+    builder.Services.AddSingleton<IHostLifetime, KoppelServiceLifetime>();
+}
 
 // One HTTPS port, 5240, with the server's own self-signed certificate, serves the UI and everything other
 // Koppel machines do through Skakel, USB traffic included; clients pin the certificate's fingerprint. Ports:Network moves
@@ -34,6 +49,17 @@ var discoveryPort = builder.Configuration.GetValue("Discovery:Port", networkPort
 var listenAddress = ListenAddress.Resolve(builder.Configuration[ListenAddress.Setting]);
 var uiReach = UiAccess.Resolve(builder.Configuration[UiAccess.Setting], builder.Environment.IsDevelopment());
 var setupWindow = UiSetupWindow.Resolve(builder.Configuration[UiSetupWindow.Setting]);
+
+// The tray icon in each signed-in session, only when Koppel runs as the installed Windows service. It opens the UI
+// at the address Kestrel listens on, localhost unless Listen:Address names one.
+if (OperatingSystem.IsWindows() && windowsService)
+{
+    var uiHost = listenAddress is null || listenAddress.Equals(System.Net.IPAddress.Any) || listenAddress.Equals(System.Net.IPAddress.IPv6Any)
+        ? "localhost"
+        : listenAddress.ToString();
+    var uiUrl = new UriBuilder(Uri.UriSchemeHttps, uiHost, uiPort).Uri.AbsoluteUri;
+    TrayLauncher.Add(builder.Services, uiUrl);
+}
 
 // A one-off command for the Docker health check: ask the UI port whether Koppel answers, and exit.
 if (HealthProbe.Requested(args))

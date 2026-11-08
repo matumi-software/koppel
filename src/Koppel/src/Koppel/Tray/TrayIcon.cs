@@ -208,7 +208,7 @@ internal static unsafe class TrayIcon
     private static void ShutDown(nint hwnd)
     {
         const string question = "Shut down Koppel?\n\nDevices this PC shares or has attached stop working until Koppel starts again. "
-            + "It starts again with Windows.";
+            + "It starts again with Windows, or from Koppel in the Start menu.";
         if (MessageBoxW(hwnd, question, "Koppel", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_SETFOREGROUND) != IDYES)
         {
             return;

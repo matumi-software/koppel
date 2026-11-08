@@ -111,6 +111,18 @@ $notices = Join-Path $product 'src\Koppel\THIRD-PARTY-NOTICES.txt'
 Write-Host 'Publishing Koppel...'
 Invoke-Checked { dotnet publish $hostProject -c Release -r win-x64 --self-contained --no-restore -o $staging -p:Version=$Version -p:PublishReadyToRun=true -p:SkipSpaInstall=true -nologo -v q }
 
+# KoppelDesktop.exe, behind the Start menu entry: the same launcher as Koppel.exe (it runs Koppel.dll), marked as a
+# Windows program instead of a console one, so opening the UI from the Start menu shows no console window. Koppel.exe
+# stays a console program for the service and for commands like --reset-password. The subsystem is a 16-bit field
+# 68 bytes into the PE optional header, which starts 24 bytes after the PE signature; it is the same for PE32+.
+$exe = [IO.File]::ReadAllBytes((Join-Path $staging 'Koppel.exe'))
+$pe = [BitConverter]::ToInt32($exe, 0x3C)
+if ([BitConverter]::ToUInt32($exe, $pe) -ne 0x4550) { throw 'Koppel.exe is not a PE file.' }
+$subsystem = $pe + 24 + 68
+if ([BitConverter]::ToUInt16($exe, $subsystem) -ne 3) { throw 'Koppel.exe is not a console program.' }
+$exe[$subsystem] = 2 # IMAGE_SUBSYSTEM_WINDOWS_GUI
+[IO.File]::WriteAllBytes((Join-Path $staging 'KoppelDesktop.exe'), $exe)
+
 $usbipWin2 = Get-ChildItem (Join-Path $installer 'usbip-win2') -Directory | Sort-Object { [version]$_.Name } | Select-Object -Last 1
 if (-not $usbipWin2) { throw 'No usbip-win2 files. Run export-usbip-win2.ps1 first.' }
 Write-Host "Checking usbip-win2 $($usbipWin2.Name)..."

@@ -18,11 +18,16 @@ using Microsoft.Extensions.Hosting.WindowsServices;
 using Skakel.Client;
 using Skakel.Server;
 
-// The tray icon the Windows service starts in each signed-in session (TrayLauncher). It is a separate process that
-// needs none of what follows.
+// The tray icon the Windows service starts in each signed-in session (TrayLauncher), and the Start menu entry that opens
+// the UI (KoppelOpener). Each is a separate process that needs none of what follows.
 if (OperatingSystem.IsWindows() && TrayIcon.Requested(args))
 {
     return TrayIcon.Run(args);
+}
+
+if (OperatingSystem.IsWindows() && KoppelOpener.Requested(args))
+{
+    return KoppelOpener.Run(args);
 }
 
 var builder = WebApplication.CreateBuilder(args);
@@ -51,7 +56,8 @@ var uiReach = UiAccess.Resolve(builder.Configuration[UiAccess.Setting], builder.
 var setupWindow = UiSetupWindow.Resolve(builder.Configuration[UiSetupWindow.Setting]);
 
 // The tray icon in each signed-in session, only when Koppel runs as the installed Windows service. It opens the UI
-// at the address Kestrel listens on, localhost unless Listen:Address names one.
+// at the address Kestrel listens on, localhost unless Listen:Address names one. The Start menu entry reads the same
+// address from the registry.
 if (OperatingSystem.IsWindows() && windowsService)
 {
     var uiHost = listenAddress is null || listenAddress.Equals(System.Net.IPAddress.Any) || listenAddress.Equals(System.Net.IPAddress.IPv6Any)
@@ -59,6 +65,7 @@ if (OperatingSystem.IsWindows() && windowsService)
         : listenAddress.ToString();
     var uiUrl = new UriBuilder(Uri.UriSchemeHttps, uiHost, uiPort).Uri.AbsoluteUri;
     TrayLauncher.Add(builder.Services, uiUrl);
+    KoppelOpener.PublishUiUrl(uiUrl);
 }
 
 // A one-off command for the Docker health check: ask the UI port whether Koppel answers, and exit.

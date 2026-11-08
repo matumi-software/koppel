@@ -36,6 +36,7 @@ internal static unsafe partial class TrayNative
     public const uint MB_YESNO = 0x0004;
     public const uint MB_ICONERROR = 0x0010;
     public const uint MB_ICONQUESTION = 0x0020;
+    public const uint MB_ICONINFORMATION = 0x0040;
     public const uint MB_DEFBUTTON2 = 0x0100;
     public const uint MB_SETFOREGROUND = 0x00010000;
     public const int IDYES = 6;

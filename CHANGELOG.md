@@ -12,6 +12,11 @@ Breaking changes known so far:
 - There is no way back from 0.2.0 to 0.1.x: the Skakel protocol changes too, so a 0.2 data folder is not for 0.1.x.
 - The UI's live updates use Server-Sent Events at `/api/events` instead of SignalR at `/api/hubs/ui`.
 
+Other changes:
+
+- The Koppel mark in the UI draws the K in the text colour and keeps only its circle in canopy green, part of the
+  Matumi rebrand. The app icon does not change.
+
 ## 0.1.2 (2026-11-09)
 
 - The Windows app has a Koppel icon in the notification area for every signed-in user, the way Apollo does it. Click it

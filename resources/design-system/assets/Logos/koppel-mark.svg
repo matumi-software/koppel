@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Koppel">
-  <g fill="#2A6B4E" stroke="#2A6B4E">
+  <g fill="#1C1B18" stroke="#1C1B18">
     <rect x="9" y="8" width="11" height="48" rx="2" stroke="none"/>
     <path d="M20 32 L41 15" stroke-width="9" fill="none"/>
     <path d="M20 32 L41.7 47.8" stroke-width="9" fill="none"/>
-    <circle cx="46" cy="12" r="8" stroke="none"/>
     <path d="M53 56 L35.6 54.5 L46.2 39.9 Z" stroke-width="3" stroke-linejoin="round"/>
   </g>
+  <circle cx="46" cy="12" r="8" fill="#2A6B4E"/>
 </svg>

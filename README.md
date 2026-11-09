@@ -7,9 +7,9 @@ around it. A machine runs as a server (shares its devices), a client (attaches t
 find servers on the local network and pair by typing a code, so nobody copies secrets around.
 
 Status: version 0.2.0 is the latest release, early: a rewrite in Rust with the same UI and features, a few MB
-instead of about 100. On real hardware, a Debian 13 server in Docker shares two USB receivers to a native
-Windows 11 client, through an upgrade from 0.1.x, a 75 second network drop, and detaching and attaching by
-hand. Not yet run on real hardware with 0.2.0: a Linux client, a Windows server through usbipd-win, and a
+instead of about 100. On real hardware, a Debian 13 server in Docker shares two USB receivers and a flash
+drive to a native Windows 11 client, through an upgrade from 0.1.x, a 75 second network drop, and detaching
+and attaching by hand. A 0.2.0 machine and a 0.1.x machine cannot link, so update both ends. Not yet run on real hardware with 0.2.0: a Linux client, a Windows server through usbipd-win, and a
 Raspberry Pi (the Pi Zero build has only run under emulation). Printers are untried, and webcams do not
 stream from a Linux server to a Windows client yet. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests; releases are tags on `main`.
 
@@ -22,8 +22,9 @@ stream from a Linux server to a Windows client yet. See [CHANGELOG.md](CHANGELOG
 
 ## Run it on Linux
 
-The image is `matumisoftware/koppel` on Docker Hub, for amd64 and arm64. A Raspberry Pi needs the 64-bit
-Raspberry Pi OS, which the script below treats as Debian.
+The image is `matumisoftware/koppel` on Docker Hub, for amd64, arm64 and arm/v6. On a Raspberry Pi, the
+script below treats Raspberry Pi OS as Debian; it has been tried on the 64-bit one. For a Pi Zero, the
+armhf `.deb` below is the simpler way.
 
 1. Copy [src/installer/docker/prepare-host.sh](src/installer/docker/prepare-host.sh) to the machine and
    run it once. It installs Docker from Docker's apt repository (Debian and Ubuntu) and loads the kernel's USB/IP
@@ -133,7 +134,8 @@ the UI within 10 minutes and set a new password.
 
 ## Help test Koppel
 
-Koppel is young, and every report helps. The most useful things to send:
+Koppel is young, and every report helps; [#42](https://github.com/matumi-software/koppel/issues/42) lists
+what is most wanted. The most useful things to send:
 
 - **Which devices work.** Tried a device, whether it worked or not? Open a
   [device report](https://github.com/matumi-software/koppel/issues/new?template=device-report.yml) with its

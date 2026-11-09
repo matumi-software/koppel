@@ -1,6 +1,7 @@
 # nfpm config for Koppel's .deb from the Rust build. Built by the linux-packages target of
 # src/koppel-bin/Dockerfile (see build.ps1), which sets VERSION from the workspace version in src/Cargo.toml,
-# ARCH to amd64, arm64 or armhf, and puts that architecture's static binary at /stage/koppel.
+# ARCH to amd64, arm64 or armhf, puts that architecture's static binary at /stage/koppel and the third-party
+# notices at /notices/THIRD-PARTY-NOTICES.txt.
 name: koppel
 arch: ${ARCH}
 platform: linux
@@ -31,7 +32,8 @@ contents:
     dst: /usr/lib/koppel/koppel-open
     file_info:
       mode: 0755
-  - src: /usr/lib/koppel/koppel
+  # Relative, as Debian's policy asks of a link within one top-level folder.
+  - src: ../lib/koppel/koppel
     dst: /usr/bin/koppel
     type: symlink
   - src: ./koppel.service
@@ -80,6 +82,20 @@ contents:
       mode: 0644
   - src: ./icons/koppel-256.png
     dst: /usr/share/icons/hicolor/256x256/apps/koppel.png
+    file_info:
+      mode: 0644
+  # Koppel's licence in Debian's machine-readable format, pointing at the notices for the third-party code.
+  - src: ./copyright
+    dst: /usr/share/doc/koppel/copyright
+    file_info:
+      mode: 0644
+  - src: ./lintian-overrides
+    dst: /usr/share/lintian/overrides/koppel
+    file_info:
+      mode: 0644
+  # Written in the Dockerfile's notices stage by src/installer/notices/new-notices.ps1, as for Windows.
+  - src: /notices/THIRD-PARTY-NOTICES.txt
+    dst: /usr/share/doc/koppel/THIRD-PARTY-NOTICES.txt
     file_info:
       mode: 0644
 

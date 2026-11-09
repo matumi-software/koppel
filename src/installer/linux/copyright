@@ -1,0 +1,26 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Koppel
+Upstream-Contact: Matumi Software <https://github.com/matumi-software/koppel>
+Source: https://github.com/matumi-software/koppel
+Comment: /usr/lib/koppel/koppel is a static program that also carries the Rust
+ crates and the UI's npm packages it is built from. Each of them, with its
+ version, licence, copyright holders and licence text, is listed in
+ /usr/share/doc/koppel/THIRD-PARTY-NOTICES.txt, which the build writes from the
+ crates and packages themselves.
+
+Files: *
+Copyright: 2026 Matumi Software
+License: GPL-3.0-or-later
+
+License: GPL-3.0-or-later
+ This program is free software: you can redistribute it and/or modify it under
+ the terms of the GNU General Public License as published by the Free Software
+ Foundation, either version 3 of the License, or (at your option) any later
+ version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ .
+ On Debian systems, the complete text of the GNU General Public License
+ version 3 can be found in "/usr/share/common-licenses/GPL-3".

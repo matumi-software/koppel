@@ -28,7 +28,9 @@ Linux packages and the image:
   capabilities but binding a low port, and `/dev` limited to USB devices. `systemd-analyze security koppel`
   scores 2.1 instead of 9.4.
 - The image is built on distroless (no shell) for amd64, arm64 and arm/v6, about 4 MB instead of about
-  100 MB. It no longer has a health check.
+  100 MB. Its health check is `koppel --healthcheck`, as in 0.1.x.
+- The `.deb` and the image carry the third-party notices at `/usr/share/doc/koppel/THIRD-PARTY-NOTICES.txt`, and
+  the `.deb` a Debian copyright file beside them.
 
 Other changes:
 

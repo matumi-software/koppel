@@ -351,7 +351,7 @@ installs 11 MB.
 - **Driver:** `driver.ps1` installs usbip-win2's driver after the files and before the service starts. Its output goes to the MSI log (`msiexec /l*v`), not to a file on disk. pnputil may say a restart finishes the driver install: the installer then asks for a restart. It records the packages and the device node it installed in `%ProgramData%\Koppel\driver-state.json`, and uninstall removes only those, and only the ones Windows still lists with an original name of `usbip2_*.inf` (it reads the driver store through `pnputil /enum-drivers /format xml`, then `Get-WindowsDriver`, so a non-English Windows works). The record is used only if an administrator owns it and nobody else can write to it. A restart that pnputil asks for on uninstall is reported to the MSI too.
 - **A standalone usbip-win2** (under Program Files\USBip or in the Apps list) is detected first (whatever the record says), logged, used, and left alone: Koppel never changes or removes its driver or device node. A machine with drivers but no record and no standalone usbip-win2 is treated as an earlier Koppel install and adopted. An uninstall with no record leaves the driver in place and says how to remove it by hand.
 - **Failure and upgrade:** a fresh install that fails after the driver went in removes the driver again. An upgrade keeps the driver and updates it in place; the driver removal is skipped when an upgrade replaces the product. A same-version MSI replaces the installed one, which keeps a rebuilt dev installer from installing next to the last. A driver that will not come out never blocks an uninstall: the script prints a `WARNING:` with the manual `pnputil` command, and the MSI log has the output. An upgrade from an installer older than this one still runs that old installer's uninstall once, and it removes the driver by name.
-- **Notices:** `src/installer/windows/new-notices.ps1 -Rust` writes `THIRD-PARTY-NOTICES.txt` into the staging folder: Koppel's licence, every Rust crate in the two programs for `x86_64-pc-windows-msvc` from cargo-about (`src/installer/windows/about.toml` lists the licences it accepts, and any other stops the build) with the licence texts found in each crate, and the npm packages the UI bundles. `build.ps1` appends usbip-win2's, CLI11's and the Visual C++ runtime's. It ships in the MSI and behind the bundle's licence link. The 0.1.x file at `src/Koppel/src/Koppel/` (NuGet, npm, .NET) stays for the C# image.
+- **Notices:** `src/installer/notices/new-notices.ps1 -Rust -Target x86_64-pc-windows-msvc` writes `THIRD-PARTY-NOTICES.txt` into the staging folder: Koppel's licence, every Rust crate in the two programs for `x86_64-pc-windows-msvc` from cargo-about (`src/installer/notices/about.toml` lists the licences it accepts, and any other stops the build) with the licence texts found in each crate, and the npm packages the UI bundles. `build.ps1` appends usbip-win2's, CLI11's and the Visual C++ runtime's. It ships in the MSI and behind the bundle's licence link. The Linux build uses the same script and `about.toml` (see "Linux packages and the image in Rust"). The 0.1.x file at `src/Koppel/src/Koppel/` (NuGet, npm, .NET) stays for the C# image.
 
 ## Building and releasing
 
@@ -387,7 +387,7 @@ To release:
 1. Set `<Version>` in `src/Directory.Build.props`.
 2. Set the image tag in the three deploy composes (`deploy/docker-compose.yml`, `docker-compose.windows-client.yml`, `docker-compose.windows-server.yml`) and the `KOPPEL_TAG` default in `src/Koppel/docker-compose.yml`.
 3. Regenerate the lock files if any package changed.
-4. For a new usbip-win2 version, run `src/installer/windows/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `src/installer/windows/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from. Run `src/installer/windows/new-notices.ps1` when packages changed.
+4. For a new usbip-win2 version, run `src/installer/windows/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `src/installer/windows/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from. Run `src/installer/notices/new-notices.ps1` when packages changed.
 5. Add the version to `CHANGELOG.md`.
 6. Build and push the image for both architectures, from `src/`, with the version and `latest`:
 
@@ -459,8 +459,8 @@ linker (ring has C and assembly), for `x86_64-unknown-linux-musl`, `aarch64-unkn
 every 32-bit Raspberry Pi runs, the Zero and the Pi 1 included. Everything compiles on the build machine's
 own architecture, so nothing runs under emulation, and one build serves all three platforms.
 
-- **Pins:** every image by tag and digest (node, rust, nfpm, distroless), cargo-zigbuild and pnpm by
-  version, Zig by version and checksum. The Dockerfile's header says how to bump them.
+- **Pins:** every image by tag and digest (node, rust, nfpm, distroless), cargo-zigbuild, cargo-about and
+  pnpm by version, Zig and PowerShell by version and checksum. The Dockerfile's header says how to bump them.
 - **Why cargo-zigbuild:** `cross` runs a container per target, so inside a Docker build it needs Docker in
   Docker, and its last release is from 2023. Per-target gcc toolchains mean a musl cross compiler for each
   target to fetch and pin; Debian has none for ARMv6. One Zig covers every target.
@@ -477,8 +477,22 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   `/var/lib/koppel` (the first start converts the 0.1.x secret files, see "Config files in Rust"):
   `/usr/lib/koppel/koppel` with `/usr/bin/koppel` linked to it, `koppel.service`,
   `/usr/lib/modules-load.d/koppel.conf`, and the same install, remove and purge scripts as 0.1.x. It depends
-  on nothing, since the binary is static. New in it: the applications menu entry (#68) and the systemd
-  watchdog and hardening (#71, #72) below.
+  on nothing, since the binary is static. New in it: the applications menu entry (#68), the systemd
+  watchdog and hardening (#71, #72) below, and the notices and copyright file (#100).
+- **Notices and copyright (#100):** `/usr/share/doc/koppel/THIRD-PARTY-NOTICES.txt`, in the `.deb` and in
+  the image, comes from the Windows installer's script and licence policy (`src/installer/notices`), so both
+  list the same way: Koppel's licence, every crate in the binaries with its licence text, and the npm
+  packages the UI bundles. The Dockerfile's `crate-licences` stage runs cargo-about with `about.toml` for the
+  three Linux targets, where cargo and the crates' sources are, and the `notices` stage runs
+  `new-notices.ps1 -AboutJson` under PowerShell for Linux on top of the UI stage, where pnpm and the UI's
+  packages are. The build context is `src/`, so Koppel's licence text comes from Debian's
+  `/usr/share/common-licenses/GPL-3`, which is the same text as the repo's `LICENSE`. One file covers all
+  three architectures. `/usr/share/doc/koppel/copyright` (`src/installer/linux/copyright`) is in Debian's
+  machine-readable format: Koppel under GPL-3.0-or-later, and a pointer to the notices for the third-party
+  code inside the binary. `/usr/bin/koppel` is a relative link, and a lintian override says the binary is
+  static on purpose. Debian 13's lintian still reports a maintainer without an email address, no
+  `changelog.gz`, `systemctl` called straight from the scripts rather than through `deb-systemd-helper`, and
+  no man page.
 - **Applications menu (#68):** `/usr/share/applications/koppel.desktop` with Koppel's icon in
   `/usr/share/icons/hicolor` (16 to 256 px and the SVG, rendered by `pnpm design:icons` into
   `src/installer/linux/icons`). It runs `/usr/lib/koppel/koppel-open`, which opens
@@ -501,8 +515,16 @@ own architecture, so nothing runs under emulation, and one build serves all thre
 - **Image (#90):** `gcr.io/distroless/static-debian13:nonroot`: root certificates, time zone data, the
   nonroot user (65532), no shell and no libc, with Koppel at `/usr/local/bin/koppel` and the `/koppel`
   volume as in 0.1.x. distroless publishes arm only as `arm/v7`, but static holds no programs, so the
-  `arm/v6` image takes those files as they are (its package list then says armhf). There is no health check
-  yet: the image has no shell or curl, and Koppel has no `--healthcheck` of its own as 0.1.x did.
+  `arm/v6` image takes those files as they are (its package list then says armhf).
+- **Health check (#100):** the image has no shell or curl, so `HEALTHCHECK` runs `koppel --healthcheck`
+  (`koppel-bin/src/healthcheck.rs`), as 0.1.x's image ran its `HealthProbe`, with the same timings (every
+  30 s, 10 s timeout, 40 s start period, 3 retries). It starts no server: it reads `Ports:Ui` and
+  `Ports:Address` as the server does, sends `GET /healthz` over HTTPS to that address (loopback for an
+  any-address), then to 127.0.0.1, and exits 0 on 200 and 1 otherwise. An address that cannot be reached
+  passes to the next; one that takes the connection and does not answer within 5 s fails the check. The
+  certificate is not checked, as in 0.1.x: it is Koppel's own self-signed one, the probe sends nothing
+  secret, and it only asks whether Koppel is up. The client is hyper's HTTP/1.1 half on the rustls the
+  server already carries, so no crate was added.
 - **Composes:** they keep naming `matumisoftware/koppel:0.1.2` and building the C# Dockerfile until 0.2.0
   is released; the image name stays and its run options do not change. `src/Koppel/src/Koppel/Dockerfile`
   and `src/Koppel/installer/linux` still build 0.1.x.

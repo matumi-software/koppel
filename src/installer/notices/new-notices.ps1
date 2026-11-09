@@ -16,35 +16,50 @@ licenses\. A licence with no text there stops the script, so a new one is notice
 The result is committed as src\Koppel\src\Koppel\THIRD-PARTY-NOTICES.txt and published with the C# host, so
 it is in the 0.1.x Docker image.
 
--Rust is for the Rust build (0.2.0), which the Windows installer ships: every crate in Koppel.exe and
-KoppelDesktop.exe for x86_64-pc-windows-msvc, from cargo-about (cargo install cargo-about --locked), checked
-against the licences about.toml accepts, with the licence texts cargo-about finds in each crate, and the npm
-packages the UI bundles. build.ps1 writes it into the staging folder, not the source tree, then adds the
-Windows-only notices.
+-Rust is for the Rust build (0.2.0): every crate in the programs for the -Target triples, from cargo-about
+(cargo install cargo-about --locked --features cli), checked against the licences about.toml accepts, with
+the licence texts cargo-about finds in each crate, and the npm packages the UI bundles. The Windows
+installer's build.ps1 runs it for x86_64-pc-windows-msvc (Koppel.exe and KoppelDesktop.exe), writes it into
+the staging folder, not the source tree, then adds the Windows-only notices. The Linux build
+(src\koppel-bin\Dockerfile) runs it under PowerShell on Linux for the .deb files and the image. There cargo
+and pnpm live in different stages, so the Dockerfile runs cargo-about with the same about.toml and passes
+the JSON in with -AboutJson. It also passes Debian's copy of the GPL with -License, since the build sees
+only src\ and not the repo's LICENSE (the two are the same text).
+
+This folder is shared by both builds: the script, about.toml and the standard licence texts in licenses\.
 
 .EXAMPLE
 .\new-notices.ps1 -Output ..\..\Koppel\src\Koppel\THIRD-PARTY-NOTICES.txt
-.\new-notices.ps1 -Rust -Output obj\staging\THIRD-PARTY-NOTICES.txt
+.\new-notices.ps1 -Rust -Output ..\windows\obj\staging\THIRD-PARTY-NOTICES.txt
+pwsh new-notices.ps1 -Rust -Target x86_64-unknown-linux-musl -Output /tmp/THIRD-PARTY-NOTICES.txt
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$Output,
-    [switch]$Rust
+    [switch]$Rust,
+    # -Rust: the targets whose crates are listed. Several are merged into one list.
+    [string[]]$Target = @('x86_64-pc-windows-msvc'),
+    # -Rust: cargo-about's JSON, already written, instead of running cargo-about here.
+    [string]$AboutJson,
+    # Koppel's licence text, the repo's LICENSE by default.
+    [string]$License
 )
 
 $ErrorActionPreference = 'Stop'
-$installer = $PSScriptRoot
-# src\installer\windows: two folders up is src\, three the repo.
-$src = Split-Path (Split-Path $installer)
+$notices = $PSScriptRoot
+# src\installer\notices: two folders up is src\, three the repo.
+$src = Split-Path (Split-Path $notices)
 $repo = Split-Path $src
+if (-not $License) { $License = Join-Path $repo 'LICENSE' }
 $assetsPath = Join-Path $src 'Koppel\src\Koppel\obj\project.assets.json'
-$uiFolder = Join-Path $src 'ui\app'
+# Join-Path one folder at a time, so the paths work under PowerShell on Linux too.
+$uiFolder = Join-Path (Join-Path $src 'ui') 'app'
 $nl = "`n"
 
 if (-not $Rust -and -not (Test-Path $assetsPath)) { throw "$assetsPath is missing. Run: dotnet restore src\Koppel\src\Koppel\Koppel.csproj -r win-x64" }
 
 function Get-StandardText([string]$spdx) {
-    $file = Join-Path $installer "licenses\$spdx.txt"
+    $file = Join-Path (Join-Path $notices 'licenses') "$spdx.txt"
     if (-not (Test-Path $file)) { throw "No standard text for the licence '$spdx'. Add licenses\$spdx.txt (from https://github.com/spdx/license-list-data)." }
     (Get-Content $file -Raw).Trim()
 }
@@ -92,11 +107,17 @@ foreach ($lib in $assets.libraries.PSObject.Properties) {
 # ---- Rust crates (cargo-about) ----
 $rustTexts = @()
 if ($Rust) {
-    $about = Join-Path $env:TEMP "koppel-about-$PID.json"
-    & cargo about generate --format json -c (Join-Path $installer 'about.toml') -m (Join-Path $src 'koppel-bin\Cargo.toml') -o $about
-    if ($LASTEXITCODE -ne 0) { throw 'cargo about failed. Install it with: cargo install cargo-about --locked. A licence about.toml does not accept stops it too.' }
-    $report = Get-Content $about -Raw -Encoding utf8 | ConvertFrom-Json
-    Remove-Item $about
+    if ($AboutJson) {
+        $report = Get-Content $AboutJson -Raw -Encoding utf8 | ConvertFrom-Json
+    }
+    else {
+        $about = Join-Path ([IO.Path]::GetTempPath()) "koppel-about-$PID.json"
+        $targets = $Target | ForEach-Object { '--target'; $_ }
+        & cargo about generate --format json -c (Join-Path $notices 'about.toml') -m (Join-Path (Join-Path $src 'koppel-bin') 'Cargo.toml') @targets -o $about
+        if ($LASTEXITCODE -ne 0) { throw 'cargo about failed. Install it with: cargo install cargo-about --locked --features cli. A licence about.toml does not accept stops it too.' }
+        $report = Get-Content $about -Raw -Encoding utf8 | ConvertFrom-Json
+        Remove-Item $about
+    }
     foreach ($crate in $report.crates) {
         $package = $crate.package
         # Koppel's own crates are covered by Koppel's licence above.
@@ -147,7 +168,7 @@ License for more details.
 Source code: https://github.com/matumi-software/koppel
 '@)
 $out.Add('')
-$out.Add((Get-Content (Join-Path $repo 'LICENSE') -Raw).Trim())
+$out.Add((Get-Content $License -Raw).Trim())
 $out.Add('')
 
 $sources = if ($Rust) { 'Rust', 'npm' } else { 'NuGet', 'npm' }

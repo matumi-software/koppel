@@ -1,9 +1,8 @@
-# The Rust Koppel, beside the C# until it matches it. The program's package is `koppel`, in
-# `koppel-bin` because `koppel` and the C# `Koppel` folder are the same folder on Windows.
+# Koppel's Cargo workspace. The program is the `koppel` package, in `koppel/`.
 [workspace]
 resolver = "3"
 members = [
-    "koppel-bin",
+    "koppel",
     "koppel-config",
     "koppel-contract",
     "koppel-usb",
@@ -107,7 +106,7 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_Shell",
 ] }
 
-# Telling systemd that Koppel is ready, stopping and still healthy (koppel-bin, Linux only): sd-notify
+# Telling systemd that Koppel is ready, stopping and still healthy (koppel, Linux only): sd-notify
 # (MIT OR Apache-2.0), pure Rust on libc, which is already here.
 sd-notify = "0.5.0"
 

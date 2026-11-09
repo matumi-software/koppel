@@ -4,7 +4,7 @@ Builds the Rust Koppel's Linux packages, bin\koppel_<version>_{amd64,arm64,armhf
 multi-platform image, kept on this machine.
 
 .DESCRIPTION
-Runs src\koppel-bin\Dockerfile, so it needs Docker and nothing else. The linux-packages target builds the UI,
+Runs src\koppel\Dockerfile, so it needs Docker and nothing else. The linux-packages target builds the UI,
 cross-compiles static binaries for amd64, arm64 and armv6 with cargo-zigbuild, and packages each with nfpm and
 the files in this folder. The version is the workspace version in src\Cargo.toml.
 
@@ -25,7 +25,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $linux = $PSScriptRoot
 $src = Split-Path (Split-Path $linux)
-$dockerfile = Join-Path $src 'koppel-bin\Dockerfile'
+$dockerfile = Join-Path $src 'koppel\Dockerfile'
 $out = Join-Path $linux 'bin'
 
 # docker writes its progress to stderr, which Windows PowerShell turns into errors when it is redirected; under

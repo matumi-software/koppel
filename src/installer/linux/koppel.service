@@ -5,7 +5,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
-# Koppel tells systemd when it is ready and when it stops (koppel-bin/src/systemd.rs).
+# Koppel tells systemd when it is ready and when it stops (koppel/src/systemd.rs).
 Type=notify
 ExecStart=/usr/lib/koppel/koppel
 WorkingDirectory=/usr/lib/koppel

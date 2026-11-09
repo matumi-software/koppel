@@ -13,7 +13,7 @@ there stops the script, so a new one is noticed and not skipped.
 
 The Windows installer's build.ps1 runs it for x86_64-pc-windows-msvc (Koppel.exe and KoppelDesktop.exe), writes it into
 the staging folder, not the source tree, then adds the Windows-only notices. The Linux build
-(src\koppel-bin\Dockerfile) runs it under PowerShell on Linux for the .deb files and the image. There cargo
+(src\koppel\Dockerfile) runs it under PowerShell on Linux for the .deb files and the image. There cargo
 and pnpm live in different stages, so the Dockerfile runs cargo-about with the same about.toml and passes
 the JSON in with -AboutJson. It also passes Debian's copy of the GPL with -License, since the build sees
 only src\ and not the repo's LICENSE (the two are the same text).
@@ -68,7 +68,7 @@ if ($AboutJson) {
 else {
     $about = Join-Path ([IO.Path]::GetTempPath()) "koppel-about-$PID.json"
     $targets = $Target | ForEach-Object { '--target'; $_ }
-    & cargo about generate --format json -c (Join-Path $notices 'about.toml') -m (Join-Path (Join-Path $src 'koppel-bin') 'Cargo.toml') @targets -o $about
+    & cargo about generate --format json -c (Join-Path $notices 'about.toml') -m (Join-Path (Join-Path $src 'koppel') 'Cargo.toml') @targets -o $about
     if ($LASTEXITCODE -ne 0) { throw 'cargo about failed. Install it with: cargo install cargo-about --locked --features cli. A licence about.toml does not accept stops it too.' }
     $report = Get-Content $about -Raw -Encoding utf8 | ConvertFrom-Json
     Remove-Item $about

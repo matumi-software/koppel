@@ -13,8 +13,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
 
-// This file sits in src/Koppel.Core/tools; the repo root is three levels up.
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+// This file sits in src/tools; the repo root is two levels up.
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const logos = join(root, 'resources', 'design-system', 'assets', 'Logos');
 const svg = readFileSync(join(logos, 'koppel-app-icon.svg'));
 

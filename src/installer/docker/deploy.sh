@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the Koppel image here and runs it on another machine over SSH. No registry needed.
-#   bash src/Koppel/deploy/deploy.sh user@thin-client
+#   bash src/installer/docker/deploy.sh user@thin-client
 #
 # The target needs Docker and the USB/IP modules: run prepare-host.sh there once first.
 # The image is built for this machine's architecture; the script stops if the target differs.
@@ -20,11 +20,9 @@ fi
 # The image name and tag come from the deploy compose, the file that runs on the target, so what is built and
 # saved here is exactly what that compose looks for (and, with its pull_policy, never pulls over).
 image="$(docker compose -f "$here/docker-compose.yml" config --images)"
-tag="${image##*:}"
 
 echo "Building $image..."
-# An empty DOCKER_REGISTRY keeps a registry set in this shell out of the image name.
-DOCKER_REGISTRY= KOPPEL_TAG="$tag" docker compose -f "$src/Koppel/docker-compose.yml" build
+docker build -f "$src/koppel-bin/Dockerfile" -t "$image" "$src"
 
 echo "Copying $image to $target..."
 docker save "$image" | gzip | ssh "$target" 'gunzip | docker load'

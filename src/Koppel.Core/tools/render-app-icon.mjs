@@ -1,11 +1,13 @@
-// Renders the app icon in resources/design-system/assets/Logos for Windows:
+// Renders the app icon in resources/design-system/assets/Logos for Windows and Linux:
 //
 //   koppel-app-icon.svg -> koppel-app-icon.ico      (16 to 256 px: Apps list, setup.exe, Koppel.exe)
 //                       -> koppel-app-icon-64.png   (the logo in the setup window)
+//                       -> src/installer/linux/icons (the .deb's applications menu entry: hicolor PNGs
+//                          from 16 to 256 px, and the SVG as the scalable one)
 //
 // Run from src/: pnpm design:icons. Commit the generated files.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
@@ -39,3 +41,13 @@ sizes.forEach((size, i) => {
 writeFileSync(join(logos, 'koppel-app-icon.ico'), Buffer.concat([header, ...images]));
 writeFileSync(join(logos, 'koppel-app-icon-64.png'), render(64));
 console.log(`Rendered koppel-app-icon.ico (${sizes.join(', ')} px) and koppel-app-icon-64.png`);
+
+// The Linux package's icons, named as they go into /usr/share/icons/hicolor/<size>/apps/koppel.png.
+const linux = join(root, 'src', 'installer', 'linux', 'icons');
+const linuxSizes = [16, 22, 24, 32, 48, 64, 128, 256];
+mkdirSync(linux, { recursive: true });
+for (const size of linuxSizes) {
+  writeFileSync(join(linux, `koppel-${size}.png`), render(size));
+}
+writeFileSync(join(linux, 'koppel.svg'), svg);
+console.log(`Rendered the Linux icons (${linuxSizes.join(', ')} px and the SVG) in src/installer/linux/icons`);

@@ -1,0 +1,76 @@
+[Unit]
+Description=Koppel, USB over IP
+Documentation=https://github.com/matumi-software/koppel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Koppel tells systemd when it is ready and when it stops (koppel-bin/src/systemd.rs).
+Type=notify
+ExecStart=/usr/lib/koppel/koppel
+WorkingDirectory=/usr/lib/koppel
+# Root: binding devices to usbip-host and attaching through vhci-hcd writes to files in /sys that only
+# root may write. The settings below take away what Koppel does not need.
+User=root
+# Config and keys go to /var/lib/koppel, Koppel's default on Linux. Koppel locks both folders to root itself.
+StateDirectory=koppel
+StateDirectoryMode=0700
+# Settings as environment variables, e.g. Ports__Ui=5250 or Ui__AllowFrom=lan. Optional file. A config
+# folder moved out of /var/lib/koppel (Paths__Config, Paths__Keys) also needs a ReadWritePaths= for it in a
+# drop-in (systemctl edit koppel), since ProtectSystem=strict below makes the rest of the disk read-only.
+EnvironmentFile=-/etc/default/koppel
+Restart=always
+RestartSec=5
+# Koppel sends a heartbeat at half this interval while it answers its own /healthz, and systemd restarts it
+# when a whole interval passes without one (a hang, not only an exit). Generous for a Raspberry Pi Zero.
+WatchdogSec=30
+
+# Hardening. `systemd-analyze security koppel` shows what each setting is worth.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+# Koppel never loads a module itself: the package's modules-load.d file loads usbip-host and vhci-hcd at
+# boot, and the install script loads them once.
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+UMask=0077
+# TCP and UDP for the ports and discovery, Unix sockets for systemd's notify socket, netlink to list the
+# network interfaces.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Root writes the usbip and vhci files in /sys and the usbfs nodes as their owner, so it needs no
+# capability for them. CAP_NET_BIND_SERVICE is for a port below 1024 set in /etc/default/koppel.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# Only the usbfs nodes (/dev/bus/usb/BBB/DDD, char-usb_device), which Koppel opens to reset a device it
+# shares, and the standard pseudo devices such as /dev/null.
+DevicePolicy=closed
+DeviceAllow=char-usb_device rw
+
+# Left out, and why:
+# - ProtectKernelTunables=yes makes all of /sys read-only, and Koppel writes there: usbip-host's
+#   match_busid, bind and unbind, a device's driver/unbind and usbip_sockfd, drivers_probe, and
+#   vhci_hcd's attach and detach. ReadWritePaths= cannot open those up again, because a device's folder
+#   is under /sys/devices/... at a path that changes with every plug.
+# - PrivateDevices=yes hides /dev/bus/usb, which the device reset needs. DeviceAllow= above limits /dev
+#   instead.
+# - PrivateUsers=yes maps root to an unprivileged user, so the root-owned files in /sys could no longer be
+#   written.
+# - PrivateNetwork=yes and IPAddressDeny= would cut Koppel off the network it serves.
+# - User=/DynamicUser=: see User=root above.
+
+[Install]
+WantedBy=multi-user.target

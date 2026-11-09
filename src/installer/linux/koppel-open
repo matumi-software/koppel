@@ -1,0 +1,13 @@
+#!/bin/sh
+# Opens Koppel's UI in the user's browser, from the applications menu entry (koppel.desktop). The port is
+# Ports__Ui from /etc/default/koppel, where the service reads its settings, or 5240. The names are matched
+# without regard to case, as Koppel reads them.
+port=5240
+if [ -r /etc/default/koppel ]; then
+  value=$(sed -n 's/^[[:space:]]*ports__ui[[:space:]]*=[[:space:]]*//Ip' /etc/default/koppel | tail -n 1 | tr -d "\"' \r")
+  case "$value" in
+    '' | *[!0-9]*) ;;
+    *) port=$value ;;
+  esac
+fi
+exec xdg-open "https://localhost:$port/"

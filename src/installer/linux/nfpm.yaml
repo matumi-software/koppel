@@ -1,0 +1,89 @@
+# nfpm config for Koppel's .deb from the Rust build. Built by the linux-packages target of
+# src/koppel-bin/Dockerfile (see build.ps1), which sets VERSION from the workspace version in src/Cargo.toml,
+# ARCH to amd64, arm64 or armhf, and puts that architecture's static binary at /stage/koppel.
+name: koppel
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: net
+priority: optional
+maintainer: Matumi Software <https://github.com/matumi-software/koppel>
+vendor: Matumi Software
+homepage: https://github.com/matumi-software/koppel
+license: GPL-3.0-or-later
+description: |-
+  Share USB devices over the network.
+  Koppel shares USB devices from a server to clients over USB/IP, carried over
+  TLS, with a web UI on port 5240. It runs as the koppel systemd service.
+
+# The binary is static (musl), so the package depends on nothing: no libc, OpenSSL or ICU. xdg-open opens the
+# UI from the applications menu entry; a server without a desktop has no use for it.
+suggests:
+  - xdg-utils
+
+# A Windows checkout gives every file in the build context mode 0755, so each file sets its own.
+contents:
+  - src: /stage/koppel
+    dst: /usr/lib/koppel/koppel
+    file_info:
+      mode: 0755
+  - src: ./koppel-open
+    dst: /usr/lib/koppel/koppel-open
+    file_info:
+      mode: 0755
+  - src: /usr/lib/koppel/koppel
+    dst: /usr/bin/koppel
+    type: symlink
+  - src: ./koppel.service
+    dst: /usr/lib/systemd/system/koppel.service
+    file_info:
+      mode: 0644
+  - src: ./modules-load.conf
+    dst: /usr/lib/modules-load.d/koppel.conf
+    file_info:
+      mode: 0644
+  - src: ./koppel.desktop
+    dst: /usr/share/applications/koppel.desktop
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/koppel.svg
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-16.png
+    dst: /usr/share/icons/hicolor/16x16/apps/koppel.png
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-22.png
+    dst: /usr/share/icons/hicolor/22x22/apps/koppel.png
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-24.png
+    dst: /usr/share/icons/hicolor/24x24/apps/koppel.png
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-32.png
+    dst: /usr/share/icons/hicolor/32x32/apps/koppel.png
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-48.png
+    dst: /usr/share/icons/hicolor/48x48/apps/koppel.png
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-64.png
+    dst: /usr/share/icons/hicolor/64x64/apps/koppel.png
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-128.png
+    dst: /usr/share/icons/hicolor/128x128/apps/koppel.png
+    file_info:
+      mode: 0644
+  - src: ./icons/koppel-256.png
+    dst: /usr/share/icons/hicolor/256x256/apps/koppel.png
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: ./postinstall.sh
+  preremove: ./preremove.sh
+  postremove: ./postremove.sh

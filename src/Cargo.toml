@@ -2,7 +2,7 @@
 # `koppel-bin` because `koppel` and the C# `Koppel` folder are the same folder on Windows.
 [workspace]
 resolver = "3"
-members = ["koppel-bin", "koppel-web"]
+members = ["koppel-bin", "koppel-contract", "koppel-web"]
 
 [workspace.package]
 version = "0.2.0"
@@ -42,3 +42,11 @@ flate2 = "1.1.11"
 # `Targets` filter reads the usual RUST_LOG form of `level` and `target=level` without one.
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi", "std"] }
+
+# The contract tests only (`koppel-contract`, never shipped). The HTTP client is reqwest (MIT OR
+# Apache-2.0), as in Skakel, on the rustls and ring above with a certificate check the tests set up
+# themselves, so there is no second TLS stack. JSON is serde_json (MIT OR Apache-2.0). ring (Apache-2.0
+# AND ISC) is already in the tree through rustls; it is named for the SHA-256 of a pinned certificate.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json"] }
+serde_json = "1.0.154"
+ring = "0.17.14"

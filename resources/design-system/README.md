@@ -23,7 +23,7 @@ Every change goes to the server over REST and is only shown as done when the ser
 
 - Page ground is `bg-page`. Cards, device rows and panels are `bg-surface`. Recessed wells (inputs, ID chips) are `bg-inset`. Menus and dialogs are `bg-raised` with `shadow-raised`.
 - Text is `text-primary`, supporting text `text-secondary`, captions and placeholders `text-tertiary`. All three pass 4.5:1 on `bg-page`, `bg-surface` and `bg-inset` in both themes.
-- `accent` (canopy green) is the only accent. Use it for the primary action, the selected tab or segment, links and the mark, and at most one accent button per view. Text on an accent fill is `on-accent`.
+- `accent` (canopy green) is the only accent. Use it for the primary action, the selected tab or segment, links and the mark's circle, and at most one accent button per view. Text on an accent fill is `on-accent`.
 - Device state has its own colors, separate from the accent: `shared` Shared (canopy, Matumi's healthy colour), `attached` Attached (river), `pending` Pending, `fault` Offline. Each has a `-subtle` background and a `-text` foreground for badges.
 - State is never told by color alone. Every state carries its word and its glyph: a circle for Shared, a square for Attached, a stripe for Pending, a cross for Offline and an empty ring for Not shared. The circle is the mark's terminal and the square comes from the USB trident.
 - Dark is the primary theme; light is a full equal. Check both before shipping a screen.

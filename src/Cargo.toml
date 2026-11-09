@@ -99,6 +99,10 @@ windows = { version = "0.62.2", features = [
     "Win32_UI_Shell",
 ] }
 
+# Telling systemd that Koppel is ready, stopping and still healthy (koppel-bin, Linux only): sd-notify
+# (MIT OR Apache-2.0), pure Rust on libc, which is already here.
+sd-notify = "0.5.0"
+
 # The USB layer (koppel-usb). libc (MIT OR Apache-2.0), already here through tokio, for the one
 # ioctl sysfs cannot do: resetting a USB device through its usbfs node on Linux.
 libc = "0.2.191"

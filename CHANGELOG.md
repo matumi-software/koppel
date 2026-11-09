@@ -12,6 +12,20 @@ Breaking changes known so far:
 - There is no way back from 0.2.0 to 0.1.x: the Skakel protocol changes too, so a 0.2 data folder is not for 0.1.x.
 - The UI's live updates use Server-Sent Events at `/api/events` instead of SignalR at `/api/hubs/ui`.
 
+Linux packages and the image:
+
+- The `.deb` comes for amd64, arm64 and armhf, the last for 32-bit Raspberry Pi OS on any Pi, the Zero
+  included. Each is about 3 MB instead of about 50 MB, and needs no other package: no OpenSSL, no ICU. It
+  upgrades 0.1.x in place and keeps `/var/lib/koppel`.
+- The `.deb` adds Koppel to the applications menu. It opens the UI in your browser, on the port
+  `/etc/default/koppel` sets.
+- systemd restarts a Koppel that hangs, not only one that exits (`WatchdogSec=30`).
+- The service runs with systemd's sandbox: the disk read-only apart from `/var/lib/koppel`, no
+  capabilities but binding a low port, and `/dev` limited to USB devices. `systemd-analyze security koppel`
+  scores 2.1 instead of 9.4.
+- The image is built on distroless (no shell) for amd64, arm64 and arm/v6, about 4 MB instead of about
+  100 MB. It no longer has a health check.
+
 Other changes:
 
 - The Koppel mark in the UI draws the K in the text colour and keeps only its circle in canopy green, part of the

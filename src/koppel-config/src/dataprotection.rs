@@ -61,8 +61,12 @@ pub enum DataProtectionError {
     NoKeys,
     /// A key file could not be read or parsed.
     KeyFile { file: String, reason: String },
-    /// The payload names a key the ring does not have.
-    KeyNotFound(String),
+    /// The payload names a key the ring does not have. The key files that could not be read are
+    /// listed, since the key may be one of them.
+    KeyNotFound {
+        key: String,
+        unreadable: Vec<String>,
+    },
     /// The key is protected with a key certificate, which this version does not read.
     KeyCertificate(String),
     /// The key was revoked, so 0.1.x refused it too.
@@ -78,7 +82,14 @@ impl fmt::Display for DataProtectionError {
         match self {
             Self::NoKeys => f.write_str("the keys directory holds no key-*.xml"),
             Self::KeyFile { file, reason } => write!(f, "{file} could not be read ({reason})"),
-            Self::KeyNotFound(key) => write!(f, "key {key} is not in the key ring"),
+            Self::KeyNotFound { key, unreadable } if unreadable.is_empty() => {
+                write!(f, "key {key} is not in the key ring")
+            }
+            Self::KeyNotFound { key, unreadable } => write!(
+                f,
+                "key {key} is not among the key files that could be read; these could not: {}",
+                unreadable.join("; ")
+            ),
             Self::KeyCertificate(key) => write!(
                 f,
                 "key {key} is protected with a key certificate (Paths:KeyCertificate), which Koppel 0.2 does not read"
@@ -117,6 +128,8 @@ pub struct KeyRing {
     keys: Vec<Key>,
     revoked_ids: Vec<[u8; 16]>,
     revoked_before: Option<OffsetDateTime>,
+    /// Key and revocation files that could not be read, with why. Data Protection skips those too.
+    unreadable: Vec<String>,
 }
 
 impl fmt::Debug for KeyRing {
@@ -138,6 +151,7 @@ impl KeyRing {
             keys: Vec::new(),
             revoked_ids: Vec::new(),
             revoked_before: None,
+            unreadable: Vec::new(),
         };
         let entries = fs::read_dir(directory).map_err(|e| DataProtectionError::KeyFile {
             file: directory.display().to_string(),
@@ -158,39 +172,31 @@ impl KeyRing {
             if !name.ends_with(".xml") {
                 continue;
             }
-            let failed = |reason: String| DataProtectionError::KeyFile {
-                file: name.clone(),
-                reason,
-            };
-            let bytes = fs::read(&path).map_err(|e| failed(e.to_string()))?;
-            let text = xml_text(&bytes).map_err(failed)?;
-            if name.starts_with("key-") {
-                ring.keys.push(parse_key(&text).map_err(failed)?);
-            } else if name.starts_with("revocation-") {
-                ring.add_revocation(&text).map_err(failed)?;
+            let read = fs::read(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| xml_text(&bytes));
+            let result = read.and_then(|text| {
+                if name.starts_with("key-") {
+                    parse_key(&text).map(|key| ring.keys.push(key))
+                } else if name.starts_with("revocation-") {
+                    ring.add_revocation(&text)
+                } else {
+                    Ok(())
+                }
+            });
+            if let Err(reason) = result {
+                tracing::warn!("{name} in the Koppel 0.1.x key ring could not be read: {reason}");
+                ring.unreadable.push(format!("{name} ({reason})"));
             }
         }
         if ring.keys.is_empty() {
-            return Err(DataProtectionError::NoKeys);
-        }
-        Ok(ring)
-    }
-
-    /// A ring of the given XML documents, for tests and for keys read some other way.
-    pub fn from_xml<'a>(
-        documents: impl IntoIterator<Item = &'a str>,
-    ) -> Result<Self, DataProtectionError> {
-        let mut ring = Self {
-            keys: Vec::new(),
-            revoked_ids: Vec::new(),
-            revoked_before: None,
-        };
-        for (index, text) in documents.into_iter().enumerate() {
-            let key = parse_key(text).map_err(|reason| DataProtectionError::KeyFile {
-                file: format!("document {index}"),
-                reason,
-            })?;
-            ring.keys.push(key);
+            return Err(match ring.unreadable.first() {
+                Some(first) => DataProtectionError::KeyFile {
+                    file: directory.display().to_string(),
+                    reason: format!("no key file could be read, the first: {first}"),
+                },
+                None => DataProtectionError::NoKeys,
+            });
         }
         Ok(ring)
     }
@@ -240,11 +246,12 @@ impl KeyRing {
             ));
         }
         let id: [u8; 16] = payload[4..20].try_into().expect("16 bytes");
-        let key = self
-            .keys
-            .iter()
-            .find(|k| k.id == id)
-            .ok_or_else(|| DataProtectionError::KeyNotFound(guid_text(&id)))?;
+        let key = self.keys.iter().find(|k| k.id == id).ok_or_else(|| {
+            DataProtectionError::KeyNotFound {
+                key: guid_text(&id),
+                unreadable: self.unreadable.clone(),
+            }
+        })?;
         if self.revoked_ids.contains(&id)
             || matches!((self.revoked_before, key.created), (Some(before), Some(created)) if created <= before)
         {
@@ -657,6 +664,7 @@ mod tests {
             }],
             revoked_ids: Vec::new(),
             revoked_before: None,
+            unreadable: Vec::new(),
         };
         let payload = protect_for_test(&master, &id, &KOPPEL_PURPOSES, b"{\"a\":1}");
         assert_eq!(

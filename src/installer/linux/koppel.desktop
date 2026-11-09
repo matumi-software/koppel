@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Koppel
+GenericName=USB over IP
+Comment=Share USB devices over the network
+Exec=/usr/lib/koppel/koppel-open
+Icon=koppel
+Terminal=false
+Categories=Network;
+Keywords=USB;USB/IP;usbip;share;attach;

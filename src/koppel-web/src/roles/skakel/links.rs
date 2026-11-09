@@ -249,9 +249,9 @@ impl Shared {
                     ActivityReason::ServerMoved,
                     ActivityOutcome::Succeeded,
                     format!(
-                        "The server moved from {} to {}",
-                        host_of(&from),
-                        host_of(&to)
+                        "Server moved from {} to {}",
+                        authority_of(&from),
+                        authority_of(&to)
                     ),
                     None,
                 );
@@ -345,6 +345,15 @@ fn continues(now: &ClientConnection, previous: &ClientConnection) -> bool {
                 && fingerprint == digits(previous.next_server_fingerprint.as_deref())))
 }
 
+/// The host and port of an address such as `https://10.0.0.5:5240`, as the activity log says where
+/// a server moved.
+fn authority_of(url: &str) -> String {
+    Url::parse(url)
+        .ok()
+        .map(|u| u.authority().to_owned())
+        .unwrap_or_else(|| url.to_owned())
+}
+
 /// The host of an address such as `https://10.0.0.5:5240`, as the activity log names a server.
 fn host_of(url: &str) -> String {
     Url::parse(url)
@@ -431,5 +440,6 @@ mod tests {
     fn a_moved_server_is_named_by_its_host() {
         assert_eq!(host_of("https://10.0.0.5:5240"), "10.0.0.5");
         assert_eq!(host_of("https://[fe80::1]:5240"), "[fe80::1]");
+        assert_eq!(authority_of("https://10.0.0.5:5240"), "10.0.0.5:5240");
     }
 }

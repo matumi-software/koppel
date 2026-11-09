@@ -14,6 +14,7 @@ use skakel_discovery::net::should_answer;
 use skakel_discovery::{DiscoveryAnswer, create_answer};
 use skakel_protocol::{SkakelApp, VERSIONS};
 use tokio::net::UdpSocket;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 /// What the answers say, but the fingerprint.
@@ -28,7 +29,7 @@ pub(crate) struct Announcer {
     bind: SocketAddr,
     announcement: Arc<Announcement>,
     fingerprint: Arc<dyn Fn() -> String + Send + Sync>,
-    running: Mutex<Option<CancellationToken>>,
+    running: Mutex<Option<(CancellationToken, JoinHandle<()>)>>,
 }
 
 impl Announcer {
@@ -73,7 +74,7 @@ impl Announcer {
             return;
         }
         if !wanted {
-            self.stop();
+            self.stop().await;
             tracing::info!("Stopped answering discovery on the local network");
             return;
         }
@@ -89,24 +90,22 @@ impl Announcer {
             }
         };
         let stop = CancellationToken::new();
-        {
-            let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
-            if running.is_some() {
-                return;
-            }
-            *running = Some(stop.clone());
+        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        if running.is_some() {
+            return;
         }
         tracing::info!(
             "Answering discovery on the local network as {} (UDP port {})",
             self.announcement.name,
             self.bind.port()
         );
-        tokio::spawn(answer(
+        let task = tokio::spawn(answer(
             socket,
             self.announcement.clone(),
             self.fingerprint.clone(),
-            stop,
+            stop.clone(),
         ));
+        *running = Some((stop, task));
     }
 
     fn is_running(&self) -> bool {
@@ -116,14 +115,16 @@ impl Announcer {
             .is_some()
     }
 
-    pub(crate) fn stop(&self) {
-        if let Some(stop) = self
+    /// Stops answering, and returns once the UDP port is free again.
+    pub(crate) async fn stop(&self) {
+        let running = self
             .running
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+            .take();
+        if let Some((stop, task)) = running {
             stop.cancel();
+            let _ = task.await;
         }
     }
 }

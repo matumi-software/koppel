@@ -395,7 +395,7 @@ impl App {
         running.data_plane.stop().await;
         running.usb_server.stop().await;
         if let Some(announcer) = &running.announcer {
-            announcer.stop();
+            announcer.stop().await;
         }
         if let Some(browser) = &running.browser {
             browser.stop();

@@ -377,6 +377,41 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
 }
 
 #[tokio::test]
+async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
+    let Some(pair) = Pair::get().await else {
+        return;
+    };
+    let (server, client) = (&pair.server_admin, &pair.client_admin);
+    let server_fingerprint = fingerprint(server).await;
+    let client_name = machine_name(client).await;
+
+    let waiting = start_pairing(client, &pair.peer_url, &server_fingerprint, "main").await;
+    let code = waiting["code"].as_str().expect("a code").to_owned();
+    let request = request_from(server, &client_name).await;
+    let approve = format!(
+        "/api/server/pairing/{}/approve",
+        request["id"].as_str().unwrap_or_default()
+    );
+    let wrong = if code == "000000" { "111111" } else { "000000" };
+    for _ in 0..3 {
+        let answer = server.post(&approve, json!({ "code": wrong })).await;
+        assert!(
+            [400, 404].contains(&answer.status),
+            "a wrong code: {}",
+            answer.status
+        );
+    }
+    server
+        .post(&approve, json!({ "code": code }))
+        .await
+        .expect(404);
+    eventually("the client to hear it was refused", WAIT, || async {
+        (pairing(client).await["state"] == json!("denied")).then_some(())
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
     let Some(pair) = Pair::get().await else {
         return;

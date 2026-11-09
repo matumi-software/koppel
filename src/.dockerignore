@@ -2,10 +2,8 @@
 **/bin
 **/obj
 **/dist
-**/wwwroot
 **/.vs
 **/.vscode
 **/.git
 **/.koppel
-**/TestResults
 **/target

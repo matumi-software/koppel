@@ -1,6 +1,6 @@
 import { getJson } from './http';
 
-/** Mirrors Koppel.Core.Activity.ActivityEvent. */
+/** Mirrors `ActivityEvent` in koppel-web/src/activity.rs. */
 export interface ServerActivity {
   id: string;
   timestampUtc: string;

@@ -339,8 +339,8 @@ UI from the pnpm lock file, builds `Koppel.exe` and `KoppelDesktop.exe` with `ca
 runtime statically (`src/.cargo/config.toml`, as in Skakel), so they need no Visual C++ runtime; the
 bundle still installs it because usbip-win2's `usbip.exe`, `devnode.exe` and `libusbip.dll` import
 `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` and `msvcp140_atomic_wait.dll`. 0.1.2's setup was
-69 MB and installed 117 MB; the Rust build's setup is 29 MB (25 MB of it the Visual C++ runtime) and it
-installs 11 MB.
+69 MB and installed 117 MB; the Rust build's setup is 31.0 MB (25.6 MB of it the Visual C++ runtime) and it
+installs 11.7 MB (see "Release profile and sizes").
 
 - **Service:** Koppel runs as a Windows service under LocalSystem, set to start at boot. It is configured to restart after the first, second and third failure, after 5 seconds, and the count resets after a day without one. `sc failureflag \Koppel 1` (the `SetServiceFailureFlag` action) makes a stop with a non-zero exit code count as a failure too. `koppel-windows/src/service.rs` runs it on the `windows-service` crate: `Koppel.exe` asks to connect to the service manager, and when it was not started as a service (error 1063) it runs as a console program. As a service it starts in its own folder (relative `Paths:*` are read from there, as .NET did), reports Running once the ports listen, stops on Stop or Shutdown, and ends with exit code 0, or 1 when the start failed, which recovery acts on. The installer sets the service's environment to `Ui__AllowFrom=local`, so the UI answers on this machine only.
 - **Tray icon:** modelled on Apollo, whose LocalSystem service launches its tray into the user's session. As a service, Koppel (`koppel-windows/src/launcher.rs`) starts `KoppelDesktop.exe --tray <ui url>` in every active session and starts it again if it ends (after a minute if it ended within 30 seconds). It runs with the session user's token from `WTSQueryUserToken`, not as LocalSystem, so the browser it opens is the user's and no LocalSystem window sits on the user's desktop. Its standard input is the read end of a pipe from the service, passed through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` so it inherits nothing else. When the service stops or dies, the pipe closes and the tray removes its icon and exits; the service ends any tray still running after 3 seconds. `tray/mod.rs` is plain Win32 on Microsoft's `windows` crate (`Shell_NotifyIcon`, `NOTIFYICON_VERSION_4`) and adds the icon again when Explorer restarts (`TaskbarCreated`). **Shut down Koppel** sends user-defined control 200: the default service DACL gives interactive users `SERVICE_USER_DEFINED_CONTROL` but not `SERVICE_STOP`, so the service stops itself, with exit code 0, so the recovery actions do not restart it. **Restart Koppel** sends control 201: the service starts `Koppel.exe --restart-service`, which runs on as LocalSystem, waits for the service to stop and starts it; then the service stops itself the same clean way. If the helper does not start, the service logs it and keeps running. **Event log:** `event_log.rs` is a `tracing` layer that writes to the Application log under the source `Koppel`: warnings and errors from everything, and information from `koppel_windows::service` (started, stopping and why, stopped), as 0.1.x's `Logging:EventLog` did. The MSI registers the source (`util:EventSource`) with `Koppel.exe` as its message file; `koppel-bin/build.rs` gives `Koppel.exe` a message table whose messages 1 to 3 (error, warning, information) are `%1`, so Event Viewer shows each entry's text. **State:** the service writes one JSON object per line to each tray's pipe (`wire.rs`, the same lines as 0.1.x's `TrayWire`), so the tray needs no sign-in and opens no port. A `state` line carries the tooltip and whether the icon needs attention; `koppel_web::tray::TrayFeed` builds it from the settings, the UI password and setup window, the USB client and server and the connection, names and counts only. The launcher sends it when it changes (it wakes on every push the UI gets, on a session ending, and on a 5 second round that catches the setup window closing) and to each new tray. A tray skips a line it cannot read and a type it does not know, so a newer service can add messages. The attention icon is Koppel's icon with an amber dot drawn on at run time (`tray/attention.rs`). The pipe has a 64 KB buffer. **Notifications:** a `notice` line carries a title, a text and the UI page a click opens (`#clients`, `#attach`); the tray accepts only `#` and lower-case letters there, so a line cannot send the browser elsewhere. `koppel_web::tray::NoticeRules` makes them from the activity log (a lost link once until it is back, its return only after a loss was told, a failed attach as the client records it, once per reason) and from the pairing requests (each waiting request once; the ones waiting at start are not told). `KoppelSettings` has `NotifyPairing`, `NotifyLink` and `NotifyAttachFailures`, all on unless set, and `/api/system/info` says `tray: true` when Koppel runs as the service, so the UI shows them. The tray shows each with `NIF_INFO` and `NIIF_RESPECT_QUIET_TIME`, and `NIN_BALLOONUSERCLICK` opens the page. No tray runs outside the Windows service (a console, Docker, Linux).
@@ -449,6 +449,77 @@ docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c \
   "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
 ```
 
+### Release profile and sizes
+
+`[profile.release]` in `src/Cargo.toml` builds for size (#92): `opt-level = "z"`, fat LTO, one codegen unit
+and `strip = true`, with ring alone at opt-level 3. The same code runs on a Raspberry Pi Zero (ARMv6, one
+core, 512 MB), so each candidate was timed as well as weighed:
+
+| Profile | `Koppel.exe` | PBKDF2, x86-64 | TLS, x86-64 | HTTP/2, x86-64 | PBKDF2, ARM1176 | TLS, HTTP/2, ARM1176 |
+|---|---|---|---|---|---|---|
+| Cargo's defaults (3, no LTO, 16 units) | 17.4 MB | 0.068 s | 1995 MiB/s | 1455 MiB/s | | |
+| 3, thin LTO | 15.4 MB | 0.064 s | 2053 MiB/s | 1466 MiB/s | | |
+| 3, fat LTO, 16 units | 16.2 MB | 0.062 s | 2098 MiB/s | 1478 MiB/s | | |
+| 3, fat LTO | 14.3 MB | 0.064 s | 2220 MiB/s | 1632 MiB/s | 0.955 s | 9, 9 MiB/s |
+| s, thin LTO | 9.8 MB | 0.080 s | 2076 MiB/s | 1513 MiB/s | | |
+| s, fat LTO | 9.2 MB | 0.081 s | 2384 MiB/s | 1551 MiB/s | 1.068 s | 8, 8 MiB/s |
+| s, fat LTO, ring at 3 | 9.2 MB | 0.069 s | 1852 MiB/s | 1452 MiB/s | 0.965 s | 9, 9 MiB/s |
+| z, fat LTO | 8.4 MB | 0.110 s | 1644 MiB/s | 1205 MiB/s | 1.800 s | 8, 8 MiB/s |
+| **z, fat LTO, ring at 3** | **8.5 MB** | **0.069 s** | **2159 MiB/s** | **1517 MiB/s** | **1.000 s** | **10, 9 MiB/s** |
+
+One codegen unit and `strip = true` in every row but the first. The speed check was a throwaway program on a
+single-threaded tokio runtime, as on the Zero's one core: the 600,000-round PBKDF2 of a sign-in through ring
+as `auth/password.rs` calls it, 256 MiB over TLS 1.3 (tokio-rustls on ring) on loopback, and 256 MiB as one
+HTTP/2 response over TLS (hyper; Skakel's gRPC streams run on HTTP/2). Each figure is the median of five runs.
+The ARM1176 columns are the same program for `arm-unknown-linux-musleabihf` under `qemu-arm -cpu arm1176`, the
+Zero's CPU, with 8 MiB per stream: emulated, so only the ratios between rows mean anything. The x86-64 figures
+move by about 10% from run to run.
+
+- **Why `z`:** it is the smallest, and with ring at 3 it is as fast as opt-level 3 on everything measured.
+  ring is where `z` hurt: its C code and the Rust around its assembly, so PBKDF2 took 1.8 times as long and
+  TLS was slower. The per-package override costs 60 KB and wins all of that back.
+- **Why fat LTO and one unit:** fat LTO is 0.6 to 1.1 MB smaller than thin, and 16 units undo most of it. The
+  cost is build time: the Windows programs build from scratch in about 2 minutes instead of 45 seconds. Debug
+  builds, tests and clippy are unchanged.
+- **No `panic = "abort"`:** Koppel relies on unwinding. koppel-config runs each change handler as its own
+  tokio task and logs one that panics while the rest still run (`file.rs`, `deliver`, tested by
+  `a_handler_that_panics_does_not_stop_the_others`); koppel-usb's `BackgroundTasks` and listener lists do the
+  same (`tasks.rs`); and the web server runs each connection as its own task (koppel-web's `server.rs`), so
+  a panic while serving one ends that connection, not the process.
+- **Dependencies:** unchanged. Koppel's own entries already leave out the default features it does not use.
+  What is big (`cargo bloat --crates` on the old Windows build, 11.4 MiB of code in a 16.6 MiB file):
+  koppel-web 2.9 MiB, std 1.5, reqwest 0.8, koppel-usb 0.8, skakel-client 0.8, rustls 0.7, tokio 0.6,
+  skakel-server 0.6, koppel-config 0.4, h2 0.3, hyper 0.2. The only crates in the programs twice are base64
+  (0.22 for tonic, 0.23 for the rest) and getrandom (0.2 for ring, 0.4 for Skakel), neither of which
+  Koppel can drop; syn 2 and 3 run only at build time. reqwest comes in through skakel-client, and with it
+  url and its IDNA tables, tower-http's redirect following and rustls-platform-verifier; whether Skakel
+  needs those is Skakel's call.
+
+Sizes, before and after this profile, in MB of a million bytes (Windows Explorer shows MiB, so 33.4 MB shows
+as 31.9 MB there):
+
+| | 0.1.2 | Before | Now |
+|---|---|---|---|
+| `Koppel.exe` | | 17.4 MB | 8.5 MB |
+| `KoppelDesktop.exe` | | 0.76 MB | 0.34 MB |
+| Installed (the programs, usbip-win2, the notices) | 117 MB | 21.1 MB | 11.7 MB |
+| `Koppel-Setup.exe` (25.6 MB of it the Visual C++ runtime) | 69 MB | 33.4 MB | 31.0 MB |
+| Linux binary, amd64 | | 14.9 MB | 6.8 MB |
+| Linux binary, arm64 | | 13.9 MB | 6.0 MB |
+| Linux binary, armv6 | | 13.2 MB | 5.7 MB |
+| `.deb`, amd64 | 53.8 MB | 6.7 MB | 3.7 MB |
+| `.deb`, arm64 | 50.9 MB | 6.5 MB | 3.7 MB |
+| `.deb`, armhf | none | 6.2 MB | 3.3 MB |
+| Image, compressed, amd64 | 102.1 MB | 7.6 MB | 4.6 MB |
+| Image, compressed, arm64 | 98.0 MB | 7.4 MB | 4.5 MB |
+| Image, compressed, arm/v6 | none | 7.1 MB | 4.2 MB |
+| Image on disk, amd64 | | 28.6 MB | 17.5 MB |
+
+"Before" is main at 501c9f6, with gRPC, reqwest and the Skakel crates in and Cargo's default release
+profile. The Windows figures come from `src/installer/windows/build.ps1` (installed is the staging folder
+the MSI installs), the Linux ones from `src/installer/linux/build.ps1 -Image` and the `binaries` target; the
+image sizes are what `docker image ls --tree` reports.
+
 ### Linux packages and the image in Rust
 
 `src/koppel-bin/Dockerfile` builds the Rust Koppel for Linux with Docker alone (#89, #90). It builds the UI
@@ -529,11 +600,7 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   is released; the image name stays and its run options do not change. `src/Koppel/src/Koppel/Dockerfile`
   and `src/Koppel/installer/linux` still build 0.1.x.
 
-| | amd64 | arm64 | armhf, arm/v6 |
-|---|---|---|---|
-| Binary | 6.7 MB | 6.2 MB | 5.8 MB |
-| `.deb` (0.1.2) | 3.3 MB (53.8 MB) | 3.1 MB (50.9 MB) | 2.9 MB (none) |
-| Image, compressed (0.1.2) | 4.1 MB (102.1 MB) | 4.0 MB (98.0 MB) | 3.8 MB (none) |
+The binary, `.deb` and image sizes per architecture, against 0.1.2, are in "Release profile and sizes" above.
 
 Tested in containers: each `.deb` installs in Debian 13 of its architecture (arm64 and armhf under QEMU, the
 armhf binary run as an ARM1176 CPU, the Pi Zero's, on which Debian's own ARMv7 programs stop on an illegal

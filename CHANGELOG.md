@@ -19,7 +19,7 @@ Breaking changes known so far:
 Linux packages and the image:
 
 - The `.deb` comes for amd64, arm64 and armhf, the last for 32-bit Raspberry Pi OS on any Pi, the Zero
-  included. Each is about 3 MB instead of about 50 MB, and needs no other package: no OpenSSL, no ICU. It
+  included. Each is about 3.5 MB instead of about 50 MB, and needs no other package: no OpenSSL, no ICU. It
   upgrades 0.1.x in place and keeps `/var/lib/koppel`.
 - The `.deb` adds Koppel to the applications menu. It opens the UI in your browser, on the port
   `/etc/default/koppel` sets.
@@ -27,7 +27,7 @@ Linux packages and the image:
 - The service runs with systemd's sandbox: the disk read-only apart from `/var/lib/koppel`, no
   capabilities but binding a low port, and `/dev` limited to USB devices. `systemd-analyze security koppel`
   scores 2.1 instead of 9.4.
-- The image is built on distroless (no shell) for amd64, arm64 and arm/v6, about 4 MB instead of about
+- The image is built on distroless (no shell) for amd64, arm64 and arm/v6, about 4.5 MB instead of about
   100 MB. Its health check is `koppel --healthcheck`, as in 0.1.x.
 - The `.deb` and the image carry the third-party notices at `/usr/share/doc/koppel/THIRD-PARTY-NOTICES.txt`, and
   the `.deb` a Debian copyright file beside them.

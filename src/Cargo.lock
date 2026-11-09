@@ -828,6 +828,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "koppel-usb"
+version = "0.2.0"
+dependencies = [
+ "koppel-config",
+ "libc",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "windows",
+]
+
+[[package]]
 name = "koppel-web"
 version = "0.2.0"
 dependencies = [

@@ -2,7 +2,7 @@
 # `koppel-bin` because `koppel` and the C# `Koppel` folder are the same folder on Windows.
 [workspace]
 resolver = "3"
-members = ["koppel-bin", "koppel-config", "koppel-contract", "koppel-web"]
+members = ["koppel-bin", "koppel-config", "koppel-contract", "koppel-usb", "koppel-web"]
 
 [workspace.package]
 version = "0.2.0"
@@ -15,9 +15,13 @@ repository = "https://github.com/matumi-software/koppel"
 [workspace.dependencies]
 koppel-web = { path = "koppel-web", version = "0.2.0" }
 koppel-config = { path = "koppel-config", version = "0.2.0" }
+koppel-usb = { path = "koppel-usb", version = "0.2.0" }
 
 # The async runtime (MIT).
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+# The tokio project's helpers (MIT), already here through h2. The USB layer takes its
+# CancellationToken, which cancels a whole tree of tasks (an attach, its relay, a link's epoch).
+tokio-util = "0.7.20"
 
 # The web stack. Every crate here, and what it pulls in, is MIT, Apache-2.0, BSD, ISC or Unicode-3.0
 # (checked with `cargo metadata`). rustls runs on ring rather than aws-lc-rs, which needs a C toolchain
@@ -69,9 +73,10 @@ des = "0.9.0"
 # Data Protection's key ring is XML (MIT OR Apache-2.0, no dependencies).
 roxmltree = "0.21.2"
 # Microsoft's Windows bindings (MIT OR Apache-2.0), as Skakel pins them: DPAPI, ACLs, the
-# ProgramData folder.
+# ProgramData folder, and the TCP table the USB gateway checks a connection's owner in.
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Security_Cryptography",
@@ -80,3 +85,7 @@ windows = { version = "0.62.2", features = [
     "Win32_System_Threading",
     "Win32_UI_Shell",
 ] }
+
+# The USB layer (koppel-usb). libc (MIT OR Apache-2.0), already here through tokio, for the one
+# ioctl sysfs cannot do: resetting a USB device through its usbfs node on Linux.
+libc = "0.2.191"

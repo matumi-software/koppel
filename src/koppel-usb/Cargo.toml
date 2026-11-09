@@ -1,0 +1,27 @@
+[package]
+name = "koppel-usb"
+description = "Koppel's USB layer: USB/IP, the Linux kernel's usbip-host and vhci-hcd, usbip-win2, usbipd-win, and the server and client roles over a stream to the other machine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+koppel-config.workspace = true
+tokio = { workspace = true, features = ["io-util", "process"] }
+tokio-util.workspace = true
+tracing.workspace = true
+serde.workspace = true
+time.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-util", "process", "test-util"] }

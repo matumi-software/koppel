@@ -500,25 +500,27 @@ as 31.9 MB there):
 
 | | 0.1.2 | Before | Now |
 |---|---|---|---|
-| `Koppel.exe` | | 17.4 MB | 8.5 MB |
+| `Koppel.exe` | | 17.3 MB | 8.4 MB |
 | `KoppelDesktop.exe` | | 0.76 MB | 0.34 MB |
-| Installed (the programs, usbip-win2, the notices) | 117 MB | 21.1 MB | 11.7 MB |
+| Installed (the programs, usbip-win2, the notices) | 117 MB | 21.0 MB | 11.7 MB |
 | `Koppel-Setup.exe` (25.6 MB of it the Visual C++ runtime) | 69 MB | 33.4 MB | 31.0 MB |
-| Linux binary, amd64 | | 14.9 MB | 6.8 MB |
-| Linux binary, arm64 | | 13.9 MB | 6.0 MB |
-| Linux binary, armv6 | | 13.2 MB | 5.7 MB |
-| `.deb`, amd64 | 53.8 MB | 6.7 MB | 3.7 MB |
-| `.deb`, arm64 | 50.9 MB | 6.5 MB | 3.7 MB |
-| `.deb`, armhf | none | 6.2 MB | 3.3 MB |
-| Image, compressed, amd64 | 102.1 MB | 7.6 MB | 4.6 MB |
+| Linux binary, amd64 | | 14.7 MB | 6.7 MB |
+| Linux binary, arm64 | | 13.8 MB | 5.9 MB |
+| Linux binary, armv6 | | 13.1 MB | 5.7 MB |
+| `.deb`, amd64 | 53.8 MB | 6.6 MB | 3.7 MB |
+| `.deb`, arm64 | 50.9 MB | 6.5 MB | 3.6 MB |
+| `.deb`, armhf | none | 6.1 MB | 3.3 MB |
+| Image, compressed, amd64 | 102.1 MB | 7.5 MB | 4.5 MB |
 | Image, compressed, arm64 | 98.0 MB | 7.4 MB | 4.5 MB |
 | Image, compressed, arm/v6 | none | 7.1 MB | 4.2 MB |
-| Image on disk, amd64 | | 28.6 MB | 17.5 MB |
+| Image on disk, amd64 | | 28.4 MB | 17.4 MB |
 
-"Before" is main at 501c9f6, with gRPC, reqwest and the Skakel crates in and Cargo's default release
-profile. The Windows figures come from `src/installer/windows/build.ps1` (installed is the staging folder
-the MSI installs), the Linux ones from `src/installer/linux/build.ps1 -Image` and the `binaries` target; the
-image sizes are what `docker image ls --tree` reports.
+"Before" is main at 66970af (Skakel v0.2.0, served on Koppel's own ports) with Cargo's default release
+profile, and "Now" the same code with this one. The profile comparison above was measured a few commits
+earlier (501c9f6), which is why its first row says 17.4 MB. The Windows figures come from
+`src/installer/windows/build.ps1` (installed is the staging folder the MSI installs), the Linux ones from
+`src/installer/linux/build.ps1 -Image` and the Dockerfile's `binaries` target; the image sizes are what
+`docker image ls --tree` reports.
 
 ### Linux packages and the image in Rust
 

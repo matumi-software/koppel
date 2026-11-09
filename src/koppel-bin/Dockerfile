@@ -142,7 +142,7 @@ COPY --from=crate-licences /crates.json /tmp/crates.json
 # Koppel's licence text comes from Debian's copy, which is the same GPL-3.0 text.
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 POWERSHELL_TELEMETRY_OPTOUT=1
 RUN mkdir /notices \
- && /opt/pwsh/pwsh -NoLogo -NoProfile -NonInteractive -File installer/notices/new-notices.ps1 -Rust \
+ && /opt/pwsh/pwsh -NoLogo -NoProfile -NonInteractive -File installer/notices/new-notices.ps1 \
       -AboutJson /tmp/crates.json -License /usr/share/common-licenses/GPL-3 -Output /notices/THIRD-PARTY-NOTICES.txt
 
 # -------- The .deb packages (not part of the image) ----------------------------------

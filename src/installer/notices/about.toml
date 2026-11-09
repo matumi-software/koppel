@@ -1,4 +1,4 @@
-# The licence policy for the Rust crates Koppel ships, read by cargo-about in new-notices.ps1 -Rust
+# The licence policy for the Rust crates Koppel ships, read by cargo-about in new-notices.ps1
 # (the Windows installer) and in src/koppel-bin/Dockerfile (the .deb files and the image). A crate
 # under a licence not named here stops the build, so a new one is looked at, not shipped unseen.
 # Koppel's own crates are GPL-3.0-or-later. The targets are not set here: each build passes its own

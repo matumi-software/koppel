@@ -5,9 +5,6 @@ obj/
 .vscode/
 node_modules/
 dist/
-**/wwwroot/
-TestResults/
-\package.g.props
 *.binlog
 *.tsbuildinfo
 .eslintcache
@@ -18,7 +15,7 @@ artifacts/
 # Rust
 target/
 
-# Local runtime data (config, keys) written by the host in Development
+# Local runtime data (config, keys) the 0.1.x host wrote in Development, which older checkouts may still have
 .koppel/
 
 # Editors and OS

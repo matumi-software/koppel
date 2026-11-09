@@ -7,8 +7,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "design:sync": "node Koppel.Core/tools/sync-design-system.mjs",
-    "design:icons": "node Koppel.Core/tools/render-app-icon.mjs"
+    "design:sync": "node tools/sync-design-system.mjs",
+    "design:icons": "node tools/render-app-icon.mjs"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2"

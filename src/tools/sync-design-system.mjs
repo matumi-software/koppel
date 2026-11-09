@@ -10,13 +10,13 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// This file sits in src/Koppel.Core/tools; the repo root is three levels up.
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+// This file sits in src/tools; the repo root is two levels up.
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const source = join(root, 'resources', 'design-system');
 const target = join(root, 'src', 'ui', 'react-ui', 'src', 'styles');
 
 const header = (from) =>
-  `/* Generated from resources/design-system/${from} by src/Koppel.Core/tools/sync-design-system.mjs. Do not edit. */\n`;
+  `/* Generated from resources/design-system/${from} by src/tools/sync-design-system.mjs. Do not edit. */\n`;
 
 const tokens = JSON.parse(readFileSync(join(source, 'tokens.json'), 'utf8'));
 const [primary, ...others] = tokens.color.themes.map((t) => t.id);

@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <!-- packages.lock.json beside each WiX project, committed. build.ps1 restores with -p:RestoreLockedMode=true,
+         so a build fails instead of picking up a different package. Regenerate with `dotnet restore` on the
+         project after changing a package version. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+</Project>

@@ -1,4 +1,4 @@
-/* Generated from resources/design-system/components/bundle.css by src/Koppel.Core/tools/sync-design-system.mjs. Do not edit. */
+/* Generated from resources/design-system/components/bundle.css by src/tools/sync-design-system.mjs. Do not edit. */
 /* Koppel components. Every color, space and radius comes from tokens.css.
    Class prefix: kp-. State lives in data-state, never in extra classes.
    Selectors also cover react-aria-components' data attributes (data-disabled,

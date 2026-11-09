@@ -51,6 +51,35 @@ impl ResolvesServerCert for CertificateSlot {
     }
 }
 
+/// What a web port shakes hands with, picked again for each new connection, so a port can move to
+/// another acceptor while it runs. Connections already open keep the one they were accepted with.
+#[derive(Clone)]
+pub struct Acceptors(Arc<dyn Fn() -> TlsAcceptor + Send + Sync>);
+
+impl Acceptors {
+    /// Calls `pick` for each new connection.
+    pub fn new(pick: impl Fn() -> TlsAcceptor + Send + Sync + 'static) -> Self {
+        Self(Arc::new(pick))
+    }
+
+    /// The acceptor for the connection that just came in.
+    pub fn pick(&self) -> TlsAcceptor {
+        (self.0)()
+    }
+}
+
+impl From<TlsAcceptor> for Acceptors {
+    fn from(acceptor: TlsAcceptor) -> Self {
+        Self::new(move || acceptor.clone())
+    }
+}
+
+impl fmt::Debug for Acceptors {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Acceptors")
+    }
+}
+
 /// The acceptor for the web port, presenting whatever `slot` holds.
 pub fn acceptor(slot: Arc<CertificateSlot>) -> Result<TlsAcceptor, WebError> {
     Ok(TlsAcceptor::from(Arc::new(server_config(slot)?)))

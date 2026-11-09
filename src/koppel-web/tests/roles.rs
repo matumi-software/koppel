@@ -1,15 +1,18 @@
 //! A Rust server and a Rust client, each a whole Koppel in this process with a fake kernel, paired
 //! through the code and linked over Skakel: a shared device attaches end to end and its USB traffic
 //! crosses, the link and the attached device survive a certificate handover and a server restart,
-//! and revoking or rotating the client ends its link with word to pair again.
+//! and revoking or rotating the client ends its link with word to pair again. Skakel's server sees
+//! each caller's own address through Koppel's port.
 
 mod common;
 
-use common::{FakeKernel, Node, TempDir, down, echoes, eventually, linked, pair};
+use std::net::IpAddr;
+
+use common::{FakeKernel, Node, TempDir, down, echoes, eventually, http_client_from, linked, pair};
 #[cfg(not(windows))]
 use common::{free_udp_port, loopback};
 use reqwest::Method;
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// The server shares the dongle; the client attaches it and the echo comes back through both
 /// kernels, both relays and Skakel's stream.
@@ -239,6 +242,66 @@ async fn leaving_the_server_role_ends_the_link_and_coming_back_takes_it_again() 
     linked(&client).await;
 
     client.stop().await;
+    server.stop().await;
+}
+
+/// Opens a pairing request on `server`'s port from the loopback address `from`, with the commitment
+/// to `nonce`, and gives the status and the answer.
+async fn open_pairing_from(server: &Node, from: &str, nonce: &str) -> (u16, Value) {
+    let from: IpAddr = from.parse().unwrap();
+    let commitment: String = ring::digest::digest(&ring::digest::SHA256, nonce.as_bytes())
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect();
+    let answer = http_client_from(Some(from))
+        .post(format!("{}/skakel/v2/pair", server.url()))
+        .json(&json!({ "clientName": format!("pc at {from}"), "commitment": commitment }))
+        .send()
+        .await
+        .unwrap();
+    let status = answer.status().as_u16();
+    (status, answer.json().await.unwrap_or(Value::Null))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn callers_at_two_addresses_do_not_share_a_pairing_limit() {
+    let dir = TempDir::new("server");
+    let server = Node::start(dir.path(), "server", None, FakeKernel::new()).await;
+
+    // Skakel takes three open pairing requests from one address at a time.
+    for n in 0..3 {
+        let (status, body) = open_pairing_from(&server, "127.0.0.1", &format!("one-{n}")).await;
+        assert_eq!(status, 200, "{body}");
+    }
+    let (fourth, _) = open_pairing_from(&server, "127.0.0.1", "one-3").await;
+    assert_eq!(fourth, 429, "a fourth from 127.0.0.1 is one too many");
+
+    // Another address has a limit of its own, and the server's list shows where it came from.
+    let (status, opened) = open_pairing_from(&server, "127.0.0.2", "two").await;
+    assert_eq!(
+        status, 200,
+        "127.0.0.2 does not share 127.0.0.1's limit: {opened}"
+    );
+    let id = opened["requestId"].as_str().unwrap().to_owned();
+    let revealed = http_client_from(Some("127.0.0.2".parse().unwrap()))
+        .post(format!("{}/skakel/v2/pair/{id}/reveal", server.url()))
+        .json(&json!({ "clientNonce": "two" }))
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .as_u16();
+    assert_eq!(revealed, 204);
+    let request = eventually("the server to list the request", || async {
+        let pairing = server.get("/api/server/pairing").await;
+        pairing["requests"]
+            .as_array()
+            .and_then(|list| list.iter().find(|r| r["id"] == json!(id)).cloned())
+    })
+    .await;
+    assert_eq!(request["from"], json!("127.0.0.2"), "{request}");
+
     server.stop().await;
 }
 

@@ -2,18 +2,18 @@
 //! the server and client roles on Skakel and the USB layer behind them.
 
 use std::fmt;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{Request, State};
 use axum::http::Method;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use koppel_config::files::{ClientConnection, KoppelSettings};
+use koppel_config::files::{ClientConnection, KoppelSettings, Role};
 use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox, open};
 use koppel_usb::{
     ActivitySink, GatewayOptions, SystemClock, Unsupported, UsbAttacher, UsbDataPlane, UsbHost,
@@ -32,14 +32,13 @@ use crate::guard::{self, RateLimit};
 use crate::host::Host;
 use crate::push::{self, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
-use crate::roles::skakel::front::{self, Front, FrontConnection, SkakelLimits};
-use crate::roles::skakel::{APP_ID, SecretsStore, ServerParts, SkakelLinks};
+use crate::roles::skakel::{self, APP_ID, SecretsStore, ServerParts, SkakelLinks};
 use crate::roles::{
     ClientRole, ServerRole, SkakelClientRole, SkakelServerRole, UsbActivity, UsbClient,
     UsbClientRole, UsbServer, UsbServerRole,
 };
 use crate::surface::starts_with_segments;
-use crate::tls::CertificateSlot;
+use crate::tls::{self, Acceptors, CertificateSlot};
 
 /// What the app is started with.
 pub struct AppOptions {
@@ -162,15 +161,15 @@ pub struct App {
     pub(crate) auth: Arc<UiAuth>,
     pub(crate) access: UiAccess,
     pub(crate) auth_limit: RateLimit,
-    pub(crate) skakel_limits: SkakelLimits,
     pub(crate) activity: Arc<ActivityLog>,
     pub(crate) push: Push,
     pub(crate) server: Arc<dyn ServerRole>,
     pub(crate) client: Arc<dyn ClientRole>,
     pub(crate) usb_server: Arc<dyn UsbServer>,
     pub(crate) usb_client: Arc<dyn UsbClient>,
-    pub(crate) front: Arc<Front>,
     certificate: Arc<CertificateSlot>,
+    /// The web ports' acceptor while Skakel's server does not present the certificate.
+    own_acceptor: tokio_rustls::TlsAcceptor,
     running: Running,
     stoppers: Vec<Box<dyn Fn() + Send + Sync>>,
 }
@@ -230,6 +229,8 @@ impl App {
             .await
             .map_err(StartError::Other)?;
         let certificate = store.slot();
+        let own_acceptor =
+            tls::acceptor(certificate.clone()).map_err(|e| StartError::Other(e.to_string()))?;
         let usb_server = koppel_usb::UsbServer::new(
             usb.host.clone(),
             devices.clone(),
@@ -252,6 +253,12 @@ impl App {
             data_plane: data_plane.clone(),
             push: push.clone(),
             activity: activity.clone(),
+            listen: SocketAddr::new(
+                network.address.unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+                host.network_port,
+            ),
+            token_per_minute: network.token_per_minute,
+            pair_per_minute: network.pair_per_minute,
         })
         .await
         .map_err(StartError::Other)?;
@@ -345,18 +352,17 @@ impl App {
             host,
             access: UiAccess::new(reach),
             auth_limit: RateLimit::per_minute(auth_per_minute),
-            skakel_limits: SkakelLimits::new(network.token_per_minute, network.pair_per_minute),
             activity,
             server: skakel.clone(),
             client,
             usb_server: usb_server_role,
             usb_client: usb_client_role,
-            front: skakel.front(),
             settings,
             connection,
             auth,
             push,
             certificate,
+            own_acceptor,
             running: Running {
                 skakel,
                 announcer,
@@ -373,6 +379,25 @@ impl App {
     /// The certificate the web ports present, which a certificate switch replaces.
     pub fn certificate(&self) -> Arc<CertificateSlot> {
         self.certificate.clone()
+    }
+
+    /// What the web ports shake hands with, picked for each new connection. While the role is
+    /// server or both, Skakel's server's own TLS settings, which present its current certificate
+    /// on every handshake as its certificate handover needs; after a restart (the role left the
+    /// server side), the new server's. Otherwise Koppel's own acceptor on [`App::certificate`],
+    /// which a save of `secrets.json` keeps on the same certificate.
+    pub fn tls(&self) -> Acceptors {
+        let settings = self.settings.clone();
+        let skakel = self.running.skakel.clone();
+        let own = self.own_acceptor.clone();
+        Acceptors::new(move || {
+            if settings.current().role != Role::Client
+                && let Some(acceptor) = skakel.acceptor()
+            {
+                return acceptor;
+            }
+            own.clone()
+        })
     }
 
     /// Every route, with the guards in front of them.
@@ -412,7 +437,7 @@ impl App {
 /// signed-in GET of one with index.html. The guard in front already decided the request may reach
 /// what it asks for.
 async fn fallback(State(app): State<Arc<App>>, request: Request) -> Response {
-    if front::is_grpc(&request) || starts_with_segments(request.uri().path(), "/skakel") {
+    if skakel::is_grpc(&request) || starts_with_segments(request.uri().path(), "/skakel") {
         return forward(State(app), request).await;
     }
     if request.method() == Method::GET || request.method() == Method::HEAD {
@@ -423,19 +448,10 @@ async fn fallback(State(app): State<Arc<App>>, request: Request) -> Response {
     }
 }
 
-/// Hands a request to Skakel's server, on the loopback connection of the connection it came on.
+/// Hands a request to Skakel's server, mounted here. It carries the caller's address from the
+/// accept loop, which Skakel's limits count by.
 async fn forward(State(app): State<Arc<App>>, request: Request) -> Response {
-    let remote = request
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|info| info.0)
-        .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 0)));
-    let connection = request
-        .extensions()
-        .get::<Arc<FrontConnection>>()
-        .cloned()
-        .unwrap_or_default();
-    app.front.forward(&connection, remote, request).await
+    app.running.skakel.serve(request).await
 }
 
 /// Earlier versions wrote a setup code to `setup-code.txt`. It does nothing now, so it should not lie

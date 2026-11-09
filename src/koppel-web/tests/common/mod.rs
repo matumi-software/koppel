@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashSet;
-use std::net::{Shutdown, SocketAddr, TcpStream as StdTcpStream};
+use std::net::{IpAddr, Shutdown, SocketAddr, TcpStream as StdTcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -16,7 +16,7 @@ use koppel_usb::{
     BoxFuture, DeviceStream, Export, ExportStatus, GatewayOptions, UsbAttacher, UsbDevice,
     UsbError, UsbHost, UsbInterface, UsbSpeed, VhciPort,
 };
-use koppel_web::{App, AppOptions, Host, NetworkOptions, UiReach, UsbOptions, tls};
+use koppel_web::{App, AppOptions, Host, NetworkOptions, UiReach, UsbOptions};
 use reqwest::Method;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -375,7 +375,7 @@ impl Node {
         })
         .await
         .expect("Koppel starts");
-        let acceptor = tls::acceptor(app.certificate()).unwrap();
+        let acceptor = app.tls();
         let (stop, mut stopped) = watch::channel(false);
         let serving = tokio::spawn(koppel_web::serve(
             listener,
@@ -478,6 +478,12 @@ impl Node {
 
 /// An HTTPS client that takes any certificate: the tests check fingerprints through the API.
 fn http_client() -> reqwest::Client {
+    http_client_from(None)
+}
+
+/// As the tests' HTTPS client, with its connections made from the local address `from`, such as
+/// another loopback address than 127.0.0.1, to be another caller.
+pub fn http_client_from(from: Option<IpAddr>) -> reqwest::Client {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let config = rustls::ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()
@@ -489,6 +495,7 @@ fn http_client() -> reqwest::Client {
         .tls_backend_preconfigured(config)
         .no_proxy()
         .pool_max_idle_per_host(0)
+        .local_address(from)
         .build()
         .unwrap()
 }

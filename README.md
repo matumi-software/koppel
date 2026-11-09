@@ -6,7 +6,8 @@ Koppel speaks the standard USB/IP protocol and adds a web UI, authentication and
 around it. A machine runs as a server (shares its devices), a client (attaches them) or both. Clients
 find servers on the local network and pair by typing a code, so nobody copies secrets around.
 
-Status: version 0.1.2, early. On real hardware, a Debian 13 server shares USB receivers and a flash drive to a
+Status: version 0.1.2 is the latest release, early. `main` holds 0.2.0, a rewrite in Rust with the same UI and
+features, not released yet. On real hardware, a Debian 13 server shares USB receivers and a flash drive to a
 Windows 11 client, and a Windows server through usbipd-win shares a webcam to a Linux client. Printers are
 untried, webcams do not stream from a Linux server to a Windows client yet, and the arm64 image and `.deb`
 are untested on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests; releases are tags on `main`.
@@ -23,7 +24,7 @@ are untested on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens o
 The image is `matumisoftware/koppel` on Docker Hub, for amd64 and arm64. A Raspberry Pi needs the 64-bit
 Raspberry Pi OS, which the script below treats as Debian.
 
-1. Copy [src/Koppel/deploy/prepare-host.sh](src/Koppel/deploy/prepare-host.sh) to the machine and
+1. Copy [src/installer/docker/prepare-host.sh](src/installer/docker/prepare-host.sh) to the machine and
    run it once. It installs Docker from Docker's apt repository (Debian and Ubuntu) and loads the kernel's USB/IP
    modules now and at every boot:
 
@@ -34,7 +35,7 @@ Raspberry Pi OS, which the script below treats as Debian.
    If a module will not load, the script says so; on an Ubuntu cloud kernel the fix is usually
    `sudo apt-get install linux-modules-extra-$(uname -r)`.
 
-2. Copy [src/Koppel/deploy/docker-compose.yml](src/Koppel/deploy/docker-compose.yml) to the machine
+2. Copy [src/installer/docker/docker-compose.yml](src/installer/docker/docker-compose.yml) to the machine
    and start Koppel next to it:
 
    ```sh
@@ -62,7 +63,7 @@ volume, not in the image, so an upgrade keeps them.
 ### Without Docker
 
 A `.deb` package runs Koppel as a systemd service on Debian 12 and 13, Ubuntu 22.04 and later, and
-64-bit Raspberry Pi OS, for amd64 and arm64. It needs no .NET and no Docker. Download the package for
+64-bit Raspberry Pi OS, for amd64 and arm64. It needs no Docker. Download the package for
 the machine from the [latest release](https://github.com/matumi-software/koppel/releases/latest) and
 install it:
 
@@ -122,7 +123,7 @@ The browser warns about Koppel's certificate the first time, because it is Koppe
 trust, check that its SHA-256 fingerprint is the one under Clients before you accept it. If you forget the password:
 
 ```sh
-docker compose exec koppel dotnet Koppel.dll --reset-password
+docker compose run --rm koppel --reset-password
 ```
 
 With the Linux package, run `sudo koppel --reset-password`. On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then open
@@ -157,7 +158,7 @@ version 3 or (at your option) any later version (GPL-3.0-or-later), see [LICENSE
 Releases up to and including 0.1.0 were published under the MIT licence and stay under it.
 
 Koppel's transport between machines is [Skakel](https://github.com/matumi-software/skakel) (MIT), a
-NuGet package; its notice is in `THIRD-PARTY-NOTICES.txt` with the other packages'.
+set of Rust crates; its notice is in `THIRD-PARTY-NOTICES.txt` with the other crates'.
 
 The Windows installer bundles usbip-win2 (BSD-2-Clause); its notices ship as `THIRD-PARTY-NOTICES.txt`,
 which the setup window's licence link opens. The setup window's theme files

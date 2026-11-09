@@ -2,6 +2,7 @@
 //
 //   koppel-app-icon.svg -> koppel-app-icon.ico      (16 to 256 px: Apps list, setup.exe, Koppel.exe)
 //                       -> koppel-app-icon-64.png   (the logo in the setup window)
+//                       -> koppel-app-icon-1000.png (the Docker Hub repository logo, its largest size)
 //                       -> src/installer/linux/icons (the .deb's applications menu entry: hicolor PNGs
 //                          from 16 to 256 px, and the SVG as the scalable one)
 //
@@ -40,7 +41,8 @@ sizes.forEach((size, i) => {
 
 writeFileSync(join(logos, 'koppel-app-icon.ico'), Buffer.concat([header, ...images]));
 writeFileSync(join(logos, 'koppel-app-icon-64.png'), render(64));
-console.log(`Rendered koppel-app-icon.ico (${sizes.join(', ')} px) and koppel-app-icon-64.png`);
+writeFileSync(join(logos, 'koppel-app-icon-1000.png'), render(1000));
+console.log(`Rendered koppel-app-icon.ico (${sizes.join(', ')} px), koppel-app-icon-64.png and koppel-app-icon-1000.png`);
 
 // The Linux package's icons, named as they go into /usr/share/icons/hicolor/<size>/apps/koppel.png.
 const linux = join(root, 'src', 'installer', 'linux', 'icons');

@@ -96,7 +96,7 @@ Settings that move them:
 | `Ui:AllowFrom` | `lan`; `local` in Development | Who may use the UI, by the caller's address, as Sunshine's `origin_web_ui_allowed`. `local` is this machine only, `lan` adds the local network, `any` is everyone. A refused UI request gets 403; the network surface is not affected. The local network is loopback, 10/8, 172.16/12, 192.168/16, 169.254/16, IPv6 unique local and link-local addresses, and any network this machine has an address on (read again every 30 seconds), so a neighbour with a global IPv6 address counts. Carrier-grade NAT (100.64/10) does not. The Windows installer sets `local`, because the native app's UI is used on that machine only |
 | `Gateway:Port` | 3242 on native Windows, off elsewhere | See "USB client". A compose file sets it by environment variable |
 | `Gateway:Address` | `127.0.0.1` | Where the gateway listens |
-| `RateLimits:TokenPerMinute`, `RateLimits:PairPerMinute` | 60, 120 | Skakel's limits on its token and pairing endpoints, per address |
+| `RateLimits:TokenPerMinute`, `RateLimits:PairPerMinute` | 60, 120 | Skakel's limits on its token and pairing endpoints, per address. In the Rust build Skakel counts them behind the port and role check, so a call to the wrong port or role does not count |
 | `RateLimits:AuthPerMinute` | 30 | See "Guards on the web surface" |
 
 `GET /healthz` is on the UI port, anonymous, answers `ok` in any role and needs no header. The Docker
@@ -570,36 +570,40 @@ paths, JSON and errors, held to them by the contract tests.
 ### The roles on Skakel in Rust
 
 The server and client roles run on Skakel 0.2.0 (protocol version 2, gRPC), taken as git
-dependencies at the commit that merged 0.2.0 until its release tag is published. The code is in
-`koppel-web/src/roles/skakel/`.
+dependencies at the commit that let an app serve Skakel on its own listener (Skakel PR #43) until
+the 0.2.0 release tag is published. The code is in `koppel-web/src/roles/skakel/`.
 
 | Module | What |
 |---|---|
 | `store.rs` | `secrets.json` as skakel-server's store, and the certificate the web ports present |
-| `server.rs` | `SkakelServerRole`: skakel-server, its clients, keys and pairing, and its events into the push and the activity log |
-| `front.rs` | The web ports handing Skakel's requests to it, with its per-address limits |
+| `server.rs` | `SkakelServerRole`: skakel-server mounted on the web ports, its clients, keys and pairing, and its events into the push and the activity log |
 | `announcer.rs` | Discovery answers while the role is server or both |
 | `remote.rs` | Koppel's own gRPC service, the remote device list, and `/api/remote/devices` |
 | `streams.rs` | The `usb` stream type as koppel-usb's `DeviceStream`, both ends |
 | `client.rs` | `SkakelClientRole`: the connection test, discovery and pairing |
 | `links.rs` | The link to the saved server as koppel-usb's `Links`, and what it saves in `connection.json` |
 
-- **Skakel's server on loopback:** skakel-server 0.2.0 serves only on a TCP listener of its own,
-  while Koppel's web ports serve the UI, the plain HTTP redirect and the port and role rules on the
-  same port as 0.1.x. So Skakel's server listens on `127.0.0.1` on a free port, and the web ports hand
-  it what is Skakel's: the gRPC calls (told by their content type; network surface, server role),
-  `/skakel/*` and `/api/remote/*`, after the port and role check. Each connection to a web port gets
-  one HTTP/2 connection of its own to the loopback port, made with its first Skakel request and
-  closed with it, so a client's USB streams keep a connection each and its calls end when it goes.
-  The web ports ping as Skakel's protocol says (15 seconds, dead after 30) and let the flow-control
-  window grow with the link.
-- **What the loopback costs:** Skakel's server sees every caller as loopback. Its limits on token
-  and pairing calls are kept on the web ports instead, per real address, ahead of the port and role
-  check as in 0.1.x (`RateLimits:TokenPerMinute`, `RateLimits:PairPerMinute`), and the address a
-  pairing request came from is read off the answer that opened it, for the server's UI and the
-  activity log. Skakel's other per-address pairing limits (5 opens in 5 minutes, 3 open at once)
-  count every caller together. A Skakel release that lets an app serve on a listener of its own
-  would remove `front.rs`.
+- **Skakel on the web ports:** Skakel's server is started mounted (`start_mounted`): it binds no
+  port of its own, and Koppel's web ports serve the UI, the plain HTTP redirect and the port and role
+  rules on the same port as 0.1.x, with Skakel beside them. After the port and role check, the web
+  ports hand Skakel's service what is Skakel's: the gRPC calls (told by their content type; network
+  surface, server role), `/skakel/*` and `/api/remote/*`. Each request carries the caller's real
+  address (`ConnectInfo`) from the accept loop. Skakel's calls run on the caller's own connection, so
+  a client's USB streams keep a connection each and its calls end when it goes. Every connection is
+  served with Skakel's connection settings (`connection_builder`): a ping after 15 seconds of quiet,
+  dead 15 seconds later, flow-control windows that grow with the link, and 30 seconds for an
+  HTTP/1.1 request's headers.
+- **TLS:** while the role is server or both, each new connection to a web port shakes hands with
+  Skakel's server's own TLS settings (`tls_config`), which ask the server for its current certificate
+  on every handshake, so a switched certificate shows from the next connection and a prepared one
+  never shows before the switch, with ALPN `h2` and `http/1.1` and no session resumption. In the
+  client role the web ports present Koppel's own certificate slot, which a save of `secrets.json`
+  keeps on the same certificate, with the same settings.
+- **Limits:** Skakel keeps its own per-address limits, by the caller's real address:
+  `RateLimits:TokenPerMinute` and `RateLimits:PairPerMinute`, 5 pairing requests opened in 5 minutes
+  and 3 open at once. Since Skakel sits behind the port and role check, a call to the wrong port or
+  role gets its 404 without counting, where 0.1.x counted it. The address a pairing request came
+  from, in the server's UI and the activity log, is the one Skakel saw.
 - **State:** `secrets.json` keeps 0.1.x's shape (Skakel 0.1's state, the certificates as PKCS#12),
   converted at each load and save, so the clients, their secret hashes and generations, the
   certificate and a prepared next one carry over unchanged. A signing key that is not ECDSA P-256
@@ -607,7 +611,9 @@ dependencies at the commit that merged 0.2.0 until its release tag is published.
   A save that changes the certificate replaces what the web ports present from the next connection.
 - **Role change:** leaving the server role starts Skakel's server again, which ends every client's
   control call, remote device list and USB stream with `STOPPING`, as 0.1.x ended its hub
-  connections and streams with close code 4003.
+  connections and streams with close code 4003. The new server starts before the old one stops; from
+  then on new requests go to the new server's service, and new connections shake hands with its TLS
+  settings once the role is server or both again.
 - **Pairing:** a request the server's person refused leaves the list at once, as in 0.1.x; Skakel
   0.2.0 shows refused requests for 15 seconds, which Koppel keeps only for three wrong codes.
   Approvals and refusals go to the activity log as `clientAdded`, as 0.1.x's `PairingActivity` put
@@ -644,8 +650,9 @@ dependencies at the commit that merged 0.2.0 until its release tag is published.
   attaches and its traffic crosses both relays and Skakel's stream, the link and the device survive a
   certificate handover and a server restart, revoking and rotating end the link with word to pair
   again, and leaving the server role ends it. Off Windows, where the client's discovery socket could
-  bring up a firewall prompt, the link also follows a server that moved. The contract tests run
-  Skakel's parts against the Rust build too.
+  bring up a firewall prompt, the link also follows a server that moved. Callers at 127.0.0.1 and
+  127.0.0.2 do not share a pairing limit through Koppel's port, and the server's list shows the
+  second one's address. The contract tests run Skakel's parts against the Rust build too.
 
 ### Contract tests
 

@@ -2,15 +2,22 @@
 //! key, the certificate and its handover, pairing requests, Koppel's remote device list and the
 //! `usb` streams. Its state is `secrets.json` ([`SecretsStore`]).
 //!
-//! Skakel's server runs on a loopback port and Koppel's web ports hand it its requests (see
-//! [`super::front`]). Leaving the server role starts it again, which ends every client's control
-//! call, remote device list and USB stream with `STOPPING`, as 0.1.x ended its hub connections and
-//! streams with close code 4003. The UI's server endpoints keep working on the new one.
+//! Skakel's server is mounted on Koppel's web ports: it binds nothing, and the web ports hand it what
+//! is Skakel's after their port and role check ([`SkakelServerRole::serve`]), with the caller's real
+//! address, and shake hands with its TLS settings while the role is server or both
+//! ([`SkakelServerRole::acceptor`]). Leaving the server role starts it again, which ends every
+//! client's control call, remote device list and USB stream with `STOPPING`, as 0.1.x ended its hub
+//! connections and streams with close code 4003. New requests then go to the new server's service,
+//! new connections take its TLS settings once the role is server or both again, and the UI's server
+//! endpoints keep working on it.
 
 use std::collections::HashSet;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use axum::extract::Request;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use koppel_config::ConfigFile;
 use koppel_config::files::{KoppelSettings, Role};
 use koppel_usb::{RemoteDevices, UsbDataPlane};
@@ -18,8 +25,9 @@ use skakel_server::{
     Clients, Keys, Pairing, PairingDecision, ServerEvent, SkakelServer, SkakelServerBuilder,
 };
 use tokio::sync::watch;
+use tokio_rustls::TlsAcceptor;
+use tower_service::Service;
 
-use super::front::Front;
 use super::remote;
 use super::store::SecretsStore;
 use super::streams::{USB_STREAM, usb_handler};
@@ -42,13 +50,18 @@ pub(crate) struct ServerParts {
     pub data_plane: UsbDataPlane,
     pub push: Push,
     pub activity: Arc<ActivityLog>,
+    /// The address the network surface's port is bound to, which Skakel's server reports as its own.
+    pub listen: SocketAddr,
+    /// `RateLimits:TokenPerMinute`, per caller's address.
+    pub token_per_minute: u32,
+    /// `RateLimits:PairPerMinute`, per caller's address.
+    pub pair_per_minute: u32,
 }
 
 /// What the server's events need.
 struct Wiring {
     push: Push,
     activity: Arc<ActivityLog>,
-    front: Arc<Front>,
     overview: Mutex<PairingOverview>,
     /// The requests a person here refused. 0.1.x's server dropped them from the list at once;
     /// Skakel 0.2.0 shows them as refused for a few seconds, as it does after three wrong codes.
@@ -64,12 +77,11 @@ pub struct SkakelServerRole {
 }
 
 impl SkakelServerRole {
-    /// Starts Skakel's server on a loopback port over `secrets.json`.
+    /// Starts Skakel's server over `secrets.json`, mounted on the web ports.
     pub(crate) async fn start(parts: ServerParts) -> Result<Arc<Self>, String> {
         let wiring = Arc::new(Wiring {
             push: parts.push.clone(),
             activity: parts.activity.clone(),
-            front: Front::new(SocketAddr::from((Ipv4Addr::LOCALHOST, 0))),
             overview: Mutex::new(PairingOverview {
                 requests: Vec::new(),
                 budget_exhausted: false,
@@ -77,7 +89,6 @@ impl SkakelServerRole {
             refused: Mutex::new(HashSet::new()),
         });
         let server = build(&parts, &wiring).await?;
-        wiring.front.retarget(server.local_addr());
         Ok(Arc::new(Self {
             parts,
             wiring,
@@ -86,9 +97,34 @@ impl SkakelServerRole {
         }))
     }
 
-    /// Where Koppel's web ports hand Skakel's requests.
-    pub(crate) fn front(&self) -> Arc<Front> {
-        self.wiring.front.clone()
+    /// Hands a request the web ports' guards let through to the running server's service: a gRPC
+    /// call, a path under `/skakel` or `/api/remote`. The request carries the caller's address
+    /// (`ConnectInfo`), which Skakel's per-address limits and a pairing request's address use. The
+    /// server that runs now answers it, so after a restart new requests reach the new one.
+    pub(crate) async fn serve(&self, request: Request) -> Response {
+        let service = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(SkakelServer::service);
+        let Some(mut service) = service else {
+            return not_running(super::is_grpc(&request));
+        };
+        let Ok(response) = service.call(request).await;
+        response
+    }
+
+    /// The TLS acceptor of the running server: its certificate on every handshake, so a switch shows
+    /// from the next connection on and a prepared certificate never shows before it, ALPN `h2` and
+    /// `http/1.1`, and no session resumption. Built from the server that runs now, so a restart
+    /// moves new connections to the new server's.
+    pub(crate) fn acceptor(&self) -> Option<TlsAcceptor> {
+        self.running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|server| TlsAcceptor::from(server.tls_config()))
     }
 
     /// Starts Skakel's server again whenever the role leaves the server side, which ends what its
@@ -124,7 +160,8 @@ impl SkakelServerRole {
                 return;
             }
         };
-        self.wiring.front.retarget(next.local_addr());
+        // From here new connections and requests reach the new server; the old one's calls end
+        // with STOPPING when it shuts down.
         let old = self
             .running
             .lock()
@@ -195,18 +232,17 @@ impl SkakelServerRole {
     }
 }
 
-/// Builds and starts Skakel's server. Discovery is Koppel's own (see `announcer.rs`), and its
-/// per-address limits are kept on the web ports, where the caller's address is known.
+/// Builds and starts Skakel's server, mounted: it binds nothing, and the web ports serve it.
+/// Discovery is Koppel's own (see `announcer.rs`).
 async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<SkakelServer, String> {
     let events = Arc::downgrade(wiring);
     SkakelServerBuilder::new(APP_ID, &parts.version, parts.store.clone())
         .name(&parts.name)
         .certificate_host_name(&parts.name)
-        .listen(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .discovery(false)
         .keep_client_secrets(true)
-        .token_requests_per_minute(u32::MAX)
-        .pair_requests_per_minute(u32::MAX)
+        .token_requests_per_minute(parts.token_per_minute)
+        .pair_requests_per_minute(parts.pair_per_minute)
         .grpc_service(remote::Service::server(parts.devices.clone()))
         .stream(USB_STREAM, usb_handler(parts.data_plane.clone()))
         .routes(remote::routes(parts.devices.clone()))
@@ -215,9 +251,19 @@ async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<SkakelServer
                 wiring.on_event(event);
             }
         })
-        .start()
+        .start_mounted(parts.listen)
         .await
         .map_err(|e| format!("Skakel's server could not start: {e}"))
+}
+
+/// What a caller gets once Skakel's server has stopped with Koppel: gRPC's `UNAVAILABLE` for a
+/// call, 503 for the rest.
+fn not_running(grpc: bool) -> Response {
+    const WHY: &str = "Skakel's server is not running.";
+    if grpc {
+        return tonic::Status::unavailable(WHY).into_http();
+    }
+    (StatusCode::SERVICE_UNAVAILABLE, WHY).into_response()
 }
 
 impl Wiring {
@@ -238,10 +284,7 @@ impl Wiring {
                         .map(|r| PairingRequestView {
                             id: r.id.clone(),
                             client_name: r.client_name.clone(),
-                            from: self
-                                .front
-                                .pair_from(&r.id)
-                                .unwrap_or_else(|| r.from.clone()),
+                            from: r.from.clone(),
                             requested_at: r.requested_at,
                             expires_at: r.expires_at,
                             state: r.state.clone(),
@@ -251,7 +294,6 @@ impl Wiring {
                     budget_exhausted: overview.budget_exhausted,
                 };
                 *self.overview.lock().unwrap_or_else(PoisonError::into_inner) = view.clone();
-                self.front.keep_pair_from(&ids);
                 self.push.send(push::PAIRING_REQUESTS_CHANGED, &view);
             }
             ServerEvent::Decided(decision) => self.record(decision),
@@ -268,10 +310,7 @@ impl Wiring {
     /// Each pairing that was approved or refused goes to the activity log, as 0.1.x's
     /// `PairingActivity` put it there.
     fn record(&self, decision: &PairingDecision) {
-        let from = self
-            .front
-            .pair_from(&decision.request_id)
-            .unwrap_or_else(|| decision.from.clone());
+        let from = &decision.from;
         match &decision.client_id {
             Some(client_id) => {
                 self.activity.record(

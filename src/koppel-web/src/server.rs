@@ -1,33 +1,29 @@
 //! The accept loop: plain HTTP answered with a redirect, TLS by hand over tokio-rustls, then HTTP/1.1
 //! or HTTP/2 by what ALPN settled on, the pattern of axum's low-level rustls example and Skakel's
-//! server.
+//! server. Skakel's calls are served on these connections too (see `roles::skakel`), so each one
+//! gets Skakel's connection settings.
 
 use std::future::Future;
 use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
 use axum::extract::ConnectInfo;
 use hyper::body::Incoming;
-use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use hyper_util::server::conn::auto;
+use hyper_util::rt::TokioIo;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
-use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
 use crate::guard::LocalAddr;
 use crate::redirect;
-use crate::roles::skakel::front::FrontConnection;
+use crate::tls::Acceptors;
 
 /// How long a client has to send its first byte and finish the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long a client has to send the headers of a request.
-const HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long open connections get to finish once the server stops.
 const STOP_GRACE: Duration = Duration::from_secs(3);
 
@@ -67,14 +63,15 @@ fn listen(address: SocketAddr, dual_stack: bool) -> io::Result<TcpListener> {
 }
 
 /// Serves `router` over TLS on `listener` until `stop` completes, then gives open connections a
-/// moment to finish. Each request carries `ConnectInfo<SocketAddr>` with the caller's address and
-/// the local address it came in on.
+/// moment to finish. Each connection shakes hands with the acceptor `tls` picks for it. Each request
+/// carries `ConnectInfo<SocketAddr>` with the caller's address and the local address it came in on.
 pub async fn serve(
     listener: TcpListener,
-    acceptor: TlsAcceptor,
+    tls: impl Into<Acceptors>,
     router: Router,
     stop: impl Future<Output = ()> + Send,
 ) {
+    let tls = tls.into();
     let (stopping, stopped) = watch::channel(false);
     let mut connections = JoinSet::new();
     tokio::pin!(stop);
@@ -86,7 +83,7 @@ pub async fn serve(
                     connections.spawn(serve_connection(
                         stream,
                         remote,
-                        acceptor.clone(),
+                        tls.clone(),
                         router.clone(),
                         stopped.clone(),
                     ));
@@ -112,7 +109,7 @@ pub async fn serve(
 async fn serve_connection(
     stream: TcpStream,
     remote: SocketAddr,
-    acceptor: TlsAcceptor,
+    tls: Acceptors,
     router: Router,
     mut stopped: watch::Receiver<bool>,
 ) {
@@ -126,7 +123,7 @@ async fn serve_connection(
         Ok(Ok(1)) => return redirect::answer(stream, local).await,
         _ => return,
     }
-    let tls = match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
+    let tls = match tokio::time::timeout(HANDSHAKE_TIMEOUT, tls.pick().accept(stream)).await {
         Ok(Ok(tls)) => tls,
         Ok(Err(e)) => {
             tracing::debug!("TLS handshake with {remote} failed: {e}");
@@ -137,32 +134,17 @@ async fn serve_connection(
             return;
         }
     };
-    // The connection to Skakel's server that this connection's Skakel requests go over, made with
-    // the first one and closed with this connection.
-    let skakel = Arc::new(FrontConnection::default());
     let service = hyper::service::service_fn(move |mut request: hyper::Request<Incoming>| {
         request.extensions_mut().insert(ConnectInfo(remote));
         request.extensions_mut().insert(LocalAddr(local));
-        request.extensions_mut().insert(skakel.clone());
         let mut router = router.clone();
         async move { router.call(request).await }
     });
-    let mut builder = auto::Builder::new(TokioExecutor::new());
-    builder
-        .http1()
-        .timer(TokioTimer::new())
-        .header_read_timeout(HEADER_TIMEOUT);
-    // Skakel's keep-alive on every connection that may carry gRPC: a PING after 15 seconds without a
-    // frame from the client, and the connection is dead when that PING has no answer 15 seconds
-    // later. Adaptive windows let a USB stream's flow-control window grow past HTTP/2's 64 KiB.
-    builder
-        .http2()
-        .timer(TokioTimer::new())
-        .keep_alive_interval(skakel_protocol::KEEP_ALIVE_INTERVAL)
-        .keep_alive_timeout(
-            skakel_protocol::KEEP_ALIVE_TIMEOUT - skakel_protocol::KEEP_ALIVE_INTERVAL,
-        )
-        .adaptive_window(true);
+    // Skakel's settings on every connection, since any may carry its calls: HTTP/2 keep-alive (a
+    // PING after 15 seconds without a frame from the client, dead when it has no answer 15 seconds
+    // later), adaptive windows so a USB stream's window grows past HTTP/2's 64 KiB, and 30 seconds
+    // for an HTTP/1.1 request's headers.
+    let builder = skakel_server::connection_builder();
     let connection = builder.serve_connection_with_upgrades(TokioIo::new(tls), service);
     tokio::pin!(connection);
     tokio::select! {

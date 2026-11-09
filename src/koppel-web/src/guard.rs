@@ -9,6 +9,9 @@
 //! 5. The rate limit on setup, login and password change, per address, after the port and role
 //!    check so a request for the wrong port does not use up the allowance.
 //! 6. The session: every UI API path but the anonymous ones needs a good cookie, else 401.
+//!
+//! Skakel's limits on its token and pairing calls are Skakel's own, behind these guards, per
+//! caller's address (see `roles::skakel`).
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -65,22 +68,8 @@ async fn check(app: &App, mut request: Request, next: Next) -> Response {
         .get::<LocalAddr>()
         .map_or(app.host.ui_port, |local| local.0.port());
 
-    // Skakel's limits on its token and pairing calls come first, as its middleware came ahead of
-    // everything Koppel added in 0.1.x, so a call to the wrong port or role counts too.
-    if !app.skakel_limits.allow(&path, remote.ip()) {
-        return (
-            StatusCode::TOO_MANY_REQUESTS,
-            [(
-                CONTENT_TYPE,
-                HeaderValue::from_static("application/problem+json"),
-            )],
-            r#"{"type":"https://tools.ietf.org/html/rfc6585#section-4","title":"Too Many Requests","status":429,"detail":"Too many requests from this address. Wait a minute and try again."}"#,
-        )
-            .into_response();
-    }
-
     // A gRPC call is Skakel's, or Koppel's own service beside it: other machines, a server's.
-    let surface = if crate::roles::skakel::front::is_grpc(&request) {
+    let surface = if crate::roles::skakel::is_grpc(&request) {
         Surface::GRPC
     } else {
         Surface::of(&path)

@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use config::Config;
 use koppel_config::{SecretBox, convert_0_1_secrets};
-use koppel_web::{App, AppOptions, Host, NetworkOptions, tls};
+use koppel_web::{App, AppOptions, Host, NetworkOptions};
 use time::OffsetDateTime;
 use tokio::sync::watch;
 use tracing::Level;
@@ -144,7 +144,7 @@ async fn run(config: &Config, service: Option<Service>) -> Result<(), Box<dyn Er
         usb,
     })
     .await?;
-    let acceptor = tls::acceptor(app.certificate())?;
+    let acceptor = app.tls();
 
     let mut ports = vec![ui_port];
     if network_port != ui_port {

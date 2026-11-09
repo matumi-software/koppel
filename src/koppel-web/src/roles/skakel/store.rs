@@ -3,8 +3,9 @@
 //! generations, the certificate and a prepared next certificate carry over as they are; each load
 //! and save converts between that and skakel-server's own state.
 //!
-//! The certificate in the file is also what Koppel's own HTTPS ports present ([`CertificateSlot`]):
-//! a save that changes it replaces what the next connection gets.
+//! The certificate in the file is also what Koppel's own HTTPS ports present in the client role
+//! ([`CertificateSlot`]): a save that changes it replaces what the next connection gets. While the
+//! role is server or both they present it through Skakel's server's TLS settings instead.
 
 use std::io;
 use std::sync::Arc;

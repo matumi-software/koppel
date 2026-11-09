@@ -144,3 +144,21 @@ protox = "0.10.0"
 # sign-in, and the tests that sign in, crawl. Only ring is optimized; the rest stays debuggable.
 [profile.dev.package.ring]
 opt-level = 3
+
+# The shipped programs, tuned for size because a Raspberry Pi Zero runs them (#92). One codegen unit and
+# fat LTO let the optimizer see the whole program and drop what it never calls; `z` optimizes the rest for
+# size; strip drops the symbol table. Measured on Windows: Koppel.exe 17.4 MB with the defaults, 14.3 MB at
+# opt-level 3 with the same LTO, 8.5 MB like this. Unwinding stays (no `panic = "abort"`): a panicking
+# config change handler, background task or listener is caught as a failed tokio task and logged, and the
+# rest keeps running, which koppel-config and koppel-usb rely on.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = true
+
+# ring at full speed even in a release build for size: at `z` the 600,000-round PBKDF2 of a sign-in took
+# 1.8 times as long on an emulated Pi Zero CPU, and TLS was slower too. At 3 both match an opt-level 3
+# build, for 60 KB.
+[profile.release.package.ring]
+opt-level = 3

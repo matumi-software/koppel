@@ -17,7 +17,7 @@ use flate2::Compression;
 use flate2::write::GzEncoder;
 
 /// Where Vite writes the UI, from `src/`.
-const UI_DIST: &str = "Koppel/src/Koppel.UI/dist";
+const UI_DIST: &str = "ui/app/dist";
 
 const PLACEHOLDER: &str = "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><title>Koppel</title></head>\n<body>\n<p>This Koppel was built without its UI. Build the UI and then Koppel again, from <code>src/</code>:</p>\n<pre>pnpm install\npnpm --filter koppel.ui build\ncargo build</pre>\n</body>\n</html>\n";
 

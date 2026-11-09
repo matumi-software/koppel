@@ -1,8 +1,8 @@
 // Copies the design system in resources/design-system into the React UI library, so the
 // design system stays the one source for every token and component style.
 //
-//   tokens.json            -> Koppel.Core.React.UI/src/styles/tokens.css
-//   components/bundle.css  -> Koppel.Core.React.UI/src/styles/components.css
+//   tokens.json            -> ui/react-ui/src/styles/tokens.css
+//   components/bundle.css  -> ui/react-ui/src/styles/components.css
 //
 // Run from src/: pnpm design:sync. Commit the generated files.
 
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 // This file sits in src/Koppel.Core/tools; the repo root is three levels up.
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const source = join(root, 'resources', 'design-system');
-const target = join(root, 'src', 'Koppel.Core', 'src', 'Koppel.Core.React.UI', 'src', 'styles');
+const target = join(root, 'src', 'ui', 'react-ui', 'src', 'styles');
 
 const header = (from) =>
   `/* Generated from resources/design-system/${from} by src/Koppel.Core/tools/sync-design-system.mjs. Do not edit. */\n`;

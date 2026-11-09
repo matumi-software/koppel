@@ -52,11 +52,10 @@ export default defineConfig({
     },
     server: {
         proxy: {
-            // REST and the SignalR hub both live under /api/.
+            // REST and the live push both live under /api/.
             '^/api/': {
                 target,
                 secure: false,
-                ws: true,
                 // Tells Koppel the browser used https, so its same-origin check on Origin passes.
                 xfwd: true,
             }

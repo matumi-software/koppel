@@ -8,7 +8,7 @@ One codebase and one Docker image cover every role; the role is a setting.
 
 | Layer | What | Status |
 |---|---|---|
-| Control plane | ASP.NET Core host, REST for commands, SignalR for pushes, React UI behind a password | Done |
+| Control plane | REST for commands, a live push for confirmed state, React UI behind a password. 0.1.x: ASP.NET Core with SignalR. The Rust build (0.2.0): axum with Server-Sent Events | Done in 0.1.x; the Rust build has it, with the roles and USB behind seams (see "The UI's server side in Rust") |
 | Transport | [Skakel](https://github.com/matumi-software/skakel) (MIT): discovery, pairing, OAuth client credentials, certificate pinning and handover, the remote hub and the streams. Koppel keeps the server's state and the client's credentials in its own encrypted files. The UI has its own password | Done |
 | Data plane | USB/IP protocol (Linux kernel spec), in Koppel's `usb` stream on Skakel | Linux server and client work. A Windows client works through usbip-win2 (see "Real hardware" below). A Windows server shares through usbipd-win, and a real one was run to a Linux client |
 
@@ -35,16 +35,16 @@ The UI never assumes a change worked.
 
 1. The UI sends the change over REST (`PATCH /api/settings`). The server answers `202 Accepted` with no body.
 2. The server writes the change to its JSON config file (temp file, flush, move over the target).
-3. Only after the write lands does the server push the confirmed state over SignalR (`SettingsChanged` on `/api/hubs/ui`).
+3. Only after the write lands does the server push the confirmed state over the live push (`SettingsChanged`). The Rust build pushes Server-Sent Events at `/api/events`; 0.1.x pushed over SignalR at `/api/hubs/ui`.
 4. The UI shows the control as pending from step 1 until the pushed value matches what the user asked for. A rejected request (400) or no confirmation within 10 seconds puts the control back to its confirmed value with the reason.
 
 Hand edits to the config file are picked up by a file watcher and pushed the same way (see "Config
-on disk" for what happens to a bad edit). While the SignalR link is down, every control that sends
+on disk" for what happens to a bad edit). While the live push is down, every control that sends
 a change is disabled, and the UI refetches over REST after reconnecting.
 
 How the UI applies it:
 
-- `HubPushes` (under `HubProvider`) applies every hub event to the query cache for the whole app. Pages register no handlers of their own. `nearby-servers.tsx` keeps one local handler that only ends its own "starting" state.
+- `HubPushes` (under `HubProvider`, which reads the `EventSource`) applies every pushed event to the query cache for the whole app. Pages register no handlers of their own. `nearby-servers.tsx` keeps one local handler that only ends its own "starting" state.
 - Pending changes live in `PendingProvider`, above the pages, one store per domain (`pending/domains.ts`: settings, serverDevices, clientDevices, clients, connection, pairingRequests, pairing). Each pending change has an activity line. Approve and Refuse on a pairing request use the pairingRequests store like any other change. Setup is a pending change in the settings domain. Leaving a page orphans nothing.
 - The provider watches the query cache and judges a pending change whenever confirmed data lands, from a push or from the refetch after a reconnect. A change that failed clears, and counts as saved, once the confirmed value equals the value that failed.
 - A push cancels the queries in flight for that key before it writes to the cache, so a late fetch cannot overwrite it. The activity list is the exception: a push merges one event in by id and the fetch merges with the cache after it lands, so neither loses the other's events.
@@ -53,11 +53,11 @@ How the UI applies it:
 - Setup sends one `PATCH { role, setupComplete: true }`.
 - Changing the password completes on the REST response, because there is no pushed value to wait for (commented in `change-password.tsx`).
 
-Code (under `src/Koppel/`): `src/Koppel/Settings/SettingsStore.cs` (write, then raise),
-`src/Koppel/Hubs/UiHub.cs` (relay to the hub), `src/Koppel.UI/src/hub/hub-pushes.tsx` (pushes into
-the cache), `src/Koppel.UI/src/pending/` (pending, confirm, fail), `src/Koppel.UI/src/settings/use-settings.ts`.
-The end-to-end test is `tests/Koppel.Tests/Settings/SettingsConfirmFlowTests.cs`; the UI has its own
-tests (`pnpm --filter koppel.ui test`).
+Code: in Rust, `koppel-web/src/api/settings.rs` (write, then answer 202) and `koppel-web/src/push.rs`
+(the push); in 0.1.x, `src/Koppel/src/Koppel/Settings/SettingsStore.cs` and `Hubs/UiHub.cs`. The UI:
+`src/ui/app/src/hub/` (the `EventSource` and the pushes into the cache), `src/ui/app/src/pending/`
+(pending, confirm, fail), `src/ui/app/src/settings/use-settings.ts`. The contract tests check every push
+against the Rust build (`koppel-contract/tests/push.rs`); the UI has its own tests (`pnpm --filter koppel.ui test`).
 
 ## Ports and what they serve
 
@@ -74,7 +74,7 @@ which is on the network surface.
 
 | Port | Surface | Serves | Role |
 |---|---|---|---|
-| 5240 HTTPS (`Ports:Ui`) | UI | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, `/api/hubs/ui`, `/healthz` | Any |
+| 5240 HTTPS (`Ports:Ui`) | UI | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, the live push (`/api/events` in Rust, `/api/hubs/ui` in 0.1.x), `/healthz` | Any |
 | 5240 HTTPS (`Ports:Ui`) | UI | `/api/server/*` | Server or both |
 | 5240 HTTPS (`Ports:Ui`) | UI | `/api/client/*` | Client or both |
 | 5240 HTTPS (`Ports:Network`) | Network | Skakel under `/skakel`: info, pairing, tokens and hello, the remote hub at `/skakel/v1/hub`, USB traffic at `/skakel/v1/streams/usb`. Koppel's own `/api/remote/*` behind a client's token | Server or both |
@@ -133,8 +133,8 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 - **Backoff:** login and password change lock a caller for one minute after 5 wrong tries, and double the lock on each further failure, up to one hour. A caller is one whole address, an IPv4-mapped IPv6 address counting as its IPv4 address, as in Skakel's limits. Not an IPv6 /64: every host on a network shares it, so one host could lock all of them out. A try is counted before the password is hashed and given back when it is right, so parallel guesses cannot all get in ahead of the lock. The lock applies before the password is looked at, so a right guess during it is refused too. Setup has nothing to guess, so it has no backoff; the rate limit and the hash slots hold it back. The table of callers holds at most 2048 entries.
 - **Hash slots:** at most 2 password hashes run at once for the whole server (setup, login and password change). A caller who arrives while both are busy gets 429 with `Retry-After: 1` at once, and the try is not counted against it.
 - **Failures in the log:** every failure goes to the log. The activity log gets one `signInFailed` entry each time a lock engages, so a burst of guesses cannot push the 500 other entries out.
-- **Ending sessions:** a password change, a reset or signing out invalidates the cookies and closes the UI hub connections of the sessions that ended. Signing out also revokes the session id on the server, so a copy of the cookie is refused too. The revoked ids are written to the encrypted `ui-auth.json` beside the stamp, so they hold across a restart. Each one is kept until the session could no longer have been valid (7 days after its sign-in) and dropped on the next sign-out after that; the list holds at most 4096 ids, and past that the ones that end soonest go. The session that changed the password stays signed in. The UI hub is mapped with `CloseOnAuthenticationExpiration`, so a connection also ends when its cookie runs out. In the browser the sign-in gate (`AuthGate`) shows the login screen on any 401, and re-asks the server whether the session is still good when the hub closes and on every reconnect retry, so a session that ended during an outage does not retry forever. Signing out cancels any auth check in flight and ignores rechecks until it finishes, and a failed sign-out says so.
-- **Where the rule lives:** `Surface.RequiresSignIn` and `Surface.Anonymous` in `SurfaceGuard.cs`. Every `/api/*` route and `/api/hubs/ui` of the UI surface needs a session by default. Anonymous: `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/healthz` and the SPA files. The network surface never looks at the cookie; it keeps bearer tokens.
+- **Ending sessions:** a password change, a reset or signing out invalidates the cookies and closes the live push of the sessions that ended. Signing out also revokes the session id on the server, so a copy of the cookie is refused too. The revoked ids are written to the encrypted `ui-auth.json` beside the stamp, so they hold across a restart. Each one is kept until the session could no longer have been valid (7 days after its sign-in) and dropped on the next sign-out after that; the list holds at most 4096 ids, and past that the ones that end soonest go. The session that changed the password stays signed in. A push stream also ends when its cookie runs out (0.1.x: `CloseOnAuthenticationExpiration`). In the browser the sign-in gate (`AuthGate`) shows the login screen on any 401, and re-asks the server whether the session is still good when the push stream closes and on every reconnect retry, so a session that ended during an outage does not retry forever. Signing out cancels any auth check in flight and ignores rechecks until it finishes, and a failed sign-out says so.
+- **Where the rule lives:** `Surface.RequiresSignIn` and `Surface.Anonymous` in `SurfaceGuard.cs`. Every `/api/*` route of the UI surface, the live push included, needs a session by default. In Rust the same table is `koppel-web/src/surface.rs`. Anonymous: `/api/auth/state`, `/api/auth/setup`, `/api/auth/login`, `/healthz` and the SPA files. The network surface never looks at the cookie; it keeps bearer tokens.
 - **Forgot the password:** run the reset command. It clears the password, changes the stamp (so every session ends) and exits. A running service sees the change through its file watcher and opens the setup window again at once; otherwise the next start opens it. Then set a new password in the UI within the window. An unreadable `ui-auth.json` is replaced by the reset.
 
   ```sh
@@ -149,7 +149,7 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 
 ### Guards on the web surface
 
-- **Origin and header (UI surface):** an `Origin` that does not match the request's own scheme, host and port gets 403 on any `/api/*` call, the hub's WebSocket upgrade included. Behind a TLS proxy the scheme comes from `X-Forwarded-Proto`. A change (anything but GET or HEAD) also needs `X-Koppel-UI: 1`, otherwise 403. A page on another site cannot add that header without a CORS preflight, which this server never grants. The UI adds it in `api/http.ts` (`uiFetch`, used by every mutating fetch). The hub is exempt from the header only, because an upgrade cannot carry one.
+- **Origin and header (UI surface):** an `Origin` that does not match the request's own scheme, host and port gets 403 on any `/api/*` call, the live push included. Behind a TLS proxy the scheme comes from `X-Forwarded-Proto`. A change (anything but GET or HEAD) also needs `X-Koppel-UI: 1`, otherwise 403. A page on another site cannot add that header without a CORS preflight, which this server never grants. The UI adds it in `api/http.ts` (`uiFetch`, used by every mutating fetch). The live push is a GET, so it needs no header, which an `EventSource` cannot send (0.1.x exempted its hub's WebSocket upgrade, which cannot carry one either).
 - **Host header:** `AllowedHosts` stays `*` and is configurable. A DNS rebinding page is stopped by HTTPS: the browser checks Koppel's certificate against the rebinding page's own host name and the request fails, and a page that tries plain HTTP is only redirected to HTTPS at its own host name, where the same check fails. The SameSite=Strict cookie and the Origin and header checks stand behind that, not the host name.
 - **Security headers** on every response: `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` (only that, so it cannot break the app), `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`.
 - **Rate limits:** a fixed one-minute window per caller, answering 429. A caller is one whole address, an IPv4-mapped IPv6 address counting as its IPv4 address. Skakel limits its token endpoint to 60 (`RateLimits:TokenPerMinute`) and its pairing endpoints to 120 (`RateLimits:PairPerMinute`), and refuses a body over 4 KiB on them with 413. It also answers 429 to a registered client's token requests after 10 wrong secrets in a minute, from any mix of addresses. Koppel limits `/api/auth/setup`, `/login` and `/password` to 30 (`RateLimits:AuthPerMinute`), counted the same way. Nothing else has a rate limit: `/api/remote/*`, the remote hub and the streams need a valid token. Skakel's limits run first, in a middleware that `AddSkakelServer` puts ahead of everything Koppel adds, so a token or pairing request also counts when it reached the wrong port or a client-only machine and gets 404. Koppel's limit runs after the port and role check, so such a request does not use up its allowance.
@@ -399,23 +399,23 @@ third-party crate pinned in `[workspace.dependencies]` with a note on its licenc
 |---|---|
 | `koppel-bin` (package `koppel`) | The program. The folder is not `koppel` because that and the C# `Koppel` folder are the same folder on Windows |
 | `koppel-config` | The files on disk: the config files with 0.1.x's JSON and write rules, the secret files, the server certificate, the folder hardening, and the conversion of a 0.1.x install (see "Config files in Rust") |
-| `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, `/healthz` and the UI |
+| `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, the plain HTTP redirect, `/healthz`, the UI, and the UI's server side: sign-in, the REST API and the live push (see "The UI's server side in Rust") |
 | `koppel-contract` | Contract tests that drive a running Koppel over HTTPS (see "Contract tests" below). Not shipped |
 | `koppel-usb` | The USB layer: USB/IP, the Linux kernel's drivers through sysfs, usbip-win2, usbipd-win, and the server and client roles over a stream to the other machine (see "USB in Rust" below) |
 
-- **Certificate:** each handshake asks `CertificateSlot` for the current certificate, and replacing it takes effect from the next connection. Session resumption is off (no tickets, no session cache), so every connection presents the current certificate, which Skakel's handover relies on. `koppel-config` loads Koppel's own from `secrets.json` (`SkakelState::certified_key`, RSA or ECDSA), and a test presents it through `CertificateSlot`. The program still makes a self-signed one at start until the server role is wired up (#85).
-- **UI:** `koppel-web/build.rs` reads Vite's output in `src/Koppel/src/Koppel.UI/dist`, gzips every file that shrinks by 5% or more, and rust-embed puts one copy of each file into the program. The gzip copy goes out as it is to a client that takes gzip (every browser) and is inflated for one that does not. Files under `assets/` have a hash in their names and are sent with `max-age=31536000, immutable`; index.html and the rest with `no-cache`. A path whose last part has no dot gets index.html, except under `/api`.
+- **Certificate:** each handshake asks `CertificateSlot` for the current certificate, and replacing it takes effect from the next connection. Session resumption is off (no tickets, no session cache), so every connection presents the current certificate, which Skakel's handover relies on. The program presents the one in `secrets.json`. On a first start it makes one as 0.1.x did (self-signed ECDSA P-256, ten years, the machine's name and `localhost`) and keeps it there as a .NET-shaped PKCS#12 (`koppel_config::pkcs12::write`), with a token signing key, which is ECDSA P-256 as Skakel's Rust server signs. A 0.1.0 `secrets.json` is carried over, or copied aside when it cannot be.
+- **UI:** `koppel-web/build.rs` reads Vite's output in `src/ui/app/dist`, gzips every file that shrinks by 5% or more, and rust-embed puts one copy of each file into the program. The gzip copy goes out as it is to a client that takes gzip (every browser) and is inflated for one that does not. Files under `assets/` have a hash in their names and are sent with `max-age=31536000, immutable`; index.html and the rest with `no-cache`. A path whose last part has no dot gets index.html, except under `/api`.
 - **No UI built:** a debug build (`cargo build`, `test`, `clippy`) embeds a placeholder page and prints a warning, so the Rust side builds without Node. A release build stops with an error that says how to build the UI.
 
 Run from `src/`:
 
 ```sh
-pnpm install && pnpm --filter koppel.ui build   # the UI the program embeds, needed for a release build
+pnpm install && pnpm --filter koppel.ui build   # the UI the program embeds (src/ui/app/dist), needed for a release build
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-cargo run -p koppel                             # https://localhost:5240, Ctrl+C stops it
+cargo run -p koppel                             # https://localhost:5240, Ctrl+C stops it; set Paths__Config and Paths__Keys to a folder of your own
 ```
 
 The same on Linux, in a container. The image has no clippy or rustfmt; add them with
@@ -425,6 +425,30 @@ The same on Linux, in a container. The image has no clippy or rustfmt; add them 
 docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c \
   "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
 ```
+
+### The UI's server side in Rust
+
+`koppel-web` ports 0.1.x's `Login/*`, `Web/*`, the `*Endpoints.cs` and `UiHubRelay` to axum, with the same
+paths, JSON and errors, held to them by the contract tests.
+
+| Module | What |
+|---|---|
+| `app.rs` | `App`: opens every config file as 0.1.x does, makes the certificate on a first start, wires the pushes, builds the router |
+| `guard.rs` | The guards, in 0.1.x's order: security headers, port and role (404), `Ui:AllowFrom` (403), Origin and `X-Koppel-UI` (403), the sign-in rate limit (429), the session (401) |
+| `surface.rs`, `access.rs` | What is served on which port and role, which paths are anonymous, and who `Ui:AllowFrom` takes |
+| `auth/` | `ui-auth.json`, the setup window, password rules and hashes, the lockout, the hash slots, the session cookie, sign-out and the password change, `--reset-password` |
+| `api/` | The REST endpoints: settings, activity, system, server, client and USB |
+| `activity.rs` | The activity log, in memory, 500 entries |
+| `push.rs` | The live push |
+| `roles/` | The seams for #85 to #87, and what stands in for them |
+| `redirect.rs`, `server.rs` | Plain HTTP answered with a 301 from the first byte, then TLS, and the dual-stack listener |
+
+- **Settings:** `koppel-bin` reads what 0.1.x read, from the environment (`Paths__Config`) and the command line (`--Paths:Config=...`), names in any case: `Paths:Config`, `Paths:Keys`, `Ports:Ui`, `Ports:Network`, `Ports:Address`, `Ui:AllowFrom`, `Ui:SetupWindowMinutes` and `RateLimits:AuthPerMinute`, each refused at start with its name when it is not a valid value. `ASPNETCORE_ENVIRONMENT` or `DOTNET_ENVIRONMENT` set to `Development` makes `Ui:AllowFrom` default to `local`. There is no `appsettings.json`: 0.1.x's only held log levels, which `RUST_LOG` sets now. `Discovery:Port` and Skakel's `RateLimits:*` come with #85, `--healthcheck` with the image (#90).
+- **Start:** the folders are prepared, 0.1.x's secrets converted, the config files opened (start-up still stops on an unusable one), then the UI port and, when set apart, the network port listen. With no `Ports:Address` a port is one dual-stack socket, or IPv4 alone where there is no IPv6.
+- **Sessions:** the cookie `koppel.ui` carries the session id, the security stamp, when it was signed in and when it runs out, signed with HMAC-SHA256. The key is `ui-session.key` in the keys directory, sealed like the secret files, so sessions survive a restart; one that cannot be opened is replaced, which signs everyone out. Every request checks the signature, the stamp, that a password is set, the 12 hours, the 7 day cap and the revoked ids in `ui-auth.json`; a request in the second half of the 12 hours gets the cookie again with a later expiry. The lockout (5 tries, then a minute doubling to an hour, per whole address, at most 2048 callers), the two hash slots and the rate limit are 0.1.x's. A reset or a hand edit of `ui-auth.json` is picked up by the file's watcher: a new stamp ends every session and reopens setup when there is no password.
+- **The push:** `GET /api/events` with the session cookie answers `text/event-stream`. Each event's name is 0.1.x's hub method and its data the same JSON, sent once the change is on disk: `SettingsChanged` and `ConnectionChanged` follow their files' change deliveries, so a hand edit is pushed too, and the rest are sent by whatever made the change. A comment goes out every 15 seconds. A stream that falls 256 events behind is closed rather than skipping one, and the stream ends when its session does: signing out, a password change or reset elsewhere, the cookie running out. HTTP/2 carries any number of streams over one connection, so many open tabs do not run out of connections. The UI's `EventSource` reconnects on 0.1.x's steps (0, 2, 5, 10, then 30 seconds), asks whether the session is still good on each failure, and fetches everything again when a stream opens.
+- **Unknown API paths:** a signed-in request for an `/api/...` path no route has gets 404, where 0.1.2 answered index.html.
+- **The seams:** `roles::ServerRole`, `ClientRole`, `UsbServer` and `UsbClient`. Until Skakel's server comes in (#85), `StoredServer` keeps the registered clients, their secrets, the signing keys and the certificates in `secrets.json`, so adding, revoking and rotating clients and keys and the certificate handover's prepare, cancel and switch work and are saved, but there are no pairing requests (approving any answers 404), no token endpoint, no `/skakel/*` and no remote hub, so `/api/remote/devices` always answers 401. The client side keeps its connection in `connection.json`; its test answers `incomplete` or `unreachable` with a line saying this build has no link, discovery finds nothing, and pairing fails at once with a reason. USB (#86, #87) answers with no devices and says sharing and attaching are not in this build, while `devices.json` and `attached.json` are still checked as 0.1.x checks them.
 
 ### Contract tests
 
@@ -437,8 +461,22 @@ crate talks HTTP only and never links Koppel's own crates.
 - **Targets:** environment variables name the Koppels to test, one for most tests and a few more for states only one test may touch (a fresh machine, a closed setup window, `Ui:AllowFrom=local`, the rate limit). The crate's docs list them. Without them every test says it was skipped and passes, so `cargo test --workspace` needs no Koppel running.
 - **Never an install someone uses:** the tests change settings, the password, clients and the certificate.
 - **Certificate:** the first certificate a target presents is pinned for the run, and every later connection must present it or one a test pinned before switching. The name in it is not checked, since the tests reach the target as `localhost`.
-- **The live push:** not tested against 0.1.x, whose SignalR goes away. `koppel_contract::push` lists the ten events the UI's push carries today, with their payloads, as the contract the SSE tests will check against the Rust build (#84).
+- **The live push:** `koppel_contract::push` lists the ten events with their payloads, and `tests/push.rs` checks each against the Rust build's Server-Sent Events, with the stream ending on a sign-out and on a password change elsewhere. Against 0.1.x, whose push is SignalR, those tests say they were skipped.
+- **What the Rust build lacks yet:** with `KOPPEL_CONTRACT_SKAKEL=0` the parts that need Skakel's endpoints or a link (tokens, `/skakel/info`, pairing between two Koppels, discovery, the connection test against a real server) say they were skipped and the rest runs. They come back with #85. `DevicesChanged` is checked only on a target that can share a device.
 - **Gaps:** what needs USB hardware (sharing, attaching), a second network, or a server older than Koppel kept secrets in is not covered; the crate's tests say so where it applies.
+
+Against the Rust build, from the repo root (Git Bash on Windows):
+
+```sh
+bash src/koppel-contract/run-against-rust.sh              # all of them
+bash src/koppel-contract/run-against-rust.sh --test push  # one file
+```
+
+The script builds `koppel`, starts the same six targets as processes, each on a fresh temporary data
+folder, on ports 16240 to 16246 (`KOPPEL_CONTRACT_PORT` moves them), runs the tests and stops them. On
+Windows they listen on 127.0.0.1 only, so no firewall prompt comes up, and the `Ui:AllowFrom` test is
+skipped, since every caller there is loopback; elsewhere the script reaches that target at the machine's
+own address. `KOPPEL_CONTRACT_RELEASE=1` tests a release build.
 
 Against Koppel 0.1.2, from the repo root with Docker running (Git Bash on Windows):
 
@@ -471,6 +509,7 @@ with the same rules.
 - **Hardening:** as 0.1.x on Windows (owner Administrators, a protected ACL for SYSTEM and
   Administrators, an unelevated process keeping its own access, links refused, `%ProgramData%\Koppel`
   itself when the folders are in it) and `chmod 700` on Linux.
+- **Session key:** `ui-session.key` in the keys directory, sealed the same way, signs the UI's session cookies (see "The UI's server side in Rust").
 - **Secret files:** a six byte header, `KPSF`, a format version (1) and a scheme. Scheme 1, on Windows,
   is machine DPAPI over the JSON. Scheme 2, elsewhere, is AES-256-GCM with a random key in
   `koppel-secrets.key` in the keys directory, mode `0600`; the file then holds that key's id and a
@@ -559,7 +598,7 @@ sections describe the behaviour; this one says where it lives in Rust and what d
 ## USB layer decisions (from the feasibility study, 2026-11-02)
 
 - **Protocol: USB/IP**, as documented in the Linux kernel. Standard clients (`usbip attach`, usbip-win2, Docker Desktop) work against it, and we do not write our own virtual USB driver. Koppel's value sits around it: auth, discovery, UI.
-- **USB traffic does not go over SignalR or REST.** It uses its own TCP connection; on Linux the kernel takes over the socket. SignalR and REST stay the control channel.
+- **USB traffic does not go over the push or REST.** It uses its own TCP connection; on Linux the kernel takes over the socket. The push and REST stay the control channel.
 - **USB/IP has no auth or encryption.** Koppel carries it in a Skakel stream (a WebSocket over TLS) with a small relay on each side and only allows an import after an OAuth check. The raw USB/IP port is never exposed to the network.
 - **Platforms:**
   - Linux server: the kernel's `usbip-host`, driven through sysfs. Docker image, privileged.

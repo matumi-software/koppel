@@ -11,16 +11,17 @@ folder per solution, each with its own `src/` and `tests/`.
 |---|---|
 | `docs/` | Architecture and decisions |
 | `resources/design-system/` | The design system: brand book, `tokens.json`, component specs and previews, logos. The source of every colour, size and component style |
-| `src/` | Shared build config: `Directory.Build.props`, `Directory.Packages.props`, `global.json`, `.editorconfig`, the pnpm workspace |
-| `src/Koppel/` | The product: `Koppel.slnx`, the host (`src/Koppel`), the React app (`src/Koppel.UI`), its tests and `docker-compose.yml` |
-| `src/Koppel.Core/` | The libraries: `Koppel.Core.slnx` with Configuration, Security, Auth and Usb, the UI library (`src/Koppel.Core.React.UI`, package `@koppel/react-ui`), their tests and `tools/` |
+| `src/` | Shared build config: `Directory.Build.props`, `Directory.Packages.props`, `global.json`, `.editorconfig`, the pnpm workspace, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/architecture.md`) |
+| `src/ui/` | The UI, one pnpm workspace with `src/`: the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
+| `src/Koppel/` | The C# product, 0.1.x: `Koppel.slnx`, the host (`src/Koppel`), its tests and `docker-compose.yml`. No longer shipped from main; its live updates do not reach the current UI, which listens for Server-Sent Events |
+| `src/Koppel.Core/` | The C# libraries: `Koppel.Core.slnx` with Configuration, Security, Auth and Usb, their tests and `tools/` (the design system sync) |
 
 ## Rules
 
-- **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the SignalR push brings the value back after the server wrote its config file. Pushes are applied in `HubPushes` and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/architecture.md`.
-- **Design values come from `resources/design-system/`.** Do not hand-edit `Koppel.Core.React.UI/src/styles/tokens.css` or `components.css`; change the design system and run `pnpm design:sync`.
+- **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the live push (Server-Sent Events at `/api/events`) brings the value back after the server wrote its config file. Pushes are applied in `HubPushes` and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/architecture.md`.
+- **Design values come from `resources/design-system/`.** Do not hand-edit `ui/react-ui/src/styles/tokens.css` or `components.css`; change the design system and run `pnpm design:sync`.
 - **No new UI primitives in the app.** Add them to `@koppel/react-ui` and to the design system.
-- **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (`Surface.RequiresSignIn`); list it in `Surface.Anonymous` only when it must work signed out. A route for remote clients goes in `Surface.Listed` on the HTTPS listener. See "Ports and what they serve" in `docs/architecture.md`.
+- **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (`requires_sign_in` in `koppel-web/src/surface.rs`, `Surface.RequiresSignIn` in the C#); list it among the anonymous paths only when it must work signed out. A route for remote clients goes in the listed surfaces on the network port. See "Ports and what they serve" in `docs/architecture.md`.
 - **Reusable code goes in `Koppel.Core`**, product wiring in `Koppel`. Core never references the product.
 - **GPL-3.0-or-later.** Code from projects under GPL-3.0, GPL-3.0-or-later, GPL-2.0-or-later, LGPL or a permissive licence may come in: keep its copyright and licence notice in the file and list it in `THIRD-PARTY-NOTICES.txt`. Never copy code from GPL-2.0-only projects (the Linux kernel, for one) or from projects without a licence.
 - C#: file-scoped namespaces, internal by default, `[LoggerMessage]` for logging. Tests are named `Method_does_thing`.

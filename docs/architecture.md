@@ -302,7 +302,7 @@ The encrypted files use ASP.NET Core Data Protection with a key ring in a separa
 (`Paths:Keys`). On Windows the key ring is protected with machine DPAPI. On Linux it is plain on disk
 unless `Paths:KeyCertificate` points at a certificate kept outside the data volume (for example a
 Docker secret); Koppel logs a warning when it is not. `Paths:KeyCertificate` is deprecated and goes in 0.2.0,
-which cannot read a key ring protected with it.
+which cannot read a key ring protected with it. Koppel 0.2 converts the secret files to its own format once (see "Config files in Rust").
 
 Data folder hardening. Before anything is written, Koppel restricts the config and keys directories:
 
@@ -398,10 +398,11 @@ third-party crate pinned in `[workspace.dependencies]` with a note on its licenc
 | Crate | What |
 |---|---|
 | `koppel-bin` (package `koppel`) | The program. The folder is not `koppel` because that and the C# `Koppel` folder are the same folder on Windows |
+| `koppel-config` | The files on disk: the config files with 0.1.x's JSON and write rules, the secret files, the server certificate, the folder hardening, and the conversion of a 0.1.x install (see "Config files in Rust") |
 | `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, `/healthz` and the UI |
 | `koppel-contract` | Contract tests that drive a running Koppel over HTTPS (see "Contract tests" below). Not shipped |
 
-- **Certificate:** each handshake asks `CertificateSlot` for the current certificate, and replacing it takes effect from the next connection. Session resumption is off (no tickets, no session cache), so every connection presents the current certificate, which Skakel's handover relies on. For now the program makes a self-signed one at start; loading Koppel's own is #83.
+- **Certificate:** each handshake asks `CertificateSlot` for the current certificate, and replacing it takes effect from the next connection. Session resumption is off (no tickets, no session cache), so every connection presents the current certificate, which Skakel's handover relies on. `koppel-config` loads Koppel's own from `secrets.json` (`SkakelState::certified_key`, RSA or ECDSA), and a test presents it through `CertificateSlot`. The program still makes a self-signed one at start until the server role is wired up (#85).
 - **UI:** `koppel-web/build.rs` reads Vite's output in `src/Koppel/src/Koppel.UI/dist`, gzips every file that shrinks by 5% or more, and rust-embed puts one copy of each file into the program. The gzip copy goes out as it is to a client that takes gzip (every browser) and is inflated for one that does not. Files under `assets/` have a hash in their names and are sent with `max-age=31536000, immutable`; index.html and the rest with `no-cache`. A path whose last part has no dot gets index.html, except under `/api`.
 - **No UI built:** a debug build (`cargo build`, `test`, `clippy`) embeds a placeholder page and prints a warning, so the Rust side builds without Node. A release build stops with an error that says how to build the UI.
 
@@ -416,7 +417,8 @@ cargo fmt --all --check
 cargo run -p koppel                             # https://localhost:5240, Ctrl+C stops it
 ```
 
-The same on Linux, in a container:
+The same on Linux, in a container. The image has no clippy or rustfmt; add them with
+`rustup component add clippy rustfmt` first to run those two there.
 
 ```sh
 docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c \
@@ -448,6 +450,49 @@ The script starts six containers from `matumisoftware/koppel:0.1.2` on fresh vol
 their own, publishes them on 127.0.0.1 ports 15240 to 15246 (never 5240, where an installed Koppel
 listens), runs the tests one at a time and removes everything it started, also when a test fails.
 `KOPPEL_IMAGE` runs another image and `KOPPEL_CONTRACT_PORT` moves the ports.
+
+### Config files in Rust
+
+`koppel-config` reads and writes the same files in the same folders as 0.1.x ("Config on disk"),
+with the same rules.
+
+- **JSON:** what System.Text.Json writes with Koppel's options, byte for byte: two space indents, the
+  platform's line ending, `\uXXXX` for everything outside printable ASCII and for `" & ' + < >` and the
+  backtick, dates as `2026-11-09T08:30:15.1234567+00:00`, and the properties a C# record only computes
+  (`isComplete`, `hasPassword`) written too. Names are read in any case and unknown ones ignored, a
+  missing one takes .NET's default, and an enum is a name in any case, never a number. The tests read
+  files 0.1.2 wrote and write them back unchanged.
+- **Writes and pushes:** `ConfigFile` is `JsonConfigFile`: temp file, flush, replace with retries,
+  stale temp files swept, start-up never replacing a file, `devices.json` and `attached.json` starting
+  empty and moving a bad file aside, and changes delivered in write order with a nested change queued.
+  Hand edits are found by checking the file's size and time every quarter second, which also works
+  through Docker bind mounts, where file change events may not arrive.
+- **Hardening:** as 0.1.x on Windows (owner Administrators, a protected ACL for SYSTEM and
+  Administrators, an unelevated process keeping its own access, links refused, `%ProgramData%\Koppel`
+  itself when the folders are in it) and `chmod 700` on Linux.
+- **Secret files:** a six byte header, `KPSF`, a format version (1) and a scheme. Scheme 1, on Windows,
+  is machine DPAPI over the JSON. Scheme 2, elsewhere, is AES-256-GCM with a random key in
+  `koppel-secrets.key` in the keys directory, mode `0600`; the file then holds that key's id and a
+  nonce before the ciphertext. Data Protection's key ring is no longer used. As before, anyone who can
+  read the keys directory on Linux can decrypt the files.
+- **The upgrade from 0.1.x:** at the first start, each of `secrets.json`, `connection.json` and
+  `ui-auth.json` that is still a Data Protection payload is decrypted with the 0.1.x key ring (machine
+  DPAPI on Windows, plain XML on Linux) and written again in the new format, with the same JSON inside.
+  All are decrypted before any is written, so a failure changes nothing: the log says why, and the
+  start then stops on the first file still in the old format. The key ring is left as it was. A key
+  ring protected with `Paths:KeyCertificate` is not read: its files are renamed to
+  `<name>.0.1-key-certificate-<UTC time>`, unchanged, and Koppel starts as a new install, so every
+  client pairs again and the password is set again.
+- **What carries over:** the certificate, so pinned clients keep their pin; the clients and their
+  secrets; the client's connection; the UI password. The token signing key stays in `secrets.json`
+  but does not need to carry over: tokens last 30 minutes and live only in a client's memory, a 0.2
+  client cannot use a 0.1.x server's tokens anyway (Skakel protocol 2), and Skakel's Rust server signs
+  with ECDSA P-256 where 0.1.x used RSA, so 0.2 starts with a new key. UI sessions end once: their
+  cookies were protected by ASP.NET Core's own Data Protection keys in `keys/aspnet`, which 0.2 does
+  not read.
+- **Certificate:** 0.1.x keeps it as a password-less PKCS#12 from .NET (3DES and SHA-1, where "no
+  password" is an empty BMPString without its terminator). The PKCS#12 crates refuse that form, so
+  `koppel-config` reads it itself and hands the DER certificate and PKCS#8 key to rustls.
 
 ## Known limits
 

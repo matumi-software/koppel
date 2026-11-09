@@ -1,0 +1,9 @@
+{
+  "serverFingerprint": "19:5E:2B:4B:D5:6C:4F:AE:98:45:69:0D:FD:43:A5:18:F5:9B:6C:53:6E:4B:66:7E:D1:08:CA:29:73:FE:EE:B0",
+  "busIds": [
+    "2-1"
+  ],
+  "vidPids": {
+    "2-1": "1a86:7523"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "role": "both",
+  "shareOnStartup": false,
+  "setupComplete": true,
+  "notifyPairing": true,
+  "notifyLink": false,
+  "notifyAttachFailures": true
+}

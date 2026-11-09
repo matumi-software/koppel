@@ -1,0 +1,31 @@
+[package]
+name = "koppel-config"
+description = "Koppel's files on disk: config files, secret files, the server certificate and the upgrade from 0.1.x"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ring.workspace = true
+rustls.workspace = true
+aes.workspace = true
+cbc.workspace = true
+des.workspace = true
+roxmltree.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
+[dev-dependencies]
+koppel-web.workspace = true
+tokio-rustls.workspace = true
+tokio = { workspace = true, features = ["io-util"] }

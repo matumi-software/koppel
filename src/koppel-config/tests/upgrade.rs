@@ -543,3 +543,54 @@ async fn a_windows_0_1_install_with_a_dpapi_key_ring_is_converted() {
     server.stop();
     let _ = fs::remove_dir_all(dir);
 }
+
+#[test]
+fn the_payload_key_is_found_by_its_id_among_other_and_unreadable_key_files() {
+    let (dir, paths) = install("morekeys", "linux-0.1.2");
+    let original = fs::read_dir(&paths.keys)
+        .unwrap()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with("key-"))
+        .unwrap()
+        .path();
+    let text = fs::read_to_string(&original).unwrap();
+    let other = text
+        .replace(
+            "9130dec0-c26c-4c1a-9248-6f9905a5d9d7",
+            "00000000-1111-2222-3333-444444444444",
+        )
+        .replace("<value>Z0MX", "<value>AAAA");
+    fs::write(
+        paths
+            .keys
+            .join("key-00000000-1111-2222-3333-444444444444.xml"),
+        other,
+    )
+    .unwrap();
+    fs::write(paths.keys.join("key-broken.xml"), "<key").unwrap();
+
+    let ring = KeyRing::load(&paths.keys).unwrap();
+    let plain = ring
+        .unprotect(
+            &KOPPEL_PURPOSES,
+            &fs::read(paths.connection_file()).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(plain, read("linux-0.1.2/plaintext/connection.json"));
+
+    fs::remove_file(original).unwrap();
+    let missing = KeyRing::load(&paths.keys)
+        .unwrap()
+        .unprotect(
+            &KOPPEL_PURPOSES,
+            &fs::read(paths.connection_file()).unwrap(),
+        )
+        .unwrap_err();
+    let message = missing.to_string();
+    assert!(
+        message.contains("9130dec0-c26c-4c1a-9248-6f9905a5d9d7")
+            && message.contains("key-broken.xml"),
+        "{message}"
+    );
+    let _ = fs::remove_dir_all(dir);
+}

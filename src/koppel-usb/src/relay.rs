@@ -2,12 +2,15 @@ use std::io;
 use std::net::{Ipv4Addr, TcpStream as StdTcpStream};
 use std::time::Duration;
 
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
 /// How long [`loopback_pair`] waits for its own connection to arrive.
 const PAIR_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The most one read takes before it is passed on, as .NET's `CopyToAsync` reads.
+const RELAY_BUFFER: usize = 81920;
 
 /// Copies both directions until either side closes or `stop` is cancelled, then returns. One
 /// side closing cuts the other copy off: that is the normal end of a session.
@@ -19,9 +22,27 @@ where
     let (mut a_read, mut a_write) = tokio::io::split(a);
     let (mut b_read, mut b_write) = tokio::io::split(b);
     tokio::select! {
-        _ = tokio::io::copy(&mut a_read, &mut b_write) => {}
-        _ = tokio::io::copy(&mut b_read, &mut a_write) => {}
+        _ = pass_on(&mut a_read, &mut b_write) => {}
+        _ = pass_on(&mut b_read, &mut a_write) => {}
         _ = stop.cancelled() => {}
+    }
+}
+
+/// Copies one direction until the reader ends. Each read is written and flushed at once, so a
+/// stream that frames its writes sends one message per read, as 0.1.x's WebSocket stream did.
+async fn pass_on<R, W>(reader: &mut R, writer: &mut W) -> io::Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut buffer = vec![0u8; RELAY_BUFFER];
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        writer.write_all(&buffer[..read]).await?;
+        writer.flush().await?;
     }
 }
 

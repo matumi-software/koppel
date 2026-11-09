@@ -174,7 +174,7 @@ What it does not cover:
 - `Ui:AllowFrom` and the per-caller limits on sign-in and pairing go by the caller's address as Koppel sees it; forwarded headers are not read. Behind NAT, such as port publishing that rewrites the source address, every caller arrives from one address: the local network check then lets everyone in, and one caller's wrong passwords lock out everyone else's address too.
 - The gateway on 3242 is plain USB/IP with no login (see "USB client"). Whoever reaches it uses the client's access to the server. On native Windows with a loopback address only the kernel's own connections get in, and only for imports Koppel asked the driver for; elsewhere, such as a container, the port publishing is all that keeps it local.
 - A registered client and the server it is paired with trust each other's USB/IP traffic: what one sends goes to the other's kernel driver (`usbip-host`, `vhci_hcd` or usbip-win2's driver) as it comes, and an attached device can be any device, a keyboard that types included. Koppel checks the bus ID and VID:PID of an import, not the traffic after it.
-- Anyone who can read the keys directory can decrypt the secret files, unless `Paths:KeyCertificate` protects the key ring (see "Config on disk").
+- Anyone who can read the keys directory can decrypt the secret files, unless `Paths:KeyCertificate` protects the key ring (see "Config on disk"). That setting is deprecated and goes in 0.2.0.
 - The Linux container is privileged and runs as root, and the Windows service runs as LocalSystem. A flaw in Koppel is a flaw with that reach.
 
 ## Finding servers and pairing
@@ -274,7 +274,8 @@ The image is built for this machine's architecture; the script stops if the targ
 
 `Paths__KeyCertificate`: by default the key ring sits as plain files in the `koppel` volume.
 `deploy/docker-compose.yml` has the commented lines to keep a PFX outside the volume and mount it as
-a secret instead, with the `openssl` commands that make one.
+a secret instead, with the `openssl` commands that make one. The setting is deprecated: 0.2.0 drops it, and an
+install that uses it pairs again after that upgrade (see the changelog). Do not start using it.
 
 ## Config on disk
 
@@ -300,7 +301,8 @@ How a file is read and written:
 The encrypted files use ASP.NET Core Data Protection with a key ring in a separate keys directory
 (`Paths:Keys`). On Windows the key ring is protected with machine DPAPI. On Linux it is plain on disk
 unless `Paths:KeyCertificate` points at a certificate kept outside the data volume (for example a
-Docker secret); Koppel logs a warning when it is not.
+Docker secret); Koppel logs a warning when it is not. `Paths:KeyCertificate` is deprecated and goes in 0.2.0,
+which cannot read a key ring protected with it.
 
 Data folder hardening. Before anything is written, Koppel restricts the config and keys directories:
 

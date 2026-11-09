@@ -26,7 +26,8 @@ services:
     user: "0"
     privileged: true
     restart: unless-stopped
-    # To encrypt the key ring at rest, mount a PFX as a secret and point Koppel at it:
+    # Deprecated, goes in Koppel 0.2.0 (an install that uses it pairs again after that upgrade):
+    # to encrypt the key ring at rest, mount a PFX as a secret and point Koppel at it:
     # environment:
     #   - Paths__KeyCertificate=/run/secrets/koppel_keys
     # secrets:

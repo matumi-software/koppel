@@ -13,7 +13,7 @@ use koppel_config::KoppelPaths;
 use koppel_web::UiReach;
 
 /// The commands that take no value and are not settings.
-pub const FLAGS: &[&str] = &["--reset-password"];
+pub const FLAGS: &[&str] = &["--reset-password", crate::healthcheck::FLAG];
 
 /// Every setting, by its name in lower case with `:` between sections.
 #[derive(Debug, Default)]

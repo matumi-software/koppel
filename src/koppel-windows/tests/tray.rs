@@ -32,7 +32,11 @@ fn a_tray_reads_its_lines_and_ends_when_the_pipe_closes() {
     };
     tray.send(&wire::state_line(&state), false);
     tray.send("a line it cannot read", true);
-    assert_eq!(tray.wait(Duration::from_millis(500)), None, "it keeps running");
+    assert_eq!(
+        tray.wait(Duration::from_millis(500)),
+        None,
+        "it keeps running"
+    );
     tray.close_pipe();
     assert_eq!(tray.wait(Duration::from_secs(10)), Some(0));
 }

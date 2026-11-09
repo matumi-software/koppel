@@ -3,7 +3,7 @@
 //! Reads its settings as 0.1.x did, converts a 0.1.x install's secret files once, opens the config
 //! files, and serves the UI with its sign-in, REST API and live push over HTTPS on the UI port (and
 //! the network port, when `Ports:Network` sets one apart), with the server certificate kept in
-//! `secrets.json`. The roles and USB come with the issues of milestone v0.2.0 (#85 to #87).
+//! `secrets.json`. The server and client roles run on Skakel, with the USB layer behind them.
 //!
 //! `koppel --reset-password` clears the UI password and ends every session, then exits.
 //!
@@ -12,6 +12,7 @@
 
 mod config;
 mod systemd;
+mod usb;
 
 use std::error::Error;
 use std::future::Future;
@@ -21,7 +22,7 @@ use std::sync::Arc;
 
 use config::Config;
 use koppel_config::{SecretBox, convert_0_1_secrets};
-use koppel_web::{App, AppOptions, Host, tls};
+use koppel_web::{App, AppOptions, Host, NetworkOptions, tls};
 use time::OffsetDateTime;
 use tokio::sync::watch;
 use tracing::Level;
@@ -41,6 +42,10 @@ const UI_PORT: u16 = 5240;
 /// Setup, login and password change a minute per address, unless `RateLimits:AuthPerMinute` says
 /// otherwise.
 const AUTH_PER_MINUTE: u32 = 30;
+/// Skakel's token requests a minute per address, unless `RateLimits:TokenPerMinute` says otherwise.
+const TOKEN_PER_MINUTE: u32 = 60;
+/// Skakel's pairing calls a minute per address, unless `RateLimits:PairPerMinute` says otherwise.
+const PAIR_PER_MINUTE: u32 = 120;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -100,6 +105,15 @@ async fn run(config: &Config, service: Option<Service>) -> Result<(), Box<dyn Er
     let reach = config.reach()?;
     let setup_window = config.setup_window()?;
     let auth_per_minute = config.count("RateLimits:AuthPerMinute", AUTH_PER_MINUTE)?;
+    let network = NetworkOptions {
+        address,
+        discovery: config.flag("Discovery:Enabled", true)?,
+        discovery_port: config.port("Discovery:Port", network_port)?,
+        probe_targets: None,
+        token_per_minute: config.count("RateLimits:TokenPerMinute", TOKEN_PER_MINUTE)?,
+        pair_per_minute: config.count("RateLimits:PairPerMinute", PAIR_PER_MINUTE)?,
+    };
+    let usb = usb::options(config)?;
 
     let secrets = open_files(config)?;
     let paths = config.paths(&std::env::current_dir()?);
@@ -119,6 +133,8 @@ async fn run(config: &Config, service: Option<Service>) -> Result<(), Box<dyn Er
         reach,
         setup_window,
         auth_per_minute,
+        network,
+        usb,
     })
     .await?;
     let acceptor = tls::acceptor(app.certificate())?;
@@ -175,7 +191,7 @@ async fn run(config: &Config, service: Option<Service>) -> Result<(), Box<dyn Er
     systemd::stopping();
     let _ = stop.send(true);
     while servers.join_next().await.is_some() {}
-    app.stop();
+    app.stop().await;
     tracing::info!("Koppel stopped");
     Ok(())
 }

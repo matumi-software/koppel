@@ -1,11 +1,11 @@
 //! The server role's endpoints: its identity, registered clients, certificate and signing key,
-//! pairing requests and USB devices, and Koppel's own `/api/remote/devices` for other machines.
+//! pairing requests and USB devices. Koppel's own `/api/remote/devices` for other machines is
+//! Skakel's server's (`roles/skakel/remote.rs`).
 
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::http::header::{HeaderValue, WWW_AUTHENTICATE};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -302,14 +302,4 @@ pub(crate) async fn share(
     }
     app.usb_server.set_shared(&bus_id, request.shared).await;
     json::accepted()
-}
-
-/// Other Koppel machines, with a bearer token from Skakel's token endpoint. There is no token
-/// endpoint until Skakel's server comes in (#85), so no token is good yet.
-pub(crate) async fn remote_devices() -> Response {
-    (
-        StatusCode::UNAUTHORIZED,
-        [(WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"))],
-    )
-        .into_response()
 }

@@ -37,7 +37,7 @@ const UI: Surface = Surface {
 };
 
 const LISTED: &[Surface] = &[
-    // Skakel: info, pairing, tokens, the remote hub and the USB stream (#85).
+    // Skakel's HTTPS calls: info, pairing and tokens. Its gRPC calls are `Surface::GRPC`.
     Surface {
         prefix: "/skakel",
         listener: Listener::Network,
@@ -66,6 +66,14 @@ const LISTED: &[Surface] = &[
 const ANONYMOUS: &[&str] = &["/api/auth/state", "/api/auth/setup", "/api/auth/login"];
 
 impl Surface {
+    /// A gRPC call, told by its content type: Skakel's control and stream services and Koppel's own
+    /// remote device list, for other machines.
+    pub(crate) const GRPC: Surface = Surface {
+        prefix: "/",
+        listener: Listener::Network,
+        role: RoleScope::Server,
+    };
+
     pub(crate) fn of(path: &str) -> Surface {
         LISTED
             .iter()

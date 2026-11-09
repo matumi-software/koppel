@@ -1,0 +1,41 @@
+// Koppel's own gRPC service between Koppel machines, beside Skakel's on the same port and
+// connection (Skakel's docs/protocol.md, "An app's own calls"). Skakel checks every call's token and
+// ends a client's calls when it is revoked, its secret rotated or the server stops.
+
+syntax = "proto3";
+
+package koppel.remote.v1;
+
+// The server's shared devices, for its clients.
+service RemoteDevices {
+  // The shared devices now, then again each time they change, until the call ends. A client calls
+  // it again after its link reconnects. 0.1.x sent the same list as the hub message DevicesChanged.
+  rpc Watch(WatchDevicesRequest) returns (stream DeviceList);
+}
+
+message WatchDevicesRequest {}
+
+// What a client may see of the server's devices: the shared ones, without who holds them, since
+// when, the serial number, the driver or a fault.
+message DeviceList {
+  repeated RemoteDevice devices = 1;
+}
+
+message RemoteDevice {
+  // The kernel's bus ID on the server, such as 1-1.4.
+  string bus_id = 1;
+  // Such as 046d:c52b.
+  string vid_pid = 2;
+  string name = 3;
+  optional string manufacturer = 4;
+  // As the UI shows it, such as "USB 2.0 (480 Mbit/s)".
+  string speed = 5;
+  // shared, or attached when a client holds it.
+  string state = 6;
+  // The interface classes as people know them, when the server read them.
+  optional InterfaceList interfaces = 7;
+}
+
+message InterfaceList {
+  repeated string names = 1;
+}

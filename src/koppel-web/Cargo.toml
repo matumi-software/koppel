@@ -10,10 +10,20 @@ repository.workspace = true
 
 [dependencies]
 koppel-config.workspace = true
-tokio.workspace = true
+koppel-usb.workspace = true
+skakel-server.workspace = true
+skakel-client.workspace = true
+skakel-discovery.workspace = true
+skakel-protocol.workspace = true
+prost.workspace = true
+tonic = { workspace = true, features = ["codegen"] }
+tonic-prost.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tokio-util.workspace = true
 axum.workspace = true
-hyper.workspace = true
+hyper = { workspace = true, features = ["client", "http2"] }
 hyper-util.workspace = true
+http-body-util.workspace = true
 tower-service.workspace = true
 tokio-rustls.workspace = true
 rustls.workspace = true
@@ -35,7 +45,10 @@ windows.workspace = true
 
 [build-dependencies]
 flate2.workspace = true
+protox.workspace = true
+tonic-prost-build.workspace = true
 
 [dev-dependencies]
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
-http-body-util.workspace = true
+# The role tests drive two Koppels over HTTPS as the UI does.
+reqwest.workspace = true

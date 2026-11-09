@@ -1,23 +1,17 @@
-//! The seams where the work of later issues plugs in, and what stands in for it until then.
-//!
-//! The REST endpoints and the push only talk to these traits, with 0.1.x's JSON shapes:
+//! The seams the REST endpoints and the push talk to, with 0.1.x's JSON shapes, and what fills them:
 //!
 //! - [`ServerRole`]: the server's registered clients, its certificate and signing key, and pairing
-//!   requests. [`StoredServer`] keeps the clients, keys and certificate in `secrets.json` as 0.1.x
-//!   did, so everything but pairing works now; Skakel's server (#85) takes its place and adds
-//!   pairing, tokens and the remote hub.
+//!   requests. [`SkakelServerRole`] runs skakel-server over `secrets.json`.
 //! - [`ClientRole`]: the client's connection test, the servers found on the network and pairing.
-//!   [`StubClient`] answers as a client that cannot reach anything yet (#85).
-//! - [`UsbServer`] and [`UsbClient`]: the devices, sharing, attaching and detaching. [`StubUsbServer`]
-//!   and [`StubUsbClient`] say USB is not in this build (#86, #87), and keep `devices.json` and
-//!   `attached.json` checked as 0.1.x does.
+//!   [`SkakelClientRole`] does them with skakel-client.
+//! - [`UsbServer`] and [`UsbClient`]: the devices, sharing, attaching and detaching, and the
+//!   client's link. [`UsbServerRole`] and [`UsbClientRole`] are koppel-usb's server and client,
+//!   whose link to the server is Skakel's (`skakel::SkakelLinks`).
 //!
-//! An implementation pushes its own changes through [`crate::push::Push`] once they are saved, as
-//! the stand-ins do. Nothing here depends on axum, so the traits can move to a crate of their own if
-//! the USB or Skakel crates should not link the web server.
+//! An implementation pushes its own changes through [`crate::push::Push`] once they are saved.
 
-mod server;
-mod stub;
+pub mod skakel;
+mod usb;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -25,8 +19,9 @@ use std::pin::Pin;
 use serde::Serialize;
 use time::OffsetDateTime;
 
-pub use server::StoredServer;
-pub use stub::{StubClient, StubUsbClient, StubUsbServer};
+pub use skakel::{SkakelClientRole, SkakelServerRole};
+pub(crate) use usb::UsbActivity;
+pub use usb::{UsbClientRole, UsbServerRole};
 
 /// A boxed future, so the traits can be used as `dyn`.
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

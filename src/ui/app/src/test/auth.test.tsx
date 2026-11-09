@@ -134,6 +134,30 @@ describe('login', () => {
     expect(screen.queryByText('The app')).toBeNull();
   });
 
+  it('signs in with the right password after a wrong one, without a reload', async () => {
+    let signedIn = false;
+    const { calls } = mockFetch({
+      'GET /api/auth/state': () => json(state({ signedIn })),
+      'POST /api/auth/login': (init) => {
+        if ((JSON.parse(String(init?.body)) as { password: string }).password !== 'correct horse battery') return problem('That password is not right.', 401);
+        signedIn = true;
+        return noContent();
+      },
+    });
+    renderGate();
+    const field = await screen.findByLabelText('Password');
+    await userEvent.type(field, 'not the password');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('That password is not right.');
+
+    await userEvent.clear(field);
+    await userEvent.type(field, 'correct horse battery');
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await screen.findByText('The app');
+    expect(calls.filter((c) => c.key === 'POST /api/auth/login')).toHaveLength(2);
+  });
+
   it('shows how long to wait when the server says too many tries', async () => {
     mockFetch({
       'GET /api/auth/state': () => json(state()),

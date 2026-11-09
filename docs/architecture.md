@@ -263,7 +263,7 @@ it. A settings change that changes nothing records nothing.
 1. Copy `prepare-host.sh` to the machine and run it once with `sudo bash prepare-host.sh`. It installs Docker from Docker's signed apt repository, loads `usbip-host` and `vhci-hcd` and keeps them loaded at boot. If `modprobe` fails (Ubuntu cloud and minimal kernels), it prints the hint to install `linux-modules-extra-<kernel>`.
 2. Copy `docker-compose.yml` there and run `docker compose up -d`. It pulls `matumisoftware/koppel` from Docker Hub.
 
-The compose files pin the image tag (`matumisoftware/koppel:0.1.2`). To upgrade, edit the tag to the
+The compose files pin the image tag (`matumisoftware/koppel:0.2.0`). To upgrade, edit the tag to the
 new version, then `docker compose pull && docker compose up -d`. Config and keys stay in the `koppel`
 volume.
 
@@ -368,7 +368,7 @@ To release:
    files and the image all take it from there.
 2. Set the image tag in the three composes in `src/installer/docker` (`docker-compose.yml`,
    `docker-compose.windows-client.yml`, `docker-compose.windows-server.yml`), in the build command in
-   `docs/windows.md` and in the README. They name `matumisoftware/koppel:0.1.2` until 0.2.0 is published.
+   `docs/windows.md` and in the README. They name the released version.
 3. For a new usbip-win2 version, run `src/installer/windows/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `src/installer/windows/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from.
 4. Add the version to `CHANGELOG.md`.
 5. Build and push the image for all three platforms, from `src/`, with the version and `latest`:
@@ -570,8 +570,8 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   certificate is not checked, as in 0.1.x: it is Koppel's own self-signed one, the probe sends nothing
   secret, and it only asks whether Koppel is up. The client is hyper's HTTP/1.1 half on the rustls the
   server already carries, so no crate was added.
-- **Composes:** the ones in `src/installer/docker` keep naming `matumisoftware/koppel:0.1.2` until 0.2.0
-  is published; the image name stays and its run options do not change. `deploy.sh` builds this
+- **Composes:** the ones in `src/installer/docker` name the released image,
+  and the image name and run options did not change from 0.1.x. `deploy.sh` builds this
   Dockerfile.
 
 The binary, `.deb` and image sizes per architecture, against 0.1.2, are in "Release profile and sizes" above.

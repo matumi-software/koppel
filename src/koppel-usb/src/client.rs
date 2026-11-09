@@ -61,7 +61,7 @@ pub enum LinkStatus {
     Down(String),
 }
 
-/// Makes the link to the saved server. The transport implements it (Skakel's client, #85).
+/// Makes the link to the saved server. The transport implements it (Skakel's client, in koppel-web).
 pub trait Links: Send + Sync {
     /// A link to the server in `connection`, not started yet. It reports through `events` once
     /// started, and never before.

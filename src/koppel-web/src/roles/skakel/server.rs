@@ -322,8 +322,10 @@ fn failed(e: skakel_server::ServerError) -> RoleError {
 }
 
 impl ServerRole for SkakelServerRole {
+    /// The certificate the web ports present, which is Skakel's: a save that switches it replaces
+    /// both. Read from there, so it answers while Skakel's server starts again or stops.
     fn fingerprint(&self) -> String {
-        self.keys_handle().fingerprint()
+        skakel_protocol::fingerprints::of_der(&self.parts.store.slot().current().cert[0])
     }
 
     fn clients(&self) -> Vec<ClientView> {

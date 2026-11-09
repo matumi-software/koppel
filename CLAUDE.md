@@ -13,7 +13,8 @@ folder per solution, each with its own `src/` and `tests/`.
 | `resources/design-system/` | The design system: brand book, `tokens.json`, component specs and previews, logos. The source of every colour, size and component style |
 | `src/` | Shared build config: `Directory.Build.props`, `Directory.Packages.props`, `global.json`, `.editorconfig`, the pnpm workspace, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/architecture.md`) |
 | `src/ui/` | The UI, one pnpm workspace with `src/`: the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
-| `src/Koppel/` | The C# product, 0.1.x: `Koppel.slnx`, the host (`src/Koppel`), its tests and `docker-compose.yml`. No longer shipped from main; its live updates do not reach the current UI, which listens for Server-Sent Events |
+| `src/installer/` | The Rust build's installers: `windows/` (WiX, `Koppel-Setup.exe`, with usbip-win2 vendored) and `linux/` (nfpm, the `.deb` files) |
+| `src/Koppel/` | The C# product, 0.1.x: `Koppel.slnx`, the host (`src/Koppel`), its tests, `docker-compose.yml` and `installer/linux` (its 0.1.x packages). No longer shipped from main; its live updates do not reach the current UI, which listens for Server-Sent Events |
 | `src/Koppel.Core/` | The C# libraries: `Koppel.Core.slnx` with Configuration, Security, Auth and Usb, their tests and `tools/` (the design system sync) |
 
 ## Rules

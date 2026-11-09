@@ -23,7 +23,7 @@ packages the UI bundles. build.ps1 writes it into the staging folder, not the so
 Windows-only notices.
 
 .EXAMPLE
-.\new-notices.ps1 -Output ..\src\Koppel\THIRD-PARTY-NOTICES.txt
+.\new-notices.ps1 -Output ..\..\Koppel\src\Koppel\THIRD-PARTY-NOTICES.txt
 .\new-notices.ps1 -Rust -Output obj\staging\THIRD-PARTY-NOTICES.txt
 #>
 [CmdletBinding()]
@@ -34,10 +34,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $installer = $PSScriptRoot
-$product = Split-Path $installer
-$repo = Split-Path (Split-Path $product)
-$assetsPath = Join-Path $product 'src\Koppel\obj\project.assets.json'
-$uiFolder = Join-Path (Split-Path $product) 'ui\app'
+# src\installer\windows: two folders up is src\, three the repo.
+$src = Split-Path (Split-Path $installer)
+$repo = Split-Path $src
+$assetsPath = Join-Path $src 'Koppel\src\Koppel\obj\project.assets.json'
+$uiFolder = Join-Path $src 'ui\app'
 $nl = "`n"
 
 if (-not $Rust -and -not (Test-Path $assetsPath)) { throw "$assetsPath is missing. Run: dotnet restore src\Koppel\src\Koppel\Koppel.csproj -r win-x64" }
@@ -91,7 +92,6 @@ foreach ($lib in $assets.libraries.PSObject.Properties) {
 # ---- Rust crates (cargo-about) ----
 $rustTexts = @()
 if ($Rust) {
-    $src = Split-Path $product
     $about = Join-Path $env:TEMP "koppel-about-$PID.json"
     & cargo about generate --format json -c (Join-Path $installer 'about.toml') -m (Join-Path $src 'koppel-bin\Cargo.toml') -o $about
     if ($LASTEXITCODE -ne 0) { throw 'cargo about failed. Install it with: cargo install cargo-about --locked. A licence about.toml does not accept stops it too.' }

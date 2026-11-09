@@ -327,7 +327,7 @@ directory"). It does not make new secrets over the old ones.
 
 ## Installer and Windows service
 
-`src/Koppel/installer` builds `Koppel-Setup.exe`, which ships the Rust build (0.2.0, `koppel-windows`
+`src/installer/windows` builds `Koppel-Setup.exe`, which ships the Rust build (0.2.0, `koppel-windows`
 below): an MSI inside a bootstrapper that installs the Visual C++ runtime first. `build.ps1` takes the
 version from `[workspace.package]` in `src/Cargo.toml`, checks the vendored usbip-win2 files against
 `usbip-win2/<version>/SHA256SUMS` and their Authenticode signers (and fails on any mismatch), builds the
@@ -348,7 +348,7 @@ installs 11 MB.
 - **Driver:** `driver.ps1` installs usbip-win2's driver after the files and before the service starts. Its output goes to the MSI log (`msiexec /l*v`), not to a file on disk. pnputil may say a restart finishes the driver install: the installer then asks for a restart. It records the packages and the device node it installed in `%ProgramData%\Koppel\driver-state.json`, and uninstall removes only those, and only the ones Windows still lists with an original name of `usbip2_*.inf` (it reads the driver store through `pnputil /enum-drivers /format xml`, then `Get-WindowsDriver`, so a non-English Windows works). The record is used only if an administrator owns it and nobody else can write to it. A restart that pnputil asks for on uninstall is reported to the MSI too.
 - **A standalone usbip-win2** (under Program Files\USBip or in the Apps list) is detected first (whatever the record says), logged, used, and left alone: Koppel never changes or removes its driver or device node. A machine with drivers but no record and no standalone usbip-win2 is treated as an earlier Koppel install and adopted. An uninstall with no record leaves the driver in place and says how to remove it by hand.
 - **Failure and upgrade:** a fresh install that fails after the driver went in removes the driver again. An upgrade keeps the driver and updates it in place; the driver removal is skipped when an upgrade replaces the product. A same-version MSI replaces the installed one, which keeps a rebuilt dev installer from installing next to the last. A driver that will not come out never blocks an uninstall: the script prints a `WARNING:` with the manual `pnputil` command, and the MSI log has the output. An upgrade from an installer older than this one still runs that old installer's uninstall once, and it removes the driver by name.
-- **Notices:** `installer/new-notices.ps1 -Rust` writes `THIRD-PARTY-NOTICES.txt` into the staging folder: Koppel's licence, every Rust crate in the two programs for `x86_64-pc-windows-msvc` from cargo-about (`installer/about.toml` lists the licences it accepts, and any other stops the build) with the licence texts found in each crate, and the npm packages the UI bundles. `build.ps1` appends usbip-win2's, CLI11's and the Visual C++ runtime's. It ships in the MSI and behind the bundle's licence link. The 0.1.x file at `src/Koppel/src/Koppel/` (NuGet, npm, .NET) stays for the C# image.
+- **Notices:** `src/installer/windows/new-notices.ps1 -Rust` writes `THIRD-PARTY-NOTICES.txt` into the staging folder: Koppel's licence, every Rust crate in the two programs for `x86_64-pc-windows-msvc` from cargo-about (`src/installer/windows/about.toml` lists the licences it accepts, and any other stops the build) with the licence texts found in each crate, and the npm packages the UI bundles. `build.ps1` appends usbip-win2's, CLI11's and the Visual C++ runtime's. It ships in the MSI and behind the bundle's licence link. The 0.1.x file at `src/Koppel/src/Koppel/` (NuGet, npm, .NET) stays for the C# image.
 
 ## Building and releasing
 
@@ -384,7 +384,7 @@ To release:
 1. Set `<Version>` in `src/Directory.Build.props`.
 2. Set the image tag in the three deploy composes (`deploy/docker-compose.yml`, `docker-compose.windows-client.yml`, `docker-compose.windows-server.yml`) and the `KOPPEL_TAG` default in `src/Koppel/docker-compose.yml`.
 3. Regenerate the lock files if any package changed.
-4. For a new usbip-win2 version, run `installer/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `installer/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from. Run `installer/new-notices.ps1` when packages changed.
+4. For a new usbip-win2 version, run `src/installer/windows/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `src/installer/windows/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from. Run `src/installer/windows/new-notices.ps1` when packages changed.
 5. Add the version to `CHANGELOG.md`.
 6. Build and push the image for both architectures, from `src/`, with the version and `latest`:
 
@@ -403,7 +403,7 @@ docker buildx build -f koppel-bin/Dockerfile --platform linux/amd64,linux/arm64,
   -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
 ```
 
-and `src/installer/linux/build.ps1` for the three `.deb` files, and `src/Koppel/installer/build.ps1` for
+and `src/installer/linux/build.ps1` for the three `.deb` files, and `src/installer/windows/build.ps1` for
 `Koppel-Setup.exe`, which takes the same version. Record the image size per platform in the release notes.
 
 ## The Rust workspace

@@ -5,8 +5,7 @@
 //! - [`App`]: everything the UI's server side holds, started from the config files, and
 //!   [`App::router`], the routes with the guards in front of them.
 //! - [`serve`]: the accept loop for one listener, and [`bind`] to make one.
-//! - [`roles`]: the seams where the Skakel roles (#85) and USB (#86, #87) plug in, with what stands
-//!   in for them until then.
+//! - [`roles`]: the server and client roles on Skakel, and the USB layer behind the UI.
 //! - [`push`]: the live push, Server-Sent Events at `/api/events`.
 //! - [`tray`]: what the Windows service tells its tray icons.
 
@@ -34,7 +33,7 @@ use axum::routing::get;
 
 pub use access::UiReach;
 pub use activity::{ActivityEvent, ActivityLog, ActivityOutcome, ActivityReason, EntityRef};
-pub use app::{App, AppOptions, StartError};
+pub use app::{App, AppOptions, NetworkOptions, StartError, UsbOptions};
 pub use auth::reset_password;
 pub use host::{Host, machine_name, os_label};
 pub use server::{bind, serve};

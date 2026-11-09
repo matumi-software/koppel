@@ -63,7 +63,6 @@ pub(crate) fn routes() -> Router<Arc<App>> {
         .route("/api/server/pairing/{id}/deny", post(server::deny))
         .route("/api/server/devices", get(server::devices))
         .route("/api/server/devices/{bus_id}/shared", put(server::share))
-        .route("/api/remote/devices", get(server::remote_devices))
         .route(
             "/api/client/connection",
             get(client::connection).put(client::save_connection),

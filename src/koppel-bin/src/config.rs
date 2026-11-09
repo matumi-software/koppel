@@ -95,6 +95,16 @@ impl Config {
         }
     }
 
+    /// `true` or `false` in any case, as .NET reads a bool, `default` when unset.
+    pub fn flag(&self, name: &str, default: bool) -> Result<bool, String> {
+        match self.get(name).map(str::trim) {
+            None => Ok(default),
+            Some(value) if value.eq_ignore_ascii_case("true") => Ok(true),
+            Some(value) if value.eq_ignore_ascii_case("false") => Ok(false),
+            Some(value) => Err(format!("{name} is \"{value}\". Use true or false.")),
+        }
+    }
+
     /// `Ports:Address`: an IP address, or `None` for every address. Other Koppel machines must reach
     /// the network port, and who may use the UI is `Ui:AllowFrom`'s call.
     pub fn listen_address(&self) -> Result<Option<IpAddr>, String> {

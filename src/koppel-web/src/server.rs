@@ -5,6 +5,7 @@
 use std::future::Future;
 use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -21,6 +22,7 @@ use tower_service::Service;
 
 use crate::guard::LocalAddr;
 use crate::redirect;
+use crate::roles::skakel::front::FrontConnection;
 
 /// How long a client has to send its first byte and finish the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -135,9 +137,13 @@ async fn serve_connection(
             return;
         }
     };
+    // The connection to Skakel's server that this connection's Skakel requests go over, made with
+    // the first one and closed with this connection.
+    let skakel = Arc::new(FrontConnection::default());
     let service = hyper::service::service_fn(move |mut request: hyper::Request<Incoming>| {
         request.extensions_mut().insert(ConnectInfo(remote));
         request.extensions_mut().insert(LocalAddr(local));
+        request.extensions_mut().insert(skakel.clone());
         let mut router = router.clone();
         async move { router.call(request).await }
     });
@@ -146,6 +152,17 @@ async fn serve_connection(
         .http1()
         .timer(TokioTimer::new())
         .header_read_timeout(HEADER_TIMEOUT);
+    // Skakel's keep-alive on every connection that may carry gRPC: a PING after 15 seconds without a
+    // frame from the client, and the connection is dead when that PING has no answer 15 seconds
+    // later. Adaptive windows let a USB stream's flow-control window grow past HTTP/2's 64 KiB.
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .keep_alive_interval(skakel_protocol::KEEP_ALIVE_INTERVAL)
+        .keep_alive_timeout(
+            skakel_protocol::KEEP_ALIVE_TIMEOUT - skakel_protocol::KEEP_ALIVE_INTERVAL,
+        )
+        .adaptive_window(true);
     let connection = builder.serve_connection_with_upgrades(TokioIo::new(tls), service);
     tokio::pin!(connection);
     tokio::select! {

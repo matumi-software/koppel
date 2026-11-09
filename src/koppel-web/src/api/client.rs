@@ -37,7 +37,7 @@ impl ConnectionView {
 
 /// A change to the connection. A null or empty secret keeps the stored one, but only while the
 /// server stays the same.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionUpdate {
     #[serde(default)]
@@ -130,7 +130,7 @@ fn same_fingerprint(a: Option<&str>, b: Option<&str>) -> bool {
 }
 
 /// The spelling Koppel stores: upper case hex in pairs, separated by colons.
-fn normalize(fingerprint: &str) -> String {
+pub(crate) fn normalize(fingerprint: &str) -> String {
     let hex = digits(Some(fingerprint)).to_ascii_uppercase();
     hex.as_bytes()
         .chunks(2)
@@ -140,6 +140,37 @@ fn normalize(fingerprint: &str) -> String {
 }
 
 impl ConnectionUpdate {
+    /// What a server approved by pairing: its address and fingerprint and the credentials it gave.
+    pub(crate) fn paired(
+        server_url: &str,
+        fingerprint: &str,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Self {
+        Self {
+            server_url: Some(server_url.to_owned()),
+            server_fingerprint: Some(fingerprint.to_owned()),
+            client_id: Some(client_id.to_owned()),
+            client_secret: Some(client_secret.to_owned()),
+        }
+    }
+
+    /// True while `saved` is the connection this update made: its client ID, address and
+    /// fingerprint.
+    pub(crate) fn matches(&self, saved: &ClientConnection) -> bool {
+        let url = self.server_url.as_deref().and_then(https_authority);
+        saved.client_id.as_deref() == self.client_id.as_deref().map(str::trim)
+            && saved
+                .server_url
+                .as_deref()
+                .zip(url.as_deref())
+                .is_some_and(|(saved, url)| saved.eq_ignore_ascii_case(url))
+            && same_fingerprint(
+                saved.server_fingerprint.as_deref(),
+                self.server_fingerprint.as_deref(),
+            )
+    }
+
     fn validate(&self) -> Vec<(&'static str, &'static str)> {
         let mut errors = Vec::new();
         if self
@@ -165,7 +196,7 @@ impl ConnectionUpdate {
 
     /// True when the update points at the server the connection already has: the same address, and
     /// its fingerprint or the next one that server announced.
-    fn keeps_server(&self, current: &ClientConnection) -> bool {
+    pub(crate) fn keeps_server(&self, current: &ClientConnection) -> bool {
         let url = self.server_url.as_deref().and_then(https_authority);
         let fingerprint = self.server_fingerprint.as_deref();
         current
@@ -180,7 +211,7 @@ impl ConnectionUpdate {
 
     /// The stored secret was issued by the stored server, so it carries over only when the server
     /// is unchanged. For another server it never does.
-    fn apply(&self, current: &ClientConnection) -> ClientConnection {
+    pub(crate) fn apply(&self, current: &ClientConnection) -> ClientConnection {
         let keeps = self.keeps_server(current);
         let fingerprint = self.server_fingerprint.as_deref();
         ClientConnection {

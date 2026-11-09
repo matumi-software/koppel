@@ -3,7 +3,7 @@
 //! itself, so a start, a stop and its reason (the tray's Shut down and Restart) are there too.
 //!
 //! The installer registers the source with Koppel.exe as its message file. Koppel.exe carries a
-//! message table (`koppel-bin/build.rs`) whose messages 1 to 3 are just `%1`, so Event Viewer shows
+//! message table (`koppel/build.rs`) whose messages 1 to 3 are just `%1`, so Event Viewer shows
 //! each entry's own text. Without the registration Windows still takes the entries, and Event Viewer
 //! says it cannot find the description before it shows the text.
 

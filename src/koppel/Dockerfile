@@ -2,11 +2,11 @@
 # Build context = src/. Docker is all it needs.
 #
 #   Binaries, to <dir>/<arch>/koppel:
-#     docker buildx build -f koppel-bin/Dockerfile --target binaries --output type=local,dest=<dir> .
+#     docker buildx build -f koppel/Dockerfile --target binaries --output type=local,dest=<dir> .
 #   The .deb files (installer/linux/build.ps1 runs this):
-#     docker buildx build -f koppel-bin/Dockerfile --target linux-packages --output type=local,dest=<dir> .
+#     docker buildx build -f koppel/Dockerfile --target linux-packages --output type=local,dest=<dir> .
 #   The image (the last stage, so the default target):
-#     docker buildx build -f koppel-bin/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 -t <name> .
+#     docker buildx build -f koppel/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 -t <name> .
 #
 # Every image is pinned by tag and digest, so a rebuild does not move under us, and every tool by version,
 # Zig and PowerShell also by their checksums. To bump an image, `docker buildx imagetools inspect <image>:<tag>` prints the new
@@ -75,7 +75,7 @@ FROM toolchain AS build
 WORKDIR /build
 # Every member of the workspace, since Cargo reads them all. A new crate goes here too.
 COPY Cargo.toml Cargo.lock ./
-COPY koppel-bin ./koppel-bin
+COPY koppel ./koppel
 COPY koppel-config ./koppel-config
 COPY koppel-contract ./koppel-contract
 COPY koppel-usb ./koppel-usb
@@ -114,7 +114,7 @@ FROM build AS crate-licences
 COPY --from=cargo-about /usr/local/cargo/bin/cargo-about /usr/local/cargo/bin/cargo-about
 COPY installer/notices/about.toml ./installer/notices/about.toml
 RUN --mount=type=cache,id=koppel-cargo-registry,target=/usr/local/cargo/registry \
-    cargo about generate --format json -c installer/notices/about.toml -m koppel-bin/Cargo.toml \
+    cargo about generate --format json -c installer/notices/about.toml -m koppel/Cargo.toml \
       --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl --target arm-unknown-linux-musleabihf \
       -o /crates.json
 
@@ -200,7 +200,7 @@ EXPOSE 5240 5240/udp
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys
 
-# GET /healthz on the UI port, asked at Ports__Address and Ports__Ui and then at 127.0.0.1 (koppel-bin/src/
+# GET /healthz on the UI port, asked at Ports__Address and Ports__Ui and then at 127.0.0.1 (koppel/src/
 # healthcheck.rs), as 0.1.x's image did. It is Koppel itself because the image has no shell or curl. Plain
 # Docker only reports "unhealthy": it does not restart the container (restart: unless-stopped acts on exits, not
 # on health). Swarm and Kubernetes act on it; with plain Docker, something has to watch it, for example an

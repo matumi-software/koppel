@@ -129,8 +129,10 @@ docker compose exec koppel dotnet Koppel.dll --reset-password
 ## The native install
 
 `Koppel-Setup.exe` comes with each [release](https://github.com/matumi-software/koppel/releases/latest). It installs Koppel as a Windows
-service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, the Visual C++
-runtime. It adds an inbound firewall rule for `Koppel.exe` (TCP and UDP, any port, so it
+service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, and the Visual C++
+runtime, which usbip-win2's tools need (Koppel's own programs do not). From 0.2.0 it installs the Rust build: `Koppel.exe`, the service, and
+`KoppelDesktop.exe`, the tray icon and the Start menu entry, about 11 MB in all. The service logs warnings, errors, and its
+starts and stops with their reason, to the Application event log under the source Koppel. It adds an inbound firewall rule for `Koppel.exe` (TCP and UDP, any port, so it
 follows a changed `Ports` setting) on Private and Domain networks, never Public. It is removed on uninstall and kept on repair and
 upgrade. The UI is at https://localhost:5240 and answers on
 this machine only: the installer sets `Ui__AllowFrom=local` for the service. A native Windows server
@@ -180,5 +182,6 @@ In a compose file these are environment variables with `__` for `:`, such as `Us
 - Installer (2026-11-03), on a clean Windows 11 22H2 VM: fresh install, service recovery, major upgrade, uninstall, taking over an administrator-owned data folder and refusing one owned by a non-administrator. The rollback of a failed fresh install was not exercised.
 - Tray icon (2026-11-08), installed over 0.1.1 on Windows 11: the icon appears for the signed-in user, a click opens the UI in their browser, Shut down Koppel stops the service without a recovery restart and the icon goes with it, the icon comes back when the service starts, and it comes back after Explorer restarts.
 - 0.1.2 Windows app (2026-11-09), on the same PC: the Start menu entry opened the UI with Koppel running, and with it shut down it offered to start it, started it after the UAC prompt and then opened the UI. Restart Koppel brought the service back in 3 seconds, with the reason in the event log, and the tray came back. The tooltip showed the real link and device count. Configuration showed the Notifications panel for a client. Launch showed on the installer's last page after an upgrade from 0.1.1 and opened the UI. The notifications themselves were tried with a test tray fed the same messages, not with real pairing or link events.
+- Rust Windows app (2026-11-09, not installed yet): the tray run by hand with its standard input fed the service's lines showed the tooltip, the amber dot, the menu and a notification, skipped lines it could not read, and removed its icon and exited when the input closed. The launcher's pipe started the real tray in the same session (the service's token path needs LocalSystem). The Start menu entry, pointed at a Rust Koppel on another port, found `/healthz` answering and opened the browser. The installer builds. Not tried until it is installed: the service itself, the tray in each session as the user, Shut down and Restart, the `UiUrl` value, the event log entries, the upgrade from 0.1.2, Launch, and the icon coming back after Explorer restarts.
 - The Windows client through Docker Desktop was re-run on 2026-11-03: attach through the gateway without elevation, and Detach from Koppel.
 - Not tested: printers, the attach deadline on its own, and a webcam from a Linux server to a Windows client, which attaches but delivers no frames (#22).

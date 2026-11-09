@@ -41,9 +41,10 @@ use windows::core::{PCWSTR, PWSTR};
 
 use crate::wire;
 
-/// How often the launcher looks for new sessions when nothing changed (the feed's own round).
+/// A tray that ends this soon after it started is started again only after `BACKOFF`.
 const QUICK_EXIT: Duration = Duration::from_secs(30);
 const BACKOFF: Duration = Duration::from_secs(60);
+/// How long the trays get to exit by themselves when the service stops.
 const EXIT_WAIT: Duration = Duration::from_secs(3);
 /// Room for many messages, so a tray that is slow to read rarely holds up the launcher.
 const PIPE_BUFFER: u32 = 64 * 1024;

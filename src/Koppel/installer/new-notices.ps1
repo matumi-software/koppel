@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-Writes THIRD-PARTY-NOTICES.txt for what Koppel ships: NuGet packages, npm packages in the UI, and the .NET runtime.
+Writes THIRD-PARTY-NOTICES.txt for what Koppel ships: NuGet packages, npm packages in the UI, and the .NET runtime;
+with -Rust, the Rust crates and the npm packages instead.
 
 .DESCRIPTION
 NuGet: every package in the host's project.assets.json (run `dotnet restore -r win-x64` first), with its
@@ -12,15 +13,23 @@ self-contained and the container image's runtime carries the same ones.
 A package licensed under an SPDX expression but shipping no licence file is covered by the standard text in
 licenses\. A licence with no text there stops the script, so a new one is noticed and not skipped.
 
-The result is committed as src\Koppel\src\Koppel\THIRD-PARTY-NOTICES.txt and published with the host, so it
-is in the MSI and in the Docker image. build.ps1 regenerates it, then adds the Windows-only notices.
+The result is committed as src\Koppel\src\Koppel\THIRD-PARTY-NOTICES.txt and published with the C# host, so
+it is in the 0.1.x Docker image.
+
+-Rust is for the Rust build (0.2.0), which the Windows installer ships: every crate in Koppel.exe and
+KoppelDesktop.exe for x86_64-pc-windows-msvc, from cargo-about (cargo install cargo-about --locked), checked
+against the licences about.toml accepts, with the licence texts cargo-about finds in each crate, and the npm
+packages the UI bundles. build.ps1 writes it into the staging folder, not the source tree, then adds the
+Windows-only notices.
 
 .EXAMPLE
 .\new-notices.ps1 -Output ..\src\Koppel\THIRD-PARTY-NOTICES.txt
+.\new-notices.ps1 -Rust -Output obj\staging\THIRD-PARTY-NOTICES.txt
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$Output
+    [Parameter(Mandatory)][string]$Output,
+    [switch]$Rust
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,7 +40,7 @@ $assetsPath = Join-Path $product 'src\Koppel\obj\project.assets.json'
 $uiFolder = Join-Path (Split-Path $product) 'ui\app'
 $nl = "`n"
 
-if (-not (Test-Path $assetsPath)) { throw "$assetsPath is missing. Run: dotnet restore src\Koppel\src\Koppel\Koppel.csproj -r win-x64" }
+if (-not $Rust -and -not (Test-Path $assetsPath)) { throw "$assetsPath is missing. Run: dotnet restore src\Koppel\src\Koppel\Koppel.csproj -r win-x64" }
 
 function Get-StandardText([string]$spdx) {
     $file = Join-Path $installer "licenses\$spdx.txt"
@@ -52,6 +61,7 @@ $declared = @{ 'Common.Logging' = 'Apache-2.0'; 'Common.Logging.Core' = 'Apache-
 $entries = New-Object System.Collections.Generic.List[object]
 
 # ---- NuGet ----
+if (-not $Rust) {
 $assets = Get-Content $assetsPath -Raw | ConvertFrom-Json
 $roots = @($assets.packageFolders.PSObject.Properties.Name)
 foreach ($lib in $assets.libraries.PSObject.Properties) {
@@ -75,6 +85,29 @@ foreach ($lib in $assets.libraries.PSObject.Properties) {
         else { throw "$($lib.Name) declares no licence this script understands (licenseUrl: $($meta.licenseUrl)). Handle it here." }
     }
     $entries.Add([pscustomobject]@{ Source = 'NuGet'; Name = $id; Version = $version; License = $license; Copyright = [string]$meta.copyright; Url = [string]$meta.projectUrl; Text = $text })
+}
+}
+
+# ---- Rust crates (cargo-about) ----
+$rustTexts = @()
+if ($Rust) {
+    $src = Split-Path $product
+    $about = Join-Path $env:TEMP "koppel-about-$PID.json"
+    & cargo about generate --format json -c (Join-Path $installer 'about.toml') -m (Join-Path $src 'koppel-bin\Cargo.toml') -o $about
+    if ($LASTEXITCODE -ne 0) { throw 'cargo about failed. Install it with: cargo install cargo-about --locked. A licence about.toml does not accept stops it too.' }
+    $report = Get-Content $about -Raw -Encoding utf8 | ConvertFrom-Json
+    Remove-Item $about
+    foreach ($crate in $report.crates) {
+        $package = $crate.package
+        # Koppel's own crates are covered by Koppel's licence above.
+        if ($package.name -like 'koppel*') { continue }
+        $entries.Add([pscustomobject]@{ Source = 'Rust'; Name = $package.name; Version = $package.version; License = [string]$crate.license; Copyright = (@($package.authors) -join ', '); Url = [string]$package.repository; Text = $null; Covered = $true })
+    }
+    # Each distinct text once, with the crates it covers.
+    foreach ($group in @($report.licenses) | Group-Object { $_.text.Trim() }) {
+        $users = $group.Group | ForEach-Object { $_.used_by } | ForEach-Object { $_.crate } | Where-Object { $_.name -notlike 'koppel*' } | ForEach-Object { "$($_.name) $($_.version)" } | Sort-Object -Unique
+        if ($users) { $rustTexts += [pscustomobject]@{ Id = $group.Group[0].id; Users = $users; Text = $group.Name } }
+    }
 }
 
 # ---- npm (what the UI bundles) ----
@@ -117,8 +150,9 @@ $out.Add('')
 $out.Add((Get-Content (Join-Path $repo 'LICENSE') -Raw).Trim())
 $out.Add('')
 
-foreach ($source in 'NuGet', 'npm') {
-    $out.Add("== $source packages ==")
+$sources = if ($Rust) { 'Rust', 'npm' } else { 'NuGet', 'npm' }
+foreach ($source in $sources) {
+    $out.Add($(if ($source -eq 'Rust') { '== Rust crates ==' } else { "== $source packages ==" }))
     $out.Add('')
     foreach ($e in $entries | Where-Object Source -eq $source | Sort-Object Name) {
         $line = "$($e.Name) $($e.Version): $($e.License)"
@@ -140,8 +174,16 @@ foreach ($group in $entries | Where-Object Text | Group-Object { $_.Text }) {
     $out.Add('----')
     $out.Add('')
 }
+foreach ($t in $rustTexts) {
+    $out.Add("$($t.Id), applies to: " + ($t.Users -join ', '))
+    $out.Add('')
+    $out.Add($t.Text)
+    $out.Add('')
+    $out.Add('----')
+    $out.Add('')
+}
 # Standard texts for the rest. Copyright holders are the ones named above.
-$spdx = $entries | Where-Object { -not $_.Text } | ForEach-Object { $_.License -split '\s+(?:OR|AND)\s+' | ForEach-Object { $_.Trim('()') } } | Sort-Object -Unique
+$spdx = $entries | Where-Object { -not $_.Text -and -not $_.Covered } | ForEach-Object { $_.License -split '\s+(?:OR|AND)\s+' | ForEach-Object { $_.Trim('()') } } | Sort-Object -Unique
 foreach ($id in $spdx) {
     $out.Add("$id (applies to the packages above that name it; their copyright holders are listed there)")
     $out.Add('')
@@ -152,6 +194,7 @@ foreach ($id in $spdx) {
 }
 
 # ---- .NET runtime ----
+if (-not $Rust) {
 $out.Add('== .NET and ASP.NET Core runtime ==')
 $out.Add('')
 $out.Add("The Windows installer ships the runtime with Koppel; the container image uses the same one from Microsoft's aspnet image.")
@@ -174,6 +217,7 @@ foreach ($pack in 'Microsoft.NETCore.App.Runtime.win-x64', 'Microsoft.AspNetCore
         $out.Add((Get-Content $thirdParty.FullName -Raw).Trim())
         $out.Add('')
     }
+}
 }
 
 [IO.File]::WriteAllText($Output, (($out -join $nl) -replace "`r`n", $nl) + $nl, (New-Object Text.UTF8Encoding($false)))

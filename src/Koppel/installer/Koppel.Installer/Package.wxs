@@ -45,11 +45,16 @@
         <!-- The native app's UI is used on this machine only, so it answers this machine only (Ui:AllowFrom). What other
              Koppel machines do on the same port is not affected. -->
         <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\Koppel" Name="Environment" Type="multiString" Value="Ui__AllowFrom=local" />
+        <!-- The event log source the service writes under. Koppel.exe carries the message table that shows each entry's
+             own text. 0.1.x registered the source itself, pointing at a .NET file that is gone after an upgrade; this
+             rewrites it, and uninstall takes it away. -->
+        <util:EventSource Name="Koppel" Log="Application" EventMessageFile="[#KoppelExe]" />
         <!-- The service writes its UI address here as it starts, for the Start menu entry. Uninstall takes it away. -->
         <RegistryKey Root="HKLM" Key="SOFTWARE\Matumi\Koppel" ForceDeleteOnUninstall="yes" />
       </Component>
-      <!-- Koppel in the Start menu, for all users: opens the UI, and starts the service first if it is not running
-           (KoppelOpener). KoppelDesktop.exe is Koppel.exe marked as a Windows program (build.ps1), so it opens no console. -->
+      <!-- Koppel in the Start menu, for all users: opens the UI, and starts the service first if it is not running.
+           KoppelDesktop.exe (koppel-windows) is a Windows program, so it opens no console; it is also the tray icon the
+           service starts in each signed-in session. -->
       <Component Id="StartMenu">
         <File Id="KoppelDesktopExe" Source="$(var.StagingDir)\KoppelDesktop.exe" KeyPath="yes" />
         <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Koppel" Description="Open Koppel, and start it if it is not running"

@@ -4,7 +4,9 @@
 //! targets of their own and are in `first_run.rs`.
 
 use koppel_contract::shape::{self, Kind};
-use koppel_contract::{Body, Main, Push, Session, activity_with, json, password, push_kind};
+use koppel_contract::{
+    Body, EVENTS_PATH, Main, Push, Session, activity_with, json, password, push_kind,
+};
 use reqwest::Method;
 
 const OTHER_PASSWORD: &str = "contract-password-2";
@@ -378,9 +380,25 @@ async fn the_live_push_needs_a_session() {
                 .expect(403);
         }
         Push::Sse => {
-            eprintln!(
-                "skipped: the SSE endpoint's path is not settled yet (#84); add its 401 check here"
+            let anonymous = main.target.anonymous();
+            anonymous.get(EVENTS_PATH).await.expect(401);
+            // A GET, so no X-Koppel-UI, which an EventSource cannot send, but the Origin check holds.
+            let events = main.admin.events().await;
+            assert_eq!(events.status, 200);
+            assert!(
+                events.content_type.starts_with("text/event-stream"),
+                "{}",
+                events.content_type
             );
+            main.admin
+                .send(
+                    Method::GET,
+                    EVENTS_PATH,
+                    Body::None,
+                    &[("Origin", "https://elsewhere.example")],
+                )
+                .await
+                .expect(403);
         }
     }
 }

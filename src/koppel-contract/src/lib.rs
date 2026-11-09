@@ -23,10 +23,18 @@
 //! | `KOPPEL_CONTRACT_LIMITS_URL` | One nothing else touches, for the sign-in rate limit | Defaults (30 a minute) |
 //! | `KOPPEL_CONTRACT_PASSWORD` | The UI password the tests set and use. Optional | |
 //! | `KOPPEL_CONTRACT_PUSH` | How the target pushes to the UI: `signalr` (0.1.x) or `sse` (the Rust build, #84). Optional, `signalr` by default | |
+//! | `KOPPEL_CONTRACT_SKAKEL` | `0` when the target has no Skakel yet: no token endpoint, `/skakel/info`, pairing, discovery or link, as the Rust build until #85. Optional, on by default | |
 //!
 //! `run-against-0.1.2.sh` in this crate starts all of them from the published image in Docker, runs the
-//! tests and removes what it started. The tests take one lock, so they run one at a time whatever the
-//! thread count: they share targets and change their settings.
+//! tests and removes what it started. `run-against-rust.sh` does the same with the Rust build, started
+//! from a temporary data folder for each target. The tests take one lock, so they run one at a time
+//! whatever the thread count: they share targets and change their settings.
+//!
+//! # What the Rust build does not have yet
+//!
+//! Until Skakel's roles come in (#85), the Rust build answers the UI's server and client endpoints
+//! with 0.1.x's shapes but has no Skakel endpoints and links to nothing. With `KOPPEL_CONTRACT_SKAKEL=0`
+//! the parts of a test that need them say they were skipped ([`needs_skakel`]) and the rest runs.
 //!
 //! # Certificates
 //!
@@ -35,9 +43,9 @@
 //!
 //! # The live push
 //!
-//! The push is not tested yet: 0.1.x pushes over SignalR and the Rust build moves to Server-Sent Events
-//! (#84). [`push`] lists the events the push contract will cover, and [`Session::get_stream`] is where
-//! an SSE test starts.
+//! 0.1.x pushes over SignalR, the Rust build over Server-Sent Events at `/api/events` (#84). [`push`]
+//! lists the events, and `tests/push.rs` checks each against a target with `KOPPEL_CONTRACT_PUSH=sse`,
+//! reading the stream with [`Session::events`]. Against 0.1.x those tests say they were skipped.
 
 pub mod push;
 pub mod shape;
@@ -84,6 +92,25 @@ pub fn push_kind() -> Push {
         _ => Push::SignalR,
     }
 }
+
+/// Whether the target has Skakel's endpoints and link (`KOPPEL_CONTRACT_SKAKEL`, on unless `0`).
+pub fn skakel() -> bool {
+    std::env::var("KOPPEL_CONTRACT_SKAKEL").as_deref() != Ok("0")
+}
+
+/// True when the target has Skakel; otherwise says that `what` was skipped, and why.
+pub fn needs_skakel(what: &str) -> bool {
+    if skakel() {
+        return true;
+    }
+    eprintln!(
+        "skipped: {what} needs Skakel's endpoints and link, which this target does not have yet (#85)"
+    );
+    false
+}
+
+/// The path of the live push on a target that pushes with Server-Sent Events.
+pub const EVENTS_PATH: &str = "/api/events";
 
 /// A running Koppel at a base address such as `https://localhost:15240`.
 #[derive(Clone)]
@@ -313,8 +340,26 @@ impl Session {
         self.send(method, path, body, &[(UI_HEADER, "1")]).await
     }
 
+    /// The live push, opened with this session's cookie, as the UI's `EventSource` opens it.
+    pub async fn events(&self) -> Events {
+        let response = self
+            .get_stream(EVENTS_PATH, &[("Accept", "text/event-stream")])
+            .await;
+        Events {
+            status: response.status().as_u16(),
+            content_type: response
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_owned(),
+            response,
+            buffer: String::new(),
+        }
+    }
+
     /// Opens a streaming GET and hands back the response unread, for a push test that reads events as
-    /// they arrive (Server-Sent Events, #84).
+    /// they arrive.
     pub async fn get_stream(&self, path: &str, headers: &[(&str, &str)]) -> reqwest::Response {
         let mut request = self.target.http.get(format!("{}{path}", self.target.base));
         if let Some(cookie) = &self.cookie {
@@ -327,6 +372,97 @@ impl Session {
             .send()
             .await
             .unwrap_or_else(|e| panic!("GET {path} to {} failed: {e:?}", self.target.base))
+    }
+}
+
+/// What reading the live push came to.
+#[derive(Debug)]
+pub enum Next {
+    /// An event: its name and its data as JSON.
+    Event(String, Value),
+    /// The server ended the stream.
+    Ended,
+    /// Nothing came in time.
+    TimedOut,
+}
+
+/// The live push as it comes, one Server-Sent Event at a time.
+pub struct Events {
+    pub status: u16,
+    pub content_type: String,
+    response: reqwest::Response,
+    buffer: String,
+}
+
+impl Events {
+    /// The next event, the end of the stream, or nothing within `timeout`. Comments, the keep-alive
+    /// among them, are skipped.
+    pub async fn next(&mut self, timeout: Duration) -> Next {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(end) = self.buffer.find("\n\n") {
+                let block: String = self.buffer.drain(..end + 2).collect();
+                let mut name = String::from("message");
+                let mut data = Vec::new();
+                for line in block.lines() {
+                    if let Some(value) = line.strip_prefix("event:") {
+                        name = value.trim_start().to_owned();
+                    } else if let Some(value) = line.strip_prefix("data:") {
+                        data.push(value.strip_prefix(' ').unwrap_or(value).to_owned());
+                    }
+                }
+                if data.is_empty() {
+                    continue;
+                }
+                let text = data.join("\n");
+                let value = serde_json::from_str(&text)
+                    .unwrap_or_else(|e| panic!("the event {name} carries no JSON ({e}): {text}"));
+                return Next::Event(name, value);
+            }
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return Next::TimedOut;
+            };
+            match tokio::time::timeout(left, self.response.chunk()).await {
+                Err(_) => return Next::TimedOut,
+                Ok(Ok(Some(chunk))) => self
+                    .buffer
+                    .push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n")),
+                Ok(Ok(None)) | Ok(Err(_)) => return Next::Ended,
+            }
+        }
+    }
+
+    /// The first event named `name` whose data `accept` takes, skipping others. Fails the test when
+    /// the stream ends or nothing comes within `timeout`.
+    pub async fn wait_for(
+        &mut self,
+        name: &str,
+        timeout: Duration,
+        mut accept: impl FnMut(&Value) -> bool,
+    ) -> Value {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.next(left).await {
+                Next::Event(got, value) if got == name && accept(&value) => return value,
+                Next::Event(..) => {}
+                Next::Ended => panic!("the stream ended while waiting for {name}"),
+                Next::TimedOut => panic!("no {name} came within {timeout:?}"),
+            }
+        }
+    }
+
+    /// True when the server ends the stream within `timeout`, whatever events come before.
+    pub async fn ends_within(&mut self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.next(left).await {
+                Next::Event(..) => {}
+                Next::Ended => return true,
+                Next::TimedOut => return false,
+            }
+        }
     }
 }
 

@@ -3,7 +3,7 @@
 //! `/api/remote/devices`, which other Koppel machines call with a token from Skakel's token endpoint.
 
 use koppel_contract::shape::{self, Kind};
-use koppel_contract::{Body, Main, Session, Target, activity_with, json, unique};
+use koppel_contract::{Body, Main, Session, Target, activity_with, json, needs_skakel, unique};
 use reqwest::Method;
 use serde_json::Value;
 
@@ -127,6 +127,9 @@ async fn identity_keys_and_info_name_the_certificate_the_port_presents() {
     assert_eq!(identity["name"], info["name"]);
     assert_eq!(identity["httpsPort"], info["httpsPort"]);
 
+    if !needs_skakel("/skakel/info") {
+        return;
+    }
     let skakel = main
         .target
         .anonymous()
@@ -171,10 +174,16 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
     assert_eq!(secret["clientSecret"], json!(first_secret));
 
     // The credentials work for the remote API.
-    let first_token = token(&main.target, &id, &first_secret)
-        .await
-        .expect("a token for the new client");
-    assert_eq!(remote_devices(&main.target, &first_token).await, 200);
+    let tokens = needs_skakel("using the client's credentials for a token");
+    let first_token = if tokens {
+        let first_token = token(&main.target, &id, &first_secret)
+            .await
+            .expect("a token for the new client");
+        assert_eq!(remote_devices(&main.target, &first_token).await, 200);
+        first_token
+    } else {
+        String::new()
+    };
 
     let rotated = admin
         .post_empty(&format!("/api/server/clients/{id}/rotate"))
@@ -195,16 +204,21 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
             .json()["clientSecret"],
         json!(second_secret)
     );
-    assert_eq!(
-        remote_devices(&main.target, &first_token).await,
-        401,
-        "rotating blocks the client's tokens at once"
-    );
-    assert_eq!(token(&main.target, &id, &first_secret).await, Err(401));
-    let second_token = token(&main.target, &id, &second_secret)
-        .await
-        .expect("a token with the new secret");
-    assert_eq!(remote_devices(&main.target, &second_token).await, 200);
+    let second_token = if tokens {
+        assert_eq!(
+            remote_devices(&main.target, &first_token).await,
+            401,
+            "rotating blocks the client's tokens at once"
+        );
+        assert_eq!(token(&main.target, &id, &first_secret).await, Err(401));
+        let second_token = token(&main.target, &id, &second_secret)
+            .await
+            .expect("a token with the new secret");
+        assert_eq!(remote_devices(&main.target, &second_token).await, 200);
+        second_token
+    } else {
+        String::new()
+    };
 
     let revoked = admin
         .delete(&format!("/api/server/clients/{id}"))
@@ -212,11 +226,13 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
         .expect(202);
     revoked.empty();
     assert!(!clients(admin).await.iter().any(|c| c["id"] == json!(id)));
-    assert_eq!(
-        remote_devices(&main.target, &second_token).await,
-        401,
-        "revoking blocks the client's tokens at once"
-    );
+    if tokens {
+        assert_eq!(
+            remote_devices(&main.target, &second_token).await,
+            401,
+            "revoking blocks the client's tokens at once"
+        );
+    }
     admin
         .get(&format!("/api/server/clients/{id}/secret"))
         .await
@@ -312,7 +328,12 @@ async fn rotating_the_signing_key_keeps_tokens_signed_with_the_old_one() {
     let created = create_client(admin, &unique("contract-keys")).await;
     let id = created["clientId"].as_str().expect("an id");
     let secret = created["clientSecret"].as_str().expect("a secret");
-    let before_token = token(&main.target, id, secret).await.expect("a token");
+    let tokens = needs_skakel("tokens across a signing key rotation");
+    let before_token = if tokens {
+        token(&main.target, id, secret).await.expect("a token")
+    } else {
+        String::new()
+    };
     let before = admin.get("/api/server/keys").await.expect(200).json();
 
     let answer = admin
@@ -332,9 +353,11 @@ async fn rotating_the_signing_key_keeps_tokens_signed_with_the_old_one() {
         "the old key is kept until its tokens expire: {after}"
     );
 
-    assert_eq!(remote_devices(&main.target, &before_token).await, 200);
-    let after_token = token(&main.target, id, secret).await.expect("a token");
-    assert_eq!(remote_devices(&main.target, &after_token).await, 200);
+    if tokens {
+        assert_eq!(remote_devices(&main.target, &before_token).await, 200);
+        let after_token = token(&main.target, id, secret).await.expect("a token");
+        assert_eq!(remote_devices(&main.target, &after_token).await, 200);
+    }
     assert!(has_entry(
         &activity_with(admin, "signingKeyRotated").await,
         "machine"
@@ -514,8 +537,10 @@ async fn the_remote_api_needs_a_token_and_ignores_the_ui_session() {
     assert_eq!(answer.header("www-authenticate").as_deref(), Some("Bearer"));
     assert_eq!(remote_devices(&main.target, "not-a-token").await, 401);
     main.admin.get("/api/remote/devices").await.expect(401);
-    assert_eq!(
-        token(&main.target, "client-nobody", "wrong").await,
-        Err(401)
-    );
+    if needs_skakel("Skakel's token endpoint") {
+        assert_eq!(
+            token(&main.target, "client-nobody", "wrong").await,
+            Err(401)
+        );
+    }
 }

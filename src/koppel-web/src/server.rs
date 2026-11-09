@@ -1,8 +1,10 @@
-//! The accept loop: TLS by hand over tokio-rustls, then HTTP/1.1 or HTTP/2 by what ALPN settled on,
-//! the pattern of axum's low-level rustls example and Skakel's server.
+//! The accept loop: plain HTTP answered with a redirect, TLS by hand over tokio-rustls, then HTTP/1.1
+//! or HTTP/2 by what ALPN settled on, the pattern of axum's low-level rustls example and Skakel's
+//! server.
 
 use std::future::Future;
-use std::net::SocketAddr;
+use std::io;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
 use axum::Router;
@@ -10,21 +12,61 @@ use axum::extract::ConnectInfo;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use hyper_util::server::conn::auto;
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
-/// How long a client has to finish the TLS handshake.
+use crate::guard::LocalAddr;
+use crate::redirect;
+
+/// How long a client has to send its first byte and finish the TLS handshake.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long a client has to send the headers of a request.
 const HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long open connections get to finish once the server stops.
 const STOP_GRACE: Duration = Duration::from_secs(3);
 
+/// A listener on `port` at `address`, or on every address, IPv4 and IPv6, when it is `None`, as
+/// Kestrel's `ListenAnyIP` binds: one dual-stack socket, or IPv4 alone where there is no IPv6.
+pub fn bind(address: Option<IpAddr>, port: u16) -> io::Result<TcpListener> {
+    match address {
+        Some(address) => listen(SocketAddr::new(address, port), false),
+        None => listen(
+            SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port),
+            true,
+        )
+        .or_else(|e| {
+            tracing::debug!("no dual-stack socket on port {port} ({e}), so IPv4 only");
+            listen(SocketAddr::from(([0, 0, 0, 0], port)), false)
+        }),
+    }
+}
+
+fn listen(address: SocketAddr, dual_stack: bool) -> io::Result<TcpListener> {
+    let socket = Socket::new(
+        Domain::for_address(address),
+        Type::STREAM,
+        Some(Protocol::TCP),
+    )?;
+    if dual_stack {
+        socket.set_only_v6(false)?;
+    }
+    // On Windows this would let another program take the port too, so only elsewhere, where it
+    // lets a restart bind while old connections wait out TIME_WAIT.
+    #[cfg(not(windows))]
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&address.into())?;
+    socket.listen(1024)?;
+    TcpListener::from_std(socket.into())
+}
+
 /// Serves `router` over TLS on `listener` until `stop` completes, then gives open connections a
-/// moment to finish. Each request carries `ConnectInfo<SocketAddr>` with the caller's address.
+/// moment to finish. Each request carries `ConnectInfo<SocketAddr>` with the caller's address and
+/// the local address it came in on.
 pub async fn serve(
     listener: TcpListener,
     acceptor: TlsAcceptor,
@@ -73,6 +115,15 @@ async fn serve_connection(
     mut stopped: watch::Receiver<bool>,
 ) {
     let _ = stream.set_nodelay(true);
+    let Ok(local) = stream.local_addr() else {
+        return;
+    };
+    let mut first = [0u8; 1];
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, stream.peek(&mut first)).await {
+        Ok(Ok(1)) if first[0] == redirect::TLS_HANDSHAKE => {}
+        Ok(Ok(1)) => return redirect::answer(stream, local).await,
+        _ => return,
+    }
     let tls = match tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await {
         Ok(Ok(tls)) => tls,
         Ok(Err(e)) => {
@@ -86,6 +137,7 @@ async fn serve_connection(
     };
     let service = hyper::service::service_fn(move |mut request: hyper::Request<Incoming>| {
         request.extensions_mut().insert(ConnectInfo(remote));
+        request.extensions_mut().insert(LocalAddr(local));
         let mut router = router.clone();
         async move { router.call(request).await }
     });

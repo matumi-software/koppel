@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
-use koppel_contract::{Answer, Body, Main, Single, Target, json};
+use koppel_contract::{Answer, Body, Main, Single, Target, json, needs_skakel};
 use reqwest::Method;
 
 #[track_caller]
@@ -178,10 +178,10 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
         ("/api/system/info", 200, 200, 200),
         ("/api/activity", 200, 200, 200),
     ];
-    let network: &[(&str, u16, u16, u16)] = &[
-        ("/api/remote/devices", 401, 404, 401),
-        ("/skakel/info", 200, 404, 200),
-    ];
+    let mut network: Vec<(&str, u16, u16, u16)> = vec![("/api/remote/devices", 401, 404, 401)];
+    if needs_skakel("/skakel/info in each role") {
+        network.push(("/skakel/info", 200, 404, 200));
+    }
     for (role, column) in [("server", 0), ("client", 1), ("both", 2), ("server", 0)] {
         admin
             .patch("/api/settings", json!({ "role": role }))
@@ -191,7 +191,7 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
             let want = [*server, *client, *both][column];
             assert_eq!(admin.get(path).await.status, want, "{path} as {role}");
         }
-        for (path, server, client, both) in network {
+        for (path, server, client, both) in &network {
             let want = [*server, *client, *both][column];
             assert_eq!(anonymous.get(path).await.status, want, "{path} as {role}");
         }
@@ -292,8 +292,10 @@ async fn the_ui_turns_away_an_address_allow_from_does_not_take_and_the_network_p
     ui.get("/api/remote/devices").await.expect(404);
 
     // The network port: other machines get the network surface, whatever Ui:AllowFrom says, and nothing of the UI.
-    let info = network.get("/skakel/info").await.expect(200).json();
-    assert_eq!(info["app"]["id"], json!("koppel"));
+    if needs_skakel("/skakel/info on the network port") {
+        let info = network.get("/skakel/info").await.expect(200).json();
+        assert_eq!(info["app"]["id"], json!("koppel"));
+    }
     network.get("/api/remote/devices").await.expect(401);
     network.get("/api/auth/state").await.expect(404);
     network.get("/healthz").await.expect(404);

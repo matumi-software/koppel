@@ -16,11 +16,18 @@ export interface FieldProps extends Omit<TextFieldProps, 'className' | 'style' |
   action?: ReactNode;
 }
 
-/** A labelled text input for settings and authentication. */
+/**
+ * A labelled text input for settings and authentication.
+ *
+ * `invalid` shows the server's answer; it is not a browser validation rule. So the field marks itself
+ * invalid for screen readers only (`validationBehavior="aria"`). With react-aria's default, native, the
+ * input would also get a custom validity error, and the browser would refuse to submit the form again
+ * until a reload, so a corrected password could never be sent.
+ */
 export function Field({ label, labelHidden, help, state, mono, placeholder, action, ...props }: FieldProps) {
   const caption = state === 'pending' ? 'Saving…' : help;
   return (
-    <TextField {...props} className="kp-field" data-state={state} isInvalid={state === 'invalid'}>
+    <TextField {...props} className="kp-field" data-state={state} isInvalid={state === 'invalid'} validationBehavior="aria">
       <Label className={labelHidden ? 'kp-sr-only' : 'kp-field__label'}>{label}</Label>
       <div className="kp-field__control">
         <Input className="kp-input" data-mono={mono ? 'true' : undefined} placeholder={placeholder} />

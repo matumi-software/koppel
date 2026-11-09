@@ -36,6 +36,9 @@ Other changes:
 
 - The Koppel mark in the UI draws the K in the text colour and keeps only its circle in canopy green, part of the
   Matumi rebrand. The app icon does not change.
+- After a wrong password, the sign-in form sent nothing more until the page was reloaded, even with the right
+  password typed in. The browser held the field's error as a validation error and refused to submit the form. Every
+  form in the UI had the same problem after a refusal from the server.
 
 ## 0.1.2 (2026-11-09)
 

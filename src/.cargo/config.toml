@@ -1,0 +1,5 @@
+# Link the C runtime statically on Windows, as Skakel does, so Koppel's programs do not need the
+# Visual C++ runtime (vcruntime140.dll is not part of Windows). The installer still installs it, for
+# usbip-win2's tools, which link it dynamically.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

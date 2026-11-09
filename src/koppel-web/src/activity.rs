@@ -8,10 +8,15 @@ use std::sync::Mutex;
 use serde::Serialize;
 use time::OffsetDateTime;
 
+use tokio::sync::broadcast;
+
 use crate::push::{self, Push};
 
 /// How many entries the log keeps.
 const CAPACITY: usize = 500;
+
+/// Entries a watcher may fall behind by before it misses some.
+const WATCH_BACKLOG: usize = 64;
 
 /// What an entry is about: a device, a client, this machine or a server link.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -85,6 +90,7 @@ pub struct ActivityEvent {
 pub struct ActivityLog {
     events: Mutex<VecDeque<ActivityEvent>>,
     push: Push,
+    recorded: broadcast::Sender<ActivityEvent>,
 }
 
 impl ActivityLog {
@@ -92,6 +98,7 @@ impl ActivityLog {
         Self {
             events: Mutex::new(VecDeque::new()),
             push,
+            recorded: broadcast::channel(WATCH_BACKLOG).0,
         }
     }
 
@@ -119,7 +126,14 @@ impl ActivityLog {
             events.truncate(CAPACITY);
         }
         self.push.send(push::ACTIVITY_RECORDED, &event);
+        // Nobody watching is fine.
+        let _ = self.recorded.send(event.clone());
         event
+    }
+
+    /// Each entry recorded from now on, for the tray's notifications.
+    pub fn watch(&self) -> broadcast::Receiver<ActivityEvent> {
+        self.recorded.subscribe()
     }
 
     /// The newest `max` entries, only those about `entity` when it is given.

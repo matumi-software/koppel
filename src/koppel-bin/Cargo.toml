@@ -23,3 +23,9 @@ sd-notify.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+
+[target.'cfg(windows)'.dependencies]
+koppel-windows.workspace = true
+
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

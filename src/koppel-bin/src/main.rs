@@ -6,11 +6,15 @@
 //! `secrets.json`. The roles and USB come with the issues of milestone v0.2.0 (#85 to #87).
 //!
 //! `koppel --reset-password` clears the UI password and ends every session, then exits.
+//!
+//! On Windows, when the service manager starts it, it runs as the Koppel service, with the tray
+//! icons and the event log (`koppel-windows`).
 
 mod config;
 mod systemd;
 
 use std::error::Error;
+use std::future::Future;
 use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -21,9 +25,16 @@ use koppel_web::{App, AppOptions, Host, tls};
 use time::OffsetDateTime;
 use tokio::sync::watch;
 use tracing::Level;
+use tracing_subscriber::Layer;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+
+/// The Windows service, when Koppel runs as one. There is none on other systems.
+#[cfg(windows)]
+use koppel_windows::service::Service;
+#[cfg(not(windows))]
+enum Service {}
 
 /// The UI's port unless `Ports:Ui` says otherwise.
 const UI_PORT: u16 = 5240;
@@ -31,19 +42,48 @@ const UI_PORT: u16 = 5240;
 /// otherwise.
 const AUTH_PER_MINUTE: u32 = 30;
 
-#[tokio::main]
-async fn main() -> ExitCode {
-    init_logging();
+fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let config = Config::read(std::env::vars_os(), &args);
+    // What the service starts as it stops for the tray's Restart Koppel.
+    #[cfg(windows)]
+    if args.first().map(String::as_str) == Some(koppel_windows::service::RESTART_ARGUMENT) {
+        return koppel_windows::service::restart_service();
+    }
     let reset = args
         .iter()
         .any(|a| a.eq_ignore_ascii_case("--reset-password"));
-    let result = if reset {
-        reset_password(&config).await
+    if !reset {
+        #[cfg(windows)]
+        {
+            let service_args = args.clone();
+            let as_service = koppel_windows::service::dispatch(move |service| {
+                init_logging(true);
+                let config = Config::read(std::env::vars_os(), &service_args);
+                u32::from(finish(block_on(run(&config, Some(service)))) != ExitCode::SUCCESS)
+            });
+            if let Some(code) = as_service {
+                return code;
+            }
+        }
+    }
+    init_logging(false);
+    let config = Config::read(std::env::vars_os(), &args);
+    if reset {
+        finish(block_on(reset_password(&config)))
     } else {
-        run(&config).await
-    };
+        finish(block_on(run(&config, None)))
+    }
+}
+
+fn block_on<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("the async runtime starts")
+        .block_on(future)
+}
+
+fn finish(result: Result<(), Box<dyn Error>>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -53,7 +93,7 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run(config: &Config) -> Result<(), Box<dyn Error>> {
+async fn run(config: &Config, service: Option<Service>) -> Result<(), Box<dyn Error>> {
     let ui_port = config.port("Ports:Ui", UI_PORT)?;
     let network_port = config.port("Ports:Network", ui_port)?;
     let address = config.listen_address()?;
@@ -69,7 +109,7 @@ async fn run(config: &Config) -> Result<(), Box<dyn Error>> {
         started_at: OffsetDateTime::now_utc(),
         ui_port,
         network_port,
-        tray: false,
+        tray: service.is_some(),
         os: koppel_web::os_label(),
     };
     let app = App::start(AppOptions {
@@ -113,7 +153,25 @@ async fn run(config: &Config) -> Result<(), Box<dyn Error>> {
     }
     systemd::ready();
     tokio::spawn(systemd::heartbeat(app.router()));
+
+    #[cfg(windows)]
+    let trays = service
+        .as_ref()
+        .map(|service| service.started(&app, address, ui_port));
+
+    #[cfg(windows)]
+    if let Some(service) = &service {
+        service.stop_requested().await;
+    } else {
+        stop_signal().await;
+    }
+    #[cfg(not(windows))]
     stop_signal().await;
+
+    #[cfg(windows)]
+    if let Some(trays) = trays {
+        trays.close().await;
+    }
     systemd::stopping();
     let _ = stop.send(true);
     while servers.join_next().await.is_some() {}
@@ -174,18 +232,25 @@ async fn reset_password(config: &Config) -> Result<(), Box<dyn Error>> {
 }
 
 /// Logs to standard output at Info, or as RUST_LOG says (`debug`, or `warn,koppel_web=debug`), in
-/// colour only on a terminal, so a service log or `docker logs` gets plain text.
-fn init_logging() {
+/// colour only on a terminal, so a service log or `docker logs` gets plain text. The Windows service
+/// also logs to the event log (`koppel_windows::event_log`).
+fn init_logging(service: bool) {
     let asked = std::env::var("RUST_LOG").ok();
     let parsed = asked.as_deref().map(str::parse::<Targets>);
     let filter = match &parsed {
         Some(Ok(targets)) => targets.clone(),
         _ => Targets::new().with_default(Level::INFO),
     };
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_ansi(std::io::stdout().is_terminal()))
-        .with(filter)
-        .init();
+    let registry = tracing_subscriber::registry().with(
+        tracing_subscriber::fmt::layer()
+            .with_ansi(std::io::stdout().is_terminal())
+            .with_filter(filter),
+    );
+    #[cfg(windows)]
+    let registry = registry.with(service.then(koppel_windows::event_log::layer).flatten());
+    #[cfg(not(windows))]
+    let _ = service;
+    registry.init();
     if let Some(Err(e)) = parsed {
         tracing::warn!("RUST_LOG is not understood ({e}), so logging stays at Info");
     }

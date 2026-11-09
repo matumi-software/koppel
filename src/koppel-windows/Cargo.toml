@@ -1,0 +1,41 @@
+[package]
+name = "koppel-windows"
+description = "Koppel's Windows app: the service, the tray icon, the Start menu entry and the event log"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# KoppelDesktop.exe in the install folder: the tray icon the service starts in each signed-in session
+# and the Start menu entry. A Windows program, so neither opens a console window.
+[[bin]]
+name = "koppel-desktop"
+path = "src/main.rs"
+
+# Everything is Windows only. Elsewhere the library is empty and the program does nothing.
+[target.'cfg(windows)'.dependencies]
+koppel-web.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+windows-service.workspace = true
+windows = { workspace = true, features = [
+    "Win32_Graphics_Gdi",
+    "Win32_Networking_WinHttp",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Environment",
+    "Win32_System_EventLog",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_Registry",
+    "Win32_System_RemoteDesktop",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

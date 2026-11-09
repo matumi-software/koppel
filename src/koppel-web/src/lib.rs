@@ -8,6 +8,7 @@
 //! - [`roles`]: the seams where the Skakel roles (#85) and USB (#86, #87) plug in, with what stands
 //!   in for them until then.
 //! - [`push`]: the live push, Server-Sent Events at `/api/events`.
+//! - [`tray`]: what the Windows service tells its tray icons.
 
 mod access;
 mod activity;
@@ -23,6 +24,7 @@ pub mod roles;
 mod server;
 mod surface;
 pub mod tls;
+pub mod tray;
 mod ui;
 
 use std::fmt;

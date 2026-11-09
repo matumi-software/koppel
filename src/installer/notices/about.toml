@@ -1,6 +1,8 @@
-# The licence policy for the Rust crates the Windows installer ships, read by cargo-about in
-# new-notices.ps1 -Rust. A crate under a licence not named here stops the build, so a new one is
-# looked at, not shipped unseen. Koppel's own crates are GPL-3.0-or-later.
+# The licence policy for the Rust crates Koppel ships, read by cargo-about in new-notices.ps1 -Rust
+# (the Windows installer) and in src/koppel-bin/Dockerfile (the .deb files and the image). A crate
+# under a licence not named here stops the build, so a new one is looked at, not shipped unseen.
+# Koppel's own crates are GPL-3.0-or-later. The targets are not set here: each build passes its own
+# with --target (x86_64-pc-windows-msvc, or the three Linux musl targets).
 accepted = [
     "GPL-3.0-or-later",
     "MIT",
@@ -17,7 +19,6 @@ accepted = [
     "Unicode-3.0",
     "CDLA-Permissive-2.0",
 ]
-targets = ["x86_64-pc-windows-msvc"]
 ignore-build-dependencies = true
 ignore-dev-dependencies = true
 

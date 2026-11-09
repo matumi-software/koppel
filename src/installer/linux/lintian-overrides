@@ -1,0 +1,2 @@
+# Static on purpose (musl), so the package needs no libc, OpenSSL or ICU and one binary runs on any release.
+koppel: statically-linked-binary [usr/lib/koppel/koppel]

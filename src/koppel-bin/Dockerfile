@@ -9,7 +9,7 @@
 #     docker buildx build -f koppel-bin/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 -t <name> .
 #
 # Every image is pinned by tag and digest, so a rebuild does not move under us, and every tool by version,
-# Zig also by its checksum. To bump an image, `docker buildx imagetools inspect <image>:<tag>` prints the new
+# Zig and PowerShell also by their checksums. To bump an image, `docker buildx imagetools inspect <image>:<tag>` prints the new
 # digest (the one at the top, for the whole multi-platform index). Zig's checksums are in
 # https://ziglang.org/download/index.json.
 #
@@ -26,6 +26,13 @@ ARG ZIG_SHA256_X86_64=3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7
 ARG ZIG_SHA256_AARCH64=a1546d5646eb184437918d6635ca6b762a0e889eac09cef720ee7a1ed3fe7795
 ARG CARGO_ZIGBUILD_VERSION=0.24.1
 ARG PNPM_VERSION=9.15.0
+# The third-party notices: cargo-about as the Windows installer's build uses it, and PowerShell to run the same
+# script, src/installer/notices/new-notices.ps1. PowerShell's checksums are on each release's assets in
+# https://github.com/PowerShell/PowerShell/releases.
+ARG CARGO_ABOUT_VERSION=0.9.3
+ARG PWSH_VERSION=7.6.8
+ARG PWSH_SHA256_X64=59112e38ad83350e4f6dc0195953c66b5926792f300ca2e7691b8242e7a16e7f
+ARG PWSH_SHA256_ARM64=3179e07fd98f026d39c730ebcb7626d071aac3351b171dda13f9f38d99efcef0
 
 # -------- The UI ---------------------------------------------------------------
 FROM --platform=$BUILDPLATFORM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS ui
@@ -73,6 +80,7 @@ COPY koppel-config ./koppel-config
 COPY koppel-contract ./koppel-contract
 COPY koppel-usb ./koppel-usb
 COPY koppel-web ./koppel-web
+COPY koppel-windows ./koppel-windows
 COPY --from=ui /build/ui/app/dist ./ui/app/dist
 # The registry, Zig's cache and target/ are cache mounts, kept between builds. The binaries are copied out of
 # target/ to /out/<TARGETARCH>/koppel, where the stages below find them: amd64, arm64, and arm for ARMv6.
@@ -94,6 +102,49 @@ RUN mkdir -p /koppel/config /koppel/keys
 FROM scratch AS binaries
 COPY --from=build /out/ /
 
+# -------- The third-party notices, for the .deb files and the image ---------------------------
+# The same script and licence policy as the Windows installer (src/installer/notices). cargo-about lists the
+# crates of the three Linux targets as JSON where cargo and the crates' sources are; the script then runs under
+# PowerShell where pnpm and the UI's packages are, and writes /notices/THIRD-PARTY-NOTICES.txt.
+FROM toolchain AS cargo-about
+ARG CARGO_ABOUT_VERSION
+RUN cargo install --locked --features cli "cargo-about@$CARGO_ABOUT_VERSION"
+
+FROM build AS crate-licences
+COPY --from=cargo-about /usr/local/cargo/bin/cargo-about /usr/local/cargo/bin/cargo-about
+COPY installer/notices/about.toml ./installer/notices/about.toml
+RUN --mount=type=cache,id=koppel-cargo-registry,target=/usr/local/cargo/registry \
+    cargo about generate --format json -c installer/notices/about.toml -m koppel-bin/Cargo.toml \
+      --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl --target arm-unknown-linux-musleabihf \
+      -o /crates.json
+
+FROM toolchain AS pwsh
+ARG PWSH_VERSION
+ARG PWSH_SHA256_X64
+ARG PWSH_SHA256_ARM64
+RUN set -eu; \
+    case "$(uname -m)" in \
+      x86_64) arch=x64; sum="$PWSH_SHA256_X64" ;; \
+      aarch64) arch=arm64; sum="$PWSH_SHA256_ARM64" ;; \
+      *) echo "There is no PowerShell checksum here for a $(uname -m) build machine; build on x86_64 or aarch64." >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v$PWSH_VERSION/powershell-$PWSH_VERSION-linux-$arch.tar.gz" -o /tmp/pwsh.tar.gz; \
+    echo "$sum  /tmp/pwsh.tar.gz" | sha256sum -c -; \
+    mkdir /opt/pwsh; \
+    tar -C /opt/pwsh -xzf /tmp/pwsh.tar.gz; \
+    chmod +x /opt/pwsh/pwsh
+
+FROM ui AS notices
+COPY --from=pwsh /opt/pwsh /opt/pwsh
+COPY installer/notices ./installer/notices
+COPY --from=crate-licences /crates.json /tmp/crates.json
+# No ICU in this image, and the script needs none. The build context is src/, without the repo's LICENSE, so
+# Koppel's licence text comes from Debian's copy, which is the same GPL-3.0 text.
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 POWERSHELL_TELEMETRY_OPTOUT=1
+RUN mkdir /notices \
+ && /opt/pwsh/pwsh -NoLogo -NoProfile -NonInteractive -File installer/notices/new-notices.ps1 -Rust \
+      -AboutJson /tmp/crates.json -License /usr/share/common-licenses/GPL-3 -Output /notices/THIRD-PARTY-NOTICES.txt
+
 # -------- The .deb packages (not part of the image) ----------------------------------
 # Built only on request, through installer/linux/build.ps1. nfpm wraps each binary with the files in
 # installer/linux; the armv6 binary becomes the armhf package, which is what Raspberry Pi OS (32-bit) installs.
@@ -101,6 +152,7 @@ FROM --platform=$BUILDPLATFORM goreleaser/nfpm:v2.48.0@sha256:d57a1452e7a019896b
 
 FROM build AS deb
 COPY --from=nfpm /usr/bin/nfpm /usr/local/bin/nfpm
+COPY --from=notices /notices /notices
 COPY installer/linux /build/installer/linux
 WORKDIR /build/installer/linux
 RUN set -eu; \
@@ -135,6 +187,7 @@ FROM base-${TARGETARCH} AS image
 ARG TARGETARCH
 # On the PATH, so `docker compose exec koppel koppel --reset-password` finds it.
 COPY --from=build /out/${TARGETARCH}/koppel /usr/local/bin/koppel
+COPY --from=notices /notices/THIRD-PARTY-NOTICES.txt /usr/share/doc/koppel/THIRD-PARTY-NOTICES.txt
 # One volume root for everything Koppel writes.
 COPY --from=build --chown=65532:65532 /koppel /koppel
 VOLUME /koppel
@@ -146,5 +199,13 @@ EXPOSE 5240 5240/udp
 
 ENV Paths__Config=/koppel/config
 ENV Paths__Keys=/koppel/keys
+
+# GET /healthz on the UI port, asked at Ports__Address and Ports__Ui and then at 127.0.0.1 (koppel-bin/src/
+# healthcheck.rs), as 0.1.x's image did. It is Koppel itself because the image has no shell or curl. Plain
+# Docker only reports "unhealthy": it does not restart the container (restart: unless-stopped acts on exits, not
+# on health). Swarm and Kubernetes act on it; with plain Docker, something has to watch it, for example an
+# autoheal container, or `docker ps --filter health=unhealthy`.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD ["/usr/local/bin/koppel", "--healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/koppel"]

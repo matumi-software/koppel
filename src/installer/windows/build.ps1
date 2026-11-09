@@ -9,7 +9,8 @@ Builds Koppel's Windows installer: bin\Koppel-Setup.exe.
    Cargo.lock (--locked): Koppel.exe, the service and the commands, with the UI inside it, and
    KoppelDesktop.exe, the tray icon and the Start menu entry.
 2. Adds usbip-win2's driver and tools (from usbip-win2\<version>, see export-usbip-win2.ps1),
-   the install scripts and the third-party notices (new-notices.ps1 -Rust, which needs cargo-about).
+   the install scripts and the third-party notices (..\notices\new-notices.ps1 -Rust, which needs
+   cargo-about; the Linux build uses the same script).
 3. Builds the MSI, then setup.exe, which installs the VC++ runtime first: usbip-win2's tools link it
    dynamically, though Koppel's own programs do not need it.
 
@@ -120,7 +121,7 @@ Copy-Item (Join-Path $release 'koppel.exe') (Join-Path $staging 'Koppel.exe')
 Copy-Item (Join-Path $release 'koppel-desktop.exe') (Join-Path $staging 'KoppelDesktop.exe')
 
 Write-Host 'Writing the third-party notices...'
-& (Join-Path $installer 'new-notices.ps1') -Rust -Output (Join-Path $staging 'THIRD-PARTY-NOTICES.txt')
+& (Join-Path (Split-Path $installer) 'notices\new-notices.ps1') -Rust -Target x86_64-pc-windows-msvc -Output (Join-Path $staging 'THIRD-PARTY-NOTICES.txt')
 
 $usbipWin2 = Get-ChildItem (Join-Path $installer 'usbip-win2') -Directory | Sort-Object { [version]$_.Name } | Select-Object -Last 1
 if (-not $usbipWin2) { throw 'No usbip-win2 files. Run export-usbip-win2.ps1 first.' }

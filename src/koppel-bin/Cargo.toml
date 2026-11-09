@@ -18,6 +18,13 @@ time.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 tower-service.workspace = true
+# `--healthcheck`'s HTTPS client, on what the server already carries: hyper's HTTP/1.1 client half,
+# rustls with ring, and http-body-util (already here through axum). No new crates.
+hyper = { workspace = true, features = ["client", "http1"] }
+hyper-util.workspace = true
+http-body-util.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 sd-notify.workspace = true

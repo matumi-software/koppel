@@ -896,13 +896,18 @@ name = "koppel"
 version = "0.2.0"
 dependencies = [
  "axum",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "koppel-config",
  "koppel-usb",
  "koppel-web",
  "koppel-windows",
+ "rustls",
  "sd-notify",
  "time",
  "tokio",
+ "tokio-rustls",
  "tower-service",
  "tracing",
  "tracing-subscriber",

@@ -6,11 +6,14 @@
 //! `secrets.json`. The server and client roles run on Skakel, with the USB layer behind them.
 //!
 //! `koppel --reset-password` clears the UI password and ends every session, then exits.
+//! `koppel --healthcheck` asks a running Koppel's `/healthz` and exits 0 when it answers, 1 when it
+//! does not: the image's health check.
 //!
 //! On Windows, when the service manager starts it, it runs as the Koppel service, with the tray
 //! icons and the event log (`koppel-windows`).
 
 mod config;
+mod healthcheck;
 mod systemd;
 mod usb;
 
@@ -53,6 +56,10 @@ fn main() -> ExitCode {
     #[cfg(windows)]
     if args.first().map(String::as_str) == Some(koppel_windows::service::RESTART_ARGUMENT) {
         return koppel_windows::service::restart_service();
+    }
+    // A one-off for the image's health check: ask the UI port whether Koppel answers, and exit.
+    if healthcheck::requested(&args) {
+        return healthcheck::run(&Config::read(std::env::vars_os(), &args));
     }
     let reset = args
         .iter()

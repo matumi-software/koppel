@@ -287,6 +287,15 @@ pub struct Node {
     cookie: String,
 }
 
+/// A free UDP port on loopback.
+pub fn free_udp_port() -> u16 {
+    std::net::UdpSocket::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
 /// A free TCP port on loopback.
 pub fn free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -299,6 +308,18 @@ pub fn free_port() -> u16 {
 impl Node {
     /// Starts a Koppel in `dir` with `role` (`server`, `client` or `both`), on `port` or a free one.
     pub async fn start(dir: &Path, role: &str, port: Option<u16>, kernel: Arc<FakeKernel>) -> Node {
+        Self::start_with(dir, role, port, kernel, None).await
+    }
+
+    /// As [`Node::start`], with discovery on UDP `discovery.0` on loopback, a client sending its
+    /// probes to `discovery.1`.
+    pub async fn start_with(
+        dir: &Path,
+        role: &str,
+        port: Option<u16>,
+        kernel: Arc<FakeKernel>,
+        discovery: Option<(u16, SocketAddr)>,
+    ) -> Node {
         let config = dir.join("config");
         let keys = dir.join("keys");
         std::fs::create_dir_all(&config).unwrap();
@@ -345,7 +366,9 @@ impl Node {
             auth_per_minute: 1000,
             network: NetworkOptions {
                 address: Some("127.0.0.1".parse().unwrap()),
-                discovery: false,
+                discovery: discovery.is_some(),
+                discovery_port: discovery.map_or(port, |d| d.0),
+                probe_targets: discovery.map(|d| vec![d.1]),
                 ..NetworkOptions::defaults(port)
             },
             usb,

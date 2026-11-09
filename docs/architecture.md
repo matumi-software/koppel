@@ -8,7 +8,7 @@ One codebase and one Docker image cover every role; the role is a setting.
 
 | Layer | What | Status |
 |---|---|---|
-| Control plane | REST for commands, a live push for confirmed state, React UI behind a password. 0.1.x: ASP.NET Core with SignalR. The Rust build (0.2.0): axum with Server-Sent Events | Done in 0.1.x; the Rust build has it, with the roles and USB behind seams (see "The UI's server side in Rust") |
+| Control plane | REST for commands, a live push for confirmed state, React UI behind a password. 0.1.x: ASP.NET Core with SignalR. The Rust build (0.2.0): axum with Server-Sent Events | Done in 0.1.x; the Rust build has it, with the roles on Skakel 0.2.0 (see "The roles on Skakel in Rust") |
 | Transport | [Skakel](https://github.com/matumi-software/skakel) (MIT): discovery, pairing, OAuth client credentials, certificate pinning and handover, the remote hub and the streams. Koppel keeps the server's state and the client's credentials in its own encrypted files. The UI has its own password | Done |
 | Data plane | USB/IP protocol (Linux kernel spec), in Koppel's `usb` stream on Skakel | Linux server and client work. A Windows client works through usbip-win2 (see "Real hardware" below). A Windows server shares through usbipd-win, and a real one was run to a Linux client |
 
@@ -18,7 +18,10 @@ Since 0.1.1 the transport between Koppel machines is Skakel, a library under the
 format is protocol version 1, described in Skakel's [`docs/protocol.md`](https://github.com/matumi-software/skakel/blob/main/docs/protocol.md): discovery,
 the info endpoint, pairing, tokens and the client generation, the certificate handover, following a
 server that moved, the hub's own messages and the streams. Koppel 0.1.0 spoke what that document calls
-version 0, so 0.1.0 and 0.1.1 cannot talk to each other.
+version 0, so 0.1.0 and 0.1.1 cannot talk to each other. The Rust build (0.2.0) speaks protocol
+version 2, Skakel 0.2.0's, which keeps discovery, info, pairing, tokens and the handover and moves the
+hub and the streams to gRPC, so it and 0.1.x cannot talk to each other either (see "The roles on Skakel
+in Rust").
 
 What Koppel adds on top, and what the rest of this document is about:
 
@@ -77,7 +80,7 @@ which is on the network surface.
 | 5240 HTTPS (`Ports:Ui`) | UI | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, the live push (`/api/events` in Rust, `/api/hubs/ui` in 0.1.x), `/healthz` | Any |
 | 5240 HTTPS (`Ports:Ui`) | UI | `/api/server/*` | Server or both |
 | 5240 HTTPS (`Ports:Ui`) | UI | `/api/client/*` | Client or both |
-| 5240 HTTPS (`Ports:Network`) | Network | Skakel under `/skakel`: info, pairing, tokens and hello, the remote hub at `/skakel/v1/hub`, USB traffic at `/skakel/v1/streams/usb`. Koppel's own `/api/remote/*` behind a client's token | Server or both |
+| 5240 HTTPS (`Ports:Network`) | Network | Skakel under `/skakel`: info, pairing, tokens and hello, the remote hub at `/skakel/v1/hub`, USB traffic at `/skakel/v1/streams/usb` (0.1.x; the Rust build takes Skakel's and Koppel's gRPC calls instead). Koppel's own `/api/remote/*` behind a client's token | Server or both |
 | 5240 UDP (`Discovery:Port`) | Network | Answers to discovery probes | Server or both |
 | 3242 plain | Gateway for a USB/IP driver on this machine | Client or both, and only where `Gateway:Port` is set or on native Windows |
 
@@ -532,15 +535,95 @@ paths, JSON and errors, held to them by the contract tests.
 | `api/` | The REST endpoints: settings, activity, system, server, client and USB |
 | `activity.rs` | The activity log, in memory, 500 entries |
 | `push.rs` | The live push |
-| `roles/` | The seams for #85 to #87, and what stands in for them |
+| `roles/` | The seams the endpoints talk to, the server and client roles on Skakel (`roles/skakel/`) and the USB layer behind them (`roles/usb.rs`); see "The roles on Skakel in Rust" |
 | `redirect.rs`, `server.rs` | Plain HTTP answered with a 301 from the first byte, then TLS, and the dual-stack listener |
 
-- **Settings:** `koppel-bin` reads what 0.1.x read, from the environment (`Paths__Config`) and the command line (`--Paths:Config=...`), names in any case: `Paths:Config`, `Paths:Keys`, `Ports:Ui`, `Ports:Network`, `Ports:Address`, `Ui:AllowFrom`, `Ui:SetupWindowMinutes` and `RateLimits:AuthPerMinute`, each refused at start with its name when it is not a valid value. `ASPNETCORE_ENVIRONMENT` or `DOTNET_ENVIRONMENT` set to `Development` makes `Ui:AllowFrom` default to `local`. There is no `appsettings.json`: 0.1.x's only held log levels, which `RUST_LOG` sets now. `Discovery:Port` and Skakel's `RateLimits:*` come with #85, `--healthcheck` with the image (#90).
+- **Settings:** `koppel-bin` reads what 0.1.x read, from the environment (`Paths__Config`) and the command line (`--Paths:Config=...`), names in any case: `Paths:Config`, `Paths:Keys`, `Ports:Ui`, `Ports:Network`, `Ports:Address`, `Ui:AllowFrom`, `Ui:SetupWindowMinutes` and `RateLimits:AuthPerMinute`, each refused at start with its name when it is not a valid value. `ASPNETCORE_ENVIRONMENT` or `DOTNET_ENVIRONMENT` set to `Development` makes `Ui:AllowFrom` default to `local`. There is no `appsettings.json`: 0.1.x's only held log levels, which `RUST_LOG` sets now. With the roles come `Discovery:Enabled`, `Discovery:Port`, `RateLimits:TokenPerMinute`, `RateLimits:PairPerMinute`, `Usb:SysRoot`, `Usb:Upstream`, `Usb:UsbipPath`, `Usb:AttachTimeoutSeconds`, `Gateway:Port`, `Gateway:Address` and `Gateway:MaxSessions`, as 0.1.x read them. `--healthcheck` comes with the image (#90).
 - **Start:** the folders are prepared, 0.1.x's secrets converted, the config files opened (start-up still stops on an unusable one), then the UI port and, when set apart, the network port listen. With no `Ports:Address` a port is one dual-stack socket, or IPv4 alone where there is no IPv6.
 - **Sessions:** the cookie `koppel.ui` carries the session id, the security stamp, when it was signed in and when it runs out, signed with HMAC-SHA256. The key is `ui-session.key` in the keys directory, sealed like the secret files, so sessions survive a restart; one that cannot be opened is replaced, which signs everyone out. Every request checks the signature, the stamp, that a password is set, the 12 hours, the 7 day cap and the revoked ids in `ui-auth.json`; a request in the second half of the 12 hours gets the cookie again with a later expiry. The lockout (5 tries, then a minute doubling to an hour, per whole address, at most 2048 callers), the two hash slots and the rate limit are 0.1.x's. A reset or a hand edit of `ui-auth.json` is picked up by the file's watcher: a new stamp ends every session and reopens setup when there is no password.
 - **The push:** `GET /api/events` with the session cookie answers `text/event-stream`. Each event's name is 0.1.x's hub method and its data the same JSON, sent once the change is on disk: `SettingsChanged` and `ConnectionChanged` follow their files' change deliveries, so a hand edit is pushed too, and the rest are sent by whatever made the change. A comment goes out every 15 seconds. A stream that falls 256 events behind is closed rather than skipping one, and the stream ends when its session does: signing out, a password change or reset elsewhere, the cookie running out. HTTP/2 carries any number of streams over one connection, so many open tabs do not run out of connections. The UI's `EventSource` reconnects on 0.1.x's steps (0, 2, 5, 10, then 30 seconds), asks whether the session is still good on each failure, and fetches everything again when a stream opens.
 - **Unknown API paths:** a signed-in request for an `/api/...` path no route has gets 404, where 0.1.2 answered index.html.
-- **The seams:** `roles::ServerRole`, `ClientRole`, `UsbServer` and `UsbClient`. Until Skakel's server comes in (#85), `StoredServer` keeps the registered clients, their secrets, the signing keys and the certificates in `secrets.json`, so adding, revoking and rotating clients and keys and the certificate handover's prepare, cancel and switch work and are saved, but there are no pairing requests (approving any answers 404), no token endpoint, no `/skakel/*` and no remote hub, so `/api/remote/devices` always answers 401. The client side keeps its connection in `connection.json`; its test answers `incomplete` or `unreachable` with a line saying this build has no link, discovery finds nothing, and pairing fails at once with a reason. USB (#86, #87) answers with no devices and says sharing and attaching are not in this build, while `devices.json` and `attached.json` are still checked as 0.1.x checks them.
+- **The seams:** `roles::ServerRole`, `ClientRole`, `UsbServer` and `UsbClient`, which the endpoints and the push talk to with 0.1.x's JSON. `SkakelServerRole`, `SkakelClientRole`, `UsbServerRole` and `UsbClientRole` fill them (see "The roles on Skakel in Rust").
+
+### The roles on Skakel in Rust
+
+The server and client roles run on Skakel 0.2.0 (protocol version 2, gRPC), taken as git
+dependencies at the commit that merged 0.2.0 until its release tag is published. The code is in
+`koppel-web/src/roles/skakel/`.
+
+| Module | What |
+|---|---|
+| `store.rs` | `secrets.json` as skakel-server's store, and the certificate the web ports present |
+| `server.rs` | `SkakelServerRole`: skakel-server, its clients, keys and pairing, and its events into the push and the activity log |
+| `front.rs` | The web ports handing Skakel's requests to it, with its per-address limits |
+| `announcer.rs` | Discovery answers while the role is server or both |
+| `remote.rs` | Koppel's own gRPC service, the remote device list, and `/api/remote/devices` |
+| `streams.rs` | The `usb` stream type as koppel-usb's `DeviceStream`, both ends |
+| `client.rs` | `SkakelClientRole`: the connection test, discovery and pairing |
+| `links.rs` | The link to the saved server as koppel-usb's `Links`, and what it saves in `connection.json` |
+
+- **Skakel's server on loopback:** skakel-server 0.2.0 serves only on a TCP listener of its own,
+  while Koppel's web ports serve the UI, the plain HTTP redirect and the port and role rules on the
+  same port as 0.1.x. So Skakel's server listens on `127.0.0.1` on a free port, and the web ports hand
+  it what is Skakel's: the gRPC calls (told by their content type; network surface, server role),
+  `/skakel/*` and `/api/remote/*`, after the port and role check. Each connection to a web port gets
+  one HTTP/2 connection of its own to the loopback port, made with its first Skakel request and
+  closed with it, so a client's USB streams keep a connection each and its calls end when it goes.
+  The web ports ping as Skakel's protocol says (15 seconds, dead after 30) and let the flow-control
+  window grow with the link.
+- **What the loopback costs:** Skakel's server sees every caller as loopback. Its limits on token
+  and pairing calls are kept on the web ports instead, per real address, ahead of the port and role
+  check as in 0.1.x (`RateLimits:TokenPerMinute`, `RateLimits:PairPerMinute`), and the address a
+  pairing request came from is read off the answer that opened it, for the server's UI and the
+  activity log. Skakel's other per-address pairing limits (5 opens in 5 minutes, 3 open at once)
+  count every caller together. A Skakel release that lets an app serve on a listener of its own
+  would remove `front.rs`.
+- **State:** `secrets.json` keeps 0.1.x's shape (Skakel 0.1's state, the certificates as PKCS#12),
+  converted at each load and save, so the clients, their secret hashes and generations, the
+  certificate and a prepared next one carry over unchanged. A signing key that is not ECDSA P-256
+  (0.1.x's RSA one) is replaced at start; tokens last 30 minutes and live only in a client's memory.
+  A save that changes the certificate replaces what the web ports present from the next connection.
+- **Role change:** leaving the server role starts Skakel's server again, which ends every client's
+  control call, remote device list and USB stream with `STOPPING`, as 0.1.x ended its hub
+  connections and streams with close code 4003.
+- **Pairing:** a request the server's person refused leaves the list at once, as in 0.1.x; Skakel
+  0.2.0 shows refused requests for 15 seconds, which Koppel keeps only for three wrong codes.
+  Approvals and refusals go to the activity log as `clientAdded`, as 0.1.x's `PairingActivity` put
+  them.
+- **Discovery:** Koppel answers probes itself while the role is server or both, on `Discovery:Port`,
+  bound to `Ports:Address` when that is an IPv4 address (a server on loopback has nobody else to
+  answer) and to every IPv4 address otherwise. The client browses with skakel-client's `Browser`
+  while the role is client or both, leaves out its own certificate, and lists servers as 0.1.x did.
+- **Remote device list:** Koppel's own gRPC service `koppel.remote.v1.RemoteDevices`
+  (`koppel-web/proto/koppel/remote/v1/devices.proto`), beside Skakel's on the same port and
+  connection. `Watch` sends the remote view (the shared devices, without who holds them) at once and
+  again on each change, in place of 0.1.x's hub message `DevicesChanged`. The client calls it again
+  each time its link is connected after it was not, and after a list that ended while the link stayed
+  up. `GET /api/remote/devices` with a client's token still answers the same view.
+- **USB streams:** Koppel's stream type `usb` on Skakel's `StreamService`, with no target and no
+  control messages. Its data frames carry USB/IP as 0.1.x's WebSocket binary frames did, and each
+  stream runs on a connection of its own. A stream the data plane ends normally, or because the role
+  left the server side, ends with `OK` (leaving the role ends them with `STOPPING` anyway); one it
+  ends after a failure ends with `ABORTED`, domain `skakel.streams.usb`, reason `FAILED`.
+- **The link:** koppel-usb's client makes it through `SkakelLinks` under its own lock, so making
+  one only builds skakel-client's `Link`; it starts in `Link::start`. Its states become koppel-usb's
+  link states with Skakel's fixed wording, so a revoke, a rotation or refused credentials say to pair
+  again. The certificates the server announces are saved as 0.1.x's `ConnectionStore.SavePinsAsync`
+  saved them, only while the saved connection is still that server, before the link tells the server
+  it has the next one. A server that moved is followed through the browser, and the new address is
+  saved as `MoveServerAsync` saved it, only while nobody saved another connection meanwhile, with a
+  `serverMoved` entry in the activity log.
+- **USB:** the app runs koppel-usb's `UsbServer`, `UsbDataPlane`, `UsbClient` and `UsbIpGateway` on
+  what `koppel-bin` picks from the settings: sysfs on Linux (`Usb:SysRoot`), a USB/IP server to share
+  from (`Usb:Upstream`), usbip-win2's `usbip.exe` on Windows (`Usb:UsbipPath`, else the bundled copy,
+  else a standalone install), as 0.1.x's `Program.cs` did.
+- **Tests:** `koppel-web/tests/roles.rs` starts a Rust server and a Rust client in one process, each
+  on a temporary data folder with a fake kernel. They pair through the code, a shared device
+  attaches and its traffic crosses both relays and Skakel's stream, the link and the device survive a
+  certificate handover and a server restart, revoking and rotating end the link with word to pair
+  again, and leaving the server role ends it. Off Windows, where the client's discovery socket could
+  bring up a firewall prompt, the link also follows a server that moved. The contract tests run
+  Skakel's parts against the Rust build too.
 
 ### Contract tests
 
@@ -554,7 +637,7 @@ crate talks HTTP only and never links Koppel's own crates.
 - **Never an install someone uses:** the tests change settings, the password, clients and the certificate.
 - **Certificate:** the first certificate a target presents is pinned for the run, and every later connection must present it or one a test pinned before switching. The name in it is not checked, since the tests reach the target as `localhost`.
 - **The live push:** `koppel_contract::push` lists the ten events with their payloads, and `tests/push.rs` checks each against the Rust build's Server-Sent Events, with the stream ending on a sign-out and on a password change elsewhere. Against 0.1.x, whose push is SignalR, those tests say they were skipped.
-- **What the Rust build lacks yet:** with `KOPPEL_CONTRACT_SKAKEL=0` the parts that need Skakel's endpoints or a link (tokens, `/skakel/info`, pairing between two Koppels, discovery, the connection test against a real server) say they were skipped and the rest runs. They come back with #85. `DevicesChanged` is checked only on a target that can share a device.
+- **Skakel:** 0.1.x speaks Skakel protocol version 1 and the Rust build version 2; the tests take the version a target lists in `/skakel/info`. Pairing between two Koppels, the connection test outcomes, discovery and the token steps run against both. `KOPPEL_CONTRACT_SKAKEL=0` skips them for a build without Skakel, and `KOPPEL_CONTRACT_DISCOVERY=0` skips the tests that need the client to find the main target by broadcast. `DevicesChanged` is checked only on a target that can share a device.
 - **Gaps:** what needs USB hardware (sharing, attaching), a second network, or a server older than Koppel kept secrets in is not covered; the crate's tests say so where it applies.
 
 Against the Rust build, from the repo root (Git Bash on Windows):
@@ -565,10 +648,12 @@ bash src/koppel-contract/run-against-rust.sh --test push  # one file
 ```
 
 The script builds `koppel`, starts the same six targets as processes, each on a fresh temporary data
-folder, on ports 16240 to 16246 (`KOPPEL_CONTRACT_PORT` moves them), runs the tests and stops them. On
-Windows they listen on 127.0.0.1 only, so no firewall prompt comes up, and the `Ui:AllowFrom` test is
-skipped, since every caller there is loopback; elsewhere the script reaches that target at the machine's
-own address. `KOPPEL_CONTRACT_RELEASE=1` tests a release build.
+folder, on ports 16240 to 16246 (`KOPPEL_CONTRACT_PORT` moves them), runs the tests and stops them. The
+client target looks for servers on the main target's port, as the two 0.1.2 containers share one. On
+Windows the targets listen on 127.0.0.1 only, with discovery and the USB/IP gateway off, so no firewall
+prompt comes up and none takes port 3242 from an installed Koppel: the discovery tests and the
+`Ui:AllowFrom` test are skipped there, since every caller is loopback. Elsewhere the client finds the
+main target by broadcast and the script reaches the `Ui:AllowFrom` target at the machine's own address. `KOPPEL_CONTRACT_RELEASE=1` tests a release build.
 
 Against Koppel 0.1.2, from the repo root with Docker running (Git Bash on Windows):
 
@@ -651,16 +736,17 @@ sections describe the behaviour; this one says where it lives in Rust and what d
   the transport accepts a client's stream after its own checks and hands it to `UsbDataPlane::serve`
   with the client's ID and name. On the client the link to the server is a `Link`, a `StreamOpener`
   that also starts, stops and says its address, made by the `Links` the transport provides; the link
-  reports its state and each device list through `LinkEvents`. Skakel's protocol version 2 (#85)
-  implements these on its gRPC streams, one connection per device stream. The tests use the
-  in-memory pair.
+  reports its state and each device list through `LinkEvents`. `koppel-web` implements these on
+  Skakel's gRPC streams, one connection per device stream (see "The roles on Skakel in Rust"). The
+  crate's own tests use the in-memory pair.
 - **Export in two steps:** `UsbHost::export` readies the device (the kernel holds its socket, or
   usbipd-win accepted the import) and returns an `Export`; the data plane answers the import and then
   calls `Export::relay`. That is 0.1.x's `ExportAsync`, split where its `exported` callback ran.
-- **Left to the transport (#85):** keeping streams out while the role is not a server (0.1.x's surface
+- **Left to the transport:** keeping streams out while the role is not a server (0.1.x's surface
   guard), revoking and rotating, pings, renewing the token, following a moved server and saving its
-  address (`serverMoved`), and saving the certificates the server announces. The client still carries
-  its remembered devices over to the server's next certificate in `attached.json`.
+  address (`serverMoved`), and saving the certificates the server announces; see "The roles on Skakel
+  in Rust". The client still carries its remembered devices over to the server's next certificate in
+  `attached.json`.
 - **Settings and files:** the server, the data plane, the client and the gateway follow `settings.json`
   and `connection.json` through `koppel-config`'s `ConfigFile` subscriptions, and keep `devices.json`
   and `attached.json` through it. `Usb:AttachTimeoutSeconds` and the `Gateway:` settings come in as
@@ -672,9 +758,9 @@ sections describe the behaviour; this one says where it lives in Rust and what d
 - **Tests:** the C# tests' cases, with fakes: a kernel on both ends, a usbip-win2 driver, batch files
   in place of `usbip.exe` (Windows only), a stand-in USB/IP server for usbipd-win, a fake `/sys` tree
   (Linux only, as the code is, and the folders have `:` in their names), and a server and a client
-  joined in memory. The cases that need Skakel (tokens, pinning, revoking, the certificate handover, a
-  moved server, token renewal) or the REST endpoints wait for #85 and #84. Nothing has run on real
-  hardware yet (#86, #87).
+  joined in memory. The cases that need Skakel (pinning, revoking, the certificate handover, a moved
+  server) run in `koppel-web/tests/roles.rs`, with the fake kernels on both ends. Nothing has run on
+  real hardware yet (#86, #87).
 
 ## Known limits
 

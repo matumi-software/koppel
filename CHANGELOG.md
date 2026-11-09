@@ -11,6 +11,10 @@ Breaking changes known so far:
   pairings. Do not start using it.
 - There is no way back from 0.2.0 to 0.1.x: the Skakel protocol changes too, so a 0.2 data folder is not for 0.1.x.
 - The UI's live updates use Server-Sent Events at `/api/events` instead of SignalR at `/api/hubs/ui`.
+- Koppel machines talk Skakel protocol version 2 (gRPC), so a 0.2.0 client and a 0.1.x server, or the other way round,
+  cannot link: update both. Pairings carry over.
+- A server whose `Ports:Address` is an IPv4 address answers discovery on that address only, so one that listens on
+  loopback no longer answers the local network.
 
 Linux packages and the image:
 

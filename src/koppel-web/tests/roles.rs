@@ -6,6 +6,8 @@
 mod common;
 
 use common::{FakeKernel, Node, TempDir, down, echoes, eventually, linked, pair};
+#[cfg(not(windows))]
+use common::{free_udp_port, loopback};
 use reqwest::Method;
 use serde_json::json;
 
@@ -235,6 +237,67 @@ async fn leaving_the_server_role_ends_the_link_and_coming_back_takes_it_again() 
         .0;
     assert_eq!(status, 202);
     linked(&client).await;
+
+    client.stop().await;
+    server.stop().await;
+}
+
+// Not on Windows: the client's discovery socket listens on every address, which can bring up a
+// firewall prompt for each new test build.
+#[cfg(not(windows))]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_link_follows_a_server_that_moved_and_saves_where_it_went() {
+    let (server_dir, client_dir) = (TempDir::new("server"), TempDir::new("client"));
+    // The client hears the server's discovery answers on loopback, as it would by broadcast.
+    let udp = free_udp_port();
+    let discovery = Some((udp, loopback(udp)));
+    let server = Node::start_with(
+        server_dir.path(),
+        "server",
+        None,
+        FakeKernel::new(),
+        discovery,
+    )
+    .await;
+    let client = Node::start_with(
+        client_dir.path(),
+        "client",
+        None,
+        FakeKernel::new(),
+        discovery,
+    )
+    .await;
+    let found = eventually("the client to find the server", || async {
+        let servers = client.get("/api/client/discovery").await;
+        servers.as_array().and_then(|list| list.first().cloned())
+    })
+    .await;
+    assert_eq!(found["httpsPort"], json!(server.port));
+    pair(&server, &client).await;
+
+    // The server comes back on another port with the same certificate.
+    server.stop().await;
+    let server = Node::start_with(
+        server_dir.path(),
+        "server",
+        None,
+        FakeKernel::new(),
+        discovery,
+    )
+    .await;
+    eventually("the saved connection to follow the server", || async {
+        (client.get("/api/client/connection").await["serverUrl"] == json!(server.url()))
+            .then_some(())
+    })
+    .await;
+    linked(&client).await;
+    let moved = client.get("/api/activity").await;
+    assert!(
+        moved
+            .as_array()
+            .is_some_and(|list| list.iter().any(|e| e["reason"] == json!("serverMoved"))),
+        "{moved}"
+    );
 
     client.stop().await;
     server.stop().await;

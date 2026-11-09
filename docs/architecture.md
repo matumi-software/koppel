@@ -401,6 +401,7 @@ third-party crate pinned in `[workspace.dependencies]` with a note on its licenc
 | `koppel-config` | The files on disk: the config files with 0.1.x's JSON and write rules, the secret files, the server certificate, the folder hardening, and the conversion of a 0.1.x install (see "Config files in Rust") |
 | `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, `/healthz` and the UI |
 | `koppel-contract` | Contract tests that drive a running Koppel over HTTPS (see "Contract tests" below). Not shipped |
+| `koppel-usb` | The USB layer: USB/IP, the Linux kernel's drivers through sysfs, usbip-win2, usbipd-win, and the server and client roles over a stream to the other machine (see "USB in Rust" below) |
 
 - **Certificate:** each handshake asks `CertificateSlot` for the current certificate, and replacing it takes effect from the next connection. Session resumption is off (no tickets, no session cache), so every connection presents the current certificate, which Skakel's handover relies on. `koppel-config` loads Koppel's own from `secrets.json` (`SkakelState::certified_key`, RSA or ECDSA), and a test presents it through `CertificateSlot`. The program still makes a self-signed one at start until the server role is wired up (#85).
 - **UI:** `koppel-web/build.rs` reads Vite's output in `src/Koppel/src/Koppel.UI/dist`, gzips every file that shrinks by 5% or more, and rust-embed puts one copy of each file into the program. The gzip copy goes out as it is to a client that takes gzip (every browser) and is inflated for one that does not. Files under `assets/` have a hash in their names and are sent with `max-age=31536000, immutable`; index.html and the rest with `no-cache`. A path whose last part has no dot gets index.html, except under `/api`.
@@ -493,6 +494,56 @@ with the same rules.
 - **Certificate:** 0.1.x keeps it as a password-less PKCS#12 from .NET (3DES and SHA-1, where "no
   password" is an empty BMPString without its terminator). The PKCS#12 crates refuse that form, so
   `koppel-config` reads it itself and hands the DER certificate and PKCS#8 key to rustls.
+
+### USB in Rust
+
+`koppel-usb` does what the C# USB layer does (`Koppel.Core.Usb` and `Koppel/Usb`), by the rules in
+"USB data plane" above: the exportable rule, start-up reconciliation, the import lock per bus ID, the
+attach deadline, `attached.json` and attaching again after a drop, the gateway and its checks. Those
+sections describe the behaviour; this one says where it lives in Rust and what differs.
+
+| Module | What |
+|---|---|
+| `protocol`, `bus_id` | The USB/IP device list and import messages, byte for byte, and `UsbBusId` |
+| `host.rs` | `UsbHost`, `UsbAttacher` and `UsbIpDriver`: what a platform can do, and `Unsupported` |
+| `linux` (Linux only) | `SysfsUsbHost` (usbip-host) and `SysfsVhci` (vhci-hcd) through sysfs, and the usbfs reset |
+| `windows` (Windows only) | `UsbipWin2Driver`, which runs `usbip.exe`, and `WindowsTcpTable` |
+| `upstream` | `UsbIpUpstreamHost` for usbipd-win, and `UpstreamAddress` (`Usb:Upstream`) |
+| `stream`, `relay` | The stream to the other machine, an in-memory pair for tests, the relay and the loopback socket pair |
+| `server`, `data_plane` | `UsbServer` and `UsbDataPlane` |
+| `client`, `gateway`, `peer_check` | `UsbClient`, `UsbIpGateway`, and which connections the gateway serves |
+| `views`, `checks`, `activity` | What the UI sees, with 0.1.x's JSON names, the USB system checks, and the activity events |
+
+- **The stream to the other machine:** the crate does not know Skakel. A `DeviceStream` is the byte
+  stream for one device: tokio's `AsyncRead` and `AsyncWrite` to read and write, and `close(reason)` to
+  end it, with `CloseReason::Done`, `Stopping` (the role left the server side) or `Failed`. On the server
+  the transport accepts a client's stream after its own checks and hands it to `UsbDataPlane::serve`
+  with the client's ID and name. On the client the link to the server is a `Link`, a `StreamOpener`
+  that also starts, stops and says its address, made by the `Links` the transport provides; the link
+  reports its state and each device list through `LinkEvents`. Skakel's protocol version 2 (#85)
+  implements these on its gRPC streams, one connection per device stream. The tests use the
+  in-memory pair.
+- **Export in two steps:** `UsbHost::export` readies the device (the kernel holds its socket, or
+  usbipd-win accepted the import) and returns an `Export`; the data plane answers the import and then
+  calls `Export::relay`. That is 0.1.x's `ExportAsync`, split where its `exported` callback ran.
+- **Left to the transport (#85):** keeping streams out while the role is not a server (0.1.x's surface
+  guard), revoking and rotating, pings, renewing the token, following a moved server and saving its
+  address (`serverMoved`), and saving the certificates the server announces. The client still carries
+  its remembered devices over to the server's next certificate in `attached.json`.
+- **Settings and files:** the server, the data plane, the client and the gateway follow `settings.json`
+  and `connection.json` through `koppel-config`'s `ConfigFile` subscriptions, and keep `devices.json`
+  and `attached.json` through it. `Usb:AttachTimeoutSeconds` and the `Gateway:` settings come in as
+  `ClientOptions` and `GatewayOptions`. The activity log implements `ActivitySink`.
+- **The gateway's check:** on Windows with a loopback address it looks the connection up in the TCP
+  table, as 0.1.x does. 0.1.x skipped that inside a Windows container (`DOTNET_RUNNING_IN_CONTAINER`);
+  Koppel ships no Windows container, so the Rust build does not look.
+- **Not ported:** `UsbSockets.EnableKeepAlive`, which nothing in 0.1.x called.
+- **Tests:** the C# tests' cases, with fakes: a kernel on both ends, a usbip-win2 driver, batch files
+  in place of `usbip.exe` (Windows only), a stand-in USB/IP server for usbipd-win, a fake `/sys` tree
+  (Linux only, as the code is, and the folders have `:` in their names), and a server and a client
+  joined in memory. The cases that need Skakel (tokens, pinning, revoking, the certificate handover, a
+  moved server, token renewal) or the REST endpoints wait for #85 and #84. Nothing has run on real
+  hardware yet (#86, #87).
 
 ## Known limits
 

@@ -49,11 +49,11 @@ impl Sys {
         SysfsUsbHost::new(self.root(), self.root().join("dev"))
     }
 
+    /// A device folder as sysfs has it. `vid_pid` is `0403:6001`.
     fn add_device(
         &self,
         bus_id: &str,
-        vid: &str,
-        pid: &str,
+        vid_pid: &str,
         class: &str,
         speed: &str,
         driver: &str,
@@ -63,6 +63,7 @@ impl Sys {
         fs::create_dir_all(&dir).unwrap();
         let write =
             |name: &str, value: &str| fs::write(dir.join(name), format!("{value}\n")).unwrap();
+        let (vid, pid) = vid_pid.split_once(':').unwrap();
         write("idVendor", vid);
         write("idProduct", pid);
         write("bcdDevice", "0600");
@@ -98,14 +99,13 @@ async fn lists_devices_and_skips_hubs_root_hubs_and_interfaces() {
     let sys = Sys::new();
     sys.add_device(
         "1-1.4",
-        "0403",
-        "6001",
+        "0403:6001",
         "00",
         "12",
         "ftdi_sio",
         Some("FT232R USB UART"),
     );
-    sys.add_device("1-1", "05e3", "0610", "09", "480", "hub", None);
+    sys.add_device("1-1", "05e3:0610", "09", "480", "hub", None);
     fs::create_dir_all(sys.devices().join("usb1")).unwrap();
 
     let devices = sys.host().list_devices().await.unwrap();
@@ -124,11 +124,10 @@ async fn lists_devices_and_skips_hubs_root_hubs_and_interfaces() {
 async fn a_hub_is_not_listed_but_the_devices_behind_it_are() {
     let sys = Sys::new();
     // The hub's own interface folder (3-1:1.0) sits in the tree too, as it does on a real machine.
-    sys.add_device("3-1", "05e3", "0610", "09", "480", "hub", None);
+    sys.add_device("3-1", "05e3:0610", "09", "480", "hub", None);
     sys.add_device(
         "3-1.1",
-        "046d",
-        "0825",
+        "046d:0825",
         "ef",
         "480",
         "uvcvideo",
@@ -136,14 +135,13 @@ async fn a_hub_is_not_listed_but_the_devices_behind_it_are() {
     );
     sys.add_device(
         "3-1.2",
-        "0781",
-        "5567",
+        "0781:5567",
         "00",
         "480",
         "usb-storage",
         Some("Cruzer Blade"),
     );
-    sys.add_device("3-2", "05e3", "0610", "09", "480", "hub", None);
+    sys.add_device("3-2", "05e3:0610", "09", "480", "hub", None);
 
     let listed: Vec<String> = sys
         .host()
@@ -173,7 +171,7 @@ async fn devices_attached_from_another_server_are_not_listed() {
     fs::write(real.join("idVendor"), "046d").unwrap();
     fs::write(real.join("idProduct"), "c548").unwrap();
     fs::write(real.join("bDeviceClass"), "00").unwrap();
-    sys.add_device("3-2", "0403", "6001", "00", "12", "ftdi_sio", None);
+    sys.add_device("3-2", "0403:6001", "00", "12", "ftdi_sio", None);
 
     let listed: Vec<String> = sys
         .host()
@@ -190,7 +188,7 @@ async fn devices_attached_from_another_server_are_not_listed() {
 #[tokio::test]
 async fn a_driver_entry_that_is_a_symlink_names_the_driver() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "0403", "6001", "00", "12", "ignored", None);
+    sys.add_device("1-1.4", "0403:6001", "00", "12", "ignored", None);
     let driver = sys.devices().join("1-1.4").join("driver");
     fs::remove_dir_all(&driver).unwrap();
     let target = sys.usbip_host();
@@ -204,7 +202,7 @@ async fn a_driver_entry_that_is_a_symlink_names_the_driver() {
 #[tokio::test]
 async fn share_claims_the_bus_id_unbinds_the_old_driver_and_binds_usbip_host() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "0403", "6001", "00", "12", "ftdi_sio", None);
+    sys.add_device("1-1.4", "0403:6001", "00", "12", "ftdi_sio", None);
     let usbip_host = sys.usbip_host();
 
     sys.host().share("1-1.4").await.unwrap();
@@ -226,7 +224,7 @@ async fn share_claims_the_bus_id_unbinds_the_old_driver_and_binds_usbip_host() {
 #[tokio::test]
 async fn a_share_whose_bind_fails_takes_the_bus_id_off_the_match_list_again() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "0403", "6001", "00", "12", "usbip-host", None);
+    sys.add_device("1-1.4", "0403:6001", "00", "12", "usbip-host", None);
     let usbip_host = sys.usbip_host();
     fs::write(sys.devices().join("1-1.4").join("usbip_status"), "0").unwrap();
     // The driver is not usbip-host yet, so the share has to bind, and the kernel refuses that.
@@ -249,7 +247,7 @@ async fn a_share_whose_bind_fails_takes_the_bus_id_off_the_match_list_again() {
 #[tokio::test]
 async fn unshare_unbinds_takes_the_bus_id_off_and_lets_the_kernel_find_the_driver() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "0403", "6001", "00", "12", "usbip-host", None);
+    sys.add_device("1-1.4", "0403:6001", "00", "12", "usbip-host", None);
     let usbip_host = sys.usbip_host();
 
     sys.host().unshare("1-1.4").await.unwrap();
@@ -271,7 +269,7 @@ async fn unshare_unbinds_takes_the_bus_id_off_and_lets_the_kernel_find_the_drive
 #[tokio::test]
 async fn share_without_the_module_explains_what_to_load() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "0403", "6001", "00", "12", "ftdi_sio", None);
+    sys.add_device("1-1.4", "0403:6001", "00", "12", "ftdi_sio", None);
 
     let share = sys.host().share("1-1.4").await;
 
@@ -290,7 +288,7 @@ async fn bus_ids_that_could_escape_sysfs_are_refused() {
 #[tokio::test]
 async fn reset_goes_through_the_usbfs_node_for_the_device_bus_and_number() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "046d", "c52b", "00", "12", "usbip-host", None);
+    sys.add_device("1-1.4", "046d:c52b", "00", "12", "usbip-host", None);
 
     let reset = sys.host().reset("1-1.4").await;
 
@@ -312,7 +310,7 @@ async fn reset_goes_through_the_usbfs_node_for_the_device_bus_and_number() {
 #[tokio::test]
 async fn reset_reports_a_node_the_kernel_will_not_reset() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "046d", "c52b", "00", "12", "usbip-host", None);
+    sys.add_device("1-1.4", "046d:c52b", "00", "12", "usbip-host", None);
     let node = sys.root().join("dev").join("bus").join("usb").join("001");
     fs::create_dir_all(&node).unwrap();
     fs::write(node.join("005"), "").unwrap();
@@ -325,7 +323,7 @@ async fn reset_reports_a_node_the_kernel_will_not_reset() {
 #[tokio::test]
 async fn export_hands_the_kernel_a_socket_and_relays_the_network_stream_through_the_other_end() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "0403", "6001", "00", "12", "usbip-host", None);
+    sys.add_device("1-1.4", "0403:6001", "00", "12", "usbip-host", None);
     fs::write(sys.devices().join("1-1.4").join("usbip_status"), "1").unwrap();
     let host = sys.host();
     let device = host.list_devices().await.unwrap().remove(0);
@@ -352,7 +350,7 @@ async fn export_hands_the_kernel_a_socket_and_relays_the_network_stream_through_
 #[tokio::test]
 async fn export_refuses_a_device_that_is_in_use() {
     let sys = Sys::new();
-    sys.add_device("1-1.4", "0403", "6001", "00", "12", "usbip-host", None);
+    sys.add_device("1-1.4", "0403:6001", "00", "12", "usbip-host", None);
     fs::write(sys.devices().join("1-1.4").join("usbip_status"), "2").unwrap();
     let host = sys.host();
     let device = host.list_devices().await.unwrap().remove(0);

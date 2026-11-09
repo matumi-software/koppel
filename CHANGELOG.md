@@ -9,6 +9,8 @@ Breaking changes known so far:
   or container that sets it cannot carry its encrypted files over: after the upgrade the server's clients pair again,
   and a client pairs again with its server. Installs without it, which includes every Windows install, keep their
   pairings. Do not start using it.
+- There is no way back from 0.2.0 to 0.1.x: the Skakel protocol changes too, so a 0.2 data folder is not for 0.1.x.
+- The UI's live updates use Server-Sent Events at `/api/events` instead of SignalR at `/api/hubs/ui`.
 
 ## 0.1.2 (2026-11-09)
 

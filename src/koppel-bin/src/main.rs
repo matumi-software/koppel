@@ -8,6 +8,7 @@
 //! `koppel --reset-password` clears the UI password and ends every session, then exits.
 
 mod config;
+mod systemd;
 
 use std::error::Error;
 use std::io::IsTerminal;
@@ -110,7 +111,10 @@ async fn run(config: &Config) -> Result<(), Box<dyn Error>> {
             },
         ));
     }
+    systemd::ready();
+    tokio::spawn(systemd::heartbeat(app.router()));
     stop_signal().await;
+    systemd::stopping();
     let _ = stop.send(true);
     while servers.join_next().await.is_some() {}
     app.stop();

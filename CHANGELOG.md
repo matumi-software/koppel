@@ -1,9 +1,9 @@
 # Changelog
 
-## 0.2.0 (not released yet)
+## 0.2.0 (2026-11-09)
 
 Koppel 0.2.0 is a rewrite in Rust, with the same web UI and features, small enough for a Raspberry Pi Zero.
-Breaking changes known so far:
+Breaking changes:
 
 - `Paths:KeyCertificate` (`Paths__KeyCertificate` in a compose file) is deprecated and goes in 0.2.0. A Linux install
   or container that sets it cannot carry its encrypted files over: after the upgrade the server's clients pair again,

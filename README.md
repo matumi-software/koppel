@@ -161,5 +161,5 @@ NuGet package; its notice is in `THIRD-PARTY-NOTICES.txt` with the other package
 
 The Windows installer bundles usbip-win2 (BSD-2-Clause); its notices ship as `THIRD-PARTY-NOTICES.txt`,
 which the setup window's licence link opens. The setup window's theme files
-(`installer/Koppel.Setup/KoppelTheme.*`) are adapted from WiX and stay under the Microsoft Reciprocal
+(`src/installer/windows/Koppel.Setup/KoppelTheme.*`) are adapted from WiX and stay under the Microsoft Reciprocal
 License; they only style the installer and are not part of Koppel.

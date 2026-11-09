@@ -23,9 +23,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $installer = $PSScriptRoot
-$product = Split-Path $installer
-$repo = Split-Path (Split-Path $product)
-$src = Split-Path $product
+# src\installer\windows: two folders up is src\.
+$src = Split-Path (Split-Path $installer)
 $staging = Join-Path $installer 'obj\staging'
 $cache = Join-Path $installer 'obj\cache'
 $out = Join-Path $installer 'bin'

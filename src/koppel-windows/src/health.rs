@@ -17,8 +17,8 @@ use windows::core::{HSTRING, PCWSTR, w};
 /// One try: true when `GET /healthz` on `host`:`port` answers 200 within `timeout`.
 pub fn answers(host: &str, port: u16, timeout: Duration) -> bool {
     let ms = timeout.as_millis().min(i32::MAX as u128) as i32;
-    // SAFETY: every handle is closed by `Handle` when it goes out of scope, children before their
-    // parents (they are declared in that order), and every buffer lives through its call.
+    // SAFETY: every handle is closed by `Handle` when it goes out of scope, in the reverse of the
+    // order they were made, so children before their parents; every buffer lives through its call.
     unsafe {
         let Some(session) = Handle::new(WinHttpOpen(
             w!("Koppel"),

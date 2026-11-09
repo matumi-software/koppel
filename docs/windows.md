@@ -23,7 +23,7 @@ From `src\Koppel` in the repo:
 docker compose build
 ```
 
-That builds `matumisoftware/koppel:0.1.1` (the tag in `KOPPEL_TAG`), which both Windows compose files use. The compose files name that tag, so a build made here is used as it is. To use the published image instead, skip this step and Docker pulls it.
+That builds `matumisoftware/koppel:0.1.2` (the tag in `KOPPEL_TAG`), which both Windows compose files use. The compose files name that tag, so a build made here is used as it is. To use the published image instead, skip this step and Docker pulls it.
 
 ## Windows server
 
@@ -179,5 +179,6 @@ In a compose file these are environment variables with `__` for `:`, such as `Us
 - Real usbipd-win (2026-11-03): a Windows 11 PC with usbipd-win 5.x shared a webcam to a Debian client, which streamed it at 30 fps. While another program on Windows held the camera open, usbipd-win could not export it and Koppel kept retrying; it attached once the program let go.
 - Installer (2026-11-03), on a clean Windows 11 22H2 VM: fresh install, service recovery, major upgrade, uninstall, taking over an administrator-owned data folder and refusing one owned by a non-administrator. The rollback of a failed fresh install was not exercised.
 - Tray icon (2026-11-08), installed over 0.1.1 on Windows 11: the icon appears for the signed-in user, a click opens the UI in their browser, Shut down Koppel stops the service without a recovery restart and the icon goes with it, the icon comes back when the service starts, and it comes back after Explorer restarts.
+- 0.1.2 Windows app (2026-11-09), on the same PC: the Start menu entry opened the UI with Koppel running, and with it shut down it offered to start it, started it after the UAC prompt and then opened the UI. Restart Koppel brought the service back in 3 seconds, with the reason in the event log, and the tray came back. The tooltip showed the real link and device count. Configuration showed the Notifications panel for a client. Launch showed on the installer's last page after an upgrade from 0.1.1 and opened the UI. The notifications themselves were tried with a test tray fed the same messages, not with real pairing or link events.
 - The Windows client through Docker Desktop was re-run on 2026-11-03: attach through the gateway without elevation, and Detach from Koppel.
 - Not tested: printers, the attach deadline on its own, and a webcam from a Linux server to a Windows client, which attaches but delivers no frames (#22).

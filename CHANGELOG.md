@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.2
+## 0.1.2 (2026-11-09)
 
 - The Windows app has a Koppel icon in the notification area for every signed-in user, the way Apollo does it. Click it
   to open the UI in your browser. Its menu also shuts Koppel down, after asking first; Koppel then stays off until the

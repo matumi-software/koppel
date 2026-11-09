@@ -1,16 +1,15 @@
-import type { HubConnection } from '@microsoft/signalr';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
 import { ActivityProvider } from '@/activity/activity-provider';
 import { AuthContext } from '@/auth/auth-context';
-import { HubContext } from '@/hub/hub-context';
+import { HubContext, type PushSource } from '@/hub/hub-context';
 import { HubPushes } from '@/hub/hub-pushes';
 import { PendingProvider } from '@/pending/pending-provider';
 
-/** A HubConnection that only knows how to subscribe, and lets a test push. */
-export class FakeHub {
+/** A push source that only knows how to subscribe, and lets a test push. */
+export class FakeHub implements PushSource {
   private readonly handlers = new Map<string, Set<(payload: unknown) => void>>();
 
   on = (name: string, handler: (payload: unknown) => void) => {
@@ -39,7 +38,7 @@ export function renderApp(ui: ReactElement, hub = new FakeHub(), queryClient = n
   const tree = (node: ReactElement) => (
     <QueryClientProvider client={queryClient}>
       <AuthContext.Provider value={{ recheck: () => {}, signOut: async () => {} }}>
-        <HubContext.Provider value={{ connection: hub as unknown as HubConnection, state: 'live', retry: () => {} }}>
+        <HubContext.Provider value={{ connection: hub, state: 'live', retry: () => {} }}>
           <HubPushes />
           <ActivityProvider>
             <PendingProvider>{node}</PendingProvider>

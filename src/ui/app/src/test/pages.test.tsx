@@ -1,4 +1,3 @@
-import type { HubConnection } from '@microsoft/signalr';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -139,7 +138,7 @@ describe('the status card', () => {
 
   /** The app with the live link in a given state, under the harness's own hub. */
   const appWithLink = (state: 'live' | 'reconnecting' | 'down', retry = () => {}) => (
-    <HubContext.Provider value={{ connection: new FakeHub() as unknown as HubConnection, state, retry }}>
+    <HubContext.Provider value={{ connection: new FakeHub(), state, retry }}>
       <App />
     </HubContext.Provider>
   );

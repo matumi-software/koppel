@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <SpaRoot>..\Koppel.UI\</SpaRoot>
+    <SpaRoot>..\..\..\ui\app\</SpaRoot>
     <SpaProxyLaunchCommand>pnpm run dev</SpaProxyLaunchCommand>
     <SpaProxyServerUrl>https://localhost:61040</SpaProxyServerUrl>
     <!-- LibraryImport and the tray icon's window procedure (Tray/) use pointers. -->

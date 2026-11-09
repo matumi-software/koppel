@@ -28,7 +28,7 @@ $installer = $PSScriptRoot
 $product = Split-Path $installer
 $repo = Split-Path (Split-Path $product)
 $assetsPath = Join-Path $product 'src\Koppel\obj\project.assets.json'
-$uiFolder = Join-Path $product 'src\Koppel.UI'
+$uiFolder = Join-Path (Split-Path $product) 'ui\app'
 $nl = "`n"
 
 if (-not (Test-Path $assetsPath)) { throw "$assetsPath is missing. Run: dotnet restore src\Koppel\src\Koppel\Koppel.csproj -r win-x64" }

@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Koppel/Koppel.csproj" />
-    <Project Path="src/Koppel.UI/Koppel.UI.esproj">
+    <Project Path="../ui/app/Koppel.UI.esproj">
       <Build />
       <Deploy />
     </Project>

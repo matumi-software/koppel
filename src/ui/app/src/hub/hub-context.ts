@@ -1,9 +1,17 @@
-import type { HubConnection } from '@microsoft/signalr';
 import { createContext, useContext, useEffect } from 'react';
 import type { LinkState } from '@koppel/react-ui';
 
+/** One server push: its JSON payload. */
+export type PushHandler = (payload: unknown) => void;
+
+/** The live push as the app sees it: subscribe to an event by its name. */
+export interface PushSource {
+  on: (name: string, handler: PushHandler) => void;
+  off: (name: string, handler: PushHandler) => void;
+}
+
 export interface HubContextValue {
-  connection: HubConnection;
+  connection: PushSource;
   state: LinkState;
   retry: () => void;
 }
@@ -20,7 +28,8 @@ export function useHub(): HubContextValue {
 export function useHubEvent<T>(name: string, handler: (payload: T) => void) {
   const { connection } = useHub();
   useEffect(() => {
-    connection.on(name, handler);
-    return () => connection.off(name, handler);
+    const listener = handler as PushHandler;
+    connection.on(name, listener);
+    return () => connection.off(name, listener);
   }, [connection, name, handler]);
 }

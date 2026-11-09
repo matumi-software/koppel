@@ -35,13 +35,14 @@ WORKDIR /build
 
 # Workspace and .NET props first, so dependency layers cache across source edits.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY Koppel.Core/src/Koppel.Core.React.UI/package.json Koppel.Core/src/Koppel.Core.React.UI/
-COPY Koppel/src/Koppel.UI/package.json Koppel/src/Koppel.UI/
+COPY ui/react-ui/package.json ui/react-ui/
+COPY ui/app/package.json ui/app/
 RUN pnpm install --frozen-lockfile
 
 COPY global.json Directory.Build.props Directory.Packages.props .editorconfig ./
 COPY Koppel.Core ./Koppel.Core
 COPY Koppel ./Koppel
+COPY ui ./ui
 
 # NuGet restores from the packages.lock.json files and fails if they have drifted (RestoreLockedMode). The
 # lock files cover every platform the host ships on, so the restore takes no -r. PublishReadyToRun is on the

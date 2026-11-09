@@ -7,62 +7,46 @@ import { getJson } from '@/api/http';
 import { AuthGate } from '@/auth/auth-gate';
 import { useAuth } from '@/auth/auth-context';
 import { HubProvider } from '@/hub/hub-provider';
+import { eventsUrl, retryDelay } from '@/hub/push-events';
 import { ChangePassword } from '@/settings/change-password';
 import { deferred, json, mockFetch, newQueryClient, renderApp } from './harness';
 
-/** A stand-in for the SignalR connection that a test can break and close by hand. */
-const signalr = vi.hoisted(() => {
-  interface Policy {
-    nextRetryDelayInMilliseconds: (context: { previousRetryCount: number }) => number | null;
-  }
-  class FakeConnection {
-    state = 'Disconnected';
-    closeHandlers: (() => void)[] = [];
-    policy: Policy;
-    constructor(policy: Policy) {
-      this.policy = policy;
-    }
-    on() {}
-    off() {}
-    onreconnecting() {}
-    onreconnected() {}
-    onclose(handler: () => void) {
-      this.closeHandlers.push(handler);
-    }
-    start() {
-      this.state = 'Connected';
-      return Promise.resolve();
-    }
-    stop() {
-      this.state = 'Disconnected';
-      return Promise.resolve();
-    }
-    /** The server dropped the connection for good. */
-    drop() {
-      this.state = 'Disconnected';
-      this.closeHandlers.forEach((handler) => handler());
-    }
-  }
-  const connections: FakeConnection[] = [];
-  class HubConnectionBuilder {
-    private policy!: Policy;
-    withUrl() {
-      return this;
-    }
-    withAutomaticReconnect(policy: Policy) {
-      this.policy = policy;
-      return this;
-    }
-    build() {
-      const connection = new FakeConnection(this.policy);
-      connections.push(connection);
-      return connection;
-    }
-  }
-  return { connections, HubConnectionBuilder, HubConnectionState: { Disconnected: 'Disconnected', Connected: 'Connected' } };
-});
+/** A stand-in for the browser's EventSource that a test can fail by hand. It answers at once unless the server is away. */
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  /** False while the server is away: a new stream fails instead of opening. */
+  static answering = true;
+  readonly url: string;
+  opened = false;
+  closed = false;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
 
-vi.mock('@microsoft/signalr', () => ({ HubConnectionBuilder: signalr.HubConnectionBuilder, HubConnectionState: signalr.HubConnectionState }));
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+    queueMicrotask(() => {
+      if (this.closed) return;
+      if (FakeEventSource.answering) {
+        this.opened = true;
+        this.onopen?.();
+      } else {
+        this.fail();
+      }
+    });
+  }
+
+  addEventListener() {}
+
+  close() {
+    this.closed = true;
+  }
+
+  /** The stream broke, or the server ended it, as it does when the session ends. */
+  fail() {
+    this.onerror?.();
+  }
+}
 
 const noContent = () => new Response(null, { status: 204 });
 const problem = (error: string, status: number) => json({ error }, status);
@@ -79,6 +63,11 @@ function SignOutButton() {
   return <button onClick={() => void signOut()}>Sign out</button>;
 }
 
+function RecheckButton() {
+  const { recheck } = useAuth();
+  return <button onClick={recheck}>Recheck</button>;
+}
+
 function renderGate() {
   const queryClient = newQueryClient();
   render(
@@ -87,17 +76,20 @@ function renderGate() {
         <HubProvider>
           <p>The app</p>
           <SignOutButton />
+          <RecheckButton />
         </HubProvider>
       </AuthGate>
     </QueryClientProvider>,
   );
 }
 
-const live = () => signalr.connections.filter((c) => c.state === 'Connected');
+const live = () => FakeEventSource.instances.filter((s) => s.opened && !s.closed);
 const loginHeading = () => screen.findByRole('heading', { name: 'Sign in to bench-pc' });
 
 beforeEach(() => {
-  signalr.connections.length = 0;
+  FakeEventSource.instances.length = 0;
+  FakeEventSource.answering = true;
+  vi.stubGlobal('EventSource', FakeEventSource);
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -315,7 +307,7 @@ describe('change password', () => {
   });
 });
 
-describe('the hub under the sign-in gate', () => {
+describe('the live push under the sign-in gate', () => {
   // Signed in unless a test says otherwise.
   const inState = (overrides: Partial<AuthState> = {}) => state({ signedIn: true, ...overrides });
 
@@ -324,13 +316,14 @@ describe('the hub under the sign-in gate', () => {
     mockFetch({ 'GET /api/auth/state': () => json(inState({ signedIn })), 'POST /api/auth/login': noContent });
     renderGate();
     await userEvent.type(await screen.findByLabelText('Password'), 'correct horse battery');
-    expect(signalr.connections.length).toBe(0);
+    expect(FakeEventSource.instances.length).toBe(0);
 
     signedIn = true;
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await screen.findByText('The app');
     await waitFor(() => expect(live().length).toBe(1));
+    expect(live()[0].url).toBe(eventsUrl);
   });
 
   it('stops on sign-out and shows the login screen', async () => {
@@ -365,7 +358,7 @@ describe('the hub under the sign-in gate', () => {
     expect(live().length).toBe(0);
   });
 
-  it('asks the server whether the session is still good when the hub closes', async () => {
+  it('asks the server whether the session is still good when the stream closes', async () => {
     let signedIn = true;
     const { count } = mockFetch({ 'GET /api/auth/state': () => json(inState({ signedIn })) });
     renderGate();
@@ -374,12 +367,18 @@ describe('the hub under the sign-in gate', () => {
     // The initial load, and the refetch of everything that follows a connect.
     await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
 
-    // The server closes the hub when the session ends.
+    // The server ends the stream when the session ends, and refuses a new one.
     signedIn = false;
-    act(() => signalr.connections[0].drop());
+    FakeEventSource.answering = false;
+    act(() => FakeEventSource.instances[0].fail());
 
     await loginHeading();
-    expect(count('GET /api/auth/state')).toBe(3);
+    expect(count('GET /api/auth/state')).toBeGreaterThanOrEqual(3);
+  });
+
+  it('reconnects on the same steps as before, for as long as it takes', () => {
+    expect([0, 1, 2, 3, 4].map(retryDelay)).toEqual([0, 2000, 5000, 10000, 30000]);
+    expect(retryDelay(9)).toBe(30000);
   });
 
   it('shows the login screen when the session ended during a long outage, on a later retry', async () => {
@@ -389,16 +388,31 @@ describe('the hub under the sign-in gate', () => {
     await screen.findByText('The app');
     await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
 
-    // Retries go on while the server is away, and the session ends meanwhile.
-    signedIn = false;
-    const delay = signalr.connections[0].policy.nextRetryDelayInMilliseconds;
-    act(() => {
-      expect(delay({ previousRetryCount: 3 })).toBe(10000);
-    });
-    expect(delay({ previousRetryCount: 9 })).toBe(30000);
+    // The server goes away: each try asks whether the session is still good, and retries go on.
+    FakeEventSource.answering = false;
+    act(() => FakeEventSource.instances[0].fail());
+    await waitFor(() => expect(FakeEventSource.instances.length).toBe(2));
+    await waitFor(() => expect(count('GET /api/auth/state')).toBe(4));
+    expect(screen.getByText('The app')).toBeTruthy();
 
-    await loginHeading();
-    expect(count('GET /api/auth/state')).toBeGreaterThan(2);
+    // The session ends meanwhile; the next try, two seconds on, finds out.
+    signedIn = false;
+    await screen.findByRole('heading', { name: 'Sign in to bench-pc' }, { timeout: 5000 });
+    expect(FakeEventSource.instances.length).toBe(3);
+  });
+
+  it('opens a new stream and fetches everything again once the server is back', async () => {
+    const { count } = mockFetch({ 'GET /api/auth/state': () => json(inState()) });
+    renderGate();
+    await screen.findByText('The app');
+    await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
+
+    act(() => FakeEventSource.instances[0].fail());
+
+    await waitFor(() => expect(live().length).toBe(1));
+    expect(live()[0]).toBe(FakeEventSource.instances[1]);
+    // The recheck, and the refetch after the new stream opened.
+    await waitFor(() => expect(count('GET /api/auth/state')).toBe(4));
   });
 
   it('does not bring the app back when a recheck or a late auth answer lands during sign-out', async () => {
@@ -414,14 +428,14 @@ describe('the hub under the sign-in gate', () => {
     renderGate();
     await screen.findByText('The app');
     await waitFor(() => expect(stateCalls).toBe(2));
-    act(() => {
-      signalr.connections[0].policy.nextRetryDelayInMilliseconds({ previousRetryCount: 0 });
-    });
+    await userEvent.click(screen.getByRole('button', { name: 'Recheck' }));
     await waitFor(() => expect(stateCalls).toBe(3));
 
+    FakeEventSource.answering = false;
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
-    // The server closes the hub as the session ends: that recheck must be ignored.
-    act(() => signalr.connections[0].drop());
+    // The server ends the stream as the session ends, and the retry fails: those rechecks are ignored.
+    act(() => FakeEventSource.instances[0].fail());
+    await waitFor(() => expect(FakeEventSource.instances.length).toBe(2));
     expect(stateCalls).toBe(3);
     await act(async () => {
       logout.resolve(noContent());

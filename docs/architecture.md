@@ -388,6 +388,18 @@ To release:
    ```
 7. Build the Linux packages with `installer/linux/build.ps1` and publish the two `.deb` files.
 
+From 0.2.0, the Rust build replaces steps 6 and 7 (see "Linux packages and the image in Rust"): set the
+version in `src/Cargo.toml`, the image tag in the composes as in step 2, and point
+`src/Koppel/docker-compose.yml`'s build at `koppel-bin/Dockerfile`. Then, from `src/`:
+
+```sh
+docker buildx build -f koppel-bin/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 \
+  -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
+```
+
+and `src/installer/linux/build.ps1` for the three `.deb` files. Record the image size per platform in the
+release notes.
+
 ## The Rust workspace
 
 Koppel 0.2.0 is a rewrite in Rust (milestone v0.2.0, #82 to #92), built beside the C# until it does
@@ -425,6 +437,78 @@ The same on Linux, in a container. The image has no clippy or rustfmt; add them 
 docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c \
   "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
 ```
+
+### Linux packages and the image in Rust
+
+`src/koppel-bin/Dockerfile` builds the Rust Koppel for Linux with Docker alone (#89, #90). It builds the UI
+with pnpm in the node image, then cross-compiles static musl binaries with
+[cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild), which uses Zig as the C compiler and
+linker (ring has C and assembly), for `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` and
+`arm-unknown-linux-musleabihf`. That last one is ARMv6 with hardware floating point (VFPv2, Thumb-1), which
+every 32-bit Raspberry Pi runs, the Zero and the Pi 1 included. Everything compiles on the build machine's
+own architecture, so nothing runs under emulation, and one build serves all three platforms.
+
+- **Pins:** every image by tag and digest (node, rust, nfpm, distroless), cargo-zigbuild and pnpm by
+  version, Zig by version and checksum. The Dockerfile's header says how to bump them.
+- **Why cargo-zigbuild:** `cross` runs a container per target, so inside a Docker build it needs Docker in
+  Docker, and its last release is from 2023. Per-target gcc toolchains mean a musl cross compiler for each
+  target to fetch and pin; Debian has none for ARMv6. One Zig covers every target.
+- **Targets:** `--target binaries` writes `<arch>/koppel` (amd64, arm64, and arm for ARMv6),
+  `--target linux-packages` the `.deb` files, and the last stage is the image. Cargo's registry, Zig's
+  cache and `target/` are cache mounts, kept between builds.
+- **Packages:** `src/installer/linux/build.ps1` builds `koppel_<version>_amd64.deb`, `_arm64.deb` and
+  `_armhf.deb` (the ARMv6 binary, which is what 32-bit Raspberry Pi OS installs) into
+  `src/installer/linux/bin`, with nfpm and the files beside it. The version is the workspace version in
+  `src/Cargo.toml`. `-Image` also builds the image for `linux/amd64`, `linux/arm64` and `linux/arm/v6` and
+  loads it into this machine's image store (Docker's containerd store, the default since Engine 29). It
+  never pushes.
+- **What a .deb holds:** the layout of 0.1.x, so an upgrade from it replaces the .NET files and keeps
+  `/var/lib/koppel` (the first start converts the 0.1.x secret files, see "Config files in Rust"):
+  `/usr/lib/koppel/koppel` with `/usr/bin/koppel` linked to it, `koppel.service`,
+  `/usr/lib/modules-load.d/koppel.conf`, and the same install, remove and purge scripts as 0.1.x. It depends
+  on nothing, since the binary is static. New in it: the applications menu entry (#68) and the systemd
+  watchdog and hardening (#71, #72) below.
+- **Applications menu (#68):** `/usr/share/applications/koppel.desktop` with Koppel's icon in
+  `/usr/share/icons/hicolor` (16 to 256 px and the SVG, rendered by `pnpm design:icons` into
+  `src/installer/linux/icons`). It runs `/usr/lib/koppel/koppel-open`, which opens
+  `https://localhost:<port>/` through `xdg-open`, with the port from `Ports__Ui` in `/etc/default/koppel`, or
+  5240. The package only suggests `xdg-utils`, so a server without a desktop gets nothing extra.
+- **Watchdog (#71):** `WatchdogSec=30`. Koppel (`koppel-bin/src/systemd.rs`, on the
+  [sd-notify](https://crates.io/crates/sd-notify) crate) sends `READY=1` once its ports listen,
+  `STOPPING=1` when it stops, and `WATCHDOG=1` every half interval, but only when its own `/healthz`
+  answers within a quarter interval. The health check goes through the router and its guard in process, on
+  the same runtime as every connection, so a runtime with every worker stuck, or a lock that never comes
+  free, stops the heartbeat. Without `WATCHDOG_USEC` (Docker, Windows, a console) none of it runs.
+- **Hardening (#72):** still root, which the files in `/sys` need, with what Koppel does not use taken
+  away: `ProtectSystem=strict` with `/var/lib/koppel` writable, no capabilities but
+  `CAP_NET_BIND_SERVICE`, `/dev` limited to the usbfs nodes the device reset opens, a system call filter,
+  and the rest of the usual list. `koppel.service` says for each setting left out what it would break
+  (`ProtectKernelTunables` makes `/sys` read-only, `PrivateDevices` hides `/dev/bus/usb`, `PrivateUsers`
+  loses root's ownership of `/sys`). `systemd-analyze security koppel` scores 2.1 (OK), down from 9.4
+  (UNSAFE) for 0.1.x's unit. A config folder moved out of `/var/lib/koppel` needs a `ReadWritePaths=` for it
+  in a drop-in.
+- **Image (#90):** `gcr.io/distroless/static-debian13:nonroot`: root certificates, time zone data, the
+  nonroot user (65532), no shell and no libc, with Koppel at `/usr/local/bin/koppel` and the `/koppel`
+  volume as in 0.1.x. distroless publishes arm only as `arm/v7`, but static holds no programs, so the
+  `arm/v6` image takes those files as they are (its package list then says armhf). There is no health check
+  yet: the image has no shell or curl, and Koppel has no `--healthcheck` of its own as 0.1.x did.
+- **Composes:** they keep naming `matumisoftware/koppel:0.1.2` and building the C# Dockerfile until 0.2.0
+  is released; the image name stays and its run options do not change. `src/Koppel/src/Koppel/Dockerfile`
+  and `src/Koppel/installer/linux` still build 0.1.x.
+
+| | amd64 | arm64 | armhf, arm/v6 |
+|---|---|---|---|
+| Binary | 6.7 MB | 6.2 MB | 5.8 MB |
+| `.deb` (0.1.2) | 3.3 MB (53.8 MB) | 3.1 MB (50.9 MB) | 2.9 MB (none) |
+| Image, compressed (0.1.2) | 4.1 MB (102.1 MB) | 4.0 MB (98.0 MB) | 3.8 MB (none) |
+
+Tested in containers: each `.deb` installs in Debian 13 of its architecture (arm64 and armhf under QEMU, the
+armhf binary run as an ARM1176 CPU, the Pi Zero's, on which Debian's own ARMv7 programs stop on an illegal
+instruction) and Koppel answers `/healthz` and serves the UI; the amd64 package upgrades 0.1.2 with
+`/var/lib/koppel` unchanged; under systemd in a container the hardened unit starts, passes
+`systemd-analyze verify`, and a Koppel frozen with `kill -STOP` is restarted by the watchdog; the image runs
+on all three platforms, as nonroot and as root on a 0.1.2 volume. Not tried yet: real hardware (a Pi Zero,
+sharing and attaching through the hardened unit) and a desktop's applications menu.
 
 ### The UI's server side in Rust
 

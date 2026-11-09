@@ -388,6 +388,40 @@ To release:
    ```
 7. Build the Linux packages with `installer/linux/build.ps1` and publish the two `.deb` files.
 
+## The Rust workspace
+
+Koppel 0.2.0 is a rewrite in Rust (milestone v0.2.0, #82 to #92), built beside the C# until it does
+everything 0.1.x does. `src/` is the Cargo workspace: `src/Cargo.toml`, the committed `src/Cargo.lock`,
+and the build output in `src/target/`. It follows Skakel's: edition 2024, Rust 1.99, and every
+third-party crate pinned in `[workspace.dependencies]` with a note on its licence.
+
+| Crate | What |
+|---|---|
+| `koppel-bin` (package `koppel`) | The program. The folder is not `koppel` because that and the C# `Koppel` folder are the same folder on Windows |
+| `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, `/healthz` and the UI |
+
+- **Certificate:** each handshake asks `CertificateSlot` for the current certificate, and replacing it takes effect from the next connection. Session resumption is off (no tickets, no session cache), so every connection presents the current certificate, which Skakel's handover relies on. For now the program makes a self-signed one at start; loading Koppel's own is #83.
+- **UI:** `koppel-web/build.rs` reads Vite's output in `src/Koppel/src/Koppel.UI/dist`, gzips every file that shrinks by 5% or more, and rust-embed puts one copy of each file into the program. The gzip copy goes out as it is to a client that takes gzip (every browser) and is inflated for one that does not. Files under `assets/` have a hash in their names and are sent with `max-age=31536000, immutable`; index.html and the rest with `no-cache`. A path whose last part has no dot gets index.html, except under `/api`.
+- **No UI built:** a debug build (`cargo build`, `test`, `clippy`) embeds a placeholder page and prints a warning, so the Rust side builds without Node. A release build stops with an error that says how to build the UI.
+
+Run from `src/`:
+
+```sh
+pnpm install && pnpm --filter koppel.ui build   # the UI the program embeds, needed for a release build
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all --check
+cargo run -p koppel                             # https://localhost:5240, Ctrl+C stops it
+```
+
+The same on Linux, in a container:
+
+```sh
+docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c \
+  "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
+```
+
 ## Known limits
 
 - The Linux container is privileged and runs as root. Narrowing it needs a test on a real kernel. The Windows composes also run as root, because the volume belongs to it.

@@ -1,0 +1,29 @@
+[package]
+name = "koppel-web"
+description = "Koppel's web server: HTTPS with a certificate that can change while it runs, and the UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio.workspace = true
+axum.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+tower-service.workspace = true
+tokio-rustls.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+rust-embed.workspace = true
+flate2.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+flate2.workspace = true
+
+[dev-dependencies]
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+http-body-util.workspace = true

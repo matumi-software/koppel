@@ -7,6 +7,7 @@
 //! call, remote device list and USB stream with `STOPPING`, as 0.1.x ended its hub connections and
 //! streams with close code 4003. The UI's server endpoints keep working on the new one.
 
+use std::collections::HashSet;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -49,6 +50,9 @@ struct Wiring {
     activity: Arc<ActivityLog>,
     front: Arc<Front>,
     overview: Mutex<PairingOverview>,
+    /// The requests a person here refused. 0.1.x's server dropped them from the list at once;
+    /// Skakel 0.2.0 shows them as refused for a few seconds, as it does after three wrong codes.
+    refused: Mutex<HashSet<String>>,
 }
 
 /// The server role. See the module docs.
@@ -70,6 +74,7 @@ impl SkakelServerRole {
                 requests: Vec::new(),
                 budget_exhausted: false,
             }),
+            refused: Mutex::new(HashSet::new()),
         });
         let server = build(&parts, &wiring).await?;
         wiring.front.retarget(server.local_addr());
@@ -220,10 +225,16 @@ impl Wiring {
         match event {
             ServerEvent::Pairing(overview) => {
                 let ids: Vec<String> = overview.requests.iter().map(|r| r.id.clone()).collect();
+                let refused = {
+                    let mut refused = self.refused.lock().unwrap_or_else(PoisonError::into_inner);
+                    refused.retain(|id| ids.contains(id));
+                    refused.clone()
+                };
                 let view = PairingOverview {
                     requests: overview
                         .requests
                         .iter()
+                        .filter(|r| !(r.state == "denied" && refused.contains(&r.id)))
                         .map(|r| PairingRequestView {
                             id: r.id.clone(),
                             client_name: r.client_name.clone(),
@@ -440,6 +451,22 @@ impl ServerRole for SkakelServerRole {
     }
 
     fn deny<'a>(&'a self, id: &'a str) -> Fut<'a, bool> {
-        Box::pin(async move { self.pairing_handle().deny(id).await })
+        Box::pin(async move {
+            // Noted first: the list Skakel raises while it refuses leaves the request out already.
+            self.wiring
+                .refused
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(id.to_owned());
+            let denied = self.pairing_handle().deny(id).await;
+            if !denied {
+                self.wiring
+                    .refused
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(id);
+            }
+            denied
+        })
     }
 }

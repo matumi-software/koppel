@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use koppel_contract::shape::{self, Kind};
 use koppel_contract::{
-    Body, Pair, Session, activity_with, eventually, json, needs_skakel, tls, unique,
+    Body, Pair, Session, activity_with, eventually, json, needs_discovery, needs_skakel, tls,
+    unique,
 };
 use reqwest::Method;
 use serde_json::Value;
@@ -737,7 +738,7 @@ async fn the_client_finds_the_server_on_its_network() {
     let Some(pair) = Pair::get().await else {
         return;
     };
-    if !needs_skakel("discovery") {
+    if !needs_discovery("discovery") {
         return;
     }
     let server_fingerprint = fingerprint(&pair.server_admin).await;
@@ -786,7 +787,11 @@ async fn the_client_finds_the_server_on_its_network() {
             found["httpsPort"]
         ))
     );
+    // Two targets on one machine share its name, and then the name cannot tell them apart.
     let own = machine_name(&pair.client_admin).await;
+    if own == server_name {
+        return;
+    }
     let servers = pair
         .client_admin
         .get("/api/client/discovery")

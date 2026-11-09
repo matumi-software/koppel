@@ -23,18 +23,21 @@
 //! | `KOPPEL_CONTRACT_LIMITS_URL` | One nothing else touches, for the sign-in rate limit | Defaults (30 a minute) |
 //! | `KOPPEL_CONTRACT_PASSWORD` | The UI password the tests set and use. Optional | |
 //! | `KOPPEL_CONTRACT_PUSH` | How the target pushes to the UI: `signalr` (0.1.x) or `sse` (the Rust build, #84). Optional, `signalr` by default | |
-//! | `KOPPEL_CONTRACT_SKAKEL` | `0` when the target has no Skakel yet: no token endpoint, `/skakel/info`, pairing, discovery or link, as the Rust build until #85. Optional, on by default | |
+//! | `KOPPEL_CONTRACT_SKAKEL` | `0` when the target has no Skakel: no token endpoint, `/skakel/info`, pairing, discovery or link, as the Rust build before #85. Optional, on by default | |
+//! | `KOPPEL_CONTRACT_DISCOVERY` | `0` when the client target cannot hear the main one's discovery answers. Optional, on by default | |
 //!
 //! `run-against-0.1.2.sh` in this crate starts all of them from the published image in Docker, runs the
 //! tests and removes what it started. `run-against-rust.sh` does the same with the Rust build, started
 //! from a temporary data folder for each target. The tests take one lock, so they run one at a time
 //! whatever the thread count: they share targets and change their settings.
 //!
-//! # What the Rust build does not have yet
+//! # Skakel and discovery
 //!
-//! Until Skakel's roles come in (#85), the Rust build answers the UI's server and client endpoints
-//! with 0.1.x's shapes but has no Skakel endpoints and links to nothing. With `KOPPEL_CONTRACT_SKAKEL=0`
-//! the parts of a test that need them say they were skipped ([`needs_skakel`]) and the rest runs.
+//! 0.1.x speaks Skakel protocol version 1 and the Rust build version 2; the tests take the version
+//! a target lists ([`skakel_path`]). With `KOPPEL_CONTRACT_SKAKEL=0`, for a build without Skakel, the
+//! parts of a test that need its endpoints or a link say they were skipped ([`needs_skakel`]) and
+//! the rest runs. With `KOPPEL_CONTRACT_DISCOVERY=0` the tests that need the client to find the main
+//! target by broadcast say they were skipped ([`needs_discovery`]).
 //!
 //! # Certificates
 //!
@@ -103,10 +106,42 @@ pub fn needs_skakel(what: &str) -> bool {
     if skakel() {
         return true;
     }
+    eprintln!("skipped: {what} needs Skakel's endpoints and link, which this target does not have");
+    false
+}
+
+/// True when the client target can hear the main one's discovery answers
+/// (`KOPPEL_CONTRACT_DISCOVERY`, on unless `0`); otherwise says that `what` was skipped, and why.
+/// Off where the targets cannot reach each other by broadcast, such as processes on Windows that
+/// listen on loopback only.
+pub fn needs_discovery(what: &str) -> bool {
+    if !needs_skakel(what) {
+        return false;
+    }
+    if std::env::var("KOPPEL_CONTRACT_DISCOVERY").as_deref() != Ok("0") {
+        return true;
+    }
     eprintln!(
-        "skipped: {what} needs Skakel's endpoints and link, which this target does not have yet (#85)"
+        "skipped: {what} needs the targets to hear each other's broadcasts, which this run turned off"
     );
     false
+}
+
+/// The path of one of Skakel's HTTPS calls, such as `token`, in the highest protocol version the
+/// target lists in `/skakel/info`: `/skakel/v2/token` for the Rust build, `/skakel/v1/token` for
+/// 0.1.x.
+pub async fn skakel_path(target: &Target, call: &str) -> String {
+    let info = target
+        .anonymous()
+        .get("/skakel/info")
+        .await
+        .expect(200)
+        .json();
+    let version = info["versions"]
+        .as_array()
+        .and_then(|versions| versions.iter().filter_map(Value::as_u64).max())
+        .expect("the target lists the Skakel versions it speaks");
+    format!("/skakel/v{version}/{call}")
 }
 
 /// The path of the live push on a target that pushes with Server-Sent Events.

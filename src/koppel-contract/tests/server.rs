@@ -3,17 +3,20 @@
 //! `/api/remote/devices`, which other Koppel machines call with a token from Skakel's token endpoint.
 
 use koppel_contract::shape::{self, Kind};
-use koppel_contract::{Body, Main, Session, Target, activity_with, json, needs_skakel, unique};
+use koppel_contract::{
+    Body, Main, Session, Target, activity_with, json, needs_skakel, skakel_path, unique,
+};
 use reqwest::Method;
 use serde_json::Value;
 
 /// A token from Skakel's token endpoint (OAuth client credentials), or the status it refused with.
 async fn token(target: &Target, client_id: &str, secret: &str) -> Result<String, u16> {
+    let path = skakel_path(target, "token").await;
     let answer = target
         .anonymous()
         .send(
             Method::POST,
-            "/skakel/v1/token",
+            &path,
             Body::Raw(
                 "application/x-www-form-urlencoded",
                 format!(

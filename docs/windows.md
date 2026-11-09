@@ -12,18 +12,18 @@ usbipd-win  <--plain-->  Koppel  <==TLS + token==>  Koppel  <--plain-->  usbip-w
 (host)     127.0.0.1    (container)    network     (container)  127.0.0.1   (host)
 ```
 
-A Linux machine needs none of this. It runs the normal image (`src/Koppel/deploy`), and the mixes
+A Linux machine needs none of this. It runs the normal image (`src/installer/docker`), and the mixes
 work: a Windows client with a Linux server, and the other way round.
 
 ## Build the image
 
-From `src\Koppel` in the repo:
+From `src` in the repo:
 
 ```powershell
-docker compose build
+docker build -f koppel\Dockerfile -t matumisoftware/koppel:0.1.2 .
 ```
 
-That builds `matumisoftware/koppel:0.1.2` (the tag in `KOPPEL_TAG`), which both Windows compose files use. The compose files name that tag, so a build made here is used as it is. To use the published image instead, skip this step and Docker pulls it.
+That builds the image under the tag both Windows compose files name, so a build made here is used as it is. To use the published image instead, skip this step and Docker pulls it.
 
 ## Windows server
 
@@ -43,7 +43,7 @@ That builds `matumisoftware/koppel:0.1.2` (the tag in `KOPPEL_TAG`), which both 
 3. Start Koppel:
 
    ```powershell
-   docker compose -f src\Koppel\deploy\docker-compose.windows-server.yml up -d
+   docker compose -f src\installer\docker\docker-compose.windows-server.yml up -d
    ```
 
 4. Open https://localhost:5240/, accept the certificate warning and finish setup as a server. The devices page shows what
@@ -79,7 +79,7 @@ Not tested: which of the two Docker Desktop needs.
 2. Start Koppel:
 
    ```powershell
-   docker compose -f src\Koppel\deploy\docker-compose.windows-client.yml up -d
+   docker compose -f src\installer\docker\docker-compose.windows-client.yml up -d
    ```
 
 3. Open https://localhost:5240/, accept the certificate warning, finish setup as a client and connect it to the server (server
@@ -123,7 +123,7 @@ set a new one in the UI within 10 minutes:
 & "C:\Program Files\Matumi\Koppel\Koppel.exe" --reset-password
 
 # Docker Desktop
-docker compose exec koppel dotnet Koppel.dll --reset-password
+docker compose run --rm koppel --reset-password
 ```
 
 ## The native install
@@ -173,9 +173,9 @@ In a compose file these are environment variables with `__` for `:`, such as `Us
 
 ## What is tested
 
-- Tested with fakes in `Koppel.Tests`: a Koppel server sharing from a stand-in usbipd-win, a client
-  attaching through it, and a stand-in usbip-win2 listing and attaching through the gateway, with
-  USB bytes going both ways through TLS.
+- Tested with fakes in `koppel-usb`'s tests: a Koppel server sharing from a stand-in usbipd-win, a
+  client attaching through it with traffic reaching the device, and a stand-in usbip-win2 attaching
+  through the gateway, which refuses an import Koppel did not ask for.
 - Real hardware: a Windows 11 client attached a Logitech USB receiver from a Linux server through usbip-win2, both with the native install and through Docker Desktop's gateway, and it worked as keyboard and mouse.
 - Real hardware (2026-11-03): a native Windows 11 client attached two Logitech receivers and a flash drive from a Debian 13 server, across an installer upgrade. A file on the drive matched its checksum after a detach and reattach, and a 75 second network drop was recovered from by itself.
 - Real usbipd-win (2026-11-03): a Windows 11 PC with usbipd-win 5.x shared a webcam to a Debian client, which streamed it at 30 fps. While another program on Windows held the camera open, usbipd-win could not export it and Koppel kept retrying; it attached once the program let go.

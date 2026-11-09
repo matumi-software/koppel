@@ -39,6 +39,7 @@ Other changes:
 - After a wrong password, the sign-in form sent nothing more until the page was reloaded, even with the right
   password typed in. The browser held the field's error as a validation error and refused to submit the form. Every
   form in the UI had the same problem after a refusal from the server.
+- The C# code is gone from the repo; the 0.1.x source stays at tag `v0.1.2`.
 
 ## 0.1.2 (2026-11-09)
 

@@ -10,12 +10,15 @@
 # arguments go to `cargo test`, such as `--test push` to run one file. Needs cargo and curl; on
 # Windows, run it from Git Bash.
 #
-# The targets push over Server-Sent Events and have no Skakel yet (#85), so the tests that need
-# Skakel's endpoints say they were skipped (KOPPEL_CONTRACT_SKAKEL=0).
+# The targets push over Server-Sent Events and speak Skakel protocol version 2. The client target
+# looks for servers on the main target's port, so it finds the main target by broadcast.
 #
-# On Windows every target listens on 127.0.0.1 only, so no firewall prompt comes up, and the
-# Ui:AllowFrom test is skipped: it needs a caller that is not this machine's loopback. Elsewhere the
-# targets listen on every address and that test reaches its target at this machine's own address.
+# On Windows every target listens on 127.0.0.1 only, with discovery and the USB/IP gateway off, so
+# no firewall prompt comes up and none takes port 3242 from an installed Koppel. The discovery tests
+# are skipped there (KOPPEL_CONTRACT_DISCOVERY=0), and so is the Ui:AllowFrom test, which needs a
+# caller that is not this machine's loopback. Elsewhere the targets listen on every address, the
+# client finds the main target by broadcast, and the Ui:AllowFrom test reaches its target at this
+# machine's own address.
 
 set -euo pipefail
 
@@ -64,7 +67,7 @@ cleanup() {
 trap cleanup EXIT
 
 address=()
-[ "$windows" = "1" ] && address=(Ports__Address=127.0.0.1)
+[ "$windows" = "1" ] && address=(Ports__Address=127.0.0.1 Discovery__Enabled=false Gateway__Port=0)
 
 # start NAME UI_PORT [NAME=VALUE settings...]
 start() {
@@ -79,7 +82,7 @@ start() {
 # The expired one first: its setup window of one minute runs while the others start.
 start expired $((port + 3)) Ui__SetupWindowMinutes=1
 start main $((port + 0)) RateLimits__AuthPerMinute=1000
-start client $((port + 1)) RateLimits__AuthPerMinute=1000
+start client $((port + 1)) RateLimits__AuthPerMinute=1000 Discovery__Port=$((port + 0))
 start fresh $((port + 2))
 start guarded $((port + 4)) Ui__AllowFrom=local Ports__Network=$((port + 5))
 start limits $((port + 6))
@@ -105,7 +108,7 @@ export KOPPEL_CONTRACT_FRESH_URL="https://localhost:$((port + 2))"
 export KOPPEL_CONTRACT_EXPIRED_URL="https://localhost:$((port + 3))"
 export KOPPEL_CONTRACT_LIMITS_URL="https://localhost:$((port + 6))"
 export KOPPEL_CONTRACT_PUSH=sse
-export KOPPEL_CONTRACT_SKAKEL=0
+[ "$windows" = "1" ] && export KOPPEL_CONTRACT_DISCOVERY=0
 
 # Ui:AllowFrom=local turns away any caller that is not loopback, so the tests reach the guarded
 # target at this machine's own address, which a connection from here comes from too.

@@ -8,7 +8,8 @@ use std::time::Duration;
 use koppel_contract::push::{EVENTS, Payload};
 use koppel_contract::shape::{self, Kind};
 use koppel_contract::{
-    Events, Main, Next, Pair, Push, Session, json, needs_skakel, password, push_kind, unique,
+    Events, Main, Next, Pair, Push, Session, json, needs_discovery, needs_skakel, password,
+    push_kind, unique,
 };
 use serde_json::Value;
 
@@ -373,7 +374,7 @@ async fn servers_discovered_follows_the_client_finding_the_server() {
     let Some(pair) = Pair::get().await else {
         return;
     };
-    if !sse() || !needs_skakel("discovery") {
+    if !sse() || !needs_discovery("discovery") {
         return;
     }
     let fingerprint = pair

@@ -6,7 +6,9 @@
 use std::time::Duration;
 
 use koppel_contract::shape::{self, Kind};
-use koppel_contract::{Body, Pair, Session, activity_with, eventually, json, tls, unique};
+use koppel_contract::{
+    Body, Pair, Session, activity_with, eventually, json, needs_skakel, tls, unique,
+};
 use reqwest::Method;
 use serde_json::Value;
 
@@ -164,6 +166,9 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     let Some(pair) = Pair::get().await else {
         return;
     };
+    if !needs_skakel("pairing through the code") {
+        return;
+    }
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let server_name = machine_name(server).await;
@@ -323,6 +328,9 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
     let Some(pair) = Pair::get().await else {
         return;
     };
+    if !needs_skakel("pairing through the code") {
+        return;
+    }
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let client_name = machine_name(client).await;
@@ -381,6 +389,9 @@ async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
     let Some(pair) = Pair::get().await else {
         return;
     };
+    if !needs_skakel("pairing through the code") {
+        return;
+    }
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let client_name = machine_name(client).await;
@@ -416,6 +427,9 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
     let Some(pair) = Pair::get().await else {
         return;
     };
+    if !needs_skakel("pairing through the code") {
+        return;
+    }
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     client
         .post_empty("/api/client/pairing/confirm")
@@ -586,7 +600,10 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
             .text()
             .contains(&secret)
     );
-    assert_eq!(connection_test(client).await["outcome"], json!("ok"));
+    let link = needs_skakel("testing the saved connection");
+    if link {
+        assert_eq!(connection_test(client).await["outcome"], json!("ok"));
+    }
 
     // An empty secret keeps the stored one while the server stays the same, and only then.
     client
@@ -594,7 +611,9 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
         .await
         .expect(202);
     assert_eq!(connection(client).await["hasSecret"], json!(true));
-    assert_eq!(connection_test(client).await["outcome"], json!("ok"));
+    if link {
+        assert_eq!(connection_test(client).await["outcome"], json!("ok"));
+    }
     let other = tls::normalize(&"ab".repeat(32));
     client
         .put(
@@ -627,6 +646,9 @@ async fn the_connection_test_names_what_is_wrong_in_fixed_words() {
     let Some(pair) = Pair::get().await else {
         return;
     };
+    if !needs_skakel("the connection test") {
+        return;
+    }
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let (id, secret) = new_client(server).await;
@@ -715,6 +737,9 @@ async fn the_client_finds_the_server_on_its_network() {
     let Some(pair) = Pair::get().await else {
         return;
     };
+    if !needs_skakel("discovery") {
+        return;
+    }
     let server_fingerprint = fingerprint(&pair.server_admin).await;
     let server_name = machine_name(&pair.server_admin).await;
     let version = pair

@@ -1,6 +1,6 @@
 [package]
 name = "koppel-web"
-description = "Koppel's web server: HTTPS with a certificate that can change while it runs, and the UI"
+description = "Koppel's web server: HTTPS with a certificate that can change while it runs, the UI, its sign-in, REST API and live push"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+koppel-config.workspace = true
 tokio.workspace = true
 axum.workspace = true
 hyper.workspace = true
@@ -20,6 +21,17 @@ rcgen.workspace = true
 rust-embed.workspace = true
 flate2.workspace = true
 tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+ring.workspace = true
+base64.workspace = true
+futures-util.workspace = true
+socket2.workspace = true
+if-addrs.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
 
 [build-dependencies]
 flate2.workspace = true

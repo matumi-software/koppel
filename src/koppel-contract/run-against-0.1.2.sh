@@ -75,6 +75,7 @@ export KOPPEL_CONTRACT_GUARDED_URL="https://localhost:$((port + 4))"
 export KOPPEL_CONTRACT_GUARDED_NETWORK_URL="https://localhost:$((port + 5))"
 export KOPPEL_CONTRACT_LIMITS_URL="https://localhost:$((port + 6))"
 export KOPPEL_CONTRACT_PUSH=signalr
+export KOPPEL_CONTRACT_SKAKEL=1
 
 cd "$here/.."
 # One at a time in name order, so a run reads the same each time. The lock would serialize them anyway.

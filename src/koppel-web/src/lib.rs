@@ -1,7 +1,27 @@
 //! Koppel's web server: HTTPS on tokio-rustls with a certificate that can be replaced while it runs,
-//! HTTP/1.1 and HTTP/2 by ALPN, and the built UI served from inside the program.
+//! HTTP/1.1 and HTTP/2 by ALPN, plain HTTP answered with a redirect, the built UI served from inside
+//! the program, and the UI's server side: sign-in, the REST API and the live push.
+//!
+//! - [`App`]: everything the UI's server side holds, started from the config files, and
+//!   [`App::router`], the routes with the guards in front of them.
+//! - [`serve`]: the accept loop for one listener, and [`bind`] to make one.
+//! - [`roles`]: the seams where the Skakel roles (#85) and USB (#86, #87) plug in, with what stands
+//!   in for them until then.
+//! - [`push`]: the live push, Server-Sent Events at `/api/events`.
 
+mod access;
+mod activity;
+mod api;
+mod app;
+mod auth;
+mod guard;
+mod host;
+mod json;
+pub mod push;
+mod redirect;
+pub mod roles;
 mod server;
+mod surface;
 pub mod tls;
 mod ui;
 
@@ -10,10 +30,16 @@ use std::fmt;
 use axum::Router;
 use axum::routing::get;
 
-pub use server::serve;
+pub use access::UiReach;
+pub use activity::{ActivityEvent, ActivityLog, ActivityOutcome, ActivityReason, EntityRef};
+pub use app::{App, AppOptions, StartError};
+pub use auth::reset_password;
+pub use host::{Host, machine_name, os_label};
+pub use server::{bind, serve};
 pub use tls::CertificateSlot;
 
-/// The routes: `/healthz` for health checks, and the UI for everything else.
+/// The routes that need nothing of the app: `/healthz` for health checks, and the UI for everything
+/// else.
 pub fn router() -> Router {
     Router::new()
         .route("/healthz", get(healthz))

@@ -68,6 +68,13 @@ impl ServerCertificate {
         Self::from_pfx(&pfx)
     }
 
+    /// The base64 PKCS#12 `SkakelState.CertificatePfx` holds, in the shape .NET exports.
+    pub fn to_pfx_base64(&self) -> Result<String, CertificateError> {
+        pkcs12::write(&self.certificate, &self.private_key)
+            .map(|pfx| STANDARD.encode(pfx))
+            .map_err(|e| CertificateError(format!("the PKCS#12 could not be written: {e}")))
+    }
+
     /// The SHA-256 of the DER, upper case hex in pairs with colons, as Skakel writes a fingerprint.
     pub fn fingerprint(&self) -> String {
         let hash = digest::digest(&digest::SHA256, &self.certificate);

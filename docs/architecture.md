@@ -399,6 +399,7 @@ third-party crate pinned in `[workspace.dependencies]` with a note on its licenc
 |---|---|
 | `koppel-bin` (package `koppel`) | The program. The folder is not `koppel` because that and the C# `Koppel` folder are the same folder on Windows |
 | `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, `/healthz` and the UI |
+| `koppel-contract` | Contract tests that drive a running Koppel over HTTPS (see "Contract tests" below). Not shipped |
 
 - **Certificate:** each handshake asks `CertificateSlot` for the current certificate, and replacing it takes effect from the next connection. Session resumption is off (no tickets, no session cache), so every connection presents the current certificate, which Skakel's handover relies on. For now the program makes a self-signed one at start; loading Koppel's own is #83.
 - **UI:** `koppel-web/build.rs` reads Vite's output in `src/Koppel/src/Koppel.UI/dist`, gzips every file that shrinks by 5% or more, and rust-embed puts one copy of each file into the program. The gzip copy goes out as it is to a client that takes gzip (every browser) and is inflated for one that does not. Files under `assets/` have a hash in their names and are sent with `max-age=31536000, immutable`; index.html and the rest with `no-cache`. A path whose last part has no dot gets index.html, except under `/api`.
@@ -421,6 +422,32 @@ The same on Linux, in a container:
 docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c \
   "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
 ```
+
+### Contract tests
+
+`koppel-contract` checks that the Rust build answers like 0.1.x (#91). Its tests drive a running Koppel
+from the outside, over HTTPS, the way the browser and other Koppel machines do: every REST endpoint with
+its errors, sign-in with its cookie, lockout and limits, the guards on each port and role, and pairing
+between two Koppels. They check status codes, field names and shapes and behaviour, not times or ids. The
+crate talks HTTP only and never links Koppel's own crates.
+
+- **Targets:** environment variables name the Koppels to test, one for most tests and a few more for states only one test may touch (a fresh machine, a closed setup window, `Ui:AllowFrom=local`, the rate limit). The crate's docs list them. Without them every test says it was skipped and passes, so `cargo test --workspace` needs no Koppel running.
+- **Never an install someone uses:** the tests change settings, the password, clients and the certificate.
+- **Certificate:** the first certificate a target presents is pinned for the run, and every later connection must present it or one a test pinned before switching. The name in it is not checked, since the tests reach the target as `localhost`.
+- **The live push:** not tested against 0.1.x, whose SignalR goes away. `koppel_contract::push` lists the ten events the UI's push carries today, with their payloads, as the contract the SSE tests will check against the Rust build (#84).
+- **Gaps:** what needs USB hardware (sharing, attaching), a second network, or a server older than Koppel kept secrets in is not covered; the crate's tests say so where it applies.
+
+Against Koppel 0.1.2, from the repo root with Docker running (Git Bash on Windows):
+
+```sh
+bash src/koppel-contract/run-against-0.1.2.sh            # all of them
+bash src/koppel-contract/run-against-0.1.2.sh --test auth   # one file
+```
+
+The script starts six containers from `matumisoftware/koppel:0.1.2` on fresh volumes and a network of
+their own, publishes them on 127.0.0.1 ports 15240 to 15246 (never 5240, where an installed Koppel
+listens), runs the tests one at a time and removes everything it started, also when a test fails.
+`KOPPEL_IMAGE` runs another image and `KOPPEL_CONTRACT_PORT` moves the ports.
 
 ## Known limits
 

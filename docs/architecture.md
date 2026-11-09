@@ -381,7 +381,7 @@ newer ICU needs its name added to `nfpm.yaml`.
 
 To release:
 
-1. Set `<Version>` in `src/Directory.Build.props`, and for the Rust build the `version` under `[workspace.package]` in `src/Cargo.toml`, which the Windows installer takes.
+1. Set `<Version>` in `src/Directory.Build.props`.
 2. Set the image tag in the three deploy composes (`deploy/docker-compose.yml`, `docker-compose.windows-client.yml`, `docker-compose.windows-server.yml`) and the `KOPPEL_TAG` default in `src/Koppel/docker-compose.yml`.
 3. Regenerate the lock files if any package changed.
 4. For a new usbip-win2 version, run `installer/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `installer/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from. Run `installer/new-notices.ps1` when packages changed.
@@ -403,8 +403,8 @@ docker buildx build -f koppel-bin/Dockerfile --platform linux/amd64,linux/arm64,
   -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
 ```
 
-and `src/installer/linux/build.ps1` for the three `.deb` files. Record the image size per platform in the
-release notes.
+and `src/installer/linux/build.ps1` for the three `.deb` files, and `src/Koppel/installer/build.ps1` for
+`Koppel-Setup.exe`, which takes the same version. Record the image size per platform in the release notes.
 
 ## The Rust workspace
 

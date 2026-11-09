@@ -8,7 +8,7 @@ platform: linux
 version: ${VERSION}
 section: net
 priority: optional
-maintainer: Matumi Software <https://github.com/matumi-software/koppel>
+maintainer: Matumi Software <70009674+RikusVanRensburg@users.noreply.github.com>
 vendor: Matumi Software
 homepage: https://github.com/matumi-software/koppel
 license: GPL-3.0-or-later

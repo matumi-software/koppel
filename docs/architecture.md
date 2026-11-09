@@ -490,7 +490,7 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   three architectures. `/usr/share/doc/koppel/copyright` (`src/installer/linux/copyright`) is in Debian's
   machine-readable format: Koppel under GPL-3.0-or-later, and a pointer to the notices for the third-party
   code inside the binary. `/usr/bin/koppel` is a relative link, and a lintian override says the binary is
-  static on purpose. Debian 13's lintian still reports a maintainer without an email address, no
+  static on purpose. The maintainer is the GitHub noreply address. Debian 13's lintian still reports no
   `changelog.gz`, `systemctl` called straight from the scripts rather than through `deb-systemd-helper`, and
   no man page.
 - **Applications menu (#68):** `/usr/share/applications/koppel.desktop` with Koppel's icon in

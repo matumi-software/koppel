@@ -25,6 +25,8 @@ services:
     user: "0"
     privileged: true
     restart: always
+    # Deprecated: Koppel 0.2.0 drops Paths__KeyCertificate, and an install that uses it pairs again after that
+    # upgrade. Do not start using it.
     # To encrypt the key ring at rest, keep a PFX (no password) outside the koppel volume, mode 0600, and
     # mount it as a secret. Without it the key ring sits as plain files in the volume, so anyone who can
     # read the volume can decrypt Koppel's secret files. Make one with:

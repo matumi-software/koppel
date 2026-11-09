@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 (not released yet)
+
+Koppel 0.2.0 is a rewrite in Rust, with the same web UI and features, small enough for a Raspberry Pi Zero.
+Breaking changes known so far:
+
+- `Paths:KeyCertificate` (`Paths__KeyCertificate` in a compose file) is deprecated and goes in 0.2.0. A Linux install
+  or container that sets it cannot carry its encrypted files over: after the upgrade the server's clients pair again,
+  and a client pairs again with its server. Installs without it, which includes every Windows install, keep their
+  pairings. Do not start using it.
+
 ## 0.1.2 (2026-11-09)
 
 - The Windows app has a Koppel icon in the notification area for every signed-in user, the way Apollo does it. Click it

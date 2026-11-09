@@ -1,0 +1,44 @@
+# The Rust Koppel, beside the C# until it matches it. The program's package is `koppel`, in
+# `koppel-bin` because `koppel` and the C# `Koppel` folder are the same folder on Windows.
+[workspace]
+resolver = "3"
+members = ["koppel-bin", "koppel-web"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.99"
+authors = ["Matumi Software"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/matumi-software/koppel"
+
+[workspace.dependencies]
+koppel-web = { path = "koppel-web", version = "0.2.0" }
+
+# The async runtime (MIT).
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
+
+# The web stack. Every crate here, and what it pulls in, is MIT, Apache-2.0, BSD, ISC or Unicode-3.0
+# (checked with `cargo metadata`). rustls runs on ring rather than aws-lc-rs, which needs a C toolchain
+# with NASM on Windows, as in Skakel.
+axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "tokio"] }
+hyper = "1.12.0"
+hyper-util = { version = "0.1.21", features = ["server-auto", "tokio"] }
+http-body-util = "0.1.5"
+tower-service = "0.3.3"
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+# The self-signed certificate, until Koppel loads its own (#83).
+rcgen = { version = "0.14.10", default-features = false, features = ["ring"] }
+
+# The built UI inside the program (MIT). `interpolate-folder-path` lets it embed the gzipped copy the
+# build script writes to OUT_DIR.
+rust-embed = { version = "8.13.0", features = ["interpolate-folder-path"] }
+# Gzip (MIT OR Apache-2.0), on miniz_oxide (MIT OR Zlib OR Apache-2.0), so no C code. The build script
+# compresses with it, and the server inflates for the rare client that does not take gzip.
+flate2 = "1.1.11"
+
+# Logging (MIT). The subscriber goes without `env-filter`, which pulls in a regex engine: the
+# `Targets` filter reads the usual RUST_LOG form of `level` and `target=level` without one.
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi", "std"] }

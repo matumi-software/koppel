@@ -15,6 +15,9 @@ coverage/
 artifacts/
 *.log
 
+# Rust
+target/
+
 # Local runtime data (config, keys) written by the host in Development
 .koppel/
 

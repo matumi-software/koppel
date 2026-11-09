@@ -124,13 +124,14 @@ winresource = "0.1.34"
 libc = "0.2.191"
 
 # The transport between Koppel machines: Skakel 0.2.0 (MIT), protocol version 2 over gRPC. Its
-# release is still a draft, so the crates come from its repository at the commit that merged 0.2.0;
-# they move to the tag v0.2.0 once it is published. What they pull in is MIT, Apache-2.0, BSD, ISC,
+# release is still a draft, so the crates come from its repository at the commit that let an app
+# serve Skakel on its own listener (Skakel PR #43, part of 0.2.0); they move to the tag v0.2.0 once
+# it is published. What they pull in is MIT, Apache-2.0, BSD, ISC,
 # Zlib, Unlicense or Unicode-3.0, as Skakel's docs/parts.md says.
-skakel-server = { git = "https://github.com/matumi-software/skakel", rev = "bf4960e8e497fcf0e78b790dea78e2be333b3c4f" }
-skakel-client = { git = "https://github.com/matumi-software/skakel", rev = "bf4960e8e497fcf0e78b790dea78e2be333b3c4f" }
-skakel-discovery = { git = "https://github.com/matumi-software/skakel", rev = "bf4960e8e497fcf0e78b790dea78e2be333b3c4f" }
-skakel-protocol = { git = "https://github.com/matumi-software/skakel", rev = "bf4960e8e497fcf0e78b790dea78e2be333b3c4f" }
+skakel-server = { git = "https://github.com/matumi-software/skakel", rev = "e10810ea2eceafd38baa6ba14fad2913ee20594d" }
+skakel-client = { git = "https://github.com/matumi-software/skakel", rev = "e10810ea2eceafd38baa6ba14fad2913ee20594d" }
+skakel-discovery = { git = "https://github.com/matumi-software/skakel", rev = "e10810ea2eceafd38baa6ba14fad2913ee20594d" }
+skakel-protocol = { git = "https://github.com/matumi-software/skakel", rev = "e10810ea2eceafd38baa6ba14fad2913ee20594d" }
 # Koppel's own gRPC service, the remote device list, from its .proto file, as Skakel builds its own:
 # prost (Apache-2.0) for the messages, tonic (MIT) for the service, protox (MIT OR Apache-2.0) to
 # compile the .proto file in Rust so no protoc is needed. All are in the tree through Skakel, at the

@@ -1921,7 +1921,7 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 [[package]]
 name = "skakel-client"
 version = "0.2.0"
-source = "git+https://github.com/matumi-software/skakel?rev=bf4960e8e497fcf0e78b790dea78e2be333b3c4f#bf4960e8e497fcf0e78b790dea78e2be333b3c4f"
+source = "git+https://github.com/matumi-software/skakel?rev=e10810ea2eceafd38baa6ba14fad2913ee20594d#e10810ea2eceafd38baa6ba14fad2913ee20594d"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -1952,7 +1952,7 @@ dependencies = [
 [[package]]
 name = "skakel-discovery"
 version = "0.2.0"
-source = "git+https://github.com/matumi-software/skakel?rev=bf4960e8e497fcf0e78b790dea78e2be333b3c4f#bf4960e8e497fcf0e78b790dea78e2be333b3c4f"
+source = "git+https://github.com/matumi-software/skakel?rev=e10810ea2eceafd38baa6ba14fad2913ee20594d#e10810ea2eceafd38baa6ba14fad2913ee20594d"
 dependencies = [
  "serde",
  "serde_json",
@@ -1963,7 +1963,7 @@ dependencies = [
 [[package]]
 name = "skakel-pairing"
 version = "0.2.0"
-source = "git+https://github.com/matumi-software/skakel?rev=bf4960e8e497fcf0e78b790dea78e2be333b3c4f#bf4960e8e497fcf0e78b790dea78e2be333b3c4f"
+source = "git+https://github.com/matumi-software/skakel?rev=e10810ea2eceafd38baa6ba14fad2913ee20594d#e10810ea2eceafd38baa6ba14fad2913ee20594d"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -1976,7 +1976,7 @@ dependencies = [
 [[package]]
 name = "skakel-proto"
 version = "0.2.0"
-source = "git+https://github.com/matumi-software/skakel?rev=bf4960e8e497fcf0e78b790dea78e2be333b3c4f#bf4960e8e497fcf0e78b790dea78e2be333b3c4f"
+source = "git+https://github.com/matumi-software/skakel?rev=e10810ea2eceafd38baa6ba14fad2913ee20594d#e10810ea2eceafd38baa6ba14fad2913ee20594d"
 dependencies = [
  "prost",
  "protox",
@@ -1988,7 +1988,7 @@ dependencies = [
 [[package]]
 name = "skakel-protocol"
 version = "0.2.0"
-source = "git+https://github.com/matumi-software/skakel?rev=bf4960e8e497fcf0e78b790dea78e2be333b3c4f#bf4960e8e497fcf0e78b790dea78e2be333b3c4f"
+source = "git+https://github.com/matumi-software/skakel?rev=e10810ea2eceafd38baa6ba14fad2913ee20594d#e10810ea2eceafd38baa6ba14fad2913ee20594d"
 dependencies = [
  "serde",
  "sha2",
@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "skakel-serial"
 version = "0.2.0"
-source = "git+https://github.com/matumi-software/skakel?rev=bf4960e8e497fcf0e78b790dea78e2be333b3c4f#bf4960e8e497fcf0e78b790dea78e2be333b3c4f"
+source = "git+https://github.com/matumi-software/skakel?rev=e10810ea2eceafd38baa6ba14fad2913ee20594d#e10810ea2eceafd38baa6ba14fad2913ee20594d"
 dependencies = [
  "prost",
  "skakel-proto",
@@ -2007,7 +2007,7 @@ dependencies = [
 [[package]]
 name = "skakel-server"
 version = "0.2.0"
-source = "git+https://github.com/matumi-software/skakel?rev=bf4960e8e497fcf0e78b790dea78e2be333b3c4f#bf4960e8e497fcf0e78b790dea78e2be333b3c4f"
+source = "git+https://github.com/matumi-software/skakel?rev=e10810ea2eceafd38baa6ba14fad2913ee20594d#e10810ea2eceafd38baa6ba14fad2913ee20594d"
 dependencies = [
  "axum",
  "base64 0.23.1",

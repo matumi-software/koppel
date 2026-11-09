@@ -12,7 +12,12 @@ use koppel_usb::protocol;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
-async fn bench() -> (std::sync::Arc<FakeKernel>, ServerSide, std::sync::Arc<FakeKernel>, ClientSide) {
+async fn bench() -> (
+    std::sync::Arc<FakeKernel>,
+    ServerSide,
+    std::sync::Arc<FakeKernel>,
+    ClientSide,
+) {
     let server_kernel = FakeKernel::new();
     let server = ServerSide::start(server_kernel.clone(), true, true).await;
     let client_kernel = FakeKernel::new();
@@ -28,7 +33,10 @@ async fn bench() -> (std::sync::Arc<FakeKernel>, ServerSide, std::sync::Arc<Fake
 async fn client_attaches_a_shared_device_and_usb_traffic_round_trips() {
     let (_, server, client_kernel, client) = bench().await;
     client.link().await;
-    assert_eq!(client.client.current().devices[0].device.vid_pid, "064f:2af9");
+    assert_eq!(
+        client.client.current().devices[0].device.vid_pid,
+        "064f:2af9"
+    );
 
     client.attach().await;
 
@@ -61,11 +69,19 @@ async fn client_remembers_what_it_attached_until_it_is_detached() {
     let (_, server, _, client) = bench().await;
     client.link().await;
     client.attach().await;
-    assert!(fs::read_to_string(client.config_file("attached.json")).unwrap().contains("1-1.4"));
+    assert!(
+        fs::read_to_string(client.config_file("attached.json"))
+            .unwrap()
+            .contains("1-1.4")
+    );
 
     client.client.detach("1-1.4").await;
 
-    assert!(!fs::read_to_string(client.config_file("attached.json")).unwrap().contains("1-1.4"));
+    assert!(
+        !fs::read_to_string(client.config_file("attached.json"))
+            .unwrap()
+            .contains("1-1.4")
+    );
     client.stop().await;
     server.stop().await;
 }
@@ -104,7 +120,9 @@ async fn gateway_lets_a_usbip_driver_on_the_client_machine_list_and_attach() {
     }
 
     let mut usb = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    usb.write_all(&protocol::import_request("1-1.4")).await.unwrap();
+    usb.write_all(&protocol::import_request("1-1.4"))
+        .await
+        .unwrap();
     let reply = protocol::read_header(&mut usb).await.unwrap();
     assert_eq!(reply.status, protocol::STATUS_OK);
     let device = protocol::read_imported_device(&mut usb).await.unwrap();
@@ -127,7 +145,11 @@ async fn gateway_lets_a_usbip_driver_on_the_client_machine_list_and_attach() {
 async fn with_a_driver_attach_and_detach_drive_it_through_the_gateway() {
     let server = ServerSide::start(FakeKernel::new(), true, true).await;
     let driver = FakeDriver::new();
-    let client = ClientSide::start(MemoryLinks::new(&server), ClientSetup::driver(driver.clone())).await;
+    let client = ClientSide::start(
+        MemoryLinks::new(&server),
+        ClientSetup::driver(driver.clone()),
+    )
+    .await;
     client.link().await;
     assert!(
         !client.client.current().gateway,

@@ -11,16 +11,16 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use koppel_config::files::{ClientConnection, KoppelSettings, Role};
-use koppel_config::{ConfigFile, KoppelPaths, Options, open};
+use koppel_config::files::{AttachedDevices, ClientConnection, KoppelSettings, Role};
+use koppel_config::{CodecError, ConfigFile, FileCodec, KoppelPaths, Options, PlainText, open};
 use koppel_usb::peer_check::AnyPeer;
 use koppel_usb::stream::memory;
 use koppel_usb::{
     ActivityOutcome, ActivityReason, ActivitySink, BoxFuture, ClientOptions, CloseReason,
     DeviceStream, EntityRef, Export, ExportStatus, GatewayOptions, Link, LinkEvents, LinkStatus,
     Links, Listener, OpenError, RemoteClient, StreamOpener, SystemClock, UsbAttacher, UsbClient,
-    UsbDataPlane, UsbDevice, UsbError, UsbHost, UsbInterface, UsbIpDriver, UsbIpGateway,
-    UsbServer, UsbSpeed, VhciPort, protocol,
+    UsbDataPlane, UsbDevice, UsbError, UsbHost, UsbInterface, UsbIpDriver, UsbIpGateway, UsbServer,
+    UsbSpeed, VhciPort, protocol,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -28,7 +28,9 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 pub fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// The dongle every test shares: a CodeMeter stick on 1-1.4.
@@ -117,7 +119,7 @@ impl Gate {
         self.0.cancel();
     }
 
-    async fn pass(&self) {
+    pub async fn wait(&self) {
         self.0.cancelled().await;
     }
 }
@@ -366,7 +368,7 @@ impl UsbHost for FakeKernel {
         Box::pin(async move {
             let gate = lock(&self.gates).unshare.clone();
             if let Some(gate) = gate {
-                gate.pass().await;
+                gate.wait().await;
             }
             let mut state = lock(&self.state);
             state.unshared.push(bus_id.to_owned());
@@ -389,7 +391,7 @@ impl UsbHost for FakeKernel {
             self.reset_started.add_permits(1);
             let gate = lock(&self.gates).reset.clone();
             if let Some(gate) = gate {
-                gate.pass().await;
+                gate.wait().await;
             }
             lock(&self.state).reset = true;
             Ok(())
@@ -458,7 +460,9 @@ impl UsbAttacher for FakeKernel {
     }
 
     fn attach(&self, socket: &StdTcpStream, _: u32, _: UsbSpeed) -> Result<u32, UsbError> {
-        let kept = socket.try_clone().map_err(|e| UsbError::new(e.to_string()))?;
+        let kept = socket
+            .try_clone()
+            .map_err(|e| UsbError::new(e.to_string()))?;
         lock(&self.state).attached.push(kept);
         Ok(8)
     }
@@ -534,7 +538,12 @@ impl UsbIpDriver for FakeDriver {
         None
     }
 
-    fn attach<'a>(&'a self, host: &'a str, port: u16, bus_id: &'a str) -> BoxFuture<'a, Result<u32, UsbError>> {
+    fn attach<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+        bus_id: &'a str,
+    ) -> BoxFuture<'a, Result<u32, UsbError>> {
         Box::pin(async move {
             self.attaches.fetch_add(1, Ordering::SeqCst);
             let fail = |e: std::io::Error| UsbError::new(e.to_string());
@@ -563,19 +572,25 @@ impl UsbIpDriver for FakeDriver {
             }
             let gate = lock(&self.attach_gate).clone();
             if let Some(gate) = gate {
-                gate.pass().await;
+                gate.wait().await;
             }
             Ok(Self::DRIVER_PORT)
         })
     }
 
-    fn detach<'a>(&'a self, _: &'a str, _: u16, bus_id: &'a str, driver_port: u32) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn detach<'a>(
+        &'a self,
+        _: &'a str,
+        _: u16,
+        bus_id: &'a str,
+        driver_port: u32,
+    ) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async move {
             lock(&self.detached).push(format!("{bus_id}@{driver_port}"));
             self.drop_connection();
             let gate = lock(&self.detach_gate).clone();
             if let Some(gate) = gate {
-                gate.pass().await;
+                gate.wait().await;
             }
             // usbip.exe returns once the device is gone, by which time the gateway session has
             // ended too.
@@ -598,22 +613,9 @@ impl ServerSide {
     /// A server whose `devices.json` already shares the dongle when `share_dongle` is set, as a
     /// person who shared it in the UI left it.
     pub async fn start(host: Arc<dyn UsbHost>, share_dongle: bool, share_on_startup: bool) -> Self {
-        let dir = TempDir::new("server");
-        let paths = KoppelPaths::new(dir.path().join("config"), dir.path().join("keys"));
-        fs::create_dir_all(dir.path().join("config")).unwrap();
-        fs::write(
-            paths.settings_file(),
-            format!(r#"{{ "role": "server", "shareOnStartup": {share_on_startup} }}"#),
-        )
-        .unwrap();
-        if share_dongle {
-            fs::write(
-                paths.devices_file(),
-                r#"{ "busIds": ["1-1.4"], "vidPids": { "1-1.4": "064f:2af9" } }"#,
-            )
-            .unwrap();
-        }
-        Self::open(dir, host).await
+        let devices = share_dongle
+            .then_some(r#"{ "busIds": ["1-1.4"], "vidPids": { "1-1.4": "064f:2af9" } }"#);
+        Self::open(server_dir(share_on_startup, devices), host).await
     }
 
     /// A server over a folder the test prepared.
@@ -669,6 +671,22 @@ impl ServerSide {
         self.server.stop().await;
         self.settings.stop();
     }
+}
+
+/// A server's folder with its settings (role server) and, when given, its `devices.json`.
+pub fn server_dir(share_on_startup: bool, devices: Option<&str>) -> TempDir {
+    let dir = TempDir::new("server");
+    let config = dir.path().join("config");
+    fs::create_dir_all(&config).unwrap();
+    fs::write(
+        config.join("settings.json"),
+        format!(r#"{{ "role": "server", "shareOnStartup": {share_on_startup} }}"#),
+    )
+    .unwrap();
+    if let Some(devices) = devices {
+        fs::write(config.join("devices.json"), devices).unwrap();
+    }
+    dir
 }
 
 /// Joins clients to a server in memory: the device list follows the server's, as the remote hub
@@ -791,6 +809,8 @@ pub struct ClientSide {
 
 pub struct ClientSetup {
     pub role: Role,
+    /// How `attached.json` is written; plain text unless a test needs a save to fail.
+    pub attached_codec: Arc<dyn FileCodec>,
     pub attacher: Arc<dyn UsbAttacher>,
     pub driver: Arc<dyn UsbIpDriver>,
     pub gateway: GatewayOptions,
@@ -802,6 +822,7 @@ impl ClientSetup {
     pub fn kernel(attacher: Arc<dyn UsbAttacher>) -> Self {
         Self {
             role: Role::Client,
+            attached_codec: Arc::new(PlainText),
             attacher,
             driver: Arc::new(koppel_usb::Unsupported::new("No driver here.")),
             gateway: GatewayOptions {
@@ -837,7 +858,11 @@ pub fn free_port() -> u16 {
 
 impl ClientSide {
     pub async fn start(links: Arc<MemoryLinks>, setup: ClientSetup) -> Self {
-        let dir = TempDir::new("client");
+        Self::start_in(TempDir::new("client"), links, setup).await
+    }
+
+    /// A client over a folder the test may have put files in already.
+    pub async fn start_in(dir: TempDir, links: Arc<MemoryLinks>, setup: ClientSetup) -> Self {
         let paths = KoppelPaths::new(dir.path().join("config"), dir.path().join("keys"));
         fs::create_dir_all(dir.path().join("config")).unwrap();
         fs::write(
@@ -857,7 +882,15 @@ impl ClientSide {
         let client = UsbClient::new(
             settings.clone(),
             connection.clone(),
-            open::attached(&paths),
+            ConfigFile::new(
+                paths.attached_file(),
+                AttachedDevices::empty(),
+                Options {
+                    codec: setup.attached_codec,
+                    start_with_defaults_when_unusable: true,
+                    ..Options::default()
+                },
+            ),
             setup.attacher,
             setup.driver,
             links.clone(),
@@ -970,4 +1003,21 @@ pub async fn echoes<S: AsyncReadExt + AsyncWriteExt + Unpin>(driver: &mut S) {
 /// Closes a stream the test opened, normally.
 pub async fn close(stream: memory::MemoryStream) {
     Box::new(stream).close(CloseReason::Done).await;
+}
+
+/// Plain text that refuses to write once told to, so a save fails the way a full disk would.
+#[derive(Default)]
+pub struct FailingCodec(pub AtomicBool);
+
+impl FileCodec for FailingCodec {
+    fn encode(&self, json: &[u8]) -> Result<Vec<u8>, CodecError> {
+        if self.0.load(Ordering::SeqCst) {
+            return Err(CodecError("the disk is full".into()));
+        }
+        Ok(json.to_vec())
+    }
+
+    fn decode(&self, bytes: &[u8]) -> Result<Vec<u8>, CodecError> {
+        Ok(bytes.to_vec())
+    }
 }

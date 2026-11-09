@@ -11,7 +11,7 @@ services:
   koppel:
     # The tag matches the deploy composes (deploy/docker-compose*.yml), so an image built here is the one deploy.sh
     # copies and a deployment finds. deploy.sh sets KOPPEL_TAG from the deploy compose; bump both on a release.
-    image: ${DOCKER_REGISTRY-}matumisoftware/koppel:${KOPPEL_TAG:-0.1.1}
+    image: ${DOCKER_REGISTRY-}matumisoftware/koppel:${KOPPEL_TAG:-0.1.2}
     # The machine name Koppel shows and puts in its certificate. A container's own name is random.
     hostname: ${KOPPEL_HOSTNAME:-${COMPUTERNAME:-koppel}}
     build:

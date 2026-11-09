@@ -6,7 +6,7 @@ Koppel speaks the standard USB/IP protocol and adds a web UI, authentication and
 around it. A machine runs as a server (shares its devices), a client (attaches them) or both. Clients
 find servers on the local network and pair by typing a code, so nobody copies secrets around.
 
-Status: version 0.1.0, early. On real hardware, a Debian 13 server shares USB receivers and a flash drive to a
+Status: version 0.1.2, early. On real hardware, a Debian 13 server shares USB receivers and a flash drive to a
 Windows 11 client, and a Windows server through usbipd-win shares a webcam to a Linux client. Printers are
 untried, webcams do not stream from a Linux server to a Windows client yet, and the arm64 image and `.deb`
 are untested on a Raspberry Pi. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests; releases are tags on `main`.
@@ -49,7 +49,7 @@ Raspberry Pi OS, which the script below treats as Debian.
 The container uses the host's network so clients can find it. It restarts after a crash, and comes
 back at the next reboot even if someone stopped it by hand. The image has a health check, but plain Docker only reports an unhealthy container and does not restart it.
 
-The compose file pins the image version (`matumisoftware/koppel:0.1.0`). To upgrade, change the tag to the new
+The compose file pins the image version (`matumisoftware/koppel:0.1.2`). To upgrade, change the tag to the new
 version, then:
 
 ```sh
@@ -67,11 +67,11 @@ the machine from the [latest release](https://github.com/matumi-software/koppel/
 install it:
 
 ```sh
-wget https://github.com/matumi-software/koppel/releases/download/v0.1.0/koppel_0.1.0_amd64.deb
-sudo apt install ./koppel_0.1.0_amd64.deb
+wget https://github.com/matumi-software/koppel/releases/download/v0.1.2/koppel_0.1.2_amd64.deb
+sudo apt install ./koppel_0.1.2_amd64.deb
 ```
 
-On a Raspberry Pi, take `koppel_0.1.0_arm64.deb` instead.
+On a Raspberry Pi, take `koppel_0.1.2_arm64.deb` instead.
 
 The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Open
 `https://<machine>:5240` within 10 minutes and set the password (after that, `sudo systemctl restart koppel`

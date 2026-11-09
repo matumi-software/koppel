@@ -6,8 +6,8 @@ export interface KoppelMarkProps {
 
 /**
  * The Koppel mark: a K whose arms end in a circle and an arrow, after the USB trident.
- * Drawn in the accent token, so it follows the theme. Same geometry as
- * resources/design-system/assets/Logos/koppel-mark.svg.
+ * The K is drawn in the text-primary token and the circle in the accent token, so it follows the
+ * theme. Same geometry and colours as resources/design-system/assets/Logos/koppel-mark.svg.
  */
 export function KoppelMark({ size = 24, title }: KoppelMarkProps) {
   return (
@@ -18,13 +18,13 @@ export function KoppelMark({ size = 24, title }: KoppelMarkProps) {
       role={title ? 'img' : undefined}
       aria-hidden={title ? undefined : true}
       aria-label={title}
-      style={{ fill: 'var(--accent)', stroke: 'var(--accent)', flex: 'none' }}
+      style={{ fill: 'var(--text-primary)', stroke: 'var(--text-primary)', flex: 'none' }}
     >
       <rect x="9" y="8" width="11" height="48" rx="2" stroke="none" />
       <path d="M20 32 L41 15" strokeWidth="9" fill="none" />
       <path d="M20 32 L41.7 47.8" strokeWidth="9" fill="none" />
-      <circle cx="46" cy="12" r="8" stroke="none" />
       <path d="M53 56 L35.6 54.5 L46.2 39.9 Z" strokeWidth="3" strokeLinejoin="round" />
+      <circle cx="46" cy="12" r="8" stroke="none" style={{ fill: 'var(--accent)' }} />
     </svg>
   );
 }

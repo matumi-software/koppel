@@ -1,0 +1,326 @@
+//! Restricts a directory that holds config or keys, as 0.1.x's `DirectoryHardening` does. Safe to
+//! run on every start.
+//!
+//! - **Windows:** the owner becomes BUILTIN\Administrators and the DACL is protected (nothing
+//!   inherited, so the broad Users grant `%ProgramData%` hands down is dropped) with full control
+//!   for SYSTEM and Administrators only. A junction or symbolic link is refused, because the ACL
+//!   would land on its target. A process that is not elevated cannot give the owner away and would
+//!   lock itself out, so it also gets full control and the owner is left alone: that is a developer
+//!   at a console, while the service runs as LocalSystem.
+//! - **Elsewhere:** `chmod 700`. A directory that cannot be changed, such as a bind mount owned by
+//!   someone else, is an error.
+
+use std::io;
+use std::path::Path;
+
+/// Restricts `directory` to administrators (Windows) or its owner (elsewhere).
+pub fn harden_directory(directory: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        windows_acl::harden(directory)
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
+    }
+}
+
+#[cfg(windows)]
+pub(crate) mod windows_acl {
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::MetadataExt;
+    use std::path::Path;
+
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree, WIN32_ERROR};
+    use windows::Win32::Security::Authorization::{
+        EXPLICIT_ACCESS_W, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
+        SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    };
+    use windows::Win32::Security::{
+        ACL, CheckTokenMembership, CreateWellKnownSid, DACL_SECURITY_INFORMATION,
+        GetTokenInformation, OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSID, SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY,
+        TOKEN_USER, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+    };
+    use windows::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    use windows::core::{BOOL, PCWSTR, PWSTR};
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+    /// A SID in a buffer of its own.
+    pub(crate) struct Sid(Vec<u8>);
+
+    impl Sid {
+        pub(crate) fn well_known(kind: WELL_KNOWN_SID_TYPE) -> io::Result<Self> {
+            let mut size = 68u32; // SECURITY_MAX_SID_SIZE
+            let mut buffer = vec![0u8; size as usize];
+            // SAFETY: `buffer` is `size` bytes long.
+            unsafe {
+                CreateWellKnownSid(
+                    kind,
+                    None,
+                    Some(PSID(buffer.as_mut_ptr().cast())),
+                    &mut size,
+                )
+            }
+            .map_err(io::Error::other)?;
+            buffer.truncate(size as usize);
+            Ok(Self(buffer))
+        }
+
+        pub(crate) fn system() -> io::Result<Self> {
+            Self::well_known(WinLocalSystemSid)
+        }
+
+        pub(crate) fn administrators() -> io::Result<Self> {
+            Self::well_known(WinBuiltinAdministratorsSid)
+        }
+
+        /// The user this process runs as.
+        pub(crate) fn current_user() -> io::Result<Self> {
+            let mut token = HANDLE::default();
+            // SAFETY: plain calls on this process's own token, closed below.
+            unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }
+                .map_err(io::Error::other)?;
+            let result = (|| {
+                let mut size = 0u32;
+                // SAFETY: the first call only asks for the size.
+                let _ = unsafe { GetTokenInformation(token, TokenUser, None, 0, &mut size) };
+                let mut buffer = vec![0u64; (size as usize).div_ceil(8)];
+                // SAFETY: `buffer` holds `size` bytes, aligned for TOKEN_USER.
+                unsafe {
+                    GetTokenInformation(
+                        token,
+                        TokenUser,
+                        Some(buffer.as_mut_ptr().cast()),
+                        size,
+                        &mut size,
+                    )
+                }
+                .map_err(io::Error::other)?;
+                // SAFETY: the call filled the buffer with a TOKEN_USER whose SID points into it.
+                let user = unsafe { &*(buffer.as_ptr() as *const TOKEN_USER) };
+                let sid = user.User.Sid;
+                // SAFETY: a valid SID's length is 8 bytes plus 4 per sub-authority.
+                let length = 8 + 4 * usize::from(unsafe { *(sid.0 as *const u8).add(1) });
+                // SAFETY: the SID is `length` bytes inside `buffer`.
+                Ok(Self(
+                    unsafe { std::slice::from_raw_parts(sid.0 as *const u8, length) }.to_vec(),
+                ))
+            })();
+            // SAFETY: the handle came from OpenProcessToken.
+            let _ = unsafe { CloseHandle(token) };
+            result
+        }
+
+        pub(crate) fn psid(&self) -> PSID {
+            PSID(self.0.as_ptr() as *mut _)
+        }
+
+        #[cfg(test)]
+        pub(crate) fn bytes(&self) -> &[u8] {
+            &self.0
+        }
+    }
+
+    fn is_member(sid: &Sid) -> bool {
+        let mut member = BOOL(0);
+        // SAFETY: `sid` is a valid SID for the length of the call.
+        unsafe { CheckTokenMembership(None, sid.psid(), &mut member) }.is_ok() && member.as_bool()
+    }
+
+    fn check(code: WIN32_ERROR) -> io::Result<()> {
+        if code.0 == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::from_raw_os_error(code.0 as i32))
+        }
+    }
+
+    fn full_control(sid: &Sid) -> EXPLICIT_ACCESS_W {
+        EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_ALL_ACCESS.0,
+            grfAccessMode: SET_ACCESS,
+            grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: std::ptr::null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_UNKNOWN,
+                ptstrName: PWSTR(sid.psid().0.cast()),
+            },
+        }
+    }
+
+    pub(crate) fn harden(directory: &Path) -> io::Result<()> {
+        let metadata = std::fs::symlink_metadata(directory)?;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || metadata.file_type().is_symlink()
+        {
+            return Err(io::Error::other(format!(
+                "{} is a junction or symbolic link. Koppel will not keep its files behind a link: point Paths:Config and Paths:Keys at a real directory.",
+                directory.display()
+            )));
+        }
+
+        let system = Sid::system()?;
+        let administrators = Sid::administrators()?;
+        let user = Sid::current_user()?;
+        // .NET's `IsSystem || IsInRole(Administrator)`: membership counts only when it is in force,
+        // so an unelevated administrator is not privileged.
+        let privileged = is_member(&system) || is_member(&administrators);
+
+        let mut entries = vec![full_control(&system), full_control(&administrators)];
+        if !privileged {
+            entries.push(full_control(&user));
+        }
+        let mut acl: *mut ACL = std::ptr::null_mut();
+        // SAFETY: the entries point at SIDs that live until the end of this function.
+        check(unsafe { SetEntriesInAclW(Some(&entries), None, &mut acl) })?;
+
+        let mut information: OBJECT_SECURITY_INFORMATION =
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+        if privileged {
+            information |= OWNER_SECURITY_INFORMATION;
+        }
+        let wide: Vec<u16> = directory.as_os_str().encode_wide().chain([0]).collect();
+        // SAFETY: `wide` is a terminated path, and the ACL and SID are valid for the call.
+        let result = check(unsafe {
+            SetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                information,
+                privileged.then(|| administrators.psid()),
+                None,
+                Some(acl),
+                None,
+            )
+        });
+        // SAFETY: SetEntriesInAclW allocated the ACL with LocalAlloc.
+        unsafe { LocalFree(Some(HLOCAL(acl.cast()))) };
+        result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("koppel-harden-{name}-{}", crate::random_hex(6)));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_directory_becomes_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("unix");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        harden_directory(&dir).unwrap();
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_acl_is_protected_and_lists_only_system_administrators_and_an_unelevated_user() {
+        use windows::Win32::Foundation::{HLOCAL, LocalFree};
+        use windows::Win32::Security::Authorization::{GetNamedSecurityInfoW, SE_FILE_OBJECT};
+        use windows::Win32::Security::{
+            ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+            DACL_SECURITY_INFORMATION, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+            PSECURITY_DESCRIPTOR,
+        };
+        use windows_acl::Sid;
+
+        let dir = temp_dir("acl");
+        harden_directory(&dir).unwrap();
+        harden_directory(&dir).unwrap();
+
+        let wide: Vec<u16> = {
+            use std::os::windows::ffi::OsStrExt;
+            dir.as_os_str().encode_wide().chain([0]).collect()
+        };
+        let mut acl: *mut ACL = std::ptr::null_mut();
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: test-only reads of the ACL just written; the descriptor is freed below.
+        unsafe {
+            let code = GetNamedSecurityInfoW(
+                windows::core::PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                None,
+                None,
+                Some(&mut acl),
+                None,
+                &mut descriptor,
+            );
+            assert_eq!(code.0, 0);
+            let (mut control, mut revision) = (0u16, 0u32);
+            GetSecurityDescriptorControl(descriptor, &mut control, &mut revision).unwrap();
+            assert_ne!(control & 0x1000, 0, "SE_DACL_PROTECTED");
+
+            let mut size = ACL_SIZE_INFORMATION::default();
+            GetAclInformation(
+                acl,
+                (&mut size as *mut ACL_SIZE_INFORMATION).cast(),
+                size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+            .unwrap();
+            let mut sids = Vec::new();
+            for index in 0..size.AceCount {
+                let mut ace = std::ptr::null_mut();
+                GetAce(acl, index, &mut ace).unwrap();
+                let ace = &*(ace as *const ACCESS_ALLOWED_ACE);
+                assert_eq!(ace.Header.AceType, 0, "allow only");
+                assert_eq!(ace.Mask, 0x1F01FF, "full control");
+                let start = &ace.SidStart as *const u32 as *const u8;
+                let length = 8 + 4 * usize::from(*start.add(1));
+                sids.push(std::slice::from_raw_parts(start, length).to_vec());
+            }
+            LocalFree(Some(HLOCAL(descriptor.0)));
+
+            let system = Sid::system().unwrap().bytes().to_vec();
+            let administrators = Sid::administrators().unwrap().bytes().to_vec();
+            let user = Sid::current_user().unwrap().bytes().to_vec();
+            assert!(sids.contains(&system));
+            assert!(sids.contains(&administrators));
+            assert!(
+                sids.iter()
+                    .all(|sid| *sid == system || *sid == administrators || *sid == user),
+                "nobody else"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_is_refused() {
+        let dir = temp_dir("link");
+        let target = dir.join("target");
+        let link = dir.join("link");
+        std::fs::create_dir(&target).unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&target)
+            .output()
+            .unwrap();
+        assert!(made.status.success());
+        let refused = harden_directory(&link).unwrap_err();
+        assert!(refused.to_string().contains("junction or symbolic link"));
+        let _ = std::fs::remove_dir(&link);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

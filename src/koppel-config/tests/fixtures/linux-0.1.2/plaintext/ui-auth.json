@@ -1,0 +1,8 @@
+{
+  "passwordHash": "pbkdf2-sha256$600000$m2LNvJlPogsqzdJ4ZH7Tow==$PIxWdotVkKc/Pu8sPH87o0jFP\u002B1dVOz1r9ZxOpbSyos=",
+  "securityStamp": "15369d15e204430db3e39bc88e2431ba",
+  "revokedSessions": {
+    "f8dfc0a349914949a0b3cdcb00fabd0e": "2026-11-16T08:01:09+00:00"
+  },
+  "hasPassword": true
+}

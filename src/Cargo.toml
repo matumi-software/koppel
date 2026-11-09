@@ -2,7 +2,7 @@
 # `koppel-bin` because `koppel` and the C# `Koppel` folder are the same folder on Windows.
 [workspace]
 resolver = "3"
-members = ["koppel-bin", "koppel-contract", "koppel-web"]
+members = ["koppel-bin", "koppel-config", "koppel-contract", "koppel-web"]
 
 [workspace.package]
 version = "0.2.0"
@@ -14,6 +14,7 @@ repository = "https://github.com/matumi-software/koppel"
 
 [workspace.dependencies]
 koppel-web = { path = "koppel-web", version = "0.2.0" }
+koppel-config = { path = "koppel-config", version = "0.2.0" }
 
 # The async runtime (MIT).
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
@@ -48,5 +49,34 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 # themselves, so there is no second TLS stack. JSON is serde_json (MIT OR Apache-2.0). ring (Apache-2.0
 # AND ISC) is already in the tree through rustls; it is named for the SHA-256 of a pinned certificate.
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json"] }
-serde_json = "1.0.154"
+
+# Config files and secrets (koppel-config). serde, serde_json, base64 and time are MIT OR Apache-2.0
+# and pinned as in Skakel; serde_json pulls in zmij (MIT). ring (Apache-2.0 AND ISC) is already here
+# through rustls: AES-256-GCM, HMAC, SHA and random bytes come from it. serde_json and ring serve the
+# contract tests too.
+serde = { version = "1.0.229", features = ["derive"] }
+# `raw_value` writes dates without escaping the `+`, as .NET does, and `preserve_order` keeps a
+# dictionary in the order it was written (indexmap, already here through h2, with foldhash, Zlib).
+serde_json = { version = "1.0.154", features = ["raw_value", "preserve_order"] }
+base64 = "0.23.1"
+time = "0.3.55"
 ring = "0.17.14"
+# What ring lacks for reading 0.1.x's files: AES-256-CBC for Data Protection payloads and 3DES-CBC
+# for .NET's PKCS#12 export. RustCrypto, MIT OR Apache-2.0.
+aes = "0.9.4"
+cbc = "0.2.1"
+des = "0.9.0"
+# Data Protection's key ring is XML (MIT OR Apache-2.0, no dependencies).
+roxmltree = "0.21.2"
+# Microsoft's Windows bindings (MIT OR Apache-2.0), as Skakel pins them: DPAPI, ACLs, the
+# ProgramData folder.
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+] }

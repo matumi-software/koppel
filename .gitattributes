@@ -3,3 +3,6 @@
 
 # Signed third-party files: the driver catalog covers the exact bytes, so git must never touch them.
 src/Koppel/installer/usbip-win2/** binary
+
+# Files Koppel 0.1.x wrote, kept byte for byte: the tests compare against them.
+src/koppel-config/tests/fixtures/** binary

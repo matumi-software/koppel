@@ -8,6 +8,7 @@
 
 use std::time::{Duration, Instant};
 
+use url::Url;
 use windows::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{GetExitCodeProcess, INFINITE, WaitForSingleObject};
 use windows::Win32::UI::Shell::{
@@ -223,16 +224,14 @@ fn wait_for_ui(url: &str) -> bool {
     }
 }
 
-/// The host and port of an `https://` address; 443 when it names none.
+/// The host and port of an `https://` address; 443 when it names none. An IPv6 host keeps its
+/// brackets, as the health probe takes it.
 fn host_and_port(url: &str) -> Option<(String, u16)> {
-    let authority = url.strip_prefix("https://")?.split('/').next()?;
-    let (host, port) = match authority.rfind(':') {
-        Some(i) if !authority[i..].contains(']') => {
-            (&authority[..i], authority[i + 1..].parse().ok()?)
-        }
-        _ => (authority, 443),
-    };
-    Some((host.to_owned(), port))
+    let url = Url::parse(url).ok()?;
+    if url.scheme() != "https" {
+        return None;
+    }
+    Some((url.host_str()?.to_owned(), url.port_or_known_default()?))
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@
 
 use std::net::IpAddr;
 
+use url::Url;
 use winreg::RegKey;
 use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE};
 
@@ -45,23 +46,27 @@ pub fn read() -> String {
         .unwrap_or_else(|| DEFAULT.to_owned())
 }
 
-/// `value` when it is an absolute HTTPS address with a host, ending in a slash.
+/// `value` as an absolute HTTPS address with a host, in the form a URL parser writes it and ending
+/// in a slash. A space in the host is refused by the parser, a quote in it by a check here, and a
+/// quote in a path is escaped, so none ends the quoted argument the launcher builds.
 pub fn checked(value: &str) -> Option<String> {
-    let rest = value.strip_prefix("https://")?;
-    let host = rest.split('/').next()?;
-    // A quote would end the quoted argument the launcher builds.
-    if host.is_empty()
-        || value
-            .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || c == '"')
+    let mut url = Url::parse(value).ok()?;
+    if url.scheme() != "https" || url.host_str().is_none_or(str::is_empty) {
+        return None;
+    }
+    if !url.path().ends_with('/') {
+        let path = format!("{}/", url.path());
+        url.set_path(&path);
+    }
+    // The parser lets a quote through in a host. It would end the quoted argument the launcher builds.
+    if url
+        .as_str()
+        .chars()
+        .any(|c| c == '"' || c.is_whitespace() || c.is_control())
     {
         return None;
     }
-    Some(if value.ends_with('/') {
-        value.to_owned()
-    } else {
-        format!("{value}/")
-    })
+    Some(url.into())
 }
 
 #[cfg(test)]
@@ -100,5 +105,17 @@ mod tests {
         assert_eq!(checked("https://a b/"), None);
         assert_eq!(checked("https://a\"b/"), None);
         assert_eq!(checked("file:///c:/x"), None);
+        assert_eq!(
+            checked("https://[::1]:5240").as_deref(),
+            Some("https://[::1]:5240/")
+        );
+        // A quote in the path is escaped, so it cannot end the launcher's quoted argument.
+        let quoted = checked("https://localhost:5240/a\"b").unwrap();
+        assert_eq!(quoted, "https://localhost:5240/a%22b/");
+        // A slash is added to the path, not after a query.
+        assert_eq!(
+            checked("https://localhost:5240/x?y=1").as_deref(),
+            Some("https://localhost:5240/x/?y=1")
+        );
     }
 }

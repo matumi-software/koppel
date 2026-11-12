@@ -47,7 +47,7 @@ fn client() -> impl Fn(&KoppelSettings) -> KoppelSettings {
 }
 
 #[tokio::test]
-async fn a_missing_file_is_seeded_with_the_defaults_as_0_1_writes_them() {
+async fn a_missing_file_is_seeded_with_the_defaults() {
     let dir = temp_dir("seed");
     let paths = paths(&dir);
     let settings = open::settings(&paths);
@@ -55,7 +55,6 @@ async fn a_missing_file_is_seeded_with_the_defaults_as_0_1_writes_them() {
 
     let written = fs::read(paths.settings_file()).unwrap();
     let expected = "{\n  \"role\": \"server\",\n  \"shareOnStartup\": true,\n  \"setupComplete\": false,\n  \"notifyPairing\": true,\n  \"notifyLink\": true,\n  \"notifyAttachFailures\": true,\n  \"version\": 1\n}";
-    let expected = expected.replace('\n', if cfg!(windows) { "\r\n" } else { "\n" });
     assert_eq!(String::from_utf8(written).unwrap(), expected);
     settings.stop();
     let _ = fs::remove_dir_all(dir);

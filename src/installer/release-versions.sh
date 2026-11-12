@@ -9,7 +9,8 @@
 # Without <version> it takes the workspace version from src/Cargo.toml. The strings are the image tag
 # (`matumisoftware/koppel:<version>`), the .deb file names and release download path in the README, and the
 # README's "version <version> is the latest release". Prose such as "a 0.2.0 machine" is not touched: it
-# names a version on purpose. `check` also needs a `## <version>` heading in CHANGELOG.md, and fails when a
+# names a version on purpose. `check` also needs a `## <version>` heading in CHANGELOG.md and a first `koppel (<version>)` entry in
+# src/installer/linux/changelog (the .deb's changelog), and fails when a
 # local tag v<version> exists but is not annotated.
 set -eu
 cd "$(dirname "$0")/../.."
@@ -55,6 +56,7 @@ for f in $files; do
   done
 done
 grep -qE "^## ${version//./\.}( |\$)" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version' section." >&2; fail=1; }
+head -n 1 src/installer/linux/changelog | grep -qE "^koppel \(${version//./\.}\) " || { echo "src/installer/linux/changelog does not start with a 'koppel ($version)' entry." >&2; fail=1; }
 if git rev-parse -q --verify "refs/tags/v$version" >/dev/null && [ "$(git cat-file -t "refs/tags/v$version")" != tag ]; then
   echo "The local tag v$version is lightweight. Make it annotated: git tag -a v$version -m ..." >&2
   fail=1

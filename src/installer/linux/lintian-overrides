@@ -1,2 +1,7 @@
 # Static on purpose (musl), so the package needs no libc, OpenSSL or ICU and one binary runs on any release.
 koppel: statically-linked-binary [usr/lib/koppel/koppel]
+# The scripts follow debhelper's dh_installsystemd: deb-systemd-helper and deb-systemd-invoke where they exist, and
+# systemctl for the daemon-reload, the is-enabled check that keeps a disabled unit disabled, and the fallback when
+# the helpers are missing. nfpm does not run debhelper, so the scripts are written out here.
+koppel: maintainer-script-calls-systemctl [postinst:*]
+koppel: maintainer-script-calls-systemctl [prerm:*]

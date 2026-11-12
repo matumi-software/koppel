@@ -162,6 +162,8 @@ COPY installer/linux /build/installer/linux
 WORKDIR /build/installer/linux
 RUN set -eu; \
     VERSION="$(cat /out/version)"; export VERSION; \
+    gzip -9nc koppel.1 > koppel.1.gz; \
+    gzip -9nc changelog > changelog.gz; \
     mkdir -p /packages; \
     for pair in amd64:amd64 arm64:arm64 armhf:arm; do \
       rm -rf /stage; mkdir /stage; \

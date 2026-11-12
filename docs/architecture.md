@@ -60,7 +60,7 @@ Code: `koppel-web/src/api/settings.rs` (write, then answer 202) and `koppel-web/
 (the push). The UI:
 `src/ui/app/src/hub/` (the `EventSource` and the pushes into the cache), `src/ui/app/src/pending/`
 (pending, confirm, fail), `src/ui/app/src/settings/use-settings.ts`. The contract tests check every push
-against the Rust build (`koppel-contract/tests/push.rs`); the UI has its own tests (`pnpm --filter koppel.ui test`).
+against the Rust build (`koppel-contract/tests/push.rs`); the UI has its own tests (`pnpm --filter koppel.ui test`, run in `src/ui/`).
 
 ## Ports and what they serve
 
@@ -355,7 +355,7 @@ installs 11.7 MB (see "Release profile and sizes").
 ## Building and releasing
 
 Everything builds from committed lock files: Rust from `src/Cargo.lock` (`--locked`), the UI from
-`src/pnpm-lock.yaml` (`--frozen-lockfile`), and the WiX projects from their `packages.lock.json`
+`src/ui/pnpm-lock.yaml` (`--frozen-lockfile`), and the WiX projects from their `packages.lock.json`
 (`-p:RestoreLockedMode=true`). WiX is an MSBuild SDK, so the Windows installer also needs the .NET SDK; its
 package versions are in `src/installer/windows/Directory.Packages.props`, and after changing one, run
 `dotnet restore` on both `.wixproj` files and commit the lock files. The Windows installer is described in
@@ -404,7 +404,7 @@ third-party crate pinned in `[workspace.dependencies]` with a note on its licenc
 Run from `src/`:
 
 ```sh
-pnpm install && pnpm --filter koppel.ui build   # the UI the program embeds (src/ui/app/dist), needed for a release build
+pnpm --dir ui install && pnpm --dir ui --filter koppel.ui build   # the UI the program embeds (src/ui/app/dist), needed for a release build
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings

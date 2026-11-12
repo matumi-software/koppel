@@ -26,6 +26,7 @@ $ErrorActionPreference = 'Stop'
 $installer = $PSScriptRoot
 # src\installer\windows: two folders up is src\.
 $src = Split-Path (Split-Path $installer)
+$ui = Join-Path $src 'ui'
 $staging = Join-Path $installer 'obj\staging'
 $cache = Join-Path $installer 'obj\cache'
 $out = Join-Path $installer 'bin'
@@ -108,8 +109,8 @@ Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $staging, $cache, $out | Out-Null
 
 Write-Host 'Building the UI...'
-Invoke-Checked { pnpm --dir $src install --frozen-lockfile }
-Invoke-Checked { pnpm --dir $src --filter koppel.ui build }
+Invoke-Checked { pnpm --dir $ui install --frozen-lockfile }
+Invoke-Checked { pnpm --dir $ui --filter koppel.ui build }
 
 Write-Host 'Building Koppel...'
 # Koppel.exe stays a console program, for the service and for commands such as --reset-password;

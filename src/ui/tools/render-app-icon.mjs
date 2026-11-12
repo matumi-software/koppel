@@ -6,15 +6,15 @@
 //                       -> src/installer/linux/icons (the .deb's applications menu entry: hicolor PNGs
 //                          from 16 to 256 px, and the SVG as the scalable one)
 //
-// Run from src/: pnpm design:icons. Commit the generated files.
+// Run from src/ui/: pnpm design:icons. Commit the generated files.
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Resvg } from '@resvg/resvg-js';
 
-// This file sits in src/tools; the repo root is two levels up.
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// This file sits in src/ui/tools; the repo root is three levels up.
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const logos = join(root, 'resources', 'design-system', 'assets', 'Logos');
 const svg = readFileSync(join(logos, 'koppel-app-icon.svg'));
 

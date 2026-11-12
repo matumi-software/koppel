@@ -38,14 +38,16 @@ ARG PWSH_SHA256_ARM64=3179e07fd98f026d39c730ebcb7626d071aac3351b171dda13f9f38d99
 FROM --platform=$BUILDPLATFORM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS ui
 ARG PNPM_VERSION
 RUN npm install -g pnpm@$PNPM_VERSION
-WORKDIR /build
+WORKDIR /build/ui
 # The workspace's package files first, so the install is cached across source edits.
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY ui/react-ui/package.json ui/react-ui/
-COPY ui/app/package.json ui/app/
+COPY ui/package.json ui/pnpm-workspace.yaml ui/pnpm-lock.yaml ./
+COPY ui/react-ui/package.json react-ui/
+COPY ui/app/package.json app/
 RUN pnpm install --frozen-lockfile
-COPY ui ./ui
+COPY ui ./
 RUN pnpm --filter koppel.ui build
+# Later stages (notices) work from /build, where installer/notices lands.
+WORKDIR /build
 
 # -------- The Rust toolchain: Rust, Zig, cargo-zigbuild and the three targets -------------------
 FROM --platform=$BUILDPLATFORM rust:1.99.1-trixie@sha256:8a4e90c7946b74626488b1446f712c0fe0ed1a596cbd3d871684bc9c5433ae07 AS toolchain

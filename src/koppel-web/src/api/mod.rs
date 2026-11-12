@@ -15,8 +15,8 @@
 //! Every route of the tree is behind the origin check and carries the session when there is one.
 
 pub(crate) mod client;
-mod server;
-mod settings;
+pub(crate) mod server;
+pub(crate) mod settings;
 
 use std::sync::Arc;
 

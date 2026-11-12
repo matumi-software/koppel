@@ -1,0 +1,24 @@
+{
+  "requests": [
+    {
+      "id": "req-1",
+      "clientName": "bench-laptop",
+      "from": "192.168.1.30",
+      "requestedAt": "2026-01-01T08:31:00Z",
+      "expiresAt": "2026-01-01T08:41:00Z",
+      "state": "waiting",
+      "message": null
+    },
+    {
+      "id": "req-2",
+      "clientName": "guest",
+      "from": "192.168.1.31",
+      "requestedAt": "2026-01-01T08:32:00Z",
+      "expiresAt": "2026-01-01T08:42:00Z",
+      "state": "denied",
+      "message": "Three wrong codes."
+    }
+  ],
+  "budgetExhausted": false,
+  "window": { "open": true, "alwaysOpen": false, "until": "2026-01-01T08:40:00Z" }
+}

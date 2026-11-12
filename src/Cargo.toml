@@ -113,6 +113,9 @@ time = { version = "0.3.55", features = ["serde-well-known"] }
 # here through h2 and serde_json's `preserve_order`.
 indexmap = { version = "2.14.2", features = ["serde"] }
 ring = "0.17.14"
+# TypeScript types for the wire, generated from the Rust types the API sends and reads (MIT). No
+# default features: no export to disk from the derive, koppel-web's `wire` test writes the one file.
+ts-rs = { version = "12.0.1", default-features = false, features = ["serde-compat", "no-serde-warnings"] }
 # Wiping a secret when it is dropped (koppel-config's `Secret`). zeroize (MIT OR Apache-2.0, RustCrypto) is already here
 # through the crypto crates.
 zeroize = "1.9.1"

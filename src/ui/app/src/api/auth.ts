@@ -1,23 +1,12 @@
-import { RejectedError } from './http';
+import type { AuthState, ChangeRequest, PasswordRequest } from './generated/wire';
+import { readJson, RejectedError } from './http';
 
-/**
- * Mirrors Koppel.Login.UiAuthState: whether this browser is signed in, whether a password exists yet,
- * and while none does, whether the first one may still be set and until when (ISO time; past once closed).
- */
-export interface AuthState {
-  signedIn: boolean;
-  passwordSet: boolean;
-  machineName: string;
-  setupOpen: boolean;
-  /** Setup asks for the one-time token the server logs (Linux and Docker, with the UI open beyond this machine). */
-  setupTokenRequired: boolean;
-  setupUntil: string | null;
-}
+export type { AuthState } from './generated/wire';
 
 export async function getAuthState(): Promise<AuthState> {
   const response = await fetch('/api/auth/state');
   if (!response.ok) throw new Error(`Could not check the sign-in (${response.status}).`);
-  return (await response.json()) as AuthState;
+  return readJson<AuthState>(response);
 }
 
 /**
@@ -25,7 +14,7 @@ export async function getAuthState(): Promise<AuthState> {
  * uiFetch: a 401 here means a wrong password, not an expired session. A refusal carries the server's
  * own sentence, ready to show.
  */
-async function post(url: string, body?: unknown): Promise<void> {
+async function post(url: string, body?: PasswordRequest | ChangeRequest): Promise<void> {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'X-Koppel-UI': '1', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
@@ -34,7 +23,7 @@ async function post(url: string, body?: unknown): Promise<void> {
   if (response.status === 204) return;
   let message = `the server answered ${response.status}.`;
   try {
-    const problem = (await response.json()) as { error?: string };
+    const problem = await readJson<{ error?: string }>(response);
     if (problem.error) message = problem.error;
   } catch {
     // Not our JSON; keep the generic message.

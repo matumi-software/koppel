@@ -1,0 +1,18 @@
+[
+  {
+    "id": "client-1",
+    "name": "bench-laptop",
+    "createdAt": "2026-01-01T08:00:00Z",
+    "lastSeen": "2026-01-01T08:20:00Z",
+    "hasNextCertificate": true,
+    "hasSecret": true
+  },
+  {
+    "id": "client-2",
+    "name": "old-client",
+    "createdAt": "2025-12-01T08:00:00Z",
+    "lastSeen": null,
+    "hasNextCertificate": false,
+    "hasSecret": false
+  }
+]

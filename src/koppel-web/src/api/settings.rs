@@ -6,14 +6,16 @@ use axum::response::{IntoResponse, Response};
 use koppel_config::files::{KoppelSettings, Role};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use ts_rs::TS;
 
 use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::{self, JsonBody};
 use crate::state::SettingsApi;
 
 /// A partial change to the settings. A field left out or null stays as it is.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct SettingsPatch {
     #[serde(default)]
     role: Option<Role>,
@@ -205,12 +207,14 @@ pub(crate) async fn checks(State(app): State<SettingsApi>) -> Response {
     json::ok(&checks)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
-struct SystemInfo<'a> {
+pub(crate) struct SystemInfo<'a> {
     name: &'a str,
     version: &'a str,
     #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
     started_at: OffsetDateTime,
     role: Role,
     ui_port: u16,

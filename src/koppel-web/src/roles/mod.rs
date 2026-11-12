@@ -14,6 +14,7 @@ mod usb;
 
 use serde::Serialize;
 use time::OffsetDateTime;
+use ts_rs::TS;
 
 pub use skakel::{SkakelClientRole, SkakelServerRole};
 pub(crate) use usb::UsbActivity;
@@ -31,14 +32,17 @@ pub enum RoleError {
 }
 
 /// One registered client, as the server's UI lists it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct ClientView {
     pub id: String,
     pub name: String,
     #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
     pub last_seen: Option<OffsetDateTime>,
     /// It has the fingerprint of the certificate prepared for a handover.
     pub has_next_certificate: bool,
@@ -47,7 +51,8 @@ pub struct ClientView {
 }
 
 /// A client just added, with its secret.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct NewClient {
     pub client_id: String,
@@ -56,12 +61,14 @@ pub struct NewClient {
 }
 
 /// The server's certificate, and the next one while a handover is under way.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct KeysView {
     pub fingerprint: String,
     pub next_fingerprint: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
     pub next_prepared_at: Option<OffsetDateTime>,
 }
 
@@ -75,7 +82,8 @@ pub struct Switched {
 
 /// Whether the server takes new pairing requests. Skakel 0.3.0 takes them only while a person at
 /// the server has opened a window.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingWindowView {
     pub open: bool,
@@ -84,6 +92,7 @@ pub struct PairingWindowView {
     pub always_open: bool,
     /// When the window closes by itself. `None` when it is closed.
     #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
     pub until: Option<OffsetDateTime>,
 }
 
@@ -98,7 +107,8 @@ impl PairingWindowView {
 }
 
 /// The pairing window and the requests waiting on the server.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingOverview {
     pub requests: Vec<PairingRequestView>,
@@ -119,22 +129,26 @@ impl PairingOverview {
 }
 
 /// One pairing request on the server.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingRequestView {
     pub id: String,
     pub client_name: String,
     pub from: String,
     #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
     pub requested_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
     pub expires_at: OffsetDateTime,
     pub state: RequestState,
     pub message: Option<String>,
 }
 
 /// Where a pairing request on the server stands. Skakel 0.3.0 words it as `waiting` or `denied`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum RequestState {
     Waiting,
@@ -173,7 +187,8 @@ pub enum RegisterError {
 }
 
 /// How a connection test ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum Outcome {
     Ok,
@@ -219,7 +234,8 @@ impl Outcome {
 }
 
 /// How a connection test ended: a fixed set, with fixed wording.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionTest {
     pub ok: bool,
@@ -244,7 +260,8 @@ impl ConnectionTest {
 }
 
 /// A server found on the local network.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredServer {
     pub name: String,
@@ -258,7 +275,8 @@ pub struct DiscoveredServer {
 }
 
 /// Where the client's pairing stands.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingStatus {
     pub state: PairingState,
@@ -267,12 +285,14 @@ pub struct PairingStatus {
     pub code: Option<String>,
     pub message: Option<String>,
     #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
     pub expires_at: Option<OffsetDateTime>,
     pub server_fingerprint: Option<String>,
 }
 
 /// Where the client's pairing stands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum PairingState {
     #[default]

@@ -1,13 +1,13 @@
 import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ClientView, ServerKeysView } from '@/api/server';
+import type { ClientView, KeysView } from '@/api/server';
 import { ServerKeys } from '@/server/server-keys';
 import { accepted, json, mockFetch, renderApp } from './harness';
 
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
 const next = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
-const keys: ServerKeysView = { fingerprint, nextFingerprint: null, nextPreparedAt: null };
+const keys: KeysView = { fingerprint, nextFingerprint: null, nextPreparedAt: null };
 const client = (name: string, hasNextCertificate: boolean): ClientView => ({
   id: `client-${name}`,
   name,

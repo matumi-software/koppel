@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, Caption, Card, FirstRunShell, Note, PageHead, RoleCards, Row, SetupChecks, Steps } from '@koppel/react-ui';
-import type { KoppelRole } from '@/api/settings';
+import type { Role } from '@/api/settings';
 import { roleOptions } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
 import { useMachineName } from '@/shared/use-machine-name';
@@ -15,7 +15,7 @@ export function SetupPage({ locked }: { locked: boolean }) {
   const host = useMachineName();
   const { query, requestSetup, setup } = useSettings();
   const checks = useQuery(systemChecksOptions());
-  const [role, setRole] = useState<KoppelRole | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
   const chosen = role ?? query.data?.role ?? 'server';
   const pending = setup.isPending;
   const failure = setup.failure;

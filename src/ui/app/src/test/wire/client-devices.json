@@ -1,0 +1,30 @@
+{
+  "link": "connected",
+  "linkMessage": null,
+  "devices": [
+    {
+      "device": {
+        "busId": "1-1.4",
+        "vidPid": "046d:c52b",
+        "name": "USB Receiver",
+        "manufacturer": "Logitech",
+        "speed": "USB 2.0 (480 Mbit/s)",
+        "state": "shared",
+        "attachedTo": null,
+        "attachedSince": null,
+        "fault": null,
+        "serial": null,
+        "driver": null,
+        "interfaces": ["HID (keyboard, mouse, game pad)"]
+      },
+      "attachedHere": true,
+      "port": 0,
+      "attachedSince": "2026-01-01T08:15:00Z",
+      "fault": null,
+      "attachedVia": null
+    }
+  ],
+  "unavailable": null,
+  "gateway": true,
+  "gatewayFault": "Port 3240 is taken."
+}

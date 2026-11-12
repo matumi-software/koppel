@@ -1,11 +1,26 @@
 /** The server refused the request. The message is ready to show after "Not saved: ". */
 export class RejectedError extends Error {}
 
+/** The parts of a 400 validation problem the UI reads. */
+interface Problem {
+  errors?: Record<string, string[]>;
+}
+
+/**
+ * The body of an answer as the type the caller expects. Every caller names a type from
+ * `generated/wire.ts`, so a payload change in Rust fails the typecheck here; the browser does not
+ * check the JSON itself.
+ */
+export async function readJson<T>(response: Response): Promise<T> {
+  const body: T = await response.json();
+  return body;
+}
+
 /** Reads the first validation message from a 400 problem response, or a generic one. */
 export async function rejection(response: Response): Promise<RejectedError> {
   if (response.status === 400) {
     try {
-      const problem = (await response.json()) as { errors?: Record<string, string[]> };
+      const problem = await readJson<Problem>(response);
       const first = Object.values(problem.errors ?? {})[0]?.[0];
       if (first) return new RejectedError(first);
     } catch {
@@ -46,7 +61,7 @@ export async function getJson<T>(url: string): Promise<T> {
   if (!response.ok) {
     throw new Error(`Could not load ${url} (${response.status}).`);
   }
-  return (await response.json()) as T;
+  return readJson<T>(response);
 }
 
 /**

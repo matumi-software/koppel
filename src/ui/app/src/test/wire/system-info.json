@@ -1,0 +1,11 @@
+{
+  "name": "bench-pc",
+  "version": "1.0.0",
+  "startedAt": "2026-01-01T00:00:00Z",
+  "role": "server",
+  "uiPort": 5240,
+  "httpsPort": 5241,
+  "fingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+  "os": "test",
+  "tray": false
+}

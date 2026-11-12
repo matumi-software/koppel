@@ -11,8 +11,8 @@ import {
   type PairingOverview,
   type PairingStatus,
 } from '@/api/pairing';
-import { cancelCertificate, prepareCertificate, revokeClient, switchCertificate, type ClientView, type ServerKeysView } from '@/api/server';
-import { patchSettings, type KoppelRole, type KoppelSettings } from '@/api/settings';
+import { cancelCertificate, prepareCertificate, revokeClient, switchCertificate, type ClientView, type KeysView } from '@/api/server';
+import { patchSettings, type Role, type KoppelSettings } from '@/api/settings';
 import { attachDevice, detachDevice, setShared, type ClientDevices, type ServerDevices } from '@/api/usb';
 import {
   clientDevicesOptions,
@@ -47,7 +47,7 @@ type Setting = keyof KoppelSettings;
  * A change to one setting, or first run, which sends the role and setupComplete in one PATCH so
  * they are one pending change.
  */
-export type SettingsAction = { [K in Setting]: { type: 'set'; setting: K; value: KoppelSettings[K] } }[Setting] | { type: 'setup'; role: KoppelRole };
+export type SettingsAction = { [K in Setting]: { type: 'set'; setting: K; value: KoppelSettings[K] } }[Setting] | { type: 'setup'; role: Role };
 
 /** One setting changed to a value. */
 export const setting = <K extends Setting>(key: K, value: KoppelSettings[K]) => ({ type: 'set', setting: key, value }) as SettingsAction;
@@ -153,7 +153,7 @@ export const pendingDomains = {
     send: ({ id }) => revokeClient(id),
   }),
 
-  serverKeys: domain<ServerKeysAction, ServerKeysView>({
+  serverKeys: domain<ServerKeysAction, KeysView>({
     queryKey: serverKeysOptions().queryKey,
     timeoutMs: confirmTimeoutMs,
     keyOf: (action) => action.type,

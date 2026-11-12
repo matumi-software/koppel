@@ -1,0 +1,1 @@
+{ "ok": false, "outcome": "certificateMismatch", "message": "The server's certificate does not match the fingerprint. Copy the fingerprint from the server's Clients section again." }

@@ -47,6 +47,7 @@ pnpm --filter koppel.ui dev                          # https://localhost:61040, 
 cargo build --workspace
 cargo test --workspace                              # runs the contract tests too: each starts koppel on a free port
 cargo test -p koppel --test contract                # just the contract tests
+KOPPEL_WRITE_WIRE=1 cargo test -p koppel-web wire    # after changing a type the API sends or reads: rewrites ui/app/src/api/generated/wire.ts
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo deny check                                    # licences, advisories and sources, before a pull request (cargo install cargo-deny)

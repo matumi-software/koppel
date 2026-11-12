@@ -1,11 +1,12 @@
 //! The USB lines of the system checks the UI shows: whether this machine can share and attach.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{HostKind, Platform};
 
 /// One line of the system checks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemCheck {
     pub id: String,

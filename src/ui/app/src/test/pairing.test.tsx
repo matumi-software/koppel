@@ -1,10 +1,12 @@
 import { act, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useActivity } from '@/activity/activity-context';
+import type { ConnectionView } from '@/api/client';
 import type { DiscoveredServer, PairingStatus } from '@/api/pairing';
 import { NearbyServers } from '@/client/nearby-servers';
 import { PairingRequests } from '@/server/pairing-requests';
 import { accepted, json, mockFetch, renderApp } from './harness';
+import { systemInfo } from './wire';
 
 const fp = (digit: string) => Array.from({ length: 32 }, () => digit.repeat(2)).join(':');
 const server = (name: string, digit: string): DiscoveredServer => ({
@@ -18,14 +20,14 @@ const server = (name: string, digit: string): DiscoveredServer => ({
 });
 
 const idle: PairingStatus = { state: 'idle', serverName: null, serverUrl: null, code: null, message: null, expiresAt: null, serverFingerprint: null };
-const noConnection = { serverUrl: null, serverFingerprint: null, clientId: null, hasSecret: false };
+const noConnection: ConnectionView = { serverUrl: null, serverFingerprint: null, clientId: null, hasSecret: false, nextServerFingerprint: null };
 
-const routes = (servers: DiscoveredServer[], connection: unknown = noConnection, status: PairingStatus = idle) => ({
+const routes = (servers: DiscoveredServer[], connection: ConnectionView = noConnection, status: PairingStatus = idle) => ({
   'GET /api/client/discovery': () => json(servers),
   'GET /api/client/connection': () => json(connection),
   'GET /api/client/pairing': () => json(status),
   'GET /api/activity?max=200': () => json([]),
-  'GET /api/system/info': () => json({ name: 'bench-1' }),
+  'GET /api/system/info': () => json({ ...systemInfo, name: 'bench-1' }),
 });
 
 function ActivityLines() {
@@ -51,7 +53,7 @@ describe('nearby servers', () => {
   });
 
   it('warns when a server wears the name of the current connection with another fingerprint', async () => {
-    mockFetch(routes([server('lab-rack-3', 'b')], { serverUrl: 'https://lab-rack-3:5241', serverFingerprint: fp('a'), clientId: 'c', hasSecret: true }));
+    mockFetch(routes([server('lab-rack-3', 'b')], { serverUrl: 'https://lab-rack-3:5241', serverFingerprint: fp('a'), clientId: 'c', hasSecret: true, nextServerFingerprint: null }));
     renderApp(<NearbyServers locked={false} />);
 
     expect(await screen.findByText(/matches the server you are connected to, but the fingerprint is different/)).toBeTruthy();

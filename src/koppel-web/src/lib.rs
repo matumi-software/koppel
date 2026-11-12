@@ -28,6 +28,8 @@ mod tasks;
 pub mod tls;
 pub mod tray;
 mod ui;
+#[cfg(test)]
+mod wire;
 
 use axum::Router;
 use axum::routing::get;

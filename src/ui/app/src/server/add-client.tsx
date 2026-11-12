@@ -1,13 +1,13 @@
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, Card, CopyValue, Field, Form, LabeledValue, ModalDialog, Note, Row, useAnnounce } from '@koppel/react-ui';
-import { createClient, type CreatedClient } from '@/api/server';
+import { createClient, type NewClient } from '@/api/server';
 import { useServerErrors } from '@/errors';
 
 /** Server role: a name in, a client ID and secret out, shown once in a dialog and kept on the server for later. */
 export function AddClient({ locked, onAdded }: { locked: boolean; onAdded: (id: string) => void }) {
   const [name, setName] = useState('');
-  const [created, setCreated] = useState<CreatedClient>();
+  const [created, setCreated] = useState<NewClient>();
   const announce = useAnnounce();
   const add = useMutation({
     mutationFn: createClient,

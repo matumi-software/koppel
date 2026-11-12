@@ -1,48 +1,7 @@
-import type { DeviceState } from '@koppel/react-ui';
 import { getJson, sendChange } from './http';
+import type { ClientDevices, ServerDevices } from './generated/wire';
 
-/** Mirrors Koppel.Usb.DeviceView. */
-export interface DeviceView {
-  busId: string;
-  vidPid: string;
-  name: string;
-  manufacturer: string | null;
-  speed: string;
-  state: Exclude<DeviceState, 'pending'>;
-  attachedTo: string | null;
-  attachedSince: string | null;
-  fault: string | null;
-  serial: string | null;
-  driver: string | null;
-  interfaces: string[] | null;
-}
-
-export interface ServerDevices {
-  devices: DeviceView[];
-  unavailable: string | null;
-}
-
-export interface ClientDeviceView {
-  device: DeviceView;
-  attachedHere: boolean;
-  /** The port this machine's kernel or driver attached it on. Null for another gateway attach. */
-  port: number | null;
-  attachedSince: string | null;
-  fault: string | null;
-  /** Where a gateway attach came from, such as 172.17.0.1. */
-  attachedVia: string | null;
-}
-
-export type LinkStatus = 'unconfigured' | 'connecting' | 'connected' | 'error';
-
-export interface ClientDevices {
-  link: LinkStatus;
-  linkMessage: string | null;
-  devices: ClientDeviceView[];
-  unavailable: string | null;
-  /** True while the plain USB/IP gateway listens, for a driver such as usbip-win2 on the host. */
-  gateway: boolean;
-}
+export type { ClientDeviceView, ClientDevices, DeviceState, DeviceView, LinkState, ServerDevices } from './generated/wire';
 
 export const getServerDevices = () => getJson<ServerDevices>('/api/server/devices');
 

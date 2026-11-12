@@ -22,7 +22,7 @@ fi
 image="$(docker compose -f "$here/docker-compose.yml" config --images)"
 
 echo "Building $image..."
-docker build -f "$src/koppel/Dockerfile" -t "$image" "$src"
+docker build -f "$here/Dockerfile" -t "$image" "$src"
 
 echo "Copying $image to $target..."
 docker save "$image" | gzip | ssh "$target" 'gunzip | docker load'

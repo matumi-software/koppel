@@ -269,7 +269,7 @@ volume.
 
 To run your own build instead, with SSH access to the machine: `bash src/installer/docker/deploy.sh
 user@host`. It reads the image name from `docker-compose.yml`, builds exactly that image here from
-`src/koppel/Dockerfile`, copies it over SSH, and starts it with that compose file. The compose file's `pull_policy: missing`
+`src/installer/docker/Dockerfile`, copies it over SSH, and starts it with that compose file. The compose file's `pull_policy: missing`
 means an image already on the machine, such as one `deploy.sh` copied, is never replaced by a pull
 from Docker Hub.
 
@@ -374,7 +374,7 @@ To release:
 5. Build and push the image for all three platforms, from `src/`, with the version and `latest`:
 
    ```sh
-   docker buildx build -f koppel/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 \
+   docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 \
      -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
    ```
 6. Build the three `.deb` files with `src/installer/linux/build.ps1` and `Koppel-Setup.exe` with
@@ -390,7 +390,7 @@ third-party crate pinned in `[workspace.dependencies]` with a note on its licenc
 
 | Crate | What |
 |---|---|
-| `koppel` | The program, and the `Dockerfile` for the Linux binaries, packages and image |
+| `koppel` | The program |
 | `koppel-config` | The files on disk: the config files with 0.1.x's JSON and write rules, the secret files, the server certificate, the folder hardening, and the conversion of a 0.1.x install (see "Config files in Rust") |
 | `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, the plain HTTP redirect, `/healthz`, the UI, and the UI's server side: sign-in, the REST API and the live push (see "The UI's server side in Rust") |
 | `koppel-contract` | Contract tests that drive a running Koppel over HTTPS (see "Contract tests" below). Not shipped |
@@ -496,7 +496,7 @@ earlier (501c9f6), which is why its first row says 17.4 MB. The Windows figures 
 
 ### Linux packages and the image in Rust
 
-`src/koppel/Dockerfile` builds Koppel for Linux with Docker alone (#89, #90). It builds the UI
+`src/installer/docker/Dockerfile` builds Koppel for Linux with Docker alone (#89, #90). It builds the UI
 with pnpm in the node image, then cross-compiles static musl binaries with
 [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild), which uses Zig as the C compiler and
 linker (ring has C and assembly), for `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` and

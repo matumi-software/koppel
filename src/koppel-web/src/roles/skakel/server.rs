@@ -39,12 +39,17 @@ use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityRef};
 use crate::push::{self, Push};
 use crate::roles::{
     Approval, ClientView, Fut, KeysView, NewClient, PairingOverview, PairingRequestView,
-    PairingWindowView, RegisterError, RoleError, ServerRole, Switched,
+    PairingWindowView, RegisterError, RequestState, RoleError, ServerRole, Switched,
 };
 use crate::surface::is_grpc_path;
 
 /// Skakel's app id for Koppel.
 pub(crate) const APP_ID: &str = "koppel";
+
+/// Skakel's server did not start.
+#[derive(Debug, thiserror::Error)]
+#[error("Skakel's server could not start: {0}")]
+pub struct ServerStartError(#[source] skakel_server::ServerError);
 
 /// What the server is made with.
 pub(crate) struct ServerParts {
@@ -97,7 +102,7 @@ pub struct SkakelServerRole {
 
 impl SkakelServerRole {
     /// Starts Skakel's server over `secrets.json`, mounted on the web ports.
-    pub(crate) async fn start(parts: ServerParts) -> Result<Arc<Self>, String> {
+    pub(crate) async fn start(parts: ServerParts) -> Result<Arc<Self>, ServerStartError> {
         let wiring = Arc::new(Wiring {
             push: parts.push.clone(),
             activity: parts.activity.clone(),
@@ -248,7 +253,7 @@ impl SkakelServerRole {
 
 /// Builds and starts Skakel's server, mounted: it binds nothing, and the web ports serve it.
 /// Discovery is Koppel's own (see `announcer.rs`).
-async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<Running, String> {
+async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<Running, ServerStartError> {
     let server = SkakelServerBuilder::new(APP_ID, &parts.version, parts.store.clone())
         .name(&parts.name)
         .certificate_host_name(&parts.name)
@@ -261,7 +266,7 @@ async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<Running, Str
         .routes(remote::routes(parts.devices.clone()))
         .start_mounted(parts.listen)
         .await
-        .map_err(|e| format!("Skakel's server could not start: {e}"))?;
+        .map_err(ServerStartError)?;
     let events = tokio::spawn(read_events(server.subscribe(), Arc::downgrade(wiring)));
     Ok(Running { server, events })
 }
@@ -300,14 +305,17 @@ impl Wiring {
                     requests: overview
                         .requests
                         .iter()
-                        .filter(|r| !(r.state == "denied" && refused.contains(&r.id)))
+                        .filter(|r| {
+                            !(RequestState::of(&r.state) == RequestState::Denied
+                                && refused.contains(&r.id))
+                        })
                         .map(|r| PairingRequestView {
                             id: r.id.clone(),
                             client_name: r.client_name.clone(),
                             from: r.from.clone(),
                             requested_at: r.requested_at,
                             expires_at: r.expires_at,
-                            state: r.state.clone(),
+                            state: RequestState::of(&r.state),
                             message: r.message.clone(),
                         })
                         .collect(),
@@ -405,10 +413,6 @@ fn window_view(window: &PairingWindow) -> PairingWindowView {
     }
 }
 
-fn failed(e: skakel_server::ServerError) -> RoleError {
-    RoleError(e.to_string())
-}
-
 impl ServerRole for SkakelServerRole {
     /// The certificate the web ports present, which is Skakel's: a save that switches it replaces
     /// both. Read from there, so it answers while Skakel's server starts again or stops.
@@ -443,7 +447,7 @@ impl ServerRole for SkakelServerRole {
                 .clients_handle()
                 .register(name)
                 .await
-                .map_err(|e| RegisterError::Failed(failed(e)))?;
+                .map_err(|e| RegisterError::Failed(e.into()))?;
             Ok(NewClient {
                 client_id: client.client_id,
                 client_secret: client.client_secret,
@@ -453,7 +457,12 @@ impl ServerRole for SkakelServerRole {
     }
 
     fn revoke<'a>(&'a self, id: &'a str) -> Fut<'a, Result<bool, RoleError>> {
-        Box::pin(async move { self.clients_handle().revoke(id).await.map_err(failed) })
+        Box::pin(async move {
+            self.clients_handle()
+                .revoke(id)
+                .await
+                .map_err(RoleError::from)
+        })
     }
 
     fn rotate_secret<'a>(&'a self, id: &'a str) -> Fut<'a, Result<Option<String>, RoleError>> {
@@ -462,7 +471,7 @@ impl ServerRole for SkakelServerRole {
                 .clients_handle()
                 .rotate_secret(id)
                 .await
-                .map_err(failed)?;
+                .map_err(RoleError::from)?;
             if secret.is_some() {
                 // Nothing the list shows changes, so Skakel does not say; 0.1.x pushed it anyway.
                 self.push_clients();
@@ -480,7 +489,7 @@ impl ServerRole for SkakelServerRole {
             self.certificates_handle()
                 .prepare_next_certificate()
                 .await
-                .map_err(failed)
+                .map_err(RoleError::from)
         })
     }
 
@@ -493,7 +502,7 @@ impl ServerRole for SkakelServerRole {
             let cancelled = certificates
                 .cancel_next_certificate()
                 .await
-                .map_err(failed)?;
+                .map_err(RoleError::from)?;
             Ok(cancelled.then_some(next))
         })
     }
@@ -504,7 +513,7 @@ impl ServerRole for SkakelServerRole {
                 .certificates_handle()
                 .switch_certificate()
                 .await
-                .map_err(failed)?;
+                .map_err(RoleError::from)?;
             Ok(switched.map(|s| Switched {
                 to: s.to,
                 not_received: s.not_received,

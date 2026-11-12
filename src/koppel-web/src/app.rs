@@ -1,7 +1,6 @@
 //! Everything the UI's server side holds, started from the config files as 0.1.x starts them, with
 //! the server and client roles on Skakel and the USB layer behind them.
 
-use std::fmt;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,6 +16,7 @@ use skakel_client::{Browser, BrowserOptions};
 use skakel_wire::SkakelApp;
 use tokio::sync::watch;
 
+use crate::WebError;
 use crate::access::{UiAccess, UiReach};
 use crate::activity::ActivityLog;
 use crate::api::client::ConnectionView;
@@ -26,7 +26,7 @@ use crate::guard::RateLimit;
 use crate::host::Host;
 use crate::push::{self, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
-use crate::roles::skakel::{APP_ID, SecretsStore, ServerParts, SkakelLinks};
+use crate::roles::skakel::{APP_ID, SecretsStore, ServerParts, ServerStartError, SkakelLinks};
 use crate::roles::{
     ClientRole, ServerRole, SkakelClientRole, SkakelServerRole, UsbActivity, UsbClient,
     UsbClientRole, UsbServer, UsbServerRole,
@@ -113,27 +113,20 @@ impl UsbOptions {
 }
 
 /// Why the app could not start. The message names the file or the setting and what to do.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum StartError {
-    File(ConfigFileError),
-    Other(String),
-}
-
-impl fmt::Display for StartError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::File(e) => e.fmt(f),
-            Self::Other(e) => f.write_str(e),
-        }
-    }
-}
-
-impl std::error::Error for StartError {}
-
-impl From<ConfigFileError> for StartError {
-    fn from(e: ConfigFileError) -> Self {
-        Self::File(e)
-    }
+    #[error(transparent)]
+    File(#[from] ConfigFileError),
+    /// `secrets.json` held nothing the server could start from.
+    #[error("{0}")]
+    Secrets(String),
+    #[error(transparent)]
+    Tls(#[from] WebError),
+    #[error(transparent)]
+    Skakel(#[from] ServerStartError),
+    /// The session key could not be read or made.
+    #[error("{0}")]
+    SessionKey(String),
 }
 
 /// What runs behind the roles, stopped in order when Koppel stops.
@@ -221,10 +214,9 @@ impl App {
         // remote device list.
         let store = SecretsStore::open(server_secrets.clone(), &host.name)
             .await
-            .map_err(StartError::Other)?;
+            .map_err(StartError::Secrets)?;
         let certificate = store.slot();
-        let own_acceptor =
-            tls::acceptor(certificate.clone()).map_err(|e| StartError::Other(e.to_string()))?;
+        let own_acceptor = tls::acceptor(certificate.clone())?;
         let usb_server = koppel_usb::UsbServer::new(koppel_usb::ServerDeps {
             host: usb.host.clone(),
             shared: devices.clone(),
@@ -254,8 +246,7 @@ impl App {
             token_per_minute: network.token_per_minute,
             pair_per_minute: network.pair_per_minute,
         })
-        .await
-        .map_err(StartError::Other)?;
+        .await?;
         skakel.follow(&settings);
         let own_fingerprint: Arc<dyn Fn() -> String + Send + Sync> = {
             let skakel = skakel.clone();
@@ -324,7 +315,7 @@ impl App {
         usb_client.start().await?;
         gateway.start().await;
 
-        let key = CookieKey::load(&paths.keys, &secrets).map_err(StartError::Other)?;
+        let key = CookieKey::load(&paths.keys, &secrets).map_err(StartError::SessionKey)?;
         let address = format!("https://{}:{}", host.name, host.ui_port);
         let auth = UiAuth::new(ui_auth.clone(), setup_window, address, key);
 

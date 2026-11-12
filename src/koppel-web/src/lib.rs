@@ -28,8 +28,6 @@ pub mod tls;
 pub mod tray;
 mod ui;
 
-use std::fmt;
-
 use axum::Router;
 use axum::routing::get;
 
@@ -56,21 +54,12 @@ async fn healthz() -> &'static str {
 }
 
 /// Why the web server could not be set up.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum WebError {
     /// rustls refused the TLS settings.
-    Tls(rustls::Error),
+    #[error("TLS could not be set up: {0}")]
+    Tls(#[source] rustls::Error),
     /// A certificate could not be made.
+    #[error("the certificate could not be made: {0}")]
     Certificate(String),
 }
-
-impl fmt::Display for WebError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Tls(e) => write!(f, "TLS could not be set up: {e}"),
-            Self::Certificate(e) => write!(f, "the certificate could not be made: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for WebError {}

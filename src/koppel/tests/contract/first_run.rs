@@ -21,6 +21,7 @@ fn state_fields() -> &'static [(&'static str, Kind)] {
         ("passwordSet", Kind::Bool),
         ("machineName", Kind::Str),
         ("setupOpen", Kind::Bool),
+        ("setupTokenRequired", Kind::Bool),
         ("setupUntil", Kind::OptTime),
     ]
 }
@@ -234,4 +235,79 @@ async fn setup_login_and_password_change_share_a_rate_limit_per_address() {
         .expect(429);
     // The UI polls the state, which is not limited.
     anonymous.get("/api/auth/state").await.expect(200);
+}
+
+/// On Linux and in Docker a UI that is open beyond this machine asks for the one-time token the log
+/// shows before it takes the first password. (Windows never asks, and has no log to read.)
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn setup_needs_the_token_from_the_log_when_the_ui_is_open_beyond_this_machine() {
+    let fresh = Single::start(Options::default().setting("KOPPEL_UI_ALLOW_FROM", "lan")).await;
+    let anonymous = fresh.target.anonymous();
+    let before = state(&anonymous).await;
+    assert_eq!(before["setupOpen"], json!(true));
+    assert_eq!(before["setupTokenRequired"], json!(true));
+
+    // The log has it, once, at Warning.
+    let log = fresh.instance.log();
+    let token = log
+        .split("The setup token is ")
+        .nth(1)
+        .and_then(|rest| rest.split(':').next())
+        .expect("the log says the setup token")
+        .to_owned();
+    assert_eq!(token.len(), 32, "{log}");
+    assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // Without it, or with another, setup is refused before the password is looked at.
+    for refused in [
+        json!({ "password": password() }),
+        json!({ "password": password(), "setupToken": "" }),
+        json!({ "password": password(), "setupToken": "0".repeat(32) }),
+        json!({ "password": password(), "setupToken": token.to_uppercase() }),
+        json!({ "password": "short" }),
+    ] {
+        let answer = anonymous.post("/api/auth/setup", refused).await.expect(403);
+        assert!(answer.error().contains("setup token"), "{}", answer.text());
+    }
+    assert_eq!(state(&anonymous).await["passwordSet"], json!(false));
+
+    // With it, the password rules still apply, and the right one sets the password.
+    anonymous
+        .post(
+            "/api/auth/setup",
+            json!({ "password": "short", "setupToken": token }),
+        )
+        .await
+        .expect(400);
+    anonymous
+        .post(
+            "/api/auth/setup",
+            json!({ "password": password(), "setupToken": token }),
+        )
+        .await
+        .expect(204);
+    let after = state(&anonymous).await;
+    assert_eq!(after["passwordSet"], json!(true));
+    // Spent: setup is over, so a second try meets the password that is set.
+    anonymous
+        .post(
+            "/api/auth/setup",
+            json!({ "password": OTHER_PASSWORD, "setupToken": token }),
+        )
+        .await
+        .expect(409);
+}
+
+/// With the UI local only there is nothing to read the token from, so there is none.
+#[tokio::test]
+async fn setup_with_the_ui_local_only_asks_for_no_token() {
+    let fresh = Single::start(Options::default()).await;
+    let anonymous = fresh.target.anonymous();
+    assert_eq!(state(&anonymous).await["setupTokenRequired"], json!(false));
+    assert!(!fresh.instance.log().contains("The setup token is"));
+    anonymous
+        .post("/api/auth/setup", json!({ "password": password() }))
+        .await
+        .expect(204);
 }

@@ -317,7 +317,16 @@ impl App {
 
         let key = CookieKey::load(&paths.keys, &secrets).map_err(StartError::SessionKey)?;
         let address = format!("https://{}:{}", host.name, host.ui_port);
-        let auth = UiAuth::new(ui_auth.clone(), setup_window, address, key);
+        // A native Windows install is local only and a service has no console to read a token from,
+        // so there the first caller within Ui:AllowFrom still sets the password.
+        let setup_token_required = !cfg!(windows) && reach != UiReach::Local;
+        let auth = UiAuth::new(
+            ui_auth.clone(),
+            setup_window,
+            address,
+            setup_token_required,
+            key,
+        );
 
         let stoppers: Vec<Box<dyn Fn() + Send + Sync>> = vec![
             Box::new({

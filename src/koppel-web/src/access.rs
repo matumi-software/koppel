@@ -145,11 +145,23 @@ pub(crate) fn canonical(address: IpAddr) -> IpAddr {
     }
 }
 
-/// What a caller's limits count: one whole address, an IPv4-mapped IPv6 address counting as its IPv4
-/// address, as Skakel's limits do. Not an IPv6 /64: every host on a network shares it, so one host's
-/// wrong passwords would lock all of them out of the UI.
+/// What a caller's rate limits count: one whole address, an IPv4-mapped IPv6 address counting as its
+/// IPv4 address, as Skakel's limits do. The sign-in lock counts by [`throttle_key`] instead.
 pub(crate) fn address_key(address: IpAddr) -> String {
     canonical(address).to_string()
+}
+
+/// What the sign-in lock counts: an IPv4 address whole, an IPv6 address as its /64. A host on a /64
+/// owns the whole prefix and can take any address in it, so counting whole addresses would let one
+/// neighbour rotate past the lock. The price is that a shared /64 shares its lock.
+pub(crate) fn throttle_key(address: IpAddr) -> String {
+    match canonical(address) {
+        IpAddr::V6(v6) => {
+            let [a, b, c, d, ..] = v6.segments();
+            format!("{}/64", std::net::Ipv6Addr::new(a, b, c, d, 0, 0, 0, 0))
+        }
+        v4 => v4.to_string(),
+    }
 }
 
 pub(crate) fn in_network(address: IpAddr, network: IpAddr, prefix: u8) -> bool {
@@ -213,6 +225,19 @@ mod tests {
     fn a_caller_is_its_whole_address() {
         assert_eq!(address_key(ip("::ffff:192.168.1.5")), "192.168.1.5");
         assert_eq!(address_key(ip("2001:db8::1")), "2001:db8::1");
+        assert_eq!(throttle_key(ip("::ffff:192.168.1.5")), "192.168.1.5");
+        assert_eq!(
+            throttle_key(ip("2001:db8:1:2:aaaa::1")),
+            "2001:db8:1:2::/64"
+        );
+        assert_eq!(
+            throttle_key(ip("2001:db8:1:2::1")),
+            throttle_key(ip("2001:db8:1:2:ffff:ffff:ffff:ffff"))
+        );
+        assert_ne!(
+            throttle_key(ip("2001:db8:1:2::1")),
+            throttle_key(ip("2001:db8:1:3::1"))
+        );
         assert!(in_network(ip("10.0.0.255"), ip("10.0.0.0"), 24));
         assert!(!in_network(ip("10.0.1.0"), ip("10.0.0.0"), 24));
     }

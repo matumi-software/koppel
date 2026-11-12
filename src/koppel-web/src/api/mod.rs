@@ -143,7 +143,7 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
         .route_layer(signed_in())
         .route_layer(role(RoleScope::Client));
 
-    Router::new()
+    let api = Router::new()
         .merge(protected)
         .merge(server)
         .merge(client)
@@ -152,5 +152,7 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
         // Anonymous routes see the session too, when there is one. The origin check is outside it, so
         // a request from another site is turned away before its cookie is looked at.
         .layer(from_fn_with_state(app.auth.clone(), guard::session))
-        .layer(from_fn(guard::ui_origin))
+        .layer(from_fn(guard::ui_origin));
+    // Outermost, so a refusal carries it too.
+    guard::no_store(api)
 }

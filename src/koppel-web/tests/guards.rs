@@ -327,6 +327,121 @@ async fn the_origin_and_the_ui_header_guard_the_api_and_nothing_else() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn sec_fetch_site_decides_before_the_origin_is_compared() {
+    let (_dir, node) = start("server").await;
+    let ui = node.app.routers().ui;
+    let authority = format!("127.0.0.1:{}", node.port);
+    let get = |site: &str| {
+        Call::get("/api/auth/state", LOCAL)
+            .header(HOST, &authority)
+            .header("sec-fetch-site", site)
+    };
+
+    for site in ["same-origin", "none"] {
+        assert_eq!(get(site).status(&ui).await, StatusCode::OK, "{site}");
+    }
+    for site in ["cross-site", "same-site", "other"] {
+        assert_eq!(
+            get(site).status(&ui).await,
+            StatusCode::FORBIDDEN,
+            "{site}, even with an Origin that matches"
+        );
+        assert_eq!(
+            get(site)
+                .header(ORIGIN, &format!("https://{authority}"))
+                .status(&ui)
+                .await,
+            StatusCode::FORBIDDEN,
+            "{site} with an Origin that matches"
+        );
+    }
+    // A change that is same-origin still needs the UI header.
+    assert_eq!(
+        Call::post("/api/auth/login", LOCAL)
+            .header(HOST, &authority)
+            .header("sec-fetch-site", "same-origin")
+            .json(&json!({}))
+            .status(&ui)
+            .await,
+        StatusCode::FORBIDDEN
+    );
+    // No Sec-Fetch-Site: the Origin against the host, over HTTPS only, and a forwarded scheme does not help.
+    assert_eq!(
+        get("same-origin").status(&ui).await,
+        StatusCode::OK,
+        "the helper sends the header"
+    );
+    for origin in [
+        format!("http://{authority}"),
+        "https://elsewhere.example".to_owned(),
+    ] {
+        assert_eq!(
+            Call::get("/api/auth/state", LOCAL)
+                .header(HOST, &authority)
+                .header(ORIGIN, &origin)
+                .header("x-forwarded-proto", "https")
+                .status(&ui)
+                .await,
+            StatusCode::FORBIDDEN,
+            "{origin}"
+        );
+    }
+
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_answer_of_the_api_says_no_store_and_the_ui_files_keep_their_own_caching() {
+    let (_dir, node) = start("server").await;
+    let ui = node.app.routers().ui;
+    let authority = format!("127.0.0.1:{}", node.port);
+    let cache = |response: &Response<Body>| {
+        response
+            .headers()
+            .get("cache-control")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+
+    for (path, signed_in, origin) in [
+        ("/api/auth/state", false, None),
+        ("/api/settings", true, None),
+        ("/api/settings", false, None),
+        ("/api/server/identity", true, None),
+        ("/api/nothing/here", true, None),
+        ("/api/events", true, None),
+        ("/api/settings", true, Some("https://elsewhere.example")),
+    ] {
+        let mut call = Call::get(path, LOCAL).header(HOST, &authority);
+        if signed_in {
+            call = call.cookie(node.cookie());
+        }
+        if let Some(origin) = origin {
+            call = call.header(ORIGIN, origin);
+        }
+        let response = call.through(&ui).await;
+        assert_eq!(
+            cache(&response).as_deref(),
+            Some("no-store"),
+            "{path} ({})",
+            response.status()
+        );
+    }
+    let secret = Call::get("/api/server/clients/none/secret", LOCAL)
+        .header(HOST, &authority)
+        .cookie(node.cookie())
+        .through(&ui)
+        .await;
+    assert_eq!(cache(&secret).as_deref(), Some("no-store"));
+
+    // Not the API: the page keeps what the file server says about it.
+    let page = Call::get("/", LOCAL).through(&ui).await;
+    assert_ne!(cache(&page).as_deref(), Some("no-store"));
+
+    node.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn the_session_guards_every_api_route_that_is_not_anonymous() {
     let (_dir, node) = start("both").await;
     let ui = node.app.routers().ui;

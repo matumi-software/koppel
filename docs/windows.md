@@ -107,7 +107,7 @@ machine that also runs usbipd-win cannot use both at once.
 The UI asks for a password. The first time, whoever opens the UI sets it, within 10 minutes of
 Koppel starting (`KOPPEL_UI_SETUP_WINDOW_MINUTES`). After that the UI says setup has timed out: restart Koppel
 (**Restart Koppel** in the menu of the tray icon, `Restart-Service Koppel` from an elevated prompt, or `docker compose restart` for Docker Desktop) and
-open it again.
+open it again. (A Docker Desktop install runs the Linux image, so while `KOPPEL_UI_ALLOW_FROM` is not `local` its first password also needs the setup token from `docker compose logs koppel`; the native app needs none.)
 
 - Native install: the UI answers this machine only, so only someone at this machine can set it.
 - Docker Desktop: every caller looks like the same address, so `KOPPEL_UI_ALLOW_FROM` cannot keep the

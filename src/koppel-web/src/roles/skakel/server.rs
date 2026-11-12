@@ -36,7 +36,7 @@ use super::remote;
 use super::store::SecretsStore;
 use super::streams::{USB_STREAM, usb_handler};
 use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
-use crate::push::{self, Push};
+use crate::push::{Event, Push};
 use crate::roles::{
     Approval, ClientView, KeysView, NewClient, PairingOverview, PairingRequestView,
     PairingWindowView, RegisterError, RequestState, RoleError, Switched,
@@ -186,9 +186,7 @@ impl SkakelServerRole {
         // The new server has no pairing requests yet, and its pairing window is closed.
         let empty = PairingOverview::empty();
         *self.wiring.overview.locked() = empty.clone();
-        self.wiring
-            .push
-            .send(push::PAIRING_REQUESTS_CHANGED, &empty);
+        self.wiring.push.send(Event::PairingRequestsChanged(&empty));
         if let Some(old) = old {
             old.shut_down().await;
         }
@@ -233,7 +231,7 @@ impl SkakelServerRole {
     fn push_clients(&self) {
         self.wiring
             .push
-            .send(push::CLIENTS_CHANGED, &self.clients());
+            .send(Event::ClientsChanged(&self.clients()));
     }
 }
 
@@ -314,7 +312,7 @@ impl Wiring {
                     window: self.current_window(),
                 };
                 *self.overview.locked() = view.clone();
-                self.push.send(push::PAIRING_REQUESTS_CHANGED, &view);
+                self.push.send(Event::PairingRequestsChanged(&view));
             }
             ServerEvent::PairingWindow(window) => {
                 let view = {
@@ -322,16 +320,16 @@ impl Wiring {
                     overview.window = window_view(window);
                     overview.clone()
                 };
-                self.push.send(push::PAIRING_REQUESTS_CHANGED, &view);
+                self.push.send(Event::PairingRequestsChanged(&view));
             }
             ServerEvent::Decided(decision) => self.record(decision),
             ServerEvent::Clients(clients) => {
                 let list: Vec<ClientView> = clients.iter().map(client_view).collect();
-                self.push.send(push::CLIENTS_CHANGED, &list);
+                self.push.send(Event::ClientsChanged(&list));
             }
             ServerEvent::Certificates(certificates) => {
                 self.push
-                    .send(push::SERVER_KEYS_CHANGED, &keys_view(certificates));
+                    .send(Event::ServerKeysChanged(&keys_view(certificates)));
             }
             // Events a later Skakel adds say nothing the UI shows.
             _ => {}

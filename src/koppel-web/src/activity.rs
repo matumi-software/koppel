@@ -11,7 +11,7 @@ use ts_rs::TS;
 
 use tokio::sync::broadcast;
 
-use crate::push::{self, Push};
+use crate::push::{Event, Push};
 use crate::sync::Unpoisoned;
 
 /// How many entries the log keeps.
@@ -78,7 +78,7 @@ impl ActivityLog {
             events.push_front(event.clone());
             events.truncate(CAPACITY);
         }
-        self.push.send(push::ACTIVITY_RECORDED, &event);
+        self.push.send(Event::ActivityRecorded(&event));
         // Nobody watching is fine.
         let _ = self.recorded.send(event.clone());
         event

@@ -6,7 +6,7 @@
 //! behind is closed rather than skipping events, and the UI fetches everything again when it opens a
 //! new one. A comment goes out every 15 seconds, so a dead connection is noticed and proxies keep it
 //! open. The stream ends when its session does (the session's token is cancelled): signing out, a
-//! password change or reset elsewhere, or the session running out.
+//! password change or reset elsewhere, the session running out, or the server stopping.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -22,6 +22,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::auth::SignedIn;
+use crate::server::Shutdown;
 use crate::state::PushApi;
 
 /// `settings.json` was written: the settings.
@@ -99,10 +100,13 @@ impl Push {
 pub(crate) async fn events(
     State(app): State<PushApi>,
     Extension(session): Extension<SignedIn>,
+    shutdown: Option<Extension<Shutdown>>,
 ) -> impl IntoResponse {
     let live = Live {
         events: app.push.subscribe(),
         ended: session.ended,
+        // A request that did not come through the accept loop has none, and nothing ends it.
+        shutdown: shutdown.map_or_else(CancellationToken::new, |Extension(Shutdown(token))| token),
         until: Instant::now() + session.valid_for,
     };
     let stream = futures_util::stream::unfold(Some(live), |state| async move {
@@ -118,6 +122,8 @@ struct Live {
     events: broadcast::Receiver<Arc<Pushed>>,
     /// Cancelled when the session ends.
     ended: CancellationToken,
+    /// Cancelled when the server stops, so the stream does not hold the stop up.
+    shutdown: CancellationToken,
     until: Instant,
 }
 
@@ -131,7 +137,59 @@ impl Live {
                 Err(RecvError::Lagged(_) | RecvError::Closed) => None,
             },
             () = self.ended.cancelled() => None,
+            () = self.shutdown.cancelled() => None,
             () = tokio::time::sleep_until(self.until) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn live(push: &Push) -> (Live, CancellationToken, CancellationToken) {
+        let (ended, shutdown) = (CancellationToken::new(), CancellationToken::new());
+        let live = Live {
+            events: push.subscribe(),
+            ended: ended.clone(),
+            shutdown: shutdown.clone(),
+            until: Instant::now() + Duration::from_secs(12 * 3600),
+        };
+        (live, ended, shutdown)
+    }
+
+    /// With the clock paused, a stream that is not ended waits the 12 hours out in no time, so the
+    /// elapsed time says whether the stream ended by itself or by running out.
+    #[tokio::test(start_paused = true)]
+    async fn the_server_stopping_ends_a_quiet_stream_at_once() {
+        let push = Push::new();
+        let (mut stream, _ended, shutdown) = live(&push);
+        let started = Instant::now();
+        let waiting = tokio::spawn(async move { stream.next().await.is_none() });
+        tokio::task::yield_now().await;
+        shutdown.cancel();
+        assert!(waiting.await.unwrap(), "the stream is over");
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_carries_events_until_its_session_ends() {
+        let push = Push::new();
+        let (mut stream, ended, _shutdown) = live(&push);
+        push.send(SETTINGS_CHANGED, &serde_json::json!({ "role": "server" }));
+        assert!(stream.next().await.is_some());
+        let started = Instant::now();
+        ended.cancel();
+        assert!(stream.next().await.is_none());
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_with_nothing_to_end_it_runs_out_with_its_session() {
+        let push = Push::new();
+        let (mut stream, _ended, _shutdown) = live(&push);
+        let started = Instant::now();
+        assert!(stream.next().await.is_none());
+        assert_eq!(started.elapsed(), Duration::from_secs(12 * 3600));
     }
 }

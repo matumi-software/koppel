@@ -1,0 +1,238 @@
+# Cuts a release from an annotated v* tag: checks the tag against the workspace version, the places that name
+# the version and CHANGELOG.md, builds the three .deb files, the image and Koppel-Setup.exe, then pushes and
+# signs the image, writes SHA256SUMS (signed too) and creates the GitHub release with the CHANGELOG section.
+#
+#   git tag -a v0.2.1 -m "Koppel 0.2.1" && git push origin v0.2.1
+#
+# Run by hand (Actions, Release, Run workflow) it is a dry run: the same checks and builds, nothing pushed,
+# signed or published. Use it to find a broken build before tagging.
+#
+# Repository secrets the owner adds (Settings, Secrets and variables, Actions), both for Docker Hub:
+#   DOCKERHUB_USERNAME   the account that owns matumisoftware/koppel
+#   DOCKERHUB_TOKEN      an access token for it with Read & Write on matumisoftware/koppel
+# A tag run checks both first and stops, before building or pushing anything, when one is missing. Signing
+# needs no secret: cosign signs keyless with this workflow's own GitHub identity, which is why only
+# `publish` has `id-token: write`.
+#
+# Every action is pinned by commit SHA with its version in a comment, as in ci.yml.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: matumisoftware/koppel
+
+jobs:
+  verify:
+    name: Verify the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Registry credentials
+        if: github.event_name == 'push'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          missing=""
+          [ -n "$DOCKERHUB_USERNAME" ] || missing="$missing DOCKERHUB_USERNAME"
+          [ -n "$DOCKERHUB_TOKEN" ] || missing="$missing DOCKERHUB_TOKEN"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them under Settings, Secrets and variables, Actions, then run this workflow again for the tag. Nothing was built, pushed or published."
+            exit 1
+          fi
+      - name: Tag, version, places and changelog
+        id: version
+        run: |
+          set -eu
+          workspace=$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' src/Cargo.toml | head -1)
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            tag=$GITHUB_REF_NAME
+            [ "$(git cat-file -t "refs/tags/$tag")" = tag ] || { echo "::error::$tag is a lightweight tag. Release from an annotated one: git tag -a $tag -m ..."; exit 1; }
+            [ "$tag" = "v$workspace" ] || { echo "::error::The tag is $tag but src/Cargo.toml says $workspace."; exit 1; }
+            git fetch --no-tags origin main
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$tag is not on main."; exit 1; }
+          fi
+          echo "version=$workspace" >> "$GITHUB_OUTPUT"
+          case "$workspace" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
+          .github/scripts/release-versions.sh check "$workspace"
+          mkdir "$RUNNER_TEMP/notes"
+          .github/scripts/changelog-section.sh "$workspace" > "$RUNNER_TEMP/notes/changelog-section.md"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notes
+          path: ${{ runner.temp }}/notes
+          retention-days: 7
+
+  packages:
+    name: Linux packages and image
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the .deb files
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src
+          file: src/installer/docker/Dockerfile
+          target: linux-packages
+          outputs: type=local,dest=${{ runner.temp }}/packages
+          cache-from: type=gha,scope=koppel-docker
+          cache-to: type=gha,scope=koppel-docker,mode=max
+      - name: Check the packages
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -eu
+          for arch in amd64 arm64 armhf; do
+            deb="$RUNNER_TEMP/packages/koppel_${VERSION}_${arch}.deb"
+            [ -f "$deb" ] || { echo "::error::$deb was not built."; exit 1; }
+            dpkg-deb --info "$deb" | grep -E 'Package|Version|Architecture'
+          done
+      # Builds the image for all three platforms and keeps it in the cache; `publish` pushes it from there.
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src
+          file: src/installer/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v6
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=koppel-docker
+          cache-to: type=gha,scope=koppel-docker,mode=max
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: debs
+          path: ${{ runner.temp }}/packages/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Windows installer
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+        with:
+          package_json_file: src/ui/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: src/ui/.nvmrc
+          cache: pnpm
+          cache-dependency-path: src/ui/pnpm-lock.yaml
+      - name: Install Rust
+        working-directory: src
+        shell: bash
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src
+          key: installer
+      # The notices script needs cargo-about, at the version the Linux build uses.
+      - name: Install cargo-about
+        working-directory: src
+        shell: bash
+        run: |
+          version=$(sed -n 's/^ARG CARGO_ABOUT_VERSION=//p' installer/docker/Dockerfile)
+          cargo install --locked --features cli "cargo-about@$version"
+      - name: Build Koppel-Setup.exe
+        working-directory: src
+        shell: pwsh
+        run: ./installer/windows/build.ps1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer
+          path: src/installer/windows/bin/Koppel-Setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Push, sign and publish
+    needs: [verify, packages, windows]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/artifacts
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # `latest` follows only a final release, never a pre-release tag such as v0.3.0-rc.1.
+      - name: Image tags
+        id: tags
+        run: |
+          tags="$IMAGE:$VERSION"
+          [ "$PRERELEASE" = true ] || tags="$tags"$'\n'"$IMAGE:latest"
+          { echo 'tags<<END'; echo "$tags"; echo END; } >> "$GITHUB_OUTPUT"
+      - name: Push the image
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src
+          file: src/installer/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v6
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=koppel-docker
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - name: Sign the image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Checksums
+        working-directory: ${{ runner.temp }}/artifacts
+        run: |
+          set -eu
+          ls -l
+          sha256sum koppel_*.deb Koppel-Setup.exe > SHA256SUMS
+          cat SHA256SUMS
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+      - name: Release notes
+        run: |
+          set -eu
+          { cat "$RUNNER_TEMP/artifacts/changelog-section.md"; sed "s/@VERSION@/$VERSION/" .github/release-verify.md; } > "$RUNNER_TEMP/release-notes.md"
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        working-directory: ${{ runner.temp }}/artifacts
+        run: |
+          set -eu
+          flags=""
+          [ "$PRERELEASE" != true ] || flags="--prerelease"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "Koppel $VERSION" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" $flags \
+            koppel_*.deb Koppel-Setup.exe SHA256SUMS SHA256SUMS.sigstore.json

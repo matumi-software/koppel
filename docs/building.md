@@ -18,20 +18,34 @@ To release:
 
 1. Set the version under `[workspace.package]` in `src/Cargo.toml`. The Windows installer, the `.deb`
    files and the image all take it from there.
-2. Set the image tag in the three composes in `src/installer/docker` (`docker-compose.yml`,
-   `docker-compose.windows-client.yml`, `docker-compose.windows-server.yml`), in the build command in
-   `docs/windows.md` and in the README. They name the released version.
+2. Move the other places that name it: run `.github/scripts/release-versions.sh write` (the image tag in the
+   three composes in `src/installer/docker`, in `docs/windows.md` and `docs/installers.md`, and the README's
+   status line, image tag and `.deb` names). The release workflow runs the same script with `check` and stops
+   when a place still names another version.
 3. For a new usbip-win2 version, run `src/installer/windows/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `src/installer/windows/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from.
-4. Add the version to `CHANGELOG.md`.
-5. Build and push the image for all three platforms, from `src/`, with the version and `latest`:
+4. Add the version to `CHANGELOG.md` as `## <version> (<date>)`. Its section becomes the release notes.
+5. Merge to `main`, then tag the merge commit with an annotated tag and push it:
 
    ```sh
-   docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 \
-     -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
+   git tag -a v<version> -m "Koppel <version>"
+   git push origin v<version>
    ```
-6. Build the three `.deb` files with `src/installer/linux/build.ps1` and `Koppel-Setup.exe` with
-   `src/installer/windows/build.ps1`, and publish them. Record the image size per platform in the release
-   notes.
+
+   `.github/workflows/release.yml` takes it from there. It fails fast unless the tag is annotated, equals the
+   workspace version and sits on `main`, the places in step 2 agree and `CHANGELOG.md` has the section. It then builds the three `.deb` files, the image for all three platforms and
+   `Koppel-Setup.exe` (on a Windows runner, unsigned: the release notes say so), pushes the image as
+   `matumisoftware/koppel:<version>` and `latest` (`latest` only for a final version, not `-rc` and the like),
+   signs the image and `SHA256SUMS` with cosign (keyless, through the workflow's own GitHub identity, so no
+   signing secret), and creates the GitHub release with the changelog section, the files, `SHA256SUMS` and its
+   signature bundle. A tag is never moved (the release tags ruleset forbids it): a failed release is fixed
+   with a new patch version, or by re-running the failed jobs while the tag has no release yet.
+
+   The push needs two repository secrets, `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (a Docker Hub access
+   token with Read & Write on `matumisoftware/koppel`). Until both are set, a tag run stops in its first job,
+   before building or pushing anything. Without them, release by hand: `docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .` from `src/`,
+   `src/installer/linux/build.ps1` and `src/installer/windows/build.ps1`, and publish the files.
+6. Record the image size per platform in the release notes. To try the builds before tagging, run the Release
+   workflow by hand from the Actions tab: it is a dry run that builds everything and publishes nothing.
 
 ## The Rust workspace
 

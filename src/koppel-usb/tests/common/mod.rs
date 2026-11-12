@@ -152,6 +152,9 @@ impl ActivitySink for Log {
 /// the device to usbip-host, unsharing gives it back, and a test can make either refuse.
 pub struct FakeKernel {
     state: Mutex<KernelState>,
+    /// The client kernel takes a pipe in memory instead of a socket, so an attach opens no real
+    /// socket and a test can run on the paused clock.
+    memory: bool,
     /// The devices a client has imported.
     used: Arc<Mutex<HashSet<BusId>>>,
     reset_started: Semaphore,
@@ -178,6 +181,8 @@ struct KernelState {
     listings: usize,
     status_failures: Vec<(String, String)>,
     attached: Vec<StdTcpStream>,
+    /// The ends of in-memory attaches; `None` once the test took one to play the driver on.
+    attached_memory: Vec<Option<tokio::io::DuplexStream>>,
     detached_ports: Vec<u32>,
 }
 
@@ -198,8 +203,10 @@ impl Default for FakeKernel {
                 listings: 0,
                 status_failures: Vec::new(),
                 attached: Vec::new(),
+                attached_memory: Vec::new(),
                 detached_ports: Vec::new(),
             }),
+            memory: false,
             used: Arc::new(Mutex::new(HashSet::new())),
             reset_started: Semaphore::new(0),
             gates: Mutex::new(Gates::default()),
@@ -210,6 +217,15 @@ impl Default for FakeKernel {
 impl FakeKernel {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// As [`FakeKernel::new`], with a client kernel that takes an in-memory pipe, for the tests
+    /// that run on the paused clock. [`FakeKernel::driver_pipe`] is the driver's end of it.
+    pub fn in_memory() -> Arc<Self> {
+        Arc::new(Self {
+            memory: true,
+            ..Self::default()
+        })
     }
 
     /// Replaces the devices on the bus; a device keeps its binding by bus ID.
@@ -298,7 +314,8 @@ impl FakeKernel {
 
     /// How many times the client kernel attached a device.
     pub fn attaches(&self) -> usize {
-        lock(&self.state).attached.len()
+        let state = lock(&self.state);
+        state.attached.len() + state.attached_memory.len()
     }
 
     /// The ports the client kernel detached, in order.
@@ -310,6 +327,15 @@ impl FakeKernel {
     pub async fn attached_socket(&self, n: usize) -> StdTcpStream {
         eventually("the attach", || self.attaches() >= n).await;
         lock(&self.state).attached[n - 1].try_clone().unwrap()
+    }
+
+    /// The driver's end of the `n`th in-memory attach (from 1), once there is one, for the test to
+    /// play the USB driver on. Only for a kernel made with [`FakeKernel::in_memory`].
+    pub async fn driver_pipe(&self, n: usize) -> tokio::io::DuplexStream {
+        eventually("the attach", || self.attaches() >= n).await;
+        lock(&self.state).attached_memory[n - 1]
+            .take()
+            .expect("the driver's end is taken once")
     }
 
     /// The `n`th attached socket as an async stream, for the test to play the USB driver on.
@@ -495,7 +521,25 @@ impl UsbAttacher for FakeKernel {
         if let Some(socket) = state.attached.last() {
             let _ = socket.shutdown(Shutdown::Both);
         }
+        // Dropping the pipe's end closes it, as shutting the socket down does.
+        if let Some(end) = state.attached_memory.last_mut() {
+            end.take();
+        }
         Ok(())
+    }
+
+    fn in_memory(&self) -> bool {
+        self.memory
+    }
+
+    fn attach_in_memory(
+        &self,
+        end: tokio::io::DuplexStream,
+        _: u32,
+        _: UsbSpeed,
+    ) -> Result<u32, UsbError> {
+        lock(&self.state).attached_memory.push(Some(end));
+        Ok(8)
     }
 }
 

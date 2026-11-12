@@ -1,18 +1,41 @@
 //! What the client does when the server, the link or its own settings misbehave: faults a person
 //! can read, the deadline, no restart for an unchanged setting, detaching on a change, a gateway
 //! that cannot bind, and stopping.
+//!
+//! Most of these run on tokio's paused clock with nothing real under them: the server is in memory
+//! (`MemoryLinks`) and the client kernel takes a pipe in memory (`FakeKernel::in_memory`), so what
+//! `eventually` and the deadlines wait for is virtual time and a test takes milliseconds. A paused
+//! clock jumps ahead whenever the runtime waits for a real socket, which is why the few tests that
+//! need one (a kernel attach over loopback, the gateway, the USB/IP driver) keep real time and
+//! `flavor = "multi_thread"`.
 
 mod common;
 
 use std::fs;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use common::*;
 use koppel_config::files::{KoppelSettings, Role};
 use koppel_usb::{BeginAttachError, ClientOptions, GatewayOptions, OpenError};
+use tokio::time::Instant;
 
+/// A server and a client whose kernel takes a pipe in memory. No socket, so it runs on the paused clock.
 async fn bench() -> (Arc<FakeKernel>, ServerSide, Arc<FakeKernel>, ClientSide) {
+    let server_kernel = FakeKernel::new();
+    let server = ServerSide::start(server_kernel.clone(), true, true).await;
+    let client_kernel = FakeKernel::in_memory();
+    let mut setup = ClientSetup::kernel(client_kernel.clone());
+    setup.options = ClientOptions {
+        attach_timeout: Duration::from_secs(3),
+        ..ClientOptions::default()
+    };
+    let client = ClientSide::start(MemoryLinks::new(&server), setup).await;
+    (server_kernel, server, client_kernel, client)
+}
+
+/// As [`bench`], with a kernel that takes a real loopback socket and the gateway on a port of its own.
+async fn bench_real() -> (Arc<FakeKernel>, ServerSide, Arc<FakeKernel>, ClientSide) {
     let server_kernel = FakeKernel::new();
     let server = ServerSide::start(server_kernel.clone(), true, true).await;
     let client_kernel = FakeKernel::new();
@@ -25,7 +48,7 @@ async fn bench() -> (Arc<FakeKernel>, ServerSide, Arc<FakeKernel>, ClientSide) {
     (server_kernel, server, client_kernel, client)
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn attach_to_a_server_that_went_away_records_a_fault() {
     let (_, server, _, client) = bench().await;
     client.link().await;
@@ -45,7 +68,7 @@ async fn attach_to_a_server_that_went_away_records_a_fault() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn attach_to_a_server_that_stalls_gives_up_at_the_deadline() {
     let (server_kernel, server, _, client) = bench().await;
     client.link().await;
@@ -66,7 +89,7 @@ async fn attach_to_a_server_that_stalls_gives_up_at_the_deadline() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn attaches_and_the_device_list_share_one_link_until_the_connection_changes() {
     let (_, server, _, client) = bench().await;
     client.link().await;
@@ -87,7 +110,7 @@ async fn attaches_and_the_device_list_share_one_link_until_the_connection_change
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn changing_the_connection_detaches_what_was_attached() {
     let (_, server, client_kernel, client) = bench().await;
     client.link().await;
@@ -102,7 +125,7 @@ async fn changing_the_connection_detaches_what_was_attached() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_setting_that_did_not_change_the_link_leaves_it_and_its_devices_alone() {
     let (_, server, client_kernel, client) = bench().await;
     client.link().await;
@@ -130,7 +153,7 @@ async fn a_setting_that_did_not_change_the_link_leaves_it_and_its_devices_alone(
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn detach_and_attach_again_leaves_the_new_attachment_in_place() {
     let (_, server, client_kernel, client) = bench().await;
     client.link().await;
@@ -158,7 +181,7 @@ async fn detach_and_attach_again_leaves_the_new_attachment_in_place() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn stopping_the_client_does_not_wait_for_its_relays_and_keeps_the_device_remembered() {
     let (_, server, client_kernel, client) = bench().await;
     client.link().await;
@@ -179,10 +202,10 @@ async fn stopping_the_client_does_not_wait_for_its_relays_and_keeps_the_device_r
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_detach_that_cannot_be_saved_is_a_fault_on_the_device_and_the_device_is_detached() {
     let server = ServerSide::start(FakeKernel::new(), true, true).await;
-    let client_kernel = FakeKernel::new();
+    let client_kernel = FakeKernel::in_memory();
     let codec = Arc::new(FailingCodec::default());
     let mut setup = ClientSetup::kernel(client_kernel.clone());
     setup.attached_codec = codec.clone();
@@ -202,7 +225,7 @@ async fn a_detach_that_cannot_be_saved_is_a_fault_on_the_device_and_the_device_i
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn attaching_a_device_that_is_attached_or_on_its_way_does_nothing() {
     let (_, server, client_kernel, client) = bench().await;
     client.link().await;
@@ -225,7 +248,7 @@ async fn attaching_a_device_that_is_attached_or_on_its_way_does_nothing() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_bus_id_that_is_not_one_is_refused() {
     let (_, server, _, client) = bench().await;
 
@@ -312,7 +335,7 @@ async fn stopping_the_client_detaches_what_the_driver_holds() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn a_corrupt_attached_file_does_not_stop_the_start_and_says_why() {
     let server = ServerSide::start(FakeKernel::new(), true, true).await;
     let dir = TempDir::new("client");
@@ -343,7 +366,7 @@ async fn a_corrupt_attached_file_does_not_stop_the_start_and_says_why() {
     server.stop().await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(start_paused = true)]
 async fn linking_to_the_server_reaches_the_activity_log() {
     let (_, server, _, client) = bench().await;
 
@@ -355,6 +378,50 @@ async fn linking_to_the_server_reaches_the_activity_log() {
             .iter()
             .any(|(_, _, summary)| summary == "Linked to server.test")
     );
+    client.stop().await;
+    server.stop().await;
+}
+
+/// The same as the paused-clock test of this name, over a real loopback socket for the kernel's
+/// end and the gateway listening: what an attach really does on a machine.
+#[tokio::test(flavor = "multi_thread")]
+async fn changing_the_connection_detaches_what_was_attached_over_a_real_socket() {
+    let (_, server, client_kernel, client) = bench_real().await;
+    client.link().await;
+    client.attach().await;
+    assert!(client_kernel.detached_ports().is_empty());
+
+    client.link().await;
+
+    eventually("the detach", || !client_kernel.detached_ports().is_empty()).await;
+    assert!(client_kernel.detached_ports().contains(&8));
+    client.stop().await;
+    server.stop().await;
+}
+
+/// Detach and attach again, three times over real sockets: the old attach's relay must not remove
+/// the new attachment, whichever way the real ends of the sockets close first.
+#[tokio::test(flavor = "multi_thread")]
+async fn detach_and_attach_again_over_real_sockets_leaves_the_new_attachment_in_place() {
+    let (_, server, client_kernel, client) = bench_real().await;
+    client.link().await;
+    client.attach().await;
+
+    let cycles = 3;
+    for cycle in 1..=cycles {
+        client.client.detach("1-1.4").await;
+        let expected = cycle + 1;
+        eventually_async("the attach again", || async {
+            let _ = client.client.begin_attach("1-1.4").await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            client_kernel.attaches() == expected
+        })
+        .await;
+    }
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(client_kernel.detached_ports().len(), cycles);
+    assert!(client.attached_here());
     client.stop().await;
     server.stop().await;
 }

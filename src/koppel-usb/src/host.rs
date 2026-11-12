@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
+use crate::relay::KernelEnd;
 use crate::{
     BoxFuture, BusId, DeviceStream, ExportStatus, UsbDevice, UsbError, UsbSpeed, VhciPort,
 };
@@ -125,6 +126,26 @@ pub trait UsbAttacher: Send + Sync {
     fn attach(&self, socket: &TcpStream, dev_id: u32, speed: UsbSpeed) -> Result<u32, UsbError>;
 
     fn detach(&self, port: u32) -> Result<(), UsbError>;
+
+    /// For a test attacher that takes one end of a pipe in memory instead of a socket, so the
+    /// attach involves no real I/O. Then [`UsbAttacher::attach_in_memory`] is called in place of
+    /// [`UsbAttacher::attach`].
+    #[cfg(feature = "test-util")]
+    fn in_memory(&self) -> bool {
+        false
+    }
+
+    /// As [`UsbAttacher::attach`], with the end of the pipe, which the attacher keeps until the
+    /// device is detached.
+    #[cfg(feature = "test-util")]
+    fn attach_in_memory(
+        &self,
+        _end: tokio::io::DuplexStream,
+        _dev_id: u32,
+        _speed: UsbSpeed,
+    ) -> Result<u32, UsbError> {
+        Err(UsbError::failed("This attacher takes a socket."))
+    }
 }
 
 /// A USB/IP driver that makes its own connection to a USB/IP server, such as usbip-win2 on
@@ -226,16 +247,40 @@ impl Platform {
         self.driver.as_ref().ok_or_else(|| self.missing())
     }
 
-    /// Hands `socket` to the virtual host controller. The write to sysfs blocks, so it runs off
-    /// the async workers; the controller takes its own reference to the socket, which the caller
+    /// Whether the attacher takes a pipe in memory (a test double only).
+    pub(crate) fn attaches_in_memory(&self) -> bool {
+        #[cfg(feature = "test-util")]
+        {
+            self.attacher.as_ref().is_some_and(|a| a.in_memory())
+        }
+        #[cfg(not(feature = "test-util"))]
+        {
+            false
+        }
+    }
+
+    /// Hands the kernel's end to the virtual host controller. The write to sysfs blocks, so it runs
+    /// off the async workers; the controller takes its own reference to the socket, which the caller
     /// keeps open until the device is detached.
     pub(crate) async fn attach_kernel(
         &self,
-        socket: &TcpStream,
+        end: &KernelEnd,
         dev_id: u32,
         speed: UsbSpeed,
     ) -> Result<u32, UsbError> {
         let attacher = self.attacher()?.clone();
+        // Without the test-util feature a socket is the only kind of end there is.
+        #[allow(clippy::infallible_destructuring_match)]
+        let socket = match end {
+            KernelEnd::Socket(socket) => socket,
+            #[cfg(feature = "test-util")]
+            KernelEnd::Memory(_) => {
+                let pipe = end
+                    .take_memory()
+                    .ok_or_else(|| UsbError::failed("The pipe was handed over already."))?;
+                return attacher.attach_in_memory(pipe, dev_id, speed);
+            }
+        };
         let socket = socket
             .try_clone()
             .map_err(|e| UsbError::failed(format!("The socket could not be handed over: {e}")))?;

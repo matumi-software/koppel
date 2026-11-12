@@ -1,5 +1,7 @@
 use std::io;
 use std::net::{Ipv4Addr, TcpStream as StdTcpStream};
+#[cfg(feature = "test-util")]
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -44,6 +46,50 @@ where
         writer.write_all(&buffer[..read]).await?;
         writer.flush().await?;
     }
+}
+
+/// What a test attacher gets instead of a socket: one end of a pipe in memory, so an attach opens no
+/// socket and the test can run on tokio's paused clock.
+#[cfg(feature = "test-util")]
+const MEMORY_PIPE: usize = 256 * 1024;
+
+/// The kernel's end of an attach: the socket the virtual host controller is handed, or in a test
+/// one end of an in-memory pipe (taken by the attacher when it attaches).
+pub(crate) enum KernelEnd {
+    Socket(StdTcpStream),
+    #[cfg(feature = "test-util")]
+    Memory(Mutex<Option<tokio::io::DuplexStream>>),
+}
+
+#[cfg(feature = "test-util")]
+impl KernelEnd {
+    /// The pipe's end, once.
+    pub(crate) fn take_memory(&self) -> Option<tokio::io::DuplexStream> {
+        match self {
+            Self::Memory(end) => end.lock().unwrap_or_else(PoisonError::into_inner).take(),
+            Self::Socket(_) => None,
+        }
+    }
+}
+
+/// The relay's end of an attach: a socket, or in a test the other end of the pipe.
+pub(crate) trait RelayEnd: AsyncRead + AsyncWrite + Unpin + Send {}
+
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> RelayEnd for T {}
+
+/// The two ends of an attach: the kernel's and the relay's. `memory` is for a test attacher that
+/// takes a pipe in memory ([`crate::UsbAttacher::in_memory`]); everything else gets
+/// [`loopback_pair`].
+pub(crate) async fn kernel_pair(memory: bool) -> io::Result<(KernelEnd, Box<dyn RelayEnd>)> {
+    #[cfg(feature = "test-util")]
+    if memory {
+        let (kernel, relay) = tokio::io::duplex(MEMORY_PIPE);
+        return Ok((KernelEnd::Memory(Mutex::new(Some(kernel))), Box::new(relay)));
+    }
+    #[cfg(not(feature = "test-util"))]
+    let _ = memory;
+    let (kernel_end, relay_end) = loopback_pair().await?;
+    Ok((KernelEnd::Socket(kernel_end), Box::new(relay_end)))
 }
 
 /// Two connected loopback TCP sockets. The kernel gets one end as a plain socket; Koppel relays

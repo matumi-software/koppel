@@ -10,3 +10,13 @@ fi
 if [ -d /run/systemd/system ]; then
   systemctl daemon-reload || true
 fi
+
+if [ "$1" = "remove" ] && command -v deb-systemd-helper >/dev/null 2>&1; then
+  deb-systemd-helper mask koppel.service >/dev/null || true
+fi
+
+if [ "$1" = "purge" ] && command -v deb-systemd-helper >/dev/null 2>&1; then
+  # Forgets the unit's links and state, so a later install starts from scratch.
+  deb-systemd-helper purge koppel.service >/dev/null || true
+  deb-systemd-helper unmask koppel.service >/dev/null || true
+fi

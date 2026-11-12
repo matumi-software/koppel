@@ -1,0 +1,108 @@
+.TH KOPPEL 1 "November 2026" "Koppel" "User Commands"
+.SH NAME
+koppel \- share USB devices over the network
+.SH SYNOPSIS
+.B koppel
+.RI [ setting ...]
+.br
+.B koppel \-\-reset\-password
+.br
+.B koppel \-\-healthcheck
+.br
+.B koppel diagnostics
+.RI [ file ]
+.SH DESCRIPTION
+.B koppel
+shares USB devices from a server to clients over USB/IP, carried over TLS, with a web UI.
+The package runs it as the
+.B koppel
+systemd service, which starts at boot.
+Open the UI at
+.I https://localhost:5240/
+and set the password there within ten minutes of the first start.
+The browser warns about Koppel's own certificate the first time.
+.PP
+With no command, it runs the service in the foreground, which is what the unit does.
+Stop it with Ctrl+C or SIGTERM.
+.SH COMMANDS
+.TP
+.B \-\-reset\-password
+Clears the UI password and ends every signed-in session, then exits.
+Open the UI afterwards and set a new password within the setup window.
+Run it as root.
+.TP
+.B \-\-healthcheck
+Asks a running Koppel's
+.I /healthz
+and exits 0 when it answers and 1 when it does not.
+It is the Docker image's health check.
+.TP
+.B diagnostics \fR[\fIfile\fR]
+Writes a report for a support request: the version, the operating system, the folders, the config files by name and size,
+the plain ones with every value that could be a secret removed, the state of the USB/IP kernel modules and the end of the log.
+The encrypted files and the keys are never read.
+The report goes to
+.I file
+or, without one, to standard output.
+Run it as root.
+.SH SETTINGS
+Settings are read from environment variables, with
+.B __
+for the
+.B :
+of a section, and from the command line, which wins:
+.B \-\-Ports:Ui=5250
+or
+.BR "\-\-Ports:Ui 5250" .
+Names are matched without regard to case.
+Under systemd, put them in
+.I /etc/default/koppel
+as
+.B Ports__Ui=5250
+and restart the service.
+The settings include
+.BR Ports:Ui ,
+.BR Ports:Network ,
+.BR Ports:Address ,
+.BR Ui:AllowFrom ,
+.BR Paths:Config ,
+.B Paths:Keys
+and
+.BR Discovery:Enabled .
+The full list is in the documentation, linked below.
+.SH FILES
+.TP
+.I /var/lib/koppel/config
+Settings, devices and the encrypted secret files.
+Only root may read it.
+.TP
+.I /var/lib/koppel/keys
+What seals the encrypted files.
+Back it up together with the config folder.
+.TP
+.I /etc/default/koppel
+Optional settings for the service, as environment variables.
+.TP
+.I /usr/lib/systemd/system/koppel.service
+The service unit.
+.SH LOGS
+The service logs to the journal:
+.B journalctl \-u koppel
+Set
+.B RUST_LOG
+in
+.I /etc/default/koppel
+for more, for example
+.B RUST_LOG=debug
+or
+.BR warn,koppel_web=debug .
+.SH EXIT STATUS
+0 on success or a clean stop, 1 on an error.
+.SH SEE ALSO
+.BR systemctl (1),
+.BR journalctl (1)
+.PP
+https://github.com/matumi-software/koppel
+.SH AUTHORS
+Matumi Software.
+Koppel is free software under the GNU General Public License, version 3 or later.

@@ -1,0 +1,13 @@
+koppel (0.2.0) unstable; urgency=medium
+
+  * Koppel is rewritten in Rust, with the same web UI and features, small
+    enough for a Raspberry Pi Zero.
+  * The package comes for amd64, arm64 and armhf, needs no other package, and
+    upgrades 0.1.x in place, keeping /var/lib/koppel.
+  * systemd restarts a Koppel that hangs, and the service runs with systemd's
+    sandbox.
+  * There is no way back to 0.1.x, and Koppel machines talk Skakel protocol 2,
+    so update every machine. The full notes are in CHANGELOG.md in the
+    repository.
+
+ -- Matumi Software <70009674+RikusVanRensburg@users.noreply.github.com>  Mon, 09 Nov 2026 12:00:00 +0000

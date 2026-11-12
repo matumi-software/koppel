@@ -3,14 +3,18 @@
 koppel \- share USB devices over the network
 .SH SYNOPSIS
 .B koppel
-.RI [ setting ...]
+.RI [ option ...]
 .br
-.B koppel \-\-reset\-password
+.B koppel reset\-password
 .br
-.B koppel \-\-healthcheck
+.B koppel healthcheck
 .br
 .B koppel diagnostics
 .RI [ file ]
+.br
+.B koppel \-\-help
+.br
+.B koppel \-\-version
 .SH DESCRIPTION
 .B koppel
 shares USB devices from a server to clients over USB/IP, carried over TLS, with a web UI.
@@ -26,12 +30,12 @@ With no command, it runs the service in the foreground, which is what the unit d
 Stop it with Ctrl+C or SIGTERM.
 .SH COMMANDS
 .TP
-.B \-\-reset\-password
+.B reset\-password
 Clears the UI password and ends every signed-in session, then exits.
 Open the UI afterwards and set a new password within the setup window.
 Run it as root.
 .TP
-.B \-\-healthcheck
+.B healthcheck
 Asks a running Koppel's
 .I /healthz
 and exits 0 when it answers and 1 when it does not.
@@ -45,31 +49,36 @@ The report goes to
 .I file
 or, without one, to standard output.
 Run it as root.
-.SH SETTINGS
-Settings are read from environment variables, with
-.B __
-for the
-.B :
-of a section, and from the command line, which wins:
-.B \-\-Ports:Ui=5250
+.PP
+0.1.x's
+.B \-\-reset\-password
+and
+.B \-\-healthcheck
+still work, with a deprecation note in the log.
+.SH OPTIONS
+Every setting is an option and an environment variable, and the option wins:
+.B \-\-ui\-port 5250
 or
-.BR "\-\-Ports:Ui 5250" .
-Names are matched without regard to case.
-Under systemd, put them in
+.BR KOPPEL_UI_PORT=5250 .
+Under systemd, put the variables in
 .I /etc/default/koppel
-as
-.B Ports__Ui=5250
 and restart the service.
 The settings include
-.BR Ports:Ui ,
-.BR Ports:Network ,
-.BR Ports:Address ,
-.BR Ui:AllowFrom ,
-.BR Paths:Config ,
-.B Paths:Keys
+.BR \-\-ui\-port ,
+.BR \-\-network\-port ,
+.BR \-\-listen\-address ,
+.BR \-\-ui\-allow\-from ,
+.BR \-\-config\-dir ,
+.BR \-\-keys\-dir
 and
-.BR Discovery:Enabled .
-The full list is in the documentation, linked below.
+.BR \-\-discovery\-enabled .
+.B koppel \-\-help
+lists them all, and
+.B koppel \-\-version
+prints the version, the git commit and the build date.
+0.1.x's names, such as
+.B Ports__Ui
+in the environment, still work and are logged as deprecated.
 .SH FILES
 .TP
 .I /var/lib/koppel/config

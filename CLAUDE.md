@@ -11,12 +11,12 @@ folder per crate, the UI and the installers.
 |---|---|
 | `docs/` | Architecture and decisions |
 | `resources/design-system/` | The design system: brand book, `tokens.json`, component specs and previews, logos. The source of every colour, size and component style |
-| `src/` | Shared build config: `.editorconfig`, the pnpm workspace, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/architecture.md`) |
+| `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/architecture.md`) |
 | `src/koppel/` | The program (package `koppel`) |
 | `src/koppel-*/` | The library crates: `koppel-config`, `koppel-web`, `koppel-usb`, `koppel-windows`, and `koppel-contract`, the contract tests |
-| `src/ui/` | The UI, one pnpm workspace with `src/`: the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
+| `src/ui/` | The UI, one pnpm workspace (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`): the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
 | `src/installer/` | The installers: `windows/` (WiX, `Koppel-Setup.exe`, with usbip-win2 vendored), `linux/` (nfpm, the `.deb` files), `docker/` (the `Dockerfile`, which builds the Linux binaries, the `.deb` files and the image, the compose files, `prepare-host.sh` and `deploy.sh`) and `notices/` (the third-party notices script and cargo-about's licence policy, shared by the Windows and Linux builds) |
-| `src/tools/` | The design system scripts behind `pnpm design:sync` and `pnpm design:icons` |
+| `src/ui/tools/` | The design system scripts behind `pnpm design:sync` and `pnpm design:icons` |
 
 ## Rules
 
@@ -29,9 +29,10 @@ folder per crate, the UI and the installers.
 
 ## Commands
 
-Run from `src/`:
+Run the pnpm commands from `src/ui/` and the rest from `src/`:
 
 ```sh
+# from src/ui/
 pnpm install                                         # once
 pnpm design:sync                                     # after changing resources/design-system
 pnpm design:icons                                    # after changing the app icon
@@ -40,12 +41,14 @@ pnpm --filter koppel.ui typecheck
 pnpm --filter koppel.ui lint
 pnpm --filter koppel.ui test                         # app tests
 pnpm --filter koppel.ui build                        # the UI the program embeds, needed for a release build
+pnpm --filter koppel.ui dev                          # https://localhost:61040, /api proxied to KOPPEL_UI_URL (https://127.0.0.1:5240)
+
+# from src/
 cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo run -p koppel                                  # https://localhost:5240; set Paths__Config and Paths__Keys to a folder of your own
-pnpm --filter koppel.ui dev                          # https://localhost:61040, /api proxied to KOPPEL_UI_URL (https://127.0.0.1:5240)
 bash koppel-contract/run-against-rust.sh             # the contract tests against a fresh build (Git Bash on Windows)
 ./installer/windows/build.ps1                        # PowerShell: Koppel-Setup.exe
 ./installer/linux/build.ps1 -Image                   # PowerShell: the .deb files and the image, loaded here, never pushed

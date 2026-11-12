@@ -54,13 +54,13 @@ fn main() {
     } else if env::var_os("CARGO_CFG_DEBUG_ASSERTIONS").is_some() {
         println!(
             "cargo::warning=The UI is not built (src/{UI_DIST} has no index.html), so this build serves a placeholder page. \
-             Run `pnpm install` and `pnpm --filter koppel.ui build` in src/ for the real one."
+             Run `pnpm install` and `pnpm --filter koppel.ui build` in src/ui/ for the real one."
         );
         add_file(Path::new("index.html"), PLACEHOLDER.as_bytes(), &raw, &gzip);
     } else {
         fail(&format!(
             "the UI is not built (src/{UI_DIST} has no index.html). A release build embeds it, so build it first: \
-             run `pnpm install` and `pnpm --filter koppel.ui build` in src/"
+             run `pnpm install` and `pnpm --filter koppel.ui build` in src/ui/"
         ));
     }
 }

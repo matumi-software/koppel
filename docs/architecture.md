@@ -8,7 +8,7 @@ One codebase and one Docker image cover every role; the role is a setting.
 
 | Layer | What | Status |
 |---|---|---|
-| Control plane | REST for commands, a live push for confirmed state, React UI behind a password: axum with Server-Sent Events | Done, with the roles on Skakel 0.2.0 (see ["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust)) |
+| Control plane | REST for commands, a live push for confirmed state, React UI behind a password: axum with Server-Sent Events | Done, with the roles on Skakel 0.2.1 (see ["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust)) |
 | Transport | [Skakel](https://github.com/matumi-software/skakel) (MIT): discovery, pairing, OAuth client credentials, certificate pinning and handover, the remote hub and the streams. Koppel keeps the server's state and the client's credentials in its own encrypted files. The UI has its own password | Done |
 | Data plane | USB/IP protocol (Linux kernel spec), in Koppel's `usb` stream on Skakel | Linux server and client work. A Windows client works through usbip-win2 (see "Real hardware" in [usb.md](usb.md#tested)). A Windows server shares through usbipd-win, and a real one was run to a Linux client |
 

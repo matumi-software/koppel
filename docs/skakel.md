@@ -37,7 +37,7 @@ limits are Skakel's; see "Discovery", "Following a server" and "Pairing" in Skak
 
 ### The roles on Skakel in Rust
 
-The server and client roles run on Skakel 0.2.0 (protocol version 2, gRPC), taken as git
+The server and client roles run on Skakel 0.2.1 (protocol version 2, gRPC), taken as git
 dependencies at the commit that let an app serve Skakel on its own listener (Skakel PR #43) until
 the 0.2.0 release tag is published. The code is in `koppel-web/src/roles/skakel/`.
 

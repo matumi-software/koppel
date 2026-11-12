@@ -1,0 +1,11 @@
+{
+  "type": "about:blank",
+  "title": "Bad Request",
+  "status": 400,
+  "code": "validation",
+  "detail": "One or more fields are not valid.",
+  "errors": {
+    "serverUrl": ["Use the server's HTTPS address, such as https://lab-rack-3:5240."],
+    "serverFingerprint": ["Paste the SHA-256 fingerprint shown in the server's Clients section.", "It has 32 pairs of digits."]
+  }
+}

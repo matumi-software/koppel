@@ -7,6 +7,7 @@ import type {
   ActivityEvent,
   AuthState,
   ClientDevices,
+  ClientSecret,
   ClientView,
   ConnectionTest,
   ConnectionView,
@@ -16,6 +17,7 @@ import type {
   NewClient,
   PairingOverview,
   PairingStatus,
+  Problem,
   ServerDevices,
   ServerIdentity,
   SystemCheck,
@@ -24,6 +26,7 @@ import type {
 import activityEventJson from './wire/activity-event.json';
 import authStateJson from './wire/auth-state.json';
 import clientDevicesJson from './wire/client-devices.json';
+import clientSecretJson from './wire/client-secret.json';
 import clientsJson from './wire/clients.json';
 import connectionTestJson from './wire/connection-test.json';
 import connectionViewJson from './wire/connection-view.json';
@@ -32,6 +35,8 @@ import keysViewJson from './wire/keys-view.json';
 import newClientJson from './wire/new-client.json';
 import pairingOverviewJson from './wire/pairing-overview.json';
 import pairingStatusJson from './wire/pairing-status.json';
+import problemJson from './wire/problem.json';
+import problemValidationJson from './wire/problem-validation.json';
 import serverDevicesJson from './wire/server-devices.json';
 import serverIdentityJson from './wire/server-identity.json';
 import settingsJson from './wire/settings.json';
@@ -51,6 +56,7 @@ const wire = <T,>(fixture: Widen<T>): T => fixture as T;
 export const activityEvent = wire<ActivityEvent>(activityEventJson);
 export const authState = wire<AuthState>(authStateJson);
 export const clientDevices = wire<ClientDevices>(clientDevicesJson);
+export const clientSecret = wire<ClientSecret>(clientSecretJson);
 export const clients = wire<ClientView[]>(clientsJson);
 export const connectionTest = wire<ConnectionTest>(connectionTestJson);
 export const connectionView = wire<ConnectionView>(connectionViewJson);
@@ -59,6 +65,8 @@ export const keysView = wire<KeysView>(keysViewJson);
 export const newClient = wire<NewClient>(newClientJson);
 export const pairingOverview = wire<PairingOverview>(pairingOverviewJson);
 export const pairingStatus = wire<PairingStatus>(pairingStatusJson);
+export const problem = wire<Problem>(problemJson);
+export const problemValidation = wire<Problem>(problemValidationJson);
 export const serverDevices = wire<ServerDevices>(serverDevicesJson);
 export const serverIdentity = wire<ServerIdentity>(serverIdentityJson);
 export const settings = wire<KoppelSettings>(settingsJson);

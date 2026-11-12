@@ -117,7 +117,7 @@ pub fn is_time(text: &str) -> bool {
         && offset[4..6].iter().all(u8::is_ascii_digit)
 }
 
-/// The fields of an activity entry, as `GET /api/activity` and the push carry it.
+/// The fields of an activity entry, as `GET /api/v1/activity` and the push carry it.
 pub const ACTIVITY: &[(&str, Kind)] = &[
     ("id", Kind::Str),
     ("timestampUtc", Kind::Time),
@@ -131,7 +131,7 @@ pub const ACTIVITY: &[(&str, Kind)] = &[
 /// What an activity entry is about.
 pub const ENTITY: &[(&str, Kind)] = &[("id", Kind::Str), ("name", Kind::Str), ("type", Kind::Str)];
 
-/// The settings, as `GET /api/settings` and the push carry them.
+/// The settings, as `GET /api/v1/settings` and the push carry them.
 pub const SETTINGS: &[(&str, Kind)] = &[
     ("role", Kind::Str),
     ("shareOnStartup", Kind::Bool),

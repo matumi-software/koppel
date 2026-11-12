@@ -6,7 +6,7 @@ import { activityOptions, clientDevicesOptions, clientsOptions, connectionOption
 const activityKey = activityOptions().queryKey;
 
 /** Where the server pushes, as Server-Sent Events. */
-export const eventsUrl = '/api/events';
+export const eventsUrl = '/api/v1/events';
 
 interface Push<T = unknown> {
   /** The cache entries this event keeps current: refetched when a payload cannot be applied. */

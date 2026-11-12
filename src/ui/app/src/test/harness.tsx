@@ -8,6 +8,7 @@ import { AuthContext } from '@/auth/auth-context';
 import { LiveProvider } from '@/live/live-provider';
 import { PendingProvider } from '@/pending/pending-provider';
 import { FakeEventSource } from './fake-event-source';
+import { problemValidation } from './wire';
 
 export const newQueryClient = () =>
   new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: false, gcTime: Infinity } } });
@@ -44,6 +45,8 @@ export function renderApp(ui: ReactElement, queryClient = newQueryClient()) {
 export const announced = () => screen.getByRole('status').textContent;
 
 export const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+/** A validation problem as the server writes it: 400 with each field's messages. */
+export const invalid = (field: string, message: string) => json({ ...problemValidation, errors: { [field]: [message] } }, 400);
 export const accepted = () => new Response(null, { status: 202 });
 
 type Route = (init?: RequestInit) => Response | Promise<Response>;

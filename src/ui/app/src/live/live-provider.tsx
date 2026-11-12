@@ -6,7 +6,7 @@ import { LiveContext } from './live-context';
 import { applyPush, downAfterFailures, eventsUrl, pushEvents, retryDelay } from './push-table';
 
 /**
- * Owns the UI's live link to the server, one EventSource on /api/events, applies every push to the
+ * Owns the UI's live link to the server, one EventSource on /api/v1/events, applies every push to the
  * query cache and reports the link's state. The browser would reconnect by itself, but not after a
  * refused request, so a failed stream is closed and a new one opened on retryDelay's steps, the first
  * connect included, asking the server each time whether the session is still good. Once the link is

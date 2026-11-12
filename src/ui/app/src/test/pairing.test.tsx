@@ -5,7 +5,7 @@ import type { ConnectionView } from '@/api/client';
 import type { DiscoveredServer, PairingStatus } from '@/api/pairing';
 import { NearbyServers } from '@/client/nearby-servers';
 import { PairingRequests } from '@/server/pairing-requests';
-import { accepted, json, mockFetch, renderApp } from './harness';
+import { accepted, invalid, json, mockFetch, renderApp } from './harness';
 import { systemInfo } from './wire';
 
 const fp = (digit: string) => Array.from({ length: 32 }, () => digit.repeat(2)).join(':');
@@ -23,11 +23,11 @@ const idle: PairingStatus = { state: 'idle', serverName: null, serverUrl: null, 
 const noConnection: ConnectionView = { serverUrl: null, serverFingerprint: null, clientId: null, hasSecret: false, nextServerFingerprint: null };
 
 const routes = (servers: DiscoveredServer[], connection: ConnectionView = noConnection, status: PairingStatus = idle) => ({
-  'GET /api/client/discovery': () => json(servers),
-  'GET /api/client/connection': () => json(connection),
-  'GET /api/client/pairing': () => json(status),
-  'GET /api/activity?max=200': () => json([]),
-  'GET /api/system/info': () => json({ ...systemInfo, name: 'bench-1' }),
+  'GET /api/v1/client/discovery': () => json(servers),
+  'GET /api/v1/client/connection': () => json(connection),
+  'GET /api/v1/client/pairing': () => json(status),
+  'GET /api/v1/activity?max=200': () => json([]),
+  'GET /api/v1/system/info': () => json({ ...systemInfo, name: 'bench-1' }),
 });
 
 function ActivityLines() {
@@ -77,12 +77,12 @@ describe('nearby servers', () => {
   it('asks before replacing a connection, and confirms through the API', async () => {
     const { count } = mockFetch({
       ...routes([], noConnection, { ...idle, state: 'confirm', serverName: 'lab', serverUrl: 'https://lab:5241', serverFingerprint: fp('c'), message: 'Saving replaces your connection to https://old:5241.' }),
-      'POST /api/client/pairing/confirm': () => accepted(),
+      'POST /api/v1/client/pairing/confirmation': () => accepted(),
     });
     const { live } = renderApp(<NearbyServers locked={false} />);
 
     fireEvent.click(await screen.findByText('Replace connection'));
-    await vi.waitFor(() => expect(count('POST /api/client/pairing/confirm')).toBe(1));
+    await vi.waitFor(() => expect(count('POST /api/v1/client/pairing/confirmation')).toBe(1));
     act(() => live.emit('PairingStatusChanged', { ...idle, state: 'paired', serverName: 'lab', serverUrl: 'https://lab:5241', serverFingerprint: fp('c') }));
 
     await vi.waitFor(() => expect(screen.queryByText('Replace connection')).toBeNull());
@@ -91,7 +91,7 @@ describe('nearby servers', () => {
   it('shows an error when starting a pairing is refused', async () => {
     mockFetch({
       ...routes([server('lab', 'a')]),
-      'POST /api/client/pairing': () => json({ errors: { serverUrl: ['Use the HTTPS address.'] } }, 400),
+      'POST /api/v1/client/pairing': () => invalid('serverUrl', 'Use the HTTPS address.'),
     });
     renderApp(<NearbyServers locked={false} />);
 
@@ -104,9 +104,9 @@ describe('nearby servers', () => {
 describe('pairing requests', () => {
   it('says why a request was refused', async () => {
     mockFetch({
-      'GET /api/server/pairing': () =>
+      'GET /api/v1/server/pairing': () =>
         json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [{ id: 'r1', clientName: 'bench-2', from: '10.0.0.9', requestedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:05:00Z', state: 'denied', message: 'The code was wrong three times.' }] }),
-      'GET /api/activity?max=200': () => json([]),
+      'GET /api/v1/activity?max=200': () => json([]),
     });
     renderApp(<PairingRequests locked={false} />);
 
@@ -115,8 +115,8 @@ describe('pairing requests', () => {
 
   it('tells the admin when the server is turning pairing requests away', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: true, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
-      'GET /api/activity?max=200': () => json([]),
+      'GET /api/v1/server/pairing': () => json({ budgetExhausted: true, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
+      'GET /api/v1/activity?max=200': () => json([]),
     });
     renderApp(<PairingRequests locked={false} />);
 
@@ -125,8 +125,8 @@ describe('pairing requests', () => {
 
   it('shows the alert when a push says the budget ran out, and drops it when it returns', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
-      'GET /api/activity?max=200': () => json([]),
+      'GET /api/v1/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
+      'GET /api/v1/activity?max=200': () => json([]),
     });
     const { live } = renderApp(<PairingRequests locked={false} />);
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -140,8 +140,8 @@ describe('pairing requests', () => {
 
   it('lists no requests and no alert when there is nothing to say', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
-      'GET /api/activity?max=200': () => json([]),
+      'GET /api/v1/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
+      'GET /api/v1/activity?max=200': () => json([]),
     });
     renderApp(<PairingRequests locked={false} />);
 
@@ -157,9 +157,9 @@ describe('the pairing window', () => {
 
   it('is closed to start with, says so, and opens only once the push says it did', async () => {
     const { calls } = mockFetch({
-      'GET /api/server/pairing': () => json(closed),
-      'GET /api/activity?max=200': () => json([]),
-      'POST /api/server/pairing/window': () => accepted(),
+      'GET /api/v1/server/pairing': () => json(closed),
+      'GET /api/v1/activity?max=200': () => json([]),
+      'PUT /api/v1/server/pairing/window': () => accepted(),
     });
     const { live } = renderApp(<PairingRequests locked={false} />);
 
@@ -167,7 +167,7 @@ describe('the pairing window', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Allow pairing for 10 minutes' }));
 
     await screen.findByRole('button', { name: 'Allowing' });
-    const sent = calls.find((c) => c.key === 'POST /api/server/pairing/window');
+    const sent = calls.find((c) => c.key === 'PUT /api/v1/server/pairing/window');
     expect(sent?.body).toEqual({ minutes: 10 });
     // The same closed window again is not the answer.
     await act(async () => live.emit('PairingRequestsChanged', closed));
@@ -180,15 +180,15 @@ describe('the pairing window', () => {
 
   it('closes through the same store', async () => {
     const { count } = mockFetch({
-      'GET /api/server/pairing': () => json(opened),
-      'GET /api/activity?max=200': () => json([]),
-      'DELETE /api/server/pairing/window': () => accepted(),
+      'GET /api/v1/server/pairing': () => json(opened),
+      'GET /api/v1/activity?max=200': () => json([]),
+      'DELETE /api/v1/server/pairing/window': () => accepted(),
     });
     const { live } = renderApp(<PairingRequests locked={false} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Close pairing' }));
 
-    await vi.waitFor(() => expect(count('DELETE /api/server/pairing/window')).toBe(1));
+    await vi.waitFor(() => expect(count('DELETE /api/v1/server/pairing/window')).toBe(1));
     await screen.findByRole('button', { name: 'Closing' });
     await act(async () => live.emit('PairingRequestsChanged', closed));
     expect(await screen.findByRole('button', { name: 'Allow pairing for 10 minutes' })).toBeTruthy();
@@ -196,8 +196,8 @@ describe('the pairing window', () => {
 
   it('has nothing to open on a server that takes requests at any time', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ ...closed, window: { open: true, alwaysOpen: true, until: null } }),
-      'GET /api/activity?max=200': () => json([]),
+      'GET /api/v1/server/pairing': () => json({ ...closed, window: { open: true, alwaysOpen: true, until: null } }),
+      'GET /api/v1/activity?max=200': () => json([]),
     });
     renderApp(<PairingRequests locked={false} />);
 
@@ -220,16 +220,16 @@ describe('approving and refusing a request', () => {
 
   it('is pending with an activity line until the request leaves the list', async () => {
     const { count } = mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
-      'GET /api/activity?max=200': () => json([]),
-      'POST /api/server/pairing/r1/approve': () => accepted(),
+      'GET /api/v1/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
+      'GET /api/v1/activity?max=200': () => json([]),
+      'POST /api/v1/server/pairing/requests/r1/approval': () => accepted(),
     });
     const { live } = open();
     fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '12345678' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
 
-    await vi.waitFor(() => expect(count('POST /api/server/pairing/r1/approve')).toBe(1));
+    await vi.waitFor(() => expect(count('POST /api/v1/server/pairing/requests/r1/approval')).toBe(1));
     expect(activityText()).toContain('Waiting. Approve pairing with bench-2');
     expect((screen.getByRole('button', { name: 'Refuse' }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -241,9 +241,9 @@ describe('approving and refusing a request', () => {
 
   it('shows the refusal of a wrong code, and the activity line says it was not done', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
-      'GET /api/activity?max=200': () => json([]),
-      'POST /api/server/pairing/r1/approve': () => json({ errors: { code: ['That code is not right.'] } }, 400),
+      'GET /api/v1/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
+      'GET /api/v1/activity?max=200': () => json([]),
+      'POST /api/v1/server/pairing/requests/r1/approval': () => invalid('code', 'That code is not right.'),
     });
     open();
     fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '12345678' } });
@@ -256,22 +256,22 @@ describe('approving and refusing a request', () => {
 
   it('refuses through the same store', async () => {
     const { count } = mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
-      'GET /api/activity?max=200': () => json([]),
-      'POST /api/server/pairing/r1/deny': () => accepted(),
+      'GET /api/v1/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
+      'GET /api/v1/activity?max=200': () => json([]),
+      'DELETE /api/v1/server/pairing/requests/r1': () => accepted(),
     });
     open();
 
     fireEvent.click(await screen.findByRole('button', { name: 'Refuse' }));
 
-    await vi.waitFor(() => expect(count('POST /api/server/pairing/r1/deny')).toBe(1));
+    await vi.waitFor(() => expect(count('DELETE /api/v1/server/pairing/requests/r1')).toBe(1));
     expect(activityText()).toContain('Refuse pairing with bench-2');
   });
 });
 
 describe('pairing with a nearby server', () => {
   it('counts the pairing as under way when the server spells the address its own way', async () => {
-    const { count } = mockFetch({ ...routes([server('lab', 'a')]), 'POST /api/client/pairing': () => accepted() });
+    const { count } = mockFetch({ ...routes([server('lab', 'a')]), 'POST /api/v1/client/pairing': () => accepted() });
     const { live } = renderApp(
       <>
         <NearbyServers locked={false} />
@@ -279,7 +279,7 @@ describe('pairing with a nearby server', () => {
       </>,
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Pair' }));
-    await vi.waitFor(() => expect(count('POST /api/client/pairing')).toBe(1));
+    await vi.waitFor(() => expect(count('POST /api/v1/client/pairing')).toBe(1));
     expect(screen.getByTestId('activity').textContent).toContain('Pair with lab');
 
     act(() => live.emit('PairingStatusChanged', { ...idle, state: 'waiting', serverName: 'lab', serverUrl: 'HTTPS://10.0.0.5:5241', code: '12345678' }));

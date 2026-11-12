@@ -12,46 +12,46 @@ const OTHER_PASSWORD: &str = "contract-password-2";
 /// The UI's routes a server serves, each needing a session. The ids in them need not exist: the
 /// session check comes before the route.
 const SERVER_ROUTES: &[(&str, &str)] = &[
-    ("GET", "/api/settings"),
-    ("PATCH", "/api/settings"),
-    ("GET", "/api/system/info"),
-    ("GET", "/api/system/checks"),
-    ("GET", "/api/activity"),
-    ("POST", "/api/auth/logout"),
-    ("POST", "/api/auth/password"),
-    ("GET", "/api/server/identity"),
-    ("GET", "/api/server/clients"),
-    ("POST", "/api/server/clients"),
-    ("DELETE", "/api/server/clients/client-0"),
-    ("GET", "/api/server/clients/client-0/secret"),
-    ("POST", "/api/server/clients/client-0/rotate"),
-    ("GET", "/api/server/keys"),
-    ("POST", "/api/server/keys/next-certificate"),
-    ("DELETE", "/api/server/keys/next-certificate"),
-    ("POST", "/api/server/keys/next-certificate/switch"),
-    ("GET", "/api/server/pairing"),
-    ("POST", "/api/server/pairing/window"),
-    ("DELETE", "/api/server/pairing/window"),
-    ("POST", "/api/server/pairing/0/approve"),
-    ("POST", "/api/server/pairing/0/deny"),
-    ("GET", "/api/server/devices"),
-    ("PUT", "/api/server/devices/1-1/shared"),
-    ("GET", "/api/not-a-route-yet"),
+    ("GET", "/api/v1/settings"),
+    ("PATCH", "/api/v1/settings"),
+    ("GET", "/api/v1/system/info"),
+    ("GET", "/api/v1/system/checks"),
+    ("GET", "/api/v1/activity"),
+    ("POST", "/api/v1/auth/logout"),
+    ("POST", "/api/v1/auth/password"),
+    ("GET", "/api/v1/server/identity"),
+    ("GET", "/api/v1/server/clients"),
+    ("POST", "/api/v1/server/clients"),
+    ("DELETE", "/api/v1/server/clients/client-0"),
+    ("GET", "/api/v1/server/clients/client-0/secret"),
+    ("POST", "/api/v1/server/clients/client-0/secret"),
+    ("GET", "/api/v1/server/keys"),
+    ("POST", "/api/v1/server/keys/next-certificate"),
+    ("DELETE", "/api/v1/server/keys/next-certificate"),
+    ("PUT", "/api/v1/server/keys/current-certificate"),
+    ("GET", "/api/v1/server/pairing"),
+    ("PUT", "/api/v1/server/pairing/window"),
+    ("DELETE", "/api/v1/server/pairing/window"),
+    ("POST", "/api/v1/server/pairing/requests/0/approval"),
+    ("DELETE", "/api/v1/server/pairing/requests/0"),
+    ("GET", "/api/v1/server/devices"),
+    ("PUT", "/api/v1/server/devices/1-1/shared"),
+    ("GET", "/api/v1/not-a-route-yet"),
 ];
 
 /// The UI's routes a client serves.
 const CLIENT_ROUTES: &[(&str, &str)] = &[
-    ("GET", "/api/client/connection"),
-    ("PUT", "/api/client/connection"),
-    ("POST", "/api/client/connection/test"),
-    ("GET", "/api/client/discovery"),
-    ("GET", "/api/client/pairing"),
-    ("POST", "/api/client/pairing"),
-    ("POST", "/api/client/pairing/confirm"),
-    ("DELETE", "/api/client/pairing"),
-    ("GET", "/api/client/devices"),
-    ("POST", "/api/client/devices/1-1/attach"),
-    ("POST", "/api/client/devices/1-1/detach"),
+    ("GET", "/api/v1/client/connection"),
+    ("PUT", "/api/v1/client/connection"),
+    ("POST", "/api/v1/client/connection/test"),
+    ("GET", "/api/v1/client/discovery"),
+    ("GET", "/api/v1/client/pairing"),
+    ("POST", "/api/v1/client/pairing"),
+    ("POST", "/api/v1/client/pairing/confirmation"),
+    ("DELETE", "/api/v1/client/pairing"),
+    ("GET", "/api/v1/client/devices"),
+    ("PUT", "/api/v1/client/devices/1-1/attachment"),
+    ("DELETE", "/api/v1/client/devices/1-1/attachment"),
 ];
 
 async fn call(session: &Session, method: &str, path: &str) -> u16 {
@@ -82,7 +82,7 @@ async fn every_ui_route_answers_401_without_a_session_and_the_role_comes_first()
     }
 
     main.admin
-        .patch("/api/settings", json!({ "role": "both" }))
+        .patch("/api/v1/settings", json!({ "role": "both" }))
         .await
         .expect(202);
     for (method, path) in CLIENT_ROUTES.iter().chain(SERVER_ROUTES) {
@@ -95,8 +95,8 @@ async fn every_ui_route_answers_401_without_a_session_and_the_role_comes_first()
 
     // A session cookie that is not one is no session.
     let forged = main.target.with_cookie("not-a-session");
-    assert_eq!(forged.get("/api/settings").await.status, 401);
-    let empty_401 = anonymous.get("/api/settings").await.expect(401);
+    assert_eq!(forged.get("/api/v1/settings").await.status, 401);
+    let empty_401 = anonymous.get("/api/v1/settings").await.expect(401);
     assert!(
         empty_401.header("location").is_none(),
         "an API call is never redirected to a sign-in page"
@@ -108,7 +108,7 @@ async fn state_and_health_answer_without_a_session() {
     let main = Main::get().await;
     let anonymous = main.target.anonymous();
 
-    let state = anonymous.get("/api/auth/state").await.expect(200).json();
+    let state = anonymous.get("/api/v1/auth/state").await.expect(200).json();
     shape::fields(
         &state,
         &[
@@ -118,7 +118,7 @@ async fn state_and_health_answer_without_a_session() {
             ("setupOpen", Kind::Bool),
             ("setupUntil", Kind::OptTime),
         ],
-        "GET /api/auth/state",
+        "GET /api/v1/auth/state",
     );
     assert_eq!(state["signedIn"], json!(false));
     assert_eq!(state["passwordSet"], json!(true));
@@ -128,9 +128,19 @@ async fn state_and_health_answer_without_a_session() {
         "null once there is a password"
     );
 
-    let signed_in = main.admin.get("/api/auth/state").await.expect(200).json();
+    let signed_in = main
+        .admin
+        .get("/api/v1/auth/state")
+        .await
+        .expect(200)
+        .json();
     assert_eq!(signed_in["signedIn"], json!(true));
-    let info = main.admin.get("/api/system/info").await.expect(200).json();
+    let info = main
+        .admin
+        .get("/api/v1/system/info")
+        .await
+        .expect(200)
+        .json();
     assert_eq!(state["machineName"], info["name"]);
 
     let health = anonymous.get("/healthz").await.expect(200);
@@ -144,7 +154,7 @@ async fn signing_in_sets_a_strict_http_only_session_cookie() {
     let answer = main
         .target
         .anonymous()
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(204);
     answer.empty();
@@ -175,7 +185,7 @@ async fn signing_in_sets_a_strict_http_only_session_cookie() {
     let again = main
         .target
         .anonymous()
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(204);
     assert_ne!(again.session_cookie().expect("a value"), value);
@@ -183,7 +193,7 @@ async fn signing_in_sets_a_strict_http_only_session_cookie() {
     let session = main
         .target
         .with_cookie(&answer.session_cookie().expect("a value"));
-    session.get("/api/settings").await.expect(200);
+    session.get("/api/v1/settings").await.expect(200);
 }
 
 #[tokio::test]
@@ -192,24 +202,26 @@ async fn a_wrong_password_is_refused_without_a_cookie() {
     let anonymous = main.target.anonymous();
 
     let wrong = anonymous
-        .post("/api/auth/login", json!({ "password": OTHER_PASSWORD }))
+        .post("/api/v1/auth/login", json!({ "password": OTHER_PASSWORD }))
         .await
         .expect(401);
     assert!(!wrong.error().is_empty());
+    assert_eq!(wrong.code(), "wrong_password");
     assert!(wrong.session_set_cookie().is_none());
 
     let missing = anonymous
-        .post("/api/auth/login", json!({}))
+        .post("/api/v1/auth/login", json!({}))
         .await
         .expect(401);
     assert!(!missing.error().is_empty());
 
     // The setup is over: a second one changes nothing.
     let again = anonymous
-        .post("/api/auth/setup", json!({ "password": OTHER_PASSWORD }))
+        .post("/api/v1/auth/setup", json!({ "password": OTHER_PASSWORD }))
         .await
         .expect(409);
     assert!(!again.error().is_empty());
+    assert_eq!(again.code(), "password_set");
 
     // A right password clears the wrong ones, so they never add up to a lockout across tests.
     main.target.sign_in().await;
@@ -221,7 +233,7 @@ async fn signing_out_ends_the_session_and_a_copy_of_its_cookie() {
     let session = main.target.sign_in().await;
     let copy = main.target.with_cookie(session.cookie().expect("a cookie"));
 
-    let out = session.post_empty("/api/auth/logout").await.expect(204);
+    let out = session.post_empty("/api/v1/auth/logout").await.expect(204);
     out.empty();
     let cleared = out
         .session_set_cookie()
@@ -235,13 +247,13 @@ async fn signing_out_ends_the_session_and_a_copy_of_its_cookie() {
         "expired: {cleared}"
     );
 
-    copy.get("/api/settings").await.expect(401);
-    let state = copy.get("/api/auth/state").await.expect(200).json();
+    copy.get("/api/v1/settings").await.expect(401);
+    let state = copy.get("/api/v1/auth/state").await.expect(200).json();
     assert_eq!(state["signedIn"], json!(false));
-    copy.post_empty("/api/auth/logout").await.expect(401);
+    copy.post_empty("/api/v1/auth/logout").await.expect(401);
 
     // Other sessions carry on.
-    main.admin.get("/api/settings").await.expect(200);
+    main.admin.get("/api/v1/settings").await.expect(200);
 }
 
 #[tokio::test]
@@ -252,7 +264,7 @@ async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
 
     let wrong = this
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": OTHER_PASSWORD, "next": OTHER_PASSWORD }),
         )
         .await
@@ -260,7 +272,7 @@ async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
     assert!(!wrong.error().is_empty());
     let weak = this
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": password(), "next": "short" }),
         )
         .await
@@ -268,18 +280,20 @@ async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
     assert!(!weak.error().is_empty());
     let long = this
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": password(), "next": "x".repeat(129) }),
         )
         .await
         .expect(400);
     assert!(!long.error().is_empty());
-    this.post("/api/auth/password", json!({})).await.expect(400);
-    other.get("/api/settings").await.expect(200);
+    this.post("/api/v1/auth/password", json!({}))
+        .await
+        .expect(400);
+    other.get("/api/v1/settings").await.expect(200);
 
     let changed = this
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": password(), "next": OTHER_PASSWORD }),
         )
         .await
@@ -291,16 +305,16 @@ async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
     );
     let renewed = this.clone();
 
-    other.get("/api/settings").await.expect(401);
-    renewed.get("/api/settings").await.expect(200);
+    other.get("/api/v1/settings").await.expect(401);
+    renewed.get("/api/v1/settings").await.expect(200);
 
     let anonymous = main.target.anonymous();
     anonymous
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(401);
     anonymous
-        .post("/api/auth/login", json!({ "password": OTHER_PASSWORD }))
+        .post("/api/v1/auth/login", json!({ "password": OTHER_PASSWORD }))
         .await
         .expect(204);
 
@@ -313,7 +327,7 @@ async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
     // Back to the run's password for the tests after this one.
     renewed
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": OTHER_PASSWORD, "next": password() }),
         )
         .await
@@ -328,7 +342,7 @@ async fn password_hashes_beyond_two_at_once_are_turned_away_at_once() {
         let anonymous = main.target.anonymous();
         tasks.spawn(async move {
             anonymous
-                .post("/api/auth/login", json!({ "password": password() }))
+                .post("/api/v1/auth/login", json!({ "password": password() }))
                 .await
         });
     }

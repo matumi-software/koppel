@@ -1,15 +1,16 @@
-//! `/api/settings`, `/api/activity` and `/api/system/*`.
+//! `/api/v1/settings`, `/api/v1/activity` and `/api/v1/system/*`.
 
+use axum::Json;
 use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use koppel_config::files::{KoppelSettings, Role};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use ts_rs::TS;
 
-use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
-use crate::json::{self, JsonBody};
+use super::{ApiError, ApiResult, accepted};
+use crate::activity::{ActivityEvent, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
+use crate::json::JsonBody;
 use crate::state::SettingsApi;
 
 /// A partial change to the settings. A field left out or null stays as it is.
@@ -90,8 +91,8 @@ impl SettingsPatch {
 }
 
 /// The settings as stored.
-pub(crate) async fn get_settings(State(app): State<SettingsApi>) -> Response {
-    json::ok(&*app.settings.current())
+pub(crate) async fn get_settings(State(app): State<SettingsApi>) -> Json<KoppelSettings> {
+    Json(app.settings.current().as_ref().clone())
 }
 
 /// Writes a change and answers 202 with no body: the confirmed settings reach the UI as
@@ -99,10 +100,10 @@ pub(crate) async fn get_settings(State(app): State<SettingsApi>) -> Response {
 pub(crate) async fn patch_settings(
     State(app): State<SettingsApi>,
     JsonBody(patch): JsonBody<SettingsPatch>,
-) -> Response {
+) -> ApiResult<StatusCode> {
     let summary = patch.describe(&app.settings.current());
     if let Err(e) = app.settings.update(|current| patch.apply(current)).await {
-        return json::failed("Saving the settings", e);
+        return Err(ApiError::internal("Saving the settings", e));
     }
     if !summary.is_empty() {
         app.activity.record(
@@ -113,15 +114,15 @@ pub(crate) async fn patch_settings(
             None,
         );
     }
-    json::accepted()
+    accepted()
 }
 
-/// `GET /api/activity?entity=&max=`: recent entries, newest first, 100 unless `max` says otherwise,
+/// `GET /api/v1/activity?entity=&max=`: recent entries, newest first, 100 unless `max` says otherwise,
 /// from 1 to 500.
 pub(crate) async fn activity(
     State(app): State<SettingsApi>,
     RawQuery(query): RawQuery,
-) -> Response {
+) -> ApiResult<Json<Vec<ActivityEvent>>> {
     let query = query.unwrap_or_default();
     let mut max = 100i64;
     let mut entity = None;
@@ -132,14 +133,19 @@ pub(crate) async fn activity(
             }
             match value.parse::<i32>() {
                 Ok(n) => max = i64::from(n),
-                Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+                Err(_) => {
+                    return Err(ApiError::invalid(&[(
+                        "max",
+                        "Give max as a whole number from 1 to 500.",
+                    )]));
+                }
             }
         } else if name.eq_ignore_ascii_case("entity") {
             entity = Some(value);
         }
     }
     let max = max.clamp(1, 500) as usize;
-    json::ok(&app.activity.recent(max, entity.as_deref()))
+    Ok(Json(app.activity.recent(max, entity.as_deref())))
 }
 
 /// A query string's pairs, percent-decoded, `+` read as a space.
@@ -180,7 +186,7 @@ fn decode(text: &str) -> String {
 
 /// What this machine can do and what is wrong with its files: sharing and attaching first, then a
 /// line for each file that was not used.
-pub(crate) async fn checks(State(app): State<SettingsApi>) -> Response {
+pub(crate) async fn checks(State(app): State<SettingsApi>) -> Json<Vec<koppel_usb::SystemCheck>> {
     let mut checks = vec![app.usb_server.check(), app.usb_client.check()];
     let files = [
         (
@@ -204,15 +210,15 @@ pub(crate) async fn checks(State(app): State<SettingsApi>) -> Response {
             checks.push(koppel_usb::SystemCheck::new(id, false, title, &problem));
         }
     }
-    json::ok(&checks)
+    Json(checks)
 }
 
 #[derive(Serialize, TS)]
 #[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SystemInfo<'a> {
-    name: &'a str,
-    version: &'a str,
+pub(crate) struct SystemInfo {
+    name: String,
+    version: String,
     #[serde(with = "time::serde::rfc3339")]
     #[ts(type = "string")]
     started_at: OffsetDateTime,
@@ -220,22 +226,22 @@ pub(crate) struct SystemInfo<'a> {
     ui_port: u16,
     https_port: u16,
     fingerprint: String,
-    os: &'a str,
+    os: String,
     tray: bool,
 }
 
 /// What the side panel shows about this machine.
-pub(crate) async fn info(State(app): State<SettingsApi>) -> Response {
+pub(crate) async fn info(State(app): State<SettingsApi>) -> Json<SystemInfo> {
     let host = &app.host;
-    json::ok(&SystemInfo {
-        name: &host.name,
-        version: &host.version,
+    Json(SystemInfo {
+        name: host.name.clone(),
+        version: host.version.clone(),
         started_at: host.started_at,
         role: app.settings.current().role,
         ui_port: host.ui_port,
         https_port: host.network_port,
         fingerprint: app.server.fingerprint(),
-        os: &host.os,
+        os: host.os.clone(),
         tray: host.tray,
     })
 }

@@ -11,7 +11,7 @@
 //! | [`no_store`] | the UI's `/api` | adds `Cache-Control: no-store` to every answer |
 //! | [`auth_limit`] | the sign-in routes | 429 over the per-address limit |
 //! | [`session`] | the UI's `/api` | puts the session on the request when the cookie is good, and renews or clears the cookie |
-//! | [`role_gate`] | `/api/server`, `/api/client` and the network router | 404 when this machine's role does not have it |
+//! | [`role_gate`] | `/api/v1/server`, `/api/v1/client` and the network router | 404 when this machine's role does not have it |
 //! | [`require_session`] | the protected routes | 401 without a session |
 //!
 //! Skakel's limits on its token and pairing calls are Skakel's own, behind these guards, per
@@ -37,6 +37,7 @@ use koppel_config::files::KoppelSettings;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::access::{UiAccess, UiReach, address_key};
+use crate::api::ApiError;
 use crate::auth::session::{clear_cookie, from_request};
 use crate::auth::{SignedIn, UiAuth};
 use crate::surface::{RoleScope, is_network_path};
@@ -144,7 +145,12 @@ pub(crate) async fn allow_from(
 /// never grants.
 pub(crate) async fn ui_origin(request: Request, next: Next) -> Response {
     if !from_the_ui(&request) {
-        return StatusCode::FORBIDDEN.into_response();
+        return ApiError::refused(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "This request did not come from Koppel's own UI.",
+        )
+        .into_response();
     }
     next.run(request).await
 }
@@ -160,7 +166,12 @@ pub(crate) async fn auth_limit(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     if !limit.allow(&address_key(remote.ip())) {
-        return StatusCode::TOO_MANY_REQUESTS.into_response();
+        return ApiError::too_many(
+            "rate_limited",
+            "Too many sign-in requests from this address. Wait a minute and try again.",
+            60,
+        )
+        .into_response();
     }
     next.run(request).await
 }
@@ -195,7 +206,12 @@ pub(crate) async fn session(
 /// On the protected routes, inside [`session`]: a request with no good session gets 401.
 pub(crate) async fn require_session(request: Request, next: Next) -> Response {
     if request.extensions().get::<SignedIn>().is_none() {
-        return StatusCode::UNAUTHORIZED.into_response();
+        return ApiError::refused(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Sign in to use Koppel.",
+        )
+        .into_response();
     }
     next.run(request).await
 }
@@ -327,7 +343,9 @@ mod tests {
     use super::*;
 
     fn request(host: &str, origin: Option<&str>, site: Option<&str>) -> Request {
-        let mut builder = Request::builder().uri("/api/settings").header(HOST, host);
+        let mut builder = Request::builder()
+            .uri("/api/v1/settings")
+            .header(HOST, host);
         if let Some(origin) = origin {
             builder = builder.header(ORIGIN, origin);
         }

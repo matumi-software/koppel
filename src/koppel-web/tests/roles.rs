@@ -23,14 +23,14 @@ async fn attach_the_dongle(server: &Node, client: &Node) {
     let status = server
         .call(
             Method::PUT,
-            "/api/server/devices/1-1.4/shared",
+            "/api/v1/server/devices/1-1.4/shared",
             Some(json!({ "shared": true })),
         )
         .await
         .0;
     assert_eq!(status, 202);
     eventually("the client to see the shared dongle", || async {
-        let devices = client.get("/api/client/devices").await;
+        let devices = client.get("/api/v1/client/devices").await;
         devices["devices"]
             .as_array()
             .and_then(|list| list.iter().find(|d| d["device"]["busId"] == json!("1-1.4")))
@@ -39,7 +39,7 @@ async fn attach_the_dongle(server: &Node, client: &Node) {
     .await;
     assert_eq!(
         client
-            .post("/api/client/devices/1-1.4/attach", json!({}))
+            .put("/api/v1/client/devices/1-1.4/attachment", json!({}))
             .await,
         202
     );
@@ -49,7 +49,7 @@ async fn attach_the_dongle(server: &Node, client: &Node) {
 /// Waits until the client shows the dongle attached here.
 async fn attached(client: &Node) {
     eventually("the dongle to be attached here", || async {
-        let devices = client.get("/api/client/devices").await;
+        let devices = client.get("/api/v1/client/devices").await;
         devices["devices"]
             .as_array()
             .and_then(|list| {
@@ -71,7 +71,7 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
     let client = Node::start(client_dir.path(), "client", None, client_kernel.clone()).await;
 
     let client_id = pair(&server, &client).await;
-    let clients = server.get("/api/server/clients").await;
+    let clients = server.get("/api/v1/server/clients").await;
     assert!(
         clients
             .as_array()
@@ -80,11 +80,11 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
             .any(|c| c["id"] == json!(client_id) && c["name"] == json!("bench")),
         "{clients}"
     );
-    let connection = client.get("/api/client/connection").await;
+    let connection = client.get("/api/v1/client/connection").await;
     assert_eq!(connection["serverUrl"], json!(server.url()));
     assert_eq!(connection["hasSecret"], json!(true));
     let test = client
-        .call(Method::POST, "/api/client/connection/test", None)
+        .call(Method::POST, "/api/v1/client/connection/test", None)
         .await
         .1;
     assert_eq!(test["outcome"], json!("ok"), "{test}");
@@ -92,7 +92,7 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
     attach_the_dongle(&server, &client).await;
     let mut driver = client_kernel.driver_stream(1).await;
     echoes(&mut driver, b"before the handover").await;
-    let devices = server.get("/api/server/devices").await;
+    let devices = server.get("/api/v1/server/devices").await;
     assert_eq!(
         devices["devices"][0]["state"],
         json!("attached"),
@@ -100,21 +100,22 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
     );
 
     // The handover: the client stores the next certificate before the switch, then pins it.
-    let first = server.get("/api/server/identity").await["fingerprint"].clone();
+    let first = server.get("/api/v1/server/identity").await["fingerprint"].clone();
     assert_eq!(
         server
-            .post("/api/server/keys/next-certificate", json!({}))
+            .post("/api/v1/server/keys/next-certificate", json!({}))
             .await,
         202
     );
-    let next = server.get("/api/server/keys").await["nextFingerprint"].clone();
+    let next = server.get("/api/v1/server/keys").await["nextFingerprint"].clone();
     assert!(next.is_string());
     eventually("the client to store the next certificate", || async {
-        (client.get("/api/client/connection").await["nextServerFingerprint"] == next).then_some(())
+        (client.get("/api/v1/client/connection").await["nextServerFingerprint"] == next)
+            .then_some(())
     })
     .await;
     eventually("the server to see the client has it", || async {
-        let clients = server.get("/api/server/clients").await;
+        let clients = server.get("/api/v1/server/clients").await;
         clients
             .as_array()
             .unwrap()
@@ -125,16 +126,16 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
     .await;
     assert_eq!(
         server
-            .post("/api/server/keys/next-certificate/switch", json!({}))
+            .put("/api/v1/server/keys/current-certificate", json!({}))
             .await,
         202
     );
     assert_eq!(
-        server.get("/api/server/identity").await["fingerprint"],
+        server.get("/api/v1/server/identity").await["fingerprint"],
         next
     );
     eventually("the client to pin the new certificate", || async {
-        let connection = client.get("/api/client/connection").await;
+        let connection = client.get("/api/v1/client/connection").await;
         (connection["serverFingerprint"] == next && connection["nextServerFingerprint"].is_null())
             .then_some(())
     })
@@ -144,7 +145,7 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
     attached(&client).await;
     echoes(&mut driver, b"after the handover").await;
     let test = client
-        .call(Method::POST, "/api/client/connection/test", None)
+        .call(Method::POST, "/api/v1/client/connection/test", None)
         .await
         .1;
     assert_eq!(test["outcome"], json!("ok"), "{test}");
@@ -161,7 +162,7 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
     )
     .await;
     assert_eq!(
-        server.get("/api/server/identity").await["fingerprint"],
+        server.get("/api/v1/server/identity").await["fingerprint"],
         next
     );
     linked(&client).await;
@@ -173,7 +174,7 @@ async fn a_paired_client_attaches_and_survives_a_handover_and_a_server_restart()
     let status = server
         .call(
             Method::DELETE,
-            &format!("/api/server/clients/{client_id}"),
+            &format!("/api/v1/server/clients/{client_id}"),
             None,
         )
         .await
@@ -196,7 +197,7 @@ async fn rotating_the_secret_ends_the_link_and_says_to_pair_again() {
     let (status, body) = server
         .call(
             Method::POST,
-            &format!("/api/server/clients/{client_id}/rotate"),
+            &format!("/api/v1/server/clients/{client_id}/secret"),
             None,
         )
         .await;
@@ -204,7 +205,7 @@ async fn rotating_the_secret_ends_the_link_and_says_to_pair_again() {
     let reason = down(&client).await;
     assert!(reason.contains("Pair with the server again"), "{reason}");
     let test = client
-        .call(Method::POST, "/api/client/connection/test", None)
+        .call(Method::POST, "/api/v1/client/connection/test", None)
         .await
         .1;
     assert_eq!(test["outcome"], json!("rejectedCredentials"), "{test}");
@@ -224,27 +225,27 @@ async fn a_read_straight_after_the_202_shows_the_pairing_that_started() {
     let server = Node::start(server_dir.path(), "server", None, FakeKernel::new()).await;
     let client = Node::start(client_dir.path(), "client", None, FakeKernel::new()).await;
     open_pairing(&server).await;
-    let fingerprint = server.get("/api/server/identity").await["fingerprint"].clone();
+    let fingerprint = server.get("/api/v1/server/identity").await["fingerprint"].clone();
     let body = json!({ "serverUrl": server.url(), "serverFingerprint": fingerprint, "serverName": "bench" });
 
     for round in 0..8 {
         assert_eq!(
-            client.post("/api/client/pairing", body.clone()).await,
+            client.post("/api/v1/client/pairing", body.clone()).await,
             202,
             "round {round}"
         );
-        let state = client.get("/api/client/pairing").await["state"].clone();
+        let state = client.get("/api/v1/client/pairing").await["state"].clone();
         assert!(
             state == json!("requesting") || state == json!("waiting"),
             "round {round}: {state}"
         );
         let (status, _) = client
-            .call(Method::DELETE, "/api/client/pairing", None)
+            .call(Method::DELETE, "/api/v1/client/pairing", None)
             .await;
         assert_eq!(status, 202);
         // A cancel leaves idle, the state a poller must not see right after the next 202.
         assert_eq!(
-            client.get("/api/client/pairing").await["state"],
+            client.get("/api/v1/client/pairing").await["state"],
             json!("idle")
         );
     }
@@ -263,7 +264,7 @@ async fn leaving_the_server_role_ends_the_link_and_coming_back_takes_it_again() 
     let status = server
         .call(
             Method::PATCH,
-            "/api/settings",
+            "/api/v1/settings",
             Some(json!({ "role": "client" })),
         )
         .await
@@ -273,7 +274,7 @@ async fn leaving_the_server_role_ends_the_link_and_coming_back_takes_it_again() 
     let status = server
         .call(
             Method::PATCH,
-            "/api/settings",
+            "/api/v1/settings",
             Some(json!({ "role": "server" })),
         )
         .await
@@ -336,7 +337,7 @@ async fn callers_at_two_addresses_do_not_share_a_pairing_limit() {
         .as_u16();
     assert_eq!(revealed, 204);
     let request = eventually("the server to list the request", || async {
-        let pairing = server.get("/api/server/pairing").await;
+        let pairing = server.get("/api/v1/server/pairing").await;
         pairing["requests"]
             .as_array()
             .and_then(|list| list.iter().find(|r| r["id"] == json!(id)).cloned())
@@ -373,7 +374,7 @@ async fn the_link_follows_a_server_that_moved_and_saves_where_it_went() {
     )
     .await;
     let found = eventually("the client to find the server", || async {
-        let servers = client.get("/api/client/discovery").await;
+        let servers = client.get("/api/v1/client/discovery").await;
         servers.as_array().and_then(|list| list.first().cloned())
     })
     .await;
@@ -391,12 +392,12 @@ async fn the_link_follows_a_server_that_moved_and_saves_where_it_went() {
     )
     .await;
     eventually("the saved connection to follow the server", || async {
-        (client.get("/api/client/connection").await["serverUrl"] == json!(server.url()))
+        (client.get("/api/v1/client/connection").await["serverUrl"] == json!(server.url()))
             .then_some(())
     })
     .await;
     linked(&client).await;
-    let moved = client.get("/api/activity").await;
+    let moved = client.get("/api/v1/activity").await;
     assert!(
         moved
             .as_array()
@@ -413,25 +414,25 @@ async fn a_server_takes_no_pairing_request_until_its_window_is_opened() {
     let dir = TempDir::new("server");
     let server = Node::start(dir.path(), "server", None, FakeKernel::new()).await;
 
-    let overview = server.get("/api/server/pairing").await;
+    let overview = server.get("/api/v1/server/pairing").await;
     assert_eq!(overview["window"]["open"], json!(false), "{overview}");
     let (status, body) = open_pairing_from(&server, "127.0.0.1", "closed").await;
     assert_eq!(status, 403, "{body}");
     assert_eq!(body["reason"], json!("pairing-closed"), "{body}");
 
     open_pairing(&server).await;
-    let opened = server.get("/api/server/pairing").await;
+    let opened = server.get("/api/v1/server/pairing").await;
     assert!(opened["window"]["until"].is_string(), "{opened}");
     let (status, body) = open_pairing_from(&server, "127.0.0.1", "open").await;
     assert_eq!(status, 200, "{body}");
 
     let status = server
-        .call(Method::DELETE, "/api/server/pairing/window", None)
+        .call(Method::DELETE, "/api/v1/server/pairing/window", None)
         .await
         .0;
     assert_eq!(status, 202);
     eventually("the window to close", || async {
-        (server.get("/api/server/pairing").await["window"]["open"] == json!(false)).then_some(())
+        (server.get("/api/v1/server/pairing").await["window"]["open"] == json!(false)).then_some(())
     })
     .await;
     let (status, _) = open_pairing_from(&server, "127.0.0.2", "closed-again").await;
@@ -441,8 +442,8 @@ async fn a_server_takes_no_pairing_request_until_its_window_is_opened() {
     for minutes in [0, 61] {
         let (status, body) = server
             .call(
-                Method::POST,
-                "/api/server/pairing/window",
+                Method::PUT,
+                "/api/v1/server/pairing/window",
                 Some(json!({ "minutes": minutes })),
             )
             .await;
@@ -493,13 +494,13 @@ async fn a_server_on_skakel_2_is_named_when_pairing_and_when_testing_the_connect
 
     let status = client
         .post(
-            "/api/client/pairing",
+            "/api/v1/client/pairing",
             json!({ "serverUrl": url, "serverFingerprint": fingerprint, "serverName": "old" }),
         )
         .await;
     assert_eq!(status, 202);
     let failed = eventually("the pairing to fail", || async {
-        let pairing = client.get("/api/client/pairing").await;
+        let pairing = client.get("/api/v1/client/pairing").await;
         (pairing["state"] == json!("failed")).then_some(pairing)
     })
     .await;
@@ -513,7 +514,7 @@ async fn a_server_on_skakel_2_is_named_when_pairing_and_when_testing_the_connect
     let status = client
         .call(
             Method::PUT,
-            "/api/client/connection",
+            "/api/v1/client/connection",
             Some(json!({
                 "serverUrl": url,
                 "serverFingerprint": fingerprint,
@@ -526,7 +527,7 @@ async fn a_server_on_skakel_2_is_named_when_pairing_and_when_testing_the_connect
     assert_eq!(status, 202);
     let test = eventually("the connection test to answer", || async {
         let test = client
-            .call(Method::POST, "/api/client/connection/test", None)
+            .call(Method::POST, "/api/v1/client/connection/test", None)
             .await
             .1;
         (test["outcome"] != json!("incomplete")).then_some(test)
@@ -540,7 +541,7 @@ async fn a_server_on_skakel_2_is_named_when_pairing_and_when_testing_the_connect
             .contains("Update the server"),
         "{test}"
     );
-    let saved = client.get("/api/client/connection").await;
+    let saved = client.get("/api/v1/client/connection").await;
     assert_eq!(saved["clientId"], json!("client-0123456789"), "{saved}");
     assert_eq!(saved["hasSecret"], json!(true), "{saved}");
 
@@ -608,7 +609,7 @@ async fn a_server_with_a_token_signing_key_in_its_state_keeps_its_clients_and_dr
     // already holds, and the next save leaves the keys out.
     let server = Node::start(server_dir.path(), "server", Some(port), FakeKernel::new()).await;
     linked(&client).await;
-    let listed = server.get("/api/server/clients").await;
+    let listed = server.get("/api/v1/server/clients").await;
     assert_eq!(listed[0]["id"], json!(client_id), "{listed}");
     server.stop().await;
 

@@ -4,9 +4,9 @@
 
 The UI never assumes a change worked.
 
-1. The UI sends the change over REST (`PATCH /api/settings`). The server answers `202 Accepted` with no body.
+1. The UI sends the change over REST (`PATCH /api/v1/settings`). The server answers `202 Accepted` with no body.
 2. The server writes the change to its JSON config file (temp file, flush, move over the target).
-3. Only after the write lands does the server push the confirmed state over the live push (`SettingsChanged`). The Rust build pushes Server-Sent Events at `/api/events`; 0.1.x pushed over SignalR at `/api/hubs/ui`.
+3. Only after the write lands does the server push the confirmed state over the live push (`SettingsChanged`). The Rust build pushes Server-Sent Events at `/api/v1/events`; 0.1.x pushed over SignalR at `/api/v1/hubs/ui`.
 4. The UI shows the control as pending from step 1 until the pushed value matches what the user asked for. A rejected request (400) or no confirmation within 10 seconds puts the control back to its confirmed value with the reason.
 
 Hand edits to the config file are picked up by a file watcher and pushed the same way (see "Config
@@ -45,15 +45,34 @@ against the program (`koppel/tests/contract/push.rs`); the UI has its own tests 
 
 The server keeps an activity log in memory (`koppel-web/src/activity.rs`):
 sharing, plugging and unplugging, attaches and releases, client changes, settings changes, certificate
-changes, and failed sign-ins, each with an outcome and, when it failed, the reason. The UI loads it from `GET /api/activity`
+changes, and failed sign-ins, each with an outcome and, when it failed, the reason. The UI loads it from `GET /api/v1/activity`
 and follows `ActivityRecorded` over the live push, so it is the same after a reload and on every device. A subscriber that fails is logged and does not fail the code that recorded the event. It
 starts empty when the process restarts. A change the UI sent shows as Waiting until the server logs
 it. A settings change that changes nothing records nothing.
 
 ### The UI's server side in Rust
 
-`koppel-web` is the UI's server side on axum, with 0.1.x's paths, JSON and errors, held to them by the
-contract tests.
+`koppel-web` is the UI's server side on axum, held to its API by the contract tests.
+
+**The API.** The UI's routes live under `/api/v1`, and a path names a resource: the verb is the method.
+A client's secret is replaced with `POST /api/v1/server/clients/{id}/secret`, a device is attached with
+`PUT` and detached with `DELETE` on `/api/v1/client/devices/{busId}/attachment`, the pairing window is
+opened with `PUT` and closed with `DELETE` on `/api/v1/server/pairing/window`, a pairing request is
+approved with `POST /api/v1/server/pairing/requests/{id}/approval` and denied with `DELETE` on the
+request, the client confirms a pairing with `POST /api/v1/client/pairing/confirmation`, and the server
+switches to its prepared certificate with `PUT /api/v1/server/keys/current-certificate`. The unversioned
+`/api/...` paths are gone: the UI is embedded in the program and always matches it, and no other client is known.
+(Koppel's `/api/remote/*` for other machines is the network surface's and is not part of this API.)
+
+**Refusals are problem JSON** (RFC 9457, `application/problem+json`), written by `api/error.rs`'s `ApiError`,
+which every handler returns through `Result<Json<T>, ApiError>`. The body has `type` (`about:blank`),
+`title`, `status`, `detail` (a sentence the UI shows as it is), `code` (a stable word) and, for a
+validation problem (400, `code: validation`), `errors`: each field with its messages. Codes in use:
+`validation`, `bad_request`, `unsupported_media_type`, `unauthorized`, `forbidden`, `not_found`,
+`wrong_password`, `password_set`, `no_password`, `setup_closed`, `setup_token_invalid`, `secret_not_kept`,
+`rate_limited`, `locked`, `busy` and `internal`. A change that fails to save is a 500 with code `internal`
+and a fixed sentence; the cause and its whole chain go to the log. The wire types of the body are
+`Problem` in `generated/wire.ts`. Dates are RFC 3339 (`time::serde::rfc3339`, `Z` form) everywhere.
 
 | Module | What |
 |---|---|
@@ -65,6 +84,7 @@ contract tests.
 | `auth/` | `ui-auth.json`, the setup window, password rules and hashes, the lockout, the hash slots, the session cookie, sign-out and the password change, `reset-password` |
 | `api/` | The REST endpoints: settings, activity, system, server, client and USB |
 | `activity.rs` | The activity log, in memory, 500 entries |
+| `api/error.rs` | `ApiError` and the problem JSON it writes |
 | `push.rs` | The live push |
 | `wire.rs` | Test only: writes the TypeScript types of the wire (`src/ui/app/src/api/generated/wire.ts`) from the Rust types, fails when the checked-in file differs, and reads the JSON fixtures in `src/ui/app/src/test/wire/` through the Rust types; see "Wire types generated from the Rust DTOs" in `decisions.md` |
 | `roles/` | The seams the endpoints talk to, the server and client roles on Skakel (`roles/skakel/`) and the USB layer behind them (`roles/usb.rs`); see ["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust) |
@@ -73,6 +93,6 @@ contract tests.
 - **Settings:** one typed `Settings` struct in `koppel/src/config.rs`, built once at start by clap from options and `KOPPEL_` environment variables, with 0.1.x's names kept as deprecated aliases. A value that is not valid, an unknown option, and a misspelt setting are all caught before anything starts (see "Settings" in [config.md](config.md)). Log levels come from `RUST_LOG`. The commands are `serve` (the default), `reset-password` and `healthcheck`, and `koppel --version` names the git commit and the build date.
 - **Start:** the folders are prepared, 0.1.x's secrets converted, the config files opened (start-up still stops on an unusable one), then the UI port and, when set apart, the network port listen. With no `KOPPEL_LISTEN_ADDRESS` a port is one dual-stack socket, or IPv4 alone where there is no IPv6.
 - **Sessions:** the cookie `__Host-koppel-session` carries an opaque 256-bit id, and the session behind it is in memory (`koppel-web/src/auth/session.rs`): nothing is written to disk, so a restart signs everyone out. Every request looks the id up and checks that a password is set, the 12 hours without use and the 7 day cap; a request in the second half of the 12 hours extends the session. Each session owns a `CancellationToken` that closes its live push when it ends. The lockout (5 tries, then a minute doubling to an hour, per IPv4 address or IPv6 /64, at most 2048 callers, and a global budget), the two hash slots and the rate limit are described under "UI sign-in" in `docs/security.md`. A reset or a hand edit of `ui-auth.json` is picked up by the file's watcher: a password this server did not write ends every session and reopens setup when there is no password.
-- **The push:** `GET /api/events` with the session cookie answers `text/event-stream`. Each event's name and JSON are 0.1.x's, sent once the change is on disk: `SettingsChanged` and `ConnectionChanged` follow their files' change deliveries, so a hand edit is pushed too, and the rest are sent by whatever made the change. A comment goes out every 15 seconds. A stream that falls 256 events behind is closed rather than skipping one, and the stream ends when its session does (its token is cancelled): signing out, a password change or reset elsewhere, the session running out, or the server stopping (every request carries a shutdown token from the accept loop, so a stop does not wait for an open tab). HTTP/2 carries any number of streams over one connection, so many open tabs do not run out of connections. The UI's `EventSource` reconnects on 0.1.x's steps (0, 2, 5, 10, then 30 seconds), a first connect that failed included, asks whether the session is still good on each failure, and fetches everything again when a stream opens after a failure (the first open needs no fetch).
-- **Unknown API paths:** a signed-in request for an `/api/...` path no route has gets 404, where 0.1.2 answered index.html.
+- **The push:** `GET /api/v1/events` with the session cookie answers `text/event-stream`. Each event's name and JSON are 0.1.x's, sent once the change is on disk: `SettingsChanged` and `ConnectionChanged` follow their files' change deliveries, so a hand edit is pushed too, and the rest are sent by whatever made the change. A comment goes out every 15 seconds. A stream that falls 256 events behind is closed rather than skipping one, and the stream ends when its session does (its token is cancelled): signing out, a password change or reset elsewhere, the session running out, or the server stopping (every request carries a shutdown token from the accept loop, so a stop does not wait for an open tab). HTTP/2 carries any number of streams over one connection, so many open tabs do not run out of connections. The UI's `EventSource` reconnects on 0.1.x's steps (0, 2, 5, 10, then 30 seconds), a first connect that failed included, asks whether the session is still good on each failure, and fetches everything again when a stream opens after a failure (the first open needs no fetch).
+- **Unknown API paths:** a signed-in request for an `/api/v1/...` path no route has gets 404, where 0.1.2 answered index.html.
 - **The roles:** `SkakelServerRole`, `SkakelClientRole`, `UsbServerRole` and `UsbClientRole` are concrete types, which the endpoints and the push talk to with 0.1.x's JSON (see ["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust)). There is one implementation of each, so there is no trait between. The device and system-check views are koppel-usb's own types, serialised as they are, and so are the activity log's entity, reason and outcome.

@@ -14,23 +14,23 @@ surface comes from its path and the port it came in on, never from a header or t
 that says it is gRPC (any `application/grpc+...` content type) is the UI's when its path is, and gets the
 UI's guards. A gRPC call is told by its path, `/<package>.<Service>/<Method>` with a package under
 `skakel.` or Koppel's `koppel.remote.v1.RemoteDevices`. Paths are matched as they are written, in the case
-they are written: `/API/settings` is not `/api/settings`. A machine whose role lacks a surface does not
+they are written: `/API/settings` is not `/api/v1/settings`. A machine whose role lacks a surface does not
 serve it: 404, read from the settings on every request, so a role change takes effect at once. Plain HTTP
 on a web port gets a 301 to the same host, port and path over HTTPS, answered before TLS from the first
 byte of the connection (`koppel-web/src/redirect.rs`); it never reaches the routers. A new route joins a
 router and gets its layers, so it is never exposed to remote clients by accident: the UI's routes are under
-`/api` in `koppel-web/src/api/mod.rs`, the network surface's are Skakel's.
+`/api/v1` in `koppel-web/src/api/mod.rs`, the network surface's are Skakel's.
 Everything Skakel maps is under `/skakel`,
 which is on the network surface. Pairing there works only while a person has opened the pairing
-window on the server's Clients page (`POST /api/server/pairing/window` on the UI surface, see
+window on the server's Clients page (`PUT /api/v1/server/pairing/window` on the UI surface, see
 ["Finding servers and pairing"](skakel.md#finding-servers-and-pairing)); outside it Skakel answers
 `POST /skakel/v3/pair` with 403.
 
 | Port | Surface | Serves | Role |
 |---|---|---|---|
-| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | The UI (single page app), `/api/auth/*`, `/api/settings`, `/api/system/*`, `/api/activity`, the live push (`/api/events`), `/healthz` | Any |
-| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/server/*` | Server or both |
-| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/client/*` | Client or both |
+| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | The UI (single page app), `/api/v1/auth/*`, `/api/v1/settings`, `/api/v1/system/*`, `/api/v1/activity`, the live push (`/api/v1/events`), `/healthz` | Any |
+| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/v1/server/*` | Server or both |
+| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/v1/client/*` | Client or both |
 | 5240 HTTPS (`KOPPEL_NETWORK_PORT`) | Network | Skakel under `/skakel`: info, pairing, tokens and hello. Skakel's and Koppel's gRPC calls: the control call, the remote device list and USB traffic. Koppel's own `/api/remote/*` behind a client's token | Server or both |
 | 5240 UDP (`KOPPEL_DISCOVERY_PORT`) | Network | Answers to discovery probes, over IPv4 and over IPv6 when the web ports serve IPv6 | Server or both |
 | 3242 plain | Gateway for a USB/IP driver on this machine | Client or both, and only where `KOPPEL_GATEWAY_PORT` is set or on native Windows |

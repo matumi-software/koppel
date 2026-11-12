@@ -29,7 +29,7 @@ async fn a_stop_with_the_live_push_open_does_not_wait_out_the_grace_period() {
 
     let client = http_client_from(None);
     let mut events = client
-        .get(format!("{}/api/events", node.url()))
+        .get(format!("{}/api/v1/events", node.url()))
         .header("Cookie", node.cookie())
         .send()
         .await
@@ -72,7 +72,7 @@ async fn a_request_after_the_stop_is_answered_and_does_not_panic() {
     let cookie = node.cookie().to_owned();
     node.stop().await;
 
-    for path in ["/api/server/clients", "/api/server/keys"] {
+    for path in ["/api/v1/server/clients", "/api/v1/server/keys"] {
         let mut request = Request::builder()
             .uri(path)
             .header("Cookie", &cookie)

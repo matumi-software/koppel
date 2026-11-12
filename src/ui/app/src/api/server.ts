@@ -3,14 +3,14 @@ import type { ClientView, CreateClient, KeysView, NewClient, ServerIdentity } fr
 
 export type { ClientView, KeysView, NewClient, ServerIdentity } from './generated/wire';
 
-export const getIdentity = () => getJson<ServerIdentity>('/api/server/identity');
+export const getIdentity = () => getJson<ServerIdentity>('/api/v1/server/identity');
 
-export const getClients = () => getJson<ClientView[]>('/api/server/clients');
+export const getClients = () => getJson<ClientView[]>('/api/v1/server/clients');
 
 /** Creates a client. The list itself updates when ClientsChanged arrives. */
 export async function createClient(name: string): Promise<NewClient> {
   const body: CreateClient = { name };
-  const response = await uiFetch('/api/server/clients', {
+  const response = await uiFetch('/api/v1/server/clients', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -24,21 +24,21 @@ export async function createClient(name: string): Promise<NewClient> {
 /** One client's secret, fetched only when someone reveals or copies it. */
 export async function getClientSecret(clientId: string): Promise<string> {
   // Through getJson, so a 401 shows the login screen.
-  return (await getJson<{ clientSecret: string }>(`/api/server/clients/${encodeURIComponent(clientId)}/secret`)).clientSecret;
+  return (await getJson<{ clientSecret: string }>(`/api/v1/server/clients/${encodeURIComponent(clientId)}/secret`)).clientSecret;
 }
 
 /** Replaces the secret and returns the new one. The client list follows over the live push. */
 export async function rotateClientSecret(clientId: string): Promise<string> {
-  const response = await uiFetch(`/api/server/clients/${encodeURIComponent(clientId)}/rotate`, { method: 'POST' });
+  const response = await uiFetch(`/api/v1/server/clients/${encodeURIComponent(clientId)}/secret`, { method: 'POST' });
   if (!response.ok) throw await rejection(response);
   return (await readJson<{ clientSecret: string }>(response)).clientSecret;
 }
 
-export const getServerKeys = () => getJson<KeysView>('/api/server/keys');
+export const getServerKeys = () => getJson<KeysView>('/api/v1/server/keys');
 
 /** Each of these answers 202; the new state arrives as ServerKeysChanged. */
-export const prepareCertificate = () => sendChange('/api/server/keys/next-certificate', 'POST');
-export const cancelCertificate = () => sendChange('/api/server/keys/next-certificate', 'DELETE');
-export const switchCertificate = () => sendChange('/api/server/keys/next-certificate/switch', 'POST');
+export const prepareCertificate = () => sendChange('/api/v1/server/keys/next-certificate', 'POST');
+export const cancelCertificate = () => sendChange('/api/v1/server/keys/next-certificate', 'DELETE');
+export const switchCertificate = () => sendChange('/api/v1/server/keys/current-certificate', 'PUT');
 
-export const revokeClient = (clientId: string) => sendChange(`/api/server/clients/${encodeURIComponent(clientId)}`, 'DELETE');
+export const revokeClient = (clientId: string) => sendChange(`/api/v1/server/clients/${encodeURIComponent(clientId)}`, 'DELETE');

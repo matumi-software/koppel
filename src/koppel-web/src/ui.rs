@@ -305,6 +305,6 @@ mod tests {
         assert!(find("/assets/missing-1234.js").is_none());
         assert!(find("/missing.txt").is_none());
         assert!(find("/api").is_none());
-        assert!(find("/api/unknown").is_none());
+        assert!(find("/api/v1/unknown").is_none());
     }
 }

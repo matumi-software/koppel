@@ -71,7 +71,7 @@ describe('the live region', () => {
     window.location.hash = '#devices';
     mockFetch({
       ...baseRoutes,
-      'GET /api/server/devices': () =>
+      'GET /api/v1/server/devices': () =>
         json({
           devices: [{ busId: '1-2', vidPid: '0403:6001', name: 'Serial adapter', manufacturer: null, speed: '480', state: 'local', attachedTo: null, attachedSince: null, fault: 'The kernel refused it.', serial: null, driver: null, interfaces: null }],
           unavailable: null,

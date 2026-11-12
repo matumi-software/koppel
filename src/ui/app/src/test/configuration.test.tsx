@@ -14,7 +14,7 @@ afterEach(() => {
 
 describe('the role', () => {
   it('shows a role it does not know as Unknown and does not treat it as both', async () => {
-    mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, role: 'gateway' }) });
+    mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, role: 'gateway' }) });
     renderApp(configuration());
 
     await screen.findByText(/this version of Koppel does not know it/);
@@ -24,7 +24,7 @@ describe('the role', () => {
   });
 
   it('shows Saving and Saved, and says how the change ended through the live region', async () => {
-    mockFetch({ ...baseRoutes, 'PATCH /api/settings': () => accepted() });
+    mockFetch({ ...baseRoutes, 'PATCH /api/v1/settings': () => accepted() });
     const { live } = renderApp(configuration());
     await screen.findByText('Role');
 
@@ -40,10 +40,10 @@ describe('the role', () => {
 describe('notifications', () => {
   const withTray = (role: KoppelSettings['role']) => ({
     ...baseRoutes,
-    'GET /api/settings': () => json({ ...settings, role }),
-    'GET /api/system/info': () =>
+    'GET /api/v1/settings': () => json({ ...settings, role }),
+    'GET /api/v1/system/info': () =>
       json({ ...systemInfo, role, os: 'Windows', tray: true }),
-    'PATCH /api/settings': () => accepted(),
+    'PATCH /api/v1/settings': () => accepted(),
   });
 
   it('are not offered without a tray icon', async () => {
@@ -74,7 +74,7 @@ describe('notifications', () => {
     const { live } = renderApp(configuration());
 
     fireEvent.click(await screen.findByRole('switch', { name: /When the link to the server drops/ }));
-    await waitFor(() => expect(calls.filter((c) => c.key === 'PATCH /api/settings').map((c) => c.body)).toEqual([{ notifyLink: false }]));
+    await waitFor(() => expect(calls.filter((c) => c.key === 'PATCH /api/v1/settings').map((c) => c.body)).toEqual([{ notifyLink: false }]));
 
     await act(async () => live.emit('SettingsChanged', { ...settings, role: 'client', notifyLink: false }));
     await waitFor(() => expect((screen.getByRole('switch', { name: /When the link to the server drops/ }) as HTMLInputElement).checked).toBe(false));
@@ -87,10 +87,10 @@ describe('the server connection', () => {
   const saveConnection = () => screen.getByRole('button', { name: 'Save connection' }) as HTMLButtonElement;
   const testButton = () => screen.getByRole('button', { name: 'Test connection' }) as HTMLButtonElement;
 
-  const clientRole = { ...baseRoutes, 'GET /api/settings': () => json({ ...settings, role: 'client' }) };
+  const clientRole = { ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, role: 'client' }) };
 
   it('is confirmed only by a push that carries what was sent, then clears the secret and enables Test', async () => {
-    const { calls } = mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
+    const { calls } = mockFetch({ ...clientRole, 'PUT /api/v1/client/connection': () => accepted() });
     const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
 
@@ -99,7 +99,7 @@ describe('the server connection', () => {
     await userEvent.type(secret(), 'hunter2');
     expect(testButton().disabled).toBe(true);
     await userEvent.click(saveConnection());
-    expect(calls.find((c) => c.key === 'PUT /api/client/connection')?.body).toMatchObject({ clientId: 'bench-2', clientSecret: 'hunter2' });
+    expect(calls.find((c) => c.key === 'PUT /api/v1/client/connection')?.body).toMatchObject({ clientId: 'bench-2', clientSecret: 'hunter2' });
     await waitFor(() => expect(clientId().disabled).toBe(true));
 
     // A push for some other connection does not confirm it: the save stays pending.
@@ -115,7 +115,7 @@ describe('the server connection', () => {
   });
 
   it('clears the secret when only the secret was changed and the push repeats the stored values', async () => {
-    mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
+    mockFetch({ ...clientRole, 'PUT /api/v1/client/connection': () => accepted() });
     const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
 
@@ -128,7 +128,7 @@ describe('the server connection', () => {
   });
 
   it('recognises the push when the server spells the address and fingerprint its own way', async () => {
-    mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
+    mockFetch({ ...clientRole, 'PUT /api/v1/client/connection': () => accepted() });
     const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
 
@@ -145,7 +145,7 @@ describe('the server connection', () => {
   });
 
   it('does not rebuild the form under someone typing when a save that had failed is confirmed late', async () => {
-    mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
+    mockFetch({ ...clientRole, 'PUT /api/v1/client/connection': () => accepted() });
     const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -169,7 +169,7 @@ describe('the server connection', () => {
   });
 
   it('shows why a test call failed instead of dropping the rejection', async () => {
-    mockFetch({ ...clientRole, 'POST /api/client/connection/test': () => Promise.reject(new TypeError('Failed to fetch')) as unknown as Response });
+    mockFetch({ ...clientRole, 'POST /api/v1/client/connection/test': () => Promise.reject(new TypeError('Failed to fetch')) as unknown as Response });
     renderApp(configuration());
     await screen.findByLabelText('Client secret');
 

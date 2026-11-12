@@ -1,10 +1,7 @@
+import type { Problem } from './generated/wire';
+
 /** The server refused the request. The message is ready to show after "Not saved: ". */
 export class RejectedError extends Error {}
-
-/** The parts of a 400 validation problem the UI reads. */
-interface Problem {
-  errors?: Record<string, string[]>;
-}
 
 /**
  * The body of an answer as the type the caller expects. Every caller names a type from
@@ -16,18 +13,23 @@ export async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-/** Reads the first validation message from a 400 problem response, or a generic one. */
-export async function rejection(response: Response): Promise<RejectedError> {
-  if (response.status === 400) {
-    try {
-      const problem = await readJson<Problem>(response);
-      const first = Object.values(problem.errors ?? {})[0]?.[0];
-      if (first) return new RejectedError(first);
-    } catch {
-      // Not a problem document; fall through.
-    }
+/**
+ * The sentence a refusal carries, ready to show: the first message of a validation problem, else the
+ * problem's `detail`. Undefined when the body is not a problem document.
+ */
+export async function problemMessage(response: Response): Promise<string | undefined> {
+  try {
+    const problem = await readJson<Partial<Problem>>(response);
+    const first = Object.values(problem.errors ?? {})[0]?.[0];
+    return first ?? problem.detail;
+  } catch {
+    return undefined;
   }
-  return new RejectedError(`the server answered ${response.status}.`);
+}
+
+/** The refusal of a request as an error with the server's own sentence, or a generic one. */
+export async function rejection(response: Response): Promise<RejectedError> {
+  return new RejectedError((await problemMessage(response)) ?? `the server answered ${response.status}.`);
 }
 
 /**

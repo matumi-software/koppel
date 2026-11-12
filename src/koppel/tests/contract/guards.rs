@@ -32,25 +32,37 @@ async fn every_answer_carries_the_security_headers() {
     security_headers(&anonymous.get("/healthz").await.expect(200), "/healthz");
     security_headers(&anonymous.get("/").await.expect(200), "/");
     security_headers(
-        &anonymous.get("/api/auth/state").await.expect(200),
-        "/api/auth/state",
+        &anonymous.get("/api/v1/auth/state").await.expect(200),
+        "/api/v1/auth/state",
     );
-    security_headers(&anonymous.get("/api/settings").await.expect(401), "a 401");
     security_headers(
-        &main.admin.get("/api/client/connection").await.expect(404),
+        &anonymous.get("/api/v1/settings").await.expect(401),
+        "a 401",
+    );
+    security_headers(
+        &main
+            .admin
+            .get("/api/v1/client/connection")
+            .await
+            .expect(404),
         "a 404",
     );
     security_headers(
         &main
             .admin
-            .send(Method::PATCH, "/api/settings", Body::Json(json!({})), &[])
+            .send(
+                Method::PATCH,
+                "/api/v1/settings",
+                Body::Json(json!({})),
+                &[],
+            )
             .await
             .expect(403),
         "a 403",
     );
     security_headers(
-        &main.admin.get("/api/settings").await.expect(200),
-        "/api/settings",
+        &main.admin.get("/api/v1/settings").await.expect(200),
+        "/api/v1/settings",
     );
 }
 
@@ -60,7 +72,7 @@ async fn a_change_needs_the_ui_header_and_a_read_does_not() {
     main.admin
         .send(
             Method::PATCH,
-            "/api/settings",
+            "/api/v1/settings",
             Body::Json(json!({ "shareOnStartup": true })),
             &[],
         )
@@ -69,18 +81,18 @@ async fn a_change_needs_the_ui_header_and_a_read_does_not() {
     main.admin
         .send(
             Method::PATCH,
-            "/api/settings",
+            "/api/v1/settings",
             Body::Json(json!({ "shareOnStartup": true })),
             &[("X-Koppel-UI", "yes")],
         )
         .await
         .expect(403);
     main.admin
-        .patch("/api/settings", json!({ "shareOnStartup": true }))
+        .patch("/api/v1/settings", json!({ "shareOnStartup": true }))
         .await
         .expect(202);
     main.admin
-        .send(Method::GET, "/api/settings", Body::None, &[])
+        .send(Method::GET, "/api/v1/settings", Body::None, &[])
         .await
         .expect(200);
     // Before the session check, so a page elsewhere learns nothing.
@@ -88,7 +100,7 @@ async fn a_change_needs_the_ui_header_and_a_read_does_not() {
         .anonymous()
         .send(
             Method::POST,
-            "/api/auth/login",
+            "/api/v1/auth/login",
             Body::Json(json!({ "password": "x" })),
             &[],
         )
@@ -112,7 +124,7 @@ async fn a_request_from_another_origin_is_refused_and_the_same_origin_is_not() {
             let mut headers = vec![("Origin", origin.as_str())];
             headers.extend(extra);
             admin
-                .send(Method::GET, "/api/settings", Body::None, &headers)
+                .send(Method::GET, "/api/v1/settings", Body::None, &headers)
                 .await
                 .status
         }
@@ -156,7 +168,7 @@ async fn a_request_from_another_origin_is_refused_and_the_same_origin_is_not() {
     main.admin
         .send(
             Method::PATCH,
-            "/api/settings",
+            "/api/v1/settings",
             Body::Json(json!({ "shareOnStartup": true })),
             &[("Origin", own.as_str()), ("X-Koppel-UI", "1")],
         )
@@ -167,7 +179,7 @@ async fn a_request_from_another_origin_is_refused_and_the_same_origin_is_not() {
         .anonymous()
         .send(
             Method::GET,
-            "/api/auth/state",
+            "/api/v1/auth/state",
             Body::None,
             &[("Origin", "https://elsewhere.example")],
         )
@@ -183,13 +195,13 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
     // (path, answer as server, as client, as both). /api/remote and /skakel are for other machines:
     // without a token the remote API is 401, and the info endpoint is open.
     let table: &[(&str, u16, u16, u16)] = &[
-        ("/api/server/identity", 200, 404, 200),
-        ("/api/server/clients", 200, 404, 200),
-        ("/api/client/connection", 404, 200, 200),
-        ("/api/client/devices", 404, 200, 200),
-        ("/api/settings", 200, 200, 200),
-        ("/api/system/info", 200, 200, 200),
-        ("/api/activity", 200, 200, 200),
+        ("/api/v1/server/identity", 200, 404, 200),
+        ("/api/v1/server/clients", 200, 404, 200),
+        ("/api/v1/client/connection", 404, 200, 200),
+        ("/api/v1/client/devices", 404, 200, 200),
+        ("/api/v1/settings", 200, 200, 200),
+        ("/api/v1/system/info", 200, 200, 200),
+        ("/api/v1/activity", 200, 200, 200),
     ];
     let network: Vec<(&str, u16, u16, u16)> = vec![
         ("/api/remote/devices", 401, 404, 401),
@@ -197,7 +209,7 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
     ];
     for (role, column) in [("server", 0), ("client", 1), ("both", 2), ("server", 0)] {
         admin
-            .patch("/api/settings", json!({ "role": role }))
+            .patch("/api/v1/settings", json!({ "role": role }))
             .await
             .expect(202);
         for (path, server, client, both) in table {
@@ -298,7 +310,7 @@ mod allow_from {
         let network = Target::new(&format!("https://localhost:{network_port}")).anonymous();
 
         // The UI port: every UI path is refused for this address, and the network surface is not here.
-        for path in ["/api/auth/state", "/api/settings", "/healthz", "/"] {
+        for path in ["/api/v1/auth/state", "/api/v1/settings", "/healthz", "/"] {
             let answer = ui.get(path).await.expect(403);
             assert!(
                 answer.text().contains("Ui:AllowFrom"),
@@ -308,7 +320,7 @@ mod allow_from {
             security_headers(&answer, path);
         }
         ui.post(
-            "/api/auth/setup",
+            "/api/v1/auth/setup",
             json!({ "password": "contract-password-1" }),
         )
         .await
@@ -320,7 +332,7 @@ mod allow_from {
         let info = network.get("/skakel/info").await.expect(200).json();
         assert_eq!(info["app"]["id"], json!("koppel"));
         network.get("/api/remote/devices").await.expect(401);
-        network.get("/api/auth/state").await.expect(404);
+        network.get("/api/v1/auth/state").await.expect(404);
         network.get("/healthz").await.expect(404);
     }
 }

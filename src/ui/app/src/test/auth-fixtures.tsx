@@ -5,10 +5,11 @@ import { AuthGate } from '@/auth/auth-gate';
 import { LiveProvider } from '@/live/live-provider';
 import { RecheckButton, SignOutButton } from './auth-buttons';
 import { json, newQueryClient } from './harness';
-import { authState } from './wire';
+import { authState, problem as problemFixture } from './wire';
 
 export const noContent = () => new Response(null, { status: 204 });
-export const problem = (error: string, status: number) => json({ error }, status);
+/** A refusal as the server writes it: problem JSON with this sentence as its `detail`. */
+export const problem = (detail: string, status: number) => json({ ...problemFixture, status, detail }, status);
 
 export const busy = 'The server is busy checking another password. Try again in a moment.';
 

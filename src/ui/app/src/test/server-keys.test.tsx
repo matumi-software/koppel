@@ -25,7 +25,7 @@ afterEach(() => {
 
 describe('the server certificate', () => {
   it('shows the prepared certificate once the push carries it, and who still lacks its fingerprint', async () => {
-    mockFetch({ 'GET /api/server/keys': () => json(keys), 'POST /api/server/keys/next-certificate': () => accepted() });
+    mockFetch({ 'GET /api/v1/server/keys': () => json(keys), 'POST /api/v1/server/keys/next-certificate': () => accepted() });
     const { live } = renderApp(card([client('bench-1', true), client('bench-2', false)]));
 
     await userEvent.click(await screen.findByRole('button', { name: 'Prepare a new certificate' }));
@@ -38,8 +38,8 @@ describe('the server certificate', () => {
 
   it('warns before a switch that leaves a client behind, and settles on the new fingerprint', async () => {
     const { calls } = mockFetch({
-      'GET /api/server/keys': () => json({ ...keys, nextFingerprint: next, nextPreparedAt: '2026-01-01T00:00:00Z' }),
-      'POST /api/server/keys/next-certificate/switch': () => accepted(),
+      'GET /api/v1/server/keys': () => json({ ...keys, nextFingerprint: next, nextPreparedAt: '2026-01-01T00:00:00Z' }),
+      'PUT /api/v1/server/keys/current-certificate': () => accepted(),
     });
     const { live } = renderApp(card([client('bench-1', true), client('bench-2', false)]));
 
@@ -47,7 +47,7 @@ describe('the server certificate', () => {
     expect(await screen.findByText(/bench-2 has not received the new fingerprint and will refuse this server/)).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Switch' }));
 
-    expect(calls.some((c) => c.key === 'POST /api/server/keys/next-certificate/switch')).toBe(true);
+    expect(calls.some((c) => c.key === 'PUT /api/v1/server/keys/current-certificate')).toBe(true);
     await act(async () => live.emit('ServerKeysChanged', { ...keys, fingerprint: next }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Prepare a new certificate' })).toBeTruthy());
     expect(screen.getByText(next)).toBeTruthy();

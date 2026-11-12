@@ -64,7 +64,7 @@ async fn remote_devices(target: &Target, token: &str) -> u16 {
 
 async fn create_client(admin: &Session, name: &str) -> Value {
     let answer = admin
-        .post("/api/server/clients", json!({ "name": name }))
+        .post("/api/v1/server/clients", json!({ "name": name }))
         .await
         .expect(201);
     let created = answer.json();
@@ -75,12 +75,12 @@ async fn create_client(admin: &Session, name: &str) -> Value {
             ("clientSecret", Kind::Str),
             ("name", Kind::Str),
         ],
-        "POST /api/server/clients",
+        "POST /api/v1/server/clients",
     );
     assert_eq!(
         answer.header("location"),
         Some(format!(
-            "/api/server/clients/{}",
+            "/api/v1/server/clients/{}",
             created["clientId"].as_str().unwrap_or_default()
         )),
     );
@@ -88,8 +88,8 @@ async fn create_client(admin: &Session, name: &str) -> Value {
 }
 
 async fn clients(admin: &Session) -> Vec<Value> {
-    let list = admin.get("/api/server/clients").await.expect(200).json();
-    shape::each(&list, "GET /api/server/clients", |client| {
+    let list = admin.get("/api/v1/server/clients").await.expect(200).json();
+    shape::each(&list, "GET /api/v1/server/clients", |client| {
         shape::fields(client, shape::CLIENT, "a client");
     });
     list.as_array().cloned().unwrap_or_default()
@@ -104,7 +104,7 @@ async fn identity_keys_and_info_name_the_certificate_the_port_presents() {
     let main = Main::get().await;
     let identity = main
         .admin
-        .get("/api/server/identity")
+        .get("/api/v1/server/identity")
         .await
         .expect(200)
         .json();
@@ -115,11 +115,21 @@ async fn identity_keys_and_info_name_the_certificate_the_port_presents() {
             ("fingerprint", Kind::Str),
             ("httpsPort", Kind::Int),
         ],
-        "GET /api/server/identity",
+        "GET /api/v1/server/identity",
     );
-    let info = main.admin.get("/api/system/info").await.expect(200).json();
-    let keys = main.admin.get("/api/server/keys").await.expect(200).json();
-    shape::fields(&keys, shape::KEYS, "GET /api/server/keys");
+    let info = main
+        .admin
+        .get("/api/v1/system/info")
+        .await
+        .expect(200)
+        .json();
+    let keys = main
+        .admin
+        .get("/api/v1/server/keys")
+        .await
+        .expect(200)
+        .json();
+    shape::fields(&keys, shape::KEYS, "GET /api/v1/server/keys");
     assert_eq!(
         identity["fingerprint"],
         json!(main.target.current_certificate().await),
@@ -164,7 +174,7 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
     assert_eq!(row["hasNextCertificate"], json!(false));
 
     let secret = admin
-        .get(&format!("/api/server/clients/{id}/secret"))
+        .get(&format!("/api/v1/server/clients/{id}/secret"))
         .await
         .expect(200)
         .json();
@@ -178,7 +188,7 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
     assert_eq!(remote_devices(&main.target, &first_token).await, 200);
 
     let rotated = admin
-        .post_empty(&format!("/api/server/clients/{id}/rotate"))
+        .post_empty(&format!("/api/v1/server/clients/{id}/secret"))
         .await
         .expect(200)
         .json();
@@ -190,7 +200,7 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
     assert_ne!(second_secret, first_secret);
     assert_eq!(
         admin
-            .get(&format!("/api/server/clients/{id}/secret"))
+            .get(&format!("/api/v1/server/clients/{id}/secret"))
             .await
             .expect(200)
             .json()["clientSecret"],
@@ -208,7 +218,7 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
     assert_eq!(remote_devices(&main.target, &second_token).await, 200);
 
     let revoked = admin
-        .delete(&format!("/api/server/clients/{id}"))
+        .delete(&format!("/api/v1/server/clients/{id}"))
         .await
         .expect(202);
     revoked.empty();
@@ -219,15 +229,15 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
         "revoking blocks the client's tokens at once"
     );
     admin
-        .get(&format!("/api/server/clients/{id}/secret"))
+        .get(&format!("/api/v1/server/clients/{id}/secret"))
         .await
         .expect(404);
     admin
-        .post_empty(&format!("/api/server/clients/{id}/rotate"))
+        .post_empty(&format!("/api/v1/server/clients/{id}/secret"))
         .await
         .expect(404);
     admin
-        .delete(&format!("/api/server/clients/{id}"))
+        .delete(&format!("/api/v1/server/clients/{id}"))
         .await
         .expect(404);
 
@@ -255,18 +265,18 @@ async fn a_client_needs_a_name_of_up_to_80_visible_characters() {
         Value::Null,
     ] {
         admin
-            .post("/api/server/clients", json!({ "name": name }))
+            .post("/api/v1/server/clients", json!({ "name": name }))
             .await
             .problem(&["name"]);
     }
     admin
-        .post("/api/server/clients", json!({}))
+        .post("/api/v1/server/clients", json!({}))
         .await
         .problem(&["name"]);
     admin
         .change(
             Method::POST,
-            "/api/server/clients",
+            "/api/v1/server/clients",
             Body::Raw("application/json", "not json".to_owned()),
         )
         .await
@@ -275,7 +285,7 @@ async fn a_client_needs_a_name_of_up_to_80_visible_characters() {
     let longest = create_client(admin, &"x".repeat(80)).await;
     admin
         .delete(&format!(
-            "/api/server/clients/{}",
+            "/api/v1/server/clients/{}",
             longest["clientId"].as_str().unwrap_or_default()
         ))
         .await
@@ -287,15 +297,15 @@ async fn unknown_clients_are_not_found() {
     let main = Main::get().await;
     let admin = &main.admin;
     admin
-        .get("/api/server/clients/client-nobody/secret")
+        .get("/api/v1/server/clients/client-nobody/secret")
         .await
         .expect(404);
     admin
-        .post_empty("/api/server/clients/client-nobody/rotate")
+        .post_empty("/api/v1/server/clients/client-nobody/secret")
         .await
         .expect(404);
     admin
-        .delete("/api/server/clients/client-nobody")
+        .delete("/api/v1/server/clients/client-nobody")
         .await
         .expect(404);
 }
@@ -305,11 +315,11 @@ async fn the_pairing_window_opens_and_closes_and_is_closed_to_start_with() {
     let main = Main::get().await;
     let admin = &main.admin;
     let window = || async {
-        let overview = admin.get("/api/server/pairing").await.expect(200).json();
+        let overview = admin.get("/api/v1/server/pairing").await.expect(200).json();
         shape::fields(
             &overview,
             shape::PAIRING_OVERVIEW,
-            "GET /api/server/pairing",
+            "GET /api/v1/server/pairing",
         );
         let window = overview["window"].clone();
         shape::fields(&window, shape::PAIRING_WINDOW, "the pairing window");
@@ -317,16 +327,16 @@ async fn the_pairing_window_opens_and_closes_and_is_closed_to_start_with() {
     };
 
     admin
-        .post("/api/server/pairing/window", json!({ "minutes": 0 }))
+        .put("/api/v1/server/pairing/window", json!({ "minutes": 0 }))
         .await
         .problem(&["minutes"]);
     admin
-        .post("/api/server/pairing/window", json!({ "minutes": 61 }))
+        .put("/api/v1/server/pairing/window", json!({ "minutes": 61 }))
         .await
         .problem(&["minutes"]);
 
     admin
-        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .put("/api/v1/server/pairing/window", json!({ "minutes": 5 }))
         .await
         .expect(202)
         .empty();
@@ -342,7 +352,7 @@ async fn the_pairing_window_opens_and_closes_and_is_closed_to_start_with() {
     assert_eq!(open["alwaysOpen"], json!(false));
 
     admin
-        .delete("/api/server/pairing/window")
+        .delete("/api/v1/server/pairing/window")
         .await
         .expect(202)
         .empty();
@@ -358,26 +368,26 @@ async fn the_pairing_window_opens_and_closes_and_is_closed_to_start_with() {
 async fn a_new_certificate_is_prepared_cancelled_and_switched_to_in_turn() {
     let main = Main::get().await;
     let admin = &main.admin;
-    let first = admin.get("/api/server/keys").await.expect(200).json();
+    let first = admin.get("/api/v1/server/keys").await.expect(200).json();
     assert!(first["nextFingerprint"].is_null());
 
     // Out of turn: nothing to cancel or switch to.
     admin
-        .delete("/api/server/keys/next-certificate")
+        .delete("/api/v1/server/keys/next-certificate")
         .await
         .problem(&["certificate"]);
     admin
-        .post_empty("/api/server/keys/next-certificate/switch")
+        .put_empty("/api/v1/server/keys/current-certificate")
         .await
         .problem(&["certificate"]);
 
     admin
-        .post_empty("/api/server/keys/next-certificate")
+        .post_empty("/api/v1/server/keys/next-certificate")
         .await
         .expect(202)
         .empty();
-    let prepared = admin.get("/api/server/keys").await.expect(200).json();
-    shape::fields(&prepared, shape::KEYS, "GET /api/server/keys");
+    let prepared = admin.get("/api/v1/server/keys").await.expect(200).json();
+    shape::fields(&prepared, shape::KEYS, "GET /api/v1/server/keys");
     assert!(prepared["nextFingerprint"].is_string());
     assert!(prepared["nextPreparedAt"].is_string());
     assert_eq!(
@@ -385,40 +395,44 @@ async fn a_new_certificate_is_prepared_cancelled_and_switched_to_in_turn() {
         "not switched yet"
     );
     admin
-        .post_empty("/api/server/keys/next-certificate")
+        .post_empty("/api/v1/server/keys/next-certificate")
         .await
         .problem(&["certificate"]);
 
     admin
-        .delete("/api/server/keys/next-certificate")
+        .delete("/api/v1/server/keys/next-certificate")
         .await
         .expect(202)
         .empty();
-    let cancelled = admin.get("/api/server/keys").await.expect(200).json();
+    let cancelled = admin.get("/api/v1/server/keys").await.expect(200).json();
     assert!(cancelled["nextFingerprint"].is_null());
     assert!(cancelled["nextPreparedAt"].is_null());
 
     admin
-        .post_empty("/api/server/keys/next-certificate")
+        .post_empty("/api/v1/server/keys/next-certificate")
         .await
         .expect(202);
-    let next = admin.get("/api/server/keys").await.expect(200).json()["nextFingerprint"]
+    let next = admin.get("/api/v1/server/keys").await.expect(200).json()["nextFingerprint"]
         .as_str()
         .expect("a next fingerprint")
         .to_owned();
     main.target.trust(&next);
     admin
-        .post_empty("/api/server/keys/next-certificate/switch")
+        .put_empty("/api/v1/server/keys/current-certificate")
         .await
         .expect(202)
         .empty();
 
-    let switched = admin.get("/api/server/keys").await.expect(200).json();
+    let switched = admin.get("/api/v1/server/keys").await.expect(200).json();
     assert_eq!(switched["fingerprint"], json!(next));
     assert!(switched["nextFingerprint"].is_null());
-    let identity = admin.get("/api/server/identity").await.expect(200).json();
+    let identity = admin
+        .get("/api/v1/server/identity")
+        .await
+        .expect(200)
+        .json();
     assert_eq!(identity["fingerprint"], json!(next));
-    let info = admin.get("/api/system/info").await.expect(200).json();
+    let info = admin.get("/api/v1/system/info").await.expect(200).json();
     assert_eq!(info["fingerprint"], json!(next));
 
     // A new connection gets the new certificate at once.
@@ -438,8 +452,12 @@ async fn a_new_certificate_is_prepared_cancelled_and_switched_to_in_turn() {
 async fn the_server_lists_its_devices_and_refuses_a_share_it_cannot_make() {
     let main = Main::get().await;
     let admin = &main.admin;
-    let devices = admin.get("/api/server/devices").await.expect(200).json();
-    shape::fields(&devices, shape::SERVER_DEVICES, "GET /api/server/devices");
+    let devices = admin.get("/api/v1/server/devices").await.expect(200).json();
+    shape::fields(
+        &devices,
+        shape::SERVER_DEVICES,
+        "GET /api/v1/server/devices",
+    );
     shape::each(&devices["devices"], "server devices", |device| {
         shape::fields(device, shape::DEVICE, "a server device");
     });
@@ -449,7 +467,7 @@ async fn the_server_lists_its_devices_and_refuses_a_share_it_cannot_make() {
     for bad in ["bogus", "1-", "a-1", "1-1.", "1-1:1.0", too_long.as_str()] {
         admin
             .put(
-                &format!("/api/server/devices/{bad}/shared"),
+                &format!("/api/v1/server/devices/{bad}/shared"),
                 json!({ "shared": true }),
             )
             .await
@@ -458,7 +476,7 @@ async fn the_server_lists_its_devices_and_refuses_a_share_it_cannot_make() {
     admin
         .change(
             Method::PUT,
-            "/api/server/devices/1-1/shared",
+            "/api/v1/server/devices/1-1/shared",
             Body::Raw("application/json", "not json".to_owned()),
         )
         .await
@@ -467,7 +485,10 @@ async fn the_server_lists_its_devices_and_refuses_a_share_it_cannot_make() {
     // The instance has no usbip-host, as a machine without the module: nothing can be shared.
     assert!(devices["unavailable"].is_string(), "{devices}");
     admin
-        .put("/api/server/devices/1-1/shared", json!({ "shared": true }))
+        .put(
+            "/api/v1/server/devices/1-1/shared",
+            json!({ "shared": true }),
+        )
         .await
         .problem(&["device"]);
 }
@@ -476,11 +497,11 @@ async fn the_server_lists_its_devices_and_refuses_a_share_it_cannot_make() {
 async fn pairing_requests_that_do_not_exist_cannot_be_decided() {
     let main = Main::get().await;
     let admin = &main.admin;
-    let overview = admin.get("/api/server/pairing").await.expect(200).json();
+    let overview = admin.get("/api/v1/server/pairing").await.expect(200).json();
     shape::fields(
         &overview,
         shape::PAIRING_OVERVIEW,
-        "GET /api/server/pairing",
+        "GET /api/v1/server/pairing",
     );
     shape::each(&overview["requests"], "pairing requests", |request| {
         shape::fields(request, shape::PAIRING_REQUEST, "a pairing request");
@@ -488,17 +509,17 @@ async fn pairing_requests_that_do_not_exist_cannot_be_decided() {
 
     admin
         .post(
-            "/api/server/pairing/NOSUCHREQUEST/approve",
+            "/api/v1/server/pairing/requests/NOSUCHREQUEST/approval",
             json!({ "code": "123456" }),
         )
         .await
         .expect(404);
     admin
-        .post_empty("/api/server/pairing/NOSUCHREQUEST/deny")
+        .delete("/api/v1/server/pairing/requests/NOSUCHREQUEST")
         .await
         .expect(404);
     admin
-        .post_empty("/api/server/pairing/NOSUCHREQUEST/approve")
+        .post_empty("/api/v1/server/pairing/requests/NOSUCHREQUEST/approval")
         .await
         .expect(400);
 }

@@ -21,8 +21,8 @@ export default defineConfig({
     },
     server: {
         proxy: {
-            // REST and the live push both live under /api/.
-            '^/api/': {
+            // REST and the live push both live under /api/v1/.
+            '^/api/v1/': {
                 target,
                 secure: false,
                 // Tells Koppel the browser used https, so its same-origin check on Origin passes.

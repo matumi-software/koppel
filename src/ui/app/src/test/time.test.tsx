@@ -17,7 +17,7 @@ describe('relative times', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-01-01T10:00:00Z'));
     const client: ClientView = { id: 'bench-1', name: 'Bench 1', createdAt: '2026-01-01T08:00:00Z', hasSecret: true, lastSeen: '2026-01-01T09:59:50Z', hasNextCertificate: false };
-    mockFetch({ ...baseRoutes, 'GET /api/server/clients': () => json([client]), 'GET /api/server/keys': () => json({ fingerprint: 'AA', nextFingerprint: null, nextPreparedAt: null, signingKeyId: 'k', signingKeySince: '2026-01-01T00:00:00Z', retiredKeysUntil: null }) });
+    mockFetch({ ...baseRoutes, 'GET /api/v1/server/clients': () => json([client]), 'GET /api/v1/server/keys': () => json({ fingerprint: 'AA', nextFingerprint: null, nextPreparedAt: null, signingKeyId: 'k', signingKeySince: '2026-01-01T00:00:00Z', retiredKeysUntil: null }) });
     renderApp(
       <FrameContext.Provider value={frame()}>
         <ClientsPage />
@@ -40,6 +40,6 @@ describe('relative times', () => {
     await act(() => vi.advanceTimersByTimeAsync(10 * 60_000));
 
     expect(screen.getByText('1 h 10 min')).toBeTruthy();
-    expect(count('GET /api/system/info')).toBe(1);
+    expect(count('GET /api/v1/system/info')).toBe(1);
   });
 });

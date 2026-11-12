@@ -27,7 +27,7 @@
 //!
 //! # The live push
 //!
-//! The program pushes to the UI over Server-Sent Events at `/api/events`. [`push`] lists the events,
+//! The program pushes to the UI over Server-Sent Events at `/api/v1/events`. [`push`] lists the events,
 //! and `push.rs` checks each, reading the stream with [`Session::events`].
 
 mod process;
@@ -80,7 +80,7 @@ pub async fn skakel_path(target: &Target, call: &str) -> String {
 }
 
 /// The path of the live push on a target that pushes with Server-Sent Events.
-pub const EVENTS_PATH: &str = "/api/events";
+pub const EVENTS_PATH: &str = "/api/v1/events";
 
 /// A running Koppel at a base address such as `https://localhost:15240`.
 #[derive(Clone)]
@@ -156,13 +156,13 @@ impl Target {
     pub async fn ensure_password(&self) {
         let state = self
             .anonymous()
-            .get("/api/auth/state")
+            .get("/api/v1/auth/state")
             .await
             .expect(200)
             .json();
         if state["passwordSet"] == Value::Bool(false) {
             self.anonymous()
-                .post("/api/auth/setup", json!({ "password": password() }))
+                .post("/api/v1/auth/setup", json!({ "password": password() }))
                 .await
                 .expect(204);
         }
@@ -173,7 +173,7 @@ impl Target {
         self.ensure_password().await;
         let answer = self
             .anonymous()
-            .post("/api/auth/login", json!({ "password": password() }))
+            .post("/api/v1/auth/login", json!({ "password": password() }))
             .await;
         assert_eq!(
             answer.status,
@@ -278,6 +278,11 @@ impl Session {
 
     pub async fn put(&self, path: &str, body: Value) -> Answer {
         self.change(Method::PUT, path, Body::Json(body)).await
+    }
+
+    /// A change without a body, with the header the UI adds.
+    pub async fn put_empty(&self, path: &str) -> Answer {
+        self.change(Method::PUT, path, Body::None).await
     }
 
     pub async fn patch(&self, path: &str, body: Value) -> Answer {
@@ -504,12 +509,51 @@ impl Answer {
         (!value.is_empty()).then(|| value.to_owned())
     }
 
-    /// `{ error }`, the shape of the sign-in endpoints' refusals.
+    /// A refusal as problem JSON (RFC 9457): the media type, `status` matching the answer's, and a
+    /// `code` and a `detail` that are not empty. Returns the sentence to show: the first message of
+    /// `errors` when there is one, else the `detail`.
     #[track_caller]
     pub fn error(&self) -> String {
+        assert_eq!(
+            self.content_type(),
+            "application/problem+json",
+            "{} answers a problem: {}",
+            self.what,
+            self.text()
+        );
         let body = self.json();
-        shape::fields(&body, &[("error", shape::Kind::Str)], &self.what);
-        body["error"].as_str().unwrap_or_default().to_owned()
+        shape::fields(
+            &body,
+            &[
+                ("type", shape::Kind::Str),
+                ("title", shape::Kind::Str),
+                ("status", shape::Kind::Int),
+                ("code", shape::Kind::Str),
+                ("detail", shape::Kind::Str),
+            ],
+            &self.what,
+        );
+        assert_eq!(body["status"], json!(self.status), "{}: {body}", self.what);
+        assert!(
+            !body["code"].as_str().unwrap_or_default().is_empty(),
+            "{body}"
+        );
+        let first = body["errors"]
+            .as_object()
+            .and_then(|errors| errors.values().next())
+            .and_then(|messages| messages.get(0))
+            .and_then(Value::as_str);
+        first
+            .or_else(|| body["detail"].as_str())
+            .unwrap_or_default()
+            .to_owned()
+    }
+
+    /// The `code` of a problem answer, after `error()` has checked its shape.
+    #[track_caller]
+    pub fn code(&self) -> String {
+        self.error();
+        self.json()["code"].as_str().unwrap_or_default().to_owned()
     }
 
     /// A validation problem (400, `application/problem+json`) whose `errors` name exactly `fields`.
@@ -524,7 +568,9 @@ impl Answer {
         );
         let body = self.json();
         assert_eq!(body["status"], json!(400), "{}: {body}", self.what);
+        assert_eq!(body["code"], json!("validation"), "{}: {body}", self.what);
         assert!(body["title"].is_string(), "{}: {body}", self.what);
+        assert!(body["detail"].is_string(), "{}: {body}", self.what);
         let errors = body["errors"]
             .as_object()
             .unwrap_or_else(|| panic!("{} has no errors object: {body}", self.what));
@@ -589,7 +635,7 @@ impl Main {
 async fn baseline_server(admin: &Session) {
     admin
         .patch(
-            "/api/settings",
+            "/api/v1/settings",
             json!({ "role": "server", "shareOnStartup": true, "notifyPairing": true, "notifyLink": true, "notifyAttachFailures": true }),
         )
         .await
@@ -627,7 +673,7 @@ impl Pair {
         baseline_server(&server_admin).await;
         let client_admin = client.sign_in().await;
         client_admin
-            .patch("/api/settings", json!({ "role": "client" }))
+            .patch("/api/v1/settings", json!({ "role": "client" }))
             .await
             .expect(202);
         let peer_url = server.base().to_owned();
@@ -649,7 +695,7 @@ impl Pair {
         let created = self
             .server_admin
             .post(
-                "/api/server/clients",
+                "/api/v1/server/clients",
                 json!({ "name": unique("contract-client") }),
             )
             .await
@@ -657,14 +703,14 @@ impl Pair {
             .json();
         let fingerprint = self
             .server_admin
-            .get("/api/server/identity")
+            .get("/api/v1/server/identity")
             .await
             .expect(200)
             .json()["fingerprint"]
             .clone();
         self.client_admin
             .put(
-                "/api/client/connection",
+                "/api/v1/client/connection",
                 json!({
                     "serverUrl": self.peer_url,
                     "serverFingerprint": fingerprint,
@@ -677,7 +723,7 @@ impl Pair {
         eventually("the client to link", Duration::from_secs(60), || async {
             let devices = self
                 .client_admin
-                .get("/api/client/devices")
+                .get("/api/v1/client/devices")
                 .await
                 .expect(200)
                 .json();
@@ -733,7 +779,7 @@ where
 /// The activity entries with this reason, newest first.
 pub async fn activity_with(admin: &Session, reason: &str) -> Vec<Value> {
     admin
-        .get("/api/activity?max=500")
+        .get("/api/v1/activity?max=500")
         .await
         .expect(200)
         .json()

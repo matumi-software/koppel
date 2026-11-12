@@ -1,6 +1,6 @@
 //! The live push: what the server sends the UI after it wrote a change, as Server-Sent Events.
 //!
-//! The UI opens `GET /api/events` with its session cookie and reads one event per change: the event's
+//! The UI opens `GET /api/v1/events` with its session cookie and reads one event per change: the event's
 //! name is what 0.1.x's SignalR hub called (`IUiClient`), its data the same JSON payload. Each is sent
 //! only once the change is on disk, so the UI never shows what was not saved. A stream that falls
 //! behind is closed rather than skipping events, and the UI fetches everything again when it opens a
@@ -131,7 +131,7 @@ impl Push {
     }
 }
 
-/// `GET /api/events`: the stream for one signed-in session.
+/// `GET /api/v1/events`: the stream for one signed-in session.
 pub(crate) async fn events(
     State(app): State<PushApi>,
     Extension(session): Extension<SignedIn>,

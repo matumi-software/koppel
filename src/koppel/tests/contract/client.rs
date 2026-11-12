@@ -13,44 +13,52 @@ use serde_json::Value;
 const WAIT: Duration = Duration::from_secs(60);
 
 async fn pairing(client: &Session) -> Value {
-    let status = client.get("/api/client/pairing").await.expect(200).json();
-    shape::fields(&status, shape::PAIRING_STATUS, "GET /api/client/pairing");
+    let status = client
+        .get("/api/v1/client/pairing")
+        .await
+        .expect(200)
+        .json();
+    shape::fields(&status, shape::PAIRING_STATUS, "GET /api/v1/client/pairing");
     status
 }
 
 async fn connection(client: &Session) -> Value {
     let value = client
-        .get("/api/client/connection")
+        .get("/api/v1/client/connection")
         .await
         .expect(200)
         .json();
-    shape::fields(&value, shape::CONNECTION, "GET /api/client/connection");
+    shape::fields(&value, shape::CONNECTION, "GET /api/v1/client/connection");
     value
 }
 
 async fn connection_test(client: &Session) -> Value {
     let answer = client
-        .post_empty("/api/client/connection/test")
+        .post_empty("/api/v1/client/connection/test")
         .await
         .expect(200)
         .json();
     shape::fields(
         &answer,
         shape::CONNECTION_TEST,
-        "POST /api/client/connection/test",
+        "POST /api/v1/client/connection/test",
     );
     answer
 }
 
 async fn fingerprint(admin: &Session) -> String {
-    admin.get("/api/server/identity").await.expect(200).json()["fingerprint"]
+    admin
+        .get("/api/v1/server/identity")
+        .await
+        .expect(200)
+        .json()["fingerprint"]
         .as_str()
         .expect("a fingerprint")
         .to_owned()
 }
 
 async fn machine_name(admin: &Session) -> String {
-    admin.get("/api/system/info").await.expect(200).json()["name"]
+    admin.get("/api/v1/system/info").await.expect(200).json()["name"]
         .as_str()
         .expect("a name")
         .to_owned()
@@ -60,12 +68,16 @@ async fn machine_name(admin: &Session) -> String {
 /// waits until it shows as open.
 async fn open_pairing(server: &Session) {
     server
-        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .put("/api/v1/server/pairing/window", json!({ "minutes": 5 }))
         .await
         .expect(202)
         .empty();
     eventually("the pairing window to open", WAIT, || async {
-        let overview = server.get("/api/server/pairing").await.expect(200).json();
+        let overview = server
+            .get("/api/v1/server/pairing")
+            .await
+            .expect(200)
+            .json();
         (overview["window"]["open"] == json!(true)).then_some(())
     })
     .await;
@@ -75,7 +87,7 @@ async fn open_pairing(server: &Session) {
 async fn start_pairing(client: &Session, url: &str, fingerprint: &str, name: &str) -> Value {
     client
         .post(
-            "/api/client/pairing",
+            "/api/v1/client/pairing",
             json!({ "serverUrl": url, "serverFingerprint": fingerprint, "serverName": name }),
         )
         .await
@@ -96,11 +108,15 @@ async fn start_pairing(client: &Session, url: &str, fingerprint: &str, name: &st
 /// The request on `server` from the client named `client_name`.
 async fn request_from(server: &Session, client_name: &str) -> Value {
     eventually("the request to reach the server", WAIT, || async {
-        let overview = server.get("/api/server/pairing").await.expect(200).json();
+        let overview = server
+            .get("/api/v1/server/pairing")
+            .await
+            .expect(200)
+            .json();
         shape::fields(
             &overview,
             shape::PAIRING_OVERVIEW,
-            "GET /api/server/pairing",
+            "GET /api/v1/server/pairing",
         );
         overview["requests"]
             .as_array()
@@ -115,7 +131,11 @@ async fn request_from(server: &Session, client_name: &str) -> Value {
 }
 
 async fn requests_on(server: &Session) -> Vec<Value> {
-    server.get("/api/server/pairing").await.expect(200).json()["requests"]
+    server
+        .get("/api/v1/server/pairing")
+        .await
+        .expect(200)
+        .json()["requests"]
         .as_array()
         .cloned()
         .unwrap_or_default()
@@ -125,7 +145,7 @@ async fn requests_on(server: &Session) -> Vec<Value> {
 async fn new_client(server: &Session) -> (String, String) {
     let created = server
         .post(
-            "/api/server/clients",
+            "/api/v1/server/clients",
             json!({ "name": unique("contract-client") }),
         )
         .await
@@ -143,7 +163,7 @@ async fn new_client(server: &Session) -> (String, String) {
 async fn save_connection(client: &Session, url: &str, fingerprint: &str, id: &str, secret: &str) {
     client
         .put(
-            "/api/client/connection",
+            "/api/v1/client/connection",
             json!({ "serverUrl": url, "serverFingerprint": fingerprint, "clientId": id, "clientSecret": secret }),
         )
         .await
@@ -162,7 +182,7 @@ async fn a_client_that_was_never_set_up_is_unconfigured() {
     assert_eq!(test["outcome"], json!("incomplete"));
     let devices = pair
         .client_admin
-        .get("/api/client/devices")
+        .get("/api/v1/client/devices")
         .await
         .expect(200)
         .json();
@@ -194,20 +214,20 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     // The address and fingerprint are checked before anything is sent.
     client
         .post(
-            "/api/client/pairing",
+            "/api/v1/client/pairing",
             json!({ "serverUrl": "http://elsewhere:5240", "serverFingerprint": server_fingerprint }),
         )
         .await
         .problem(&["serverUrl"]);
     client
         .post(
-            "/api/client/pairing",
+            "/api/v1/client/pairing",
             json!({ "serverUrl": pair.peer_url, "serverFingerprint": "AB:CD" }),
         )
         .await
         .problem(&["serverFingerprint"]);
     client
-        .post("/api/client/pairing", json!({}))
+        .post("/api/v1/client/pairing", json!({}))
         .await
         .problem(&["serverUrl", "serverFingerprint"]);
 
@@ -238,7 +258,7 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     let request = request_from(server, &client_name).await;
     shape::fields(&request, shape::PAIRING_REQUEST, "a pairing request");
     let request_id = request["id"].as_str().expect("an id").to_owned();
-    let approve = format!("/api/server/pairing/{request_id}/approve");
+    let approve = format!("/api/v1/server/pairing/requests/{request_id}/approval");
 
     let wrong_code = if code == "00000000" {
         "11111111"
@@ -284,7 +304,11 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
         "the paired credentials replaced the old ones"
     );
 
-    let clients = server.get("/api/server/clients").await.expect(200).json();
+    let clients = server
+        .get("/api/v1/server/clients")
+        .await
+        .expect(200)
+        .json();
     let row = clients
         .as_array()
         .and_then(|list| list.iter().find(|c| c["id"] == json!(client_id)))
@@ -307,12 +331,24 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     assert_eq!(test["outcome"], json!("ok"));
 
     let linked = eventually("the client to link", WAIT, || async {
-        let devices = client.get("/api/client/devices").await.expect(200).json();
-        shape::fields(&devices, shape::CLIENT_DEVICES, "GET /api/client/devices");
+        let devices = client
+            .get("/api/v1/client/devices")
+            .await
+            .expect(200)
+            .json();
+        shape::fields(
+            &devices,
+            shape::CLIENT_DEVICES,
+            "GET /api/v1/client/devices",
+        );
         (devices["link"] == json!("connected")).then_some(devices)
     })
     .await;
-    let shared = server.get("/api/server/devices").await.expect(200).json();
+    let shared = server
+        .get("/api/v1/server/devices")
+        .await
+        .expect(200)
+        .json();
     assert_eq!(
         linked["devices"].as_array().map(Vec::len),
         shared["devices"].as_array().map(Vec::len),
@@ -327,7 +363,7 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     assert_eq!(entry["outcome"], json!("succeeded"));
 
     server
-        .delete(&format!("/api/server/clients/{old_id}"))
+        .delete(&format!("/api/v1/server/clients/{old_id}"))
         .await
         .expect(202);
 }
@@ -338,19 +374,23 @@ async fn a_server_with_its_pairing_closed_tells_the_client_how_to_open_it() {
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     server
-        .delete("/api/server/pairing/window")
+        .delete("/api/v1/server/pairing/window")
         .await
         .expect(202)
         .empty();
     eventually("the pairing window to close", WAIT, || async {
-        let overview = server.get("/api/server/pairing").await.expect(200).json();
+        let overview = server
+            .get("/api/v1/server/pairing")
+            .await
+            .expect(200)
+            .json();
         (overview["window"]["open"] == json!(false)).then_some(())
     })
     .await;
 
     client
         .post(
-            "/api/client/pairing",
+            "/api/v1/client/pairing",
             json!({ "serverUrl": pair.peer_url, "serverFingerprint": server_fingerprint, "serverName": "main" }),
         )
         .await
@@ -371,7 +411,7 @@ async fn a_server_with_its_pairing_closed_tells_the_client_how_to_open_it() {
         "{message}"
     );
     client
-        .delete("/api/client/pairing")
+        .delete("/api/v1/client/pairing")
         .await
         .expect(202)
         .empty();
@@ -389,7 +429,7 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
     let request = request_from(server, &client_name).await;
     let request_id = request["id"].as_str().expect("an id").to_owned();
     server
-        .post_empty(&format!("/api/server/pairing/{request_id}/deny"))
+        .delete(&format!("/api/v1/server/pairing/requests/{request_id}"))
         .await
         .expect(202)
         .empty();
@@ -404,7 +444,7 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
             .any(|r| r["id"] == json!(request_id))
     );
     server
-        .post_empty(&format!("/api/server/pairing/{request_id}/deny"))
+        .delete(&format!("/api/v1/server/pairing/requests/{request_id}"))
         .await
         .expect(404);
     let refused = activity_with(server, "clientAdded").await;
@@ -418,7 +458,7 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
     let request = request_from(server, &client_name).await;
     let request_id = request["id"].as_str().expect("an id").to_owned();
     client
-        .delete("/api/client/pairing")
+        .delete("/api/v1/client/pairing")
         .await
         .expect(202)
         .empty();
@@ -432,7 +472,7 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
     })
     .await;
     // Cancelling with nothing going on is fine.
-    client.delete("/api/client/pairing").await.expect(202);
+    client.delete("/api/v1/client/pairing").await.expect(202);
 }
 
 #[tokio::test]
@@ -447,7 +487,7 @@ async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
     let code = waiting["code"].as_str().expect("a code").to_owned();
     let request = request_from(server, &client_name).await;
     let approve = format!(
-        "/api/server/pairing/{}/approve",
+        "/api/v1/server/pairing/requests/{}/approval",
         request["id"].as_str().unwrap_or_default()
     );
     let wrong = if code == "00000000" {
@@ -478,7 +518,7 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
     let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     client
-        .post_empty("/api/client/pairing/confirm")
+        .post_empty("/api/v1/client/pairing/confirmation")
         .await
         .problem(&["pairing"]);
 
@@ -489,10 +529,14 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
 
     // The other server is the client target itself, as both: it serves pairing on its own port.
     client
-        .patch("/api/settings", json!({ "role": "both" }))
+        .patch("/api/v1/settings", json!({ "role": "both" }))
         .await
         .expect(202);
-    let own = client.get("/api/server/identity").await.expect(200).json();
+    let own = client
+        .get("/api/v1/server/identity")
+        .await
+        .expect(200)
+        .json();
     let own_url = format!("https://localhost:{}", own["httpsPort"]);
     let own_fingerprint = own["fingerprint"]
         .as_str()
@@ -507,7 +551,7 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
         client
             .post(
                 &format!(
-                    "/api/server/pairing/{}/approve",
+                    "/api/v1/server/pairing/requests/{}/approval",
                     request["id"].as_str().unwrap_or_default()
                 ),
                 json!({ "code": waiting["code"] }),
@@ -536,7 +580,7 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
     );
 
     // Discard keeps the connection.
-    client.delete("/api/client/pairing").await.expect(202);
+    client.delete("/api/v1/client/pairing").await.expect(202);
     assert_eq!(pairing(client).await["state"], json!("idle"));
     assert_eq!(
         connection(client).await["serverFingerprint"],
@@ -546,7 +590,7 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
     // Replace saves the new one.
     approve_self().await;
     client
-        .post_empty("/api/client/pairing/confirm")
+        .post_empty("/api/v1/client/pairing/confirmation")
         .await
         .expect(202)
         .empty();
@@ -559,12 +603,12 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
     })
     .await;
     client
-        .post_empty("/api/client/pairing/confirm")
+        .post_empty("/api/v1/client/pairing/confirmation")
         .await
         .problem(&["pairing"]);
 
     server
-        .delete(&format!("/api/server/clients/{id}"))
+        .delete(&format!("/api/v1/server/clients/{id}"))
         .await
         .expect(202);
 }
@@ -604,14 +648,14 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
         ),
     ] {
         client
-            .put("/api/client/connection", body)
+            .put("/api/v1/client/connection", body)
             .await
             .problem(&fields);
     }
     client
         .change(
             Method::PUT,
-            "/api/client/connection",
+            "/api/v1/client/connection",
             Body::Raw("application/json", "not json".to_owned()),
         )
         .await
@@ -621,7 +665,7 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
     let typed = server_fingerprint.replace(':', "").to_ascii_lowercase();
     client
         .put(
-            "/api/client/connection",
+            "/api/v1/client/connection",
             json!({
                 "serverUrl": format!("{}/some/path?x=1", pair.peer_url),
                 "serverFingerprint": typed,
@@ -640,7 +684,7 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
     assert!(stored["nextServerFingerprint"].is_null());
     assert!(
         !client
-            .get("/api/client/connection")
+            .get("/api/v1/client/connection")
             .await
             .text()
             .contains(&secret)
@@ -649,7 +693,7 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
 
     // An empty secret keeps the stored one while the server stays the same, and only then.
     client
-        .put("/api/client/connection", with("clientSecret", json!("")))
+        .put("/api/v1/client/connection", with("clientSecret", json!("")))
         .await
         .expect(202);
     assert_eq!(connection(client).await["hasSecret"], json!(true));
@@ -657,14 +701,14 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
     let other = tls::normalize(&"ab".repeat(32));
     client
         .put(
-            "/api/client/connection",
+            "/api/v1/client/connection",
             json!({ "serverUrl": pair.peer_url, "serverFingerprint": other, "clientId": id }),
         )
         .await
         .problem(&["clientSecret"]);
     client
         .put(
-            "/api/client/connection",
+            "/api/v1/client/connection",
             json!({ "serverUrl": "https://elsewhere:5240", "serverFingerprint": server_fingerprint, "clientId": id }),
         )
         .await
@@ -676,7 +720,7 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
     );
 
     server
-        .delete(&format!("/api/server/clients/{id}"))
+        .delete(&format!("/api/v1/server/clients/{id}"))
         .await
         .expect(202);
 }
@@ -762,7 +806,7 @@ async fn the_connection_test_names_what_is_wrong_in_fixed_words() {
     );
 
     server
-        .delete(&format!("/api/server/clients/{id}"))
+        .delete(&format!("/api/v1/server/clients/{id}"))
         .await
         .expect(202);
 }
@@ -777,7 +821,7 @@ async fn the_client_finds_the_server_on_its_network() {
     let server_name = machine_name(&pair.server_admin).await;
     let version = pair
         .server_admin
-        .get("/api/system/info")
+        .get("/api/v1/system/info")
         .await
         .expect(200)
         .json()["version"]
@@ -789,14 +833,14 @@ async fn the_client_finds_the_server_on_its_network() {
         || async {
             let servers = pair
                 .client_admin
-                .get("/api/client/discovery")
+                .get("/api/v1/client/discovery")
                 .await
                 .expect(200)
                 .json();
             let mut fields = shape::DISCOVERED_SERVER.to_vec();
             // The address as a URL, for the UI.
             fields.push(("url", Kind::Str));
-            shape::each(&servers, "GET /api/client/discovery", |server| {
+            shape::each(&servers, "GET /api/v1/client/discovery", |server| {
                 shape::fields(server, &fields, "a discovered server");
             });
             servers
@@ -825,8 +869,16 @@ async fn the_client_finds_the_server_on_its_network() {
 async fn the_client_lists_its_devices_and_takes_attach_and_detach() {
     let pair = Pair::get().await;
     let client = &pair.client_admin;
-    let devices = client.get("/api/client/devices").await.expect(200).json();
-    shape::fields(&devices, shape::CLIENT_DEVICES, "GET /api/client/devices");
+    let devices = client
+        .get("/api/v1/client/devices")
+        .await
+        .expect(200)
+        .json();
+    shape::fields(
+        &devices,
+        shape::CLIENT_DEVICES,
+        "GET /api/v1/client/devices",
+    );
     assert!(
         ["unconfigured", "connecting", "connected", "error"]
             .contains(&devices["link"].as_str().unwrap_or_default()),
@@ -850,27 +902,27 @@ async fn the_client_lists_its_devices_and_takes_attach_and_detach() {
 
     for bad in ["bogus", "1-", "a-1"] {
         client
-            .post_empty(&format!("/api/client/devices/{bad}/attach"))
+            .put_empty(&format!("/api/v1/client/devices/{bad}/attachment"))
             .await
             .problem(&["busId"]);
         client
-            .post_empty(&format!("/api/client/devices/{bad}/detach"))
+            .delete(&format!("/api/v1/client/devices/{bad}/attachment"))
             .await
             .problem(&["busId"]);
     }
     client
-        .post_empty("/api/client/devices/9-9/attach")
+        .put_empty("/api/v1/client/devices/9-9/attachment")
         .await
         .expect(202)
         .empty();
     client
-        .post_empty("/api/client/devices/9-9/detach")
+        .delete("/api/v1/client/devices/9-9/attachment")
         .await
         .expect(202)
         .empty();
     // Detaching what is not attached is fine too.
     client
-        .post_empty("/api/client/devices/9-9/detach")
+        .delete("/api/v1/client/devices/9-9/attachment")
         .await
         .expect(202);
 }

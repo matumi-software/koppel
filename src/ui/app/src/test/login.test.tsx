@@ -9,7 +9,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('login', () => {
   it('shows the login screen, not the app, when the browser is not signed in', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(state()) });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(state()) });
     renderGate();
 
     await screen.findByRole('heading', { name: 'Sign in to bench-pc' });
@@ -20,8 +20,8 @@ describe('login', () => {
   it('sends the password with the UI header and shows the app once the server says signed in', async () => {
     let signedIn = false;
     const { calls, fetchMock } = mockFetch({
-      'GET /api/auth/state': () => json(state({ signedIn })),
-      'POST /api/auth/login': () => {
+      'GET /api/v1/auth/state': () => json(state({ signedIn })),
+      'POST /api/v1/auth/login': () => {
         signedIn = true;
         return noContent();
       },
@@ -32,13 +32,13 @@ describe('login', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await screen.findByText('The app');
-    expect(calls.find((c) => c.key === 'POST /api/auth/login')?.body).toEqual({ password: 'correct horse battery' });
-    const login = fetchMock.mock.calls.find(([url]) => url === '/api/auth/login')!;
+    expect(calls.find((c) => c.key === 'POST /api/v1/auth/login')?.body).toEqual({ password: 'correct horse battery' });
+    const login = fetchMock.mock.calls.find(([url]) => url === '/api/v1/auth/login')!;
     expect(new Headers(login[1]?.headers).get('X-Koppel-UI')).toBe('1');
   });
 
   it('shows the server\'s answer to a wrong password and stays on the login screen', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(state()), 'POST /api/auth/login': () => problem('That password is not right.', 401) });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(state()), 'POST /api/v1/auth/login': () => problem('That password is not right.', 401) });
     renderGate();
     await userEvent.type(await screen.findByLabelText('Password'), 'not the password');
 
@@ -51,8 +51,8 @@ describe('login', () => {
   it('signs in with the right password after a wrong one, without a reload', async () => {
     let signedIn = false;
     const { calls } = mockFetch({
-      'GET /api/auth/state': () => json(state({ signedIn })),
-      'POST /api/auth/login': (init) => {
+      'GET /api/v1/auth/state': () => json(state({ signedIn })),
+      'POST /api/v1/auth/login': (init) => {
         if ((JSON.parse(String(init?.body)) as { password: string }).password !== 'correct horse battery') return problem('That password is not right.', 401);
         signedIn = true;
         return noContent();
@@ -69,13 +69,13 @@ describe('login', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await screen.findByText('The app');
-    expect(calls.filter((c) => c.key === 'POST /api/auth/login')).toHaveLength(2);
+    expect(calls.filter((c) => c.key === 'POST /api/v1/auth/login')).toHaveLength(2);
   });
 
   it('shows how long to wait when the server says too many tries', async () => {
     mockFetch({
-      'GET /api/auth/state': () => json(state()),
-      'POST /api/auth/login': () => problem('Too many tries. Wait 1 minutes and try again.', 429),
+      'GET /api/v1/auth/state': () => json(state()),
+      'POST /api/v1/auth/login': () => problem('Too many tries. Wait 1 minutes and try again.', 429),
     });
     renderGate();
     await userEvent.type(await screen.findByLabelText('Password'), 'whatever it is');
@@ -87,8 +87,8 @@ describe('login', () => {
 
   it('shows the busy answer on login and keeps what was typed', async () => {
     mockFetch({
-      'GET /api/auth/state': () => json(state()),
-      'POST /api/auth/login': () => problem(busy, 429),
+      'GET /api/v1/auth/state': () => json(state()),
+      'POST /api/v1/auth/login': () => problem(busy, 429),
     });
     renderGate();
     await userEvent.type(await screen.findByLabelText('Password'), 'whatever it is');
@@ -100,11 +100,11 @@ describe('login', () => {
   });
 
   it('goes back to the login screen when an API call is answered 401', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(state({ signedIn: true })), 'GET /api/settings': () => new Response(null, { status: 401 }) });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(state({ signedIn: true })), 'GET /api/v1/settings': () => new Response(null, { status: 401 }) });
     renderGate();
     await screen.findByText('The app');
 
-    await expect(getJson('/api/settings')).rejects.toThrow();
+    await expect(getJson('/api/v1/settings')).rejects.toThrow();
 
     await screen.findByRole('heading', { name: 'Sign in to bench-pc' });
     expect(screen.queryByText('The app')).toBeNull();

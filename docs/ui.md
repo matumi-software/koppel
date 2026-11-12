@@ -31,6 +31,16 @@ Code: `koppel-web/src/api/settings.rs` (write, then answer 202) and `koppel-web/
 (pending, confirm, fail), `src/ui/app/src/settings/use-settings.ts`. The contract tests check every push
 against the Rust build (`koppel-contract/tests/push.rs`); the UI has its own tests (`pnpm --filter koppel.ui test`, run in `src/ui/`).
 
+## Pages, forms and accessibility
+
+- **Primitives.** A page is built from `@koppel/react-ui`: `Card`, `Stack` and `Row` for layout, `Note`, `Caption` and `SectionHeading` for text, `Drawer` (with `DrawerSection`, `Holder`, `KeyValues` and `Chips`) for the side panel, `LabeledValue` for a value that is not an input, `FirstRunShell` and `PageHead` for the pages before the app. The app sets no inline style and no layout class of its own; what it needs that the library lacks goes into the library and `resources/design-system/components/` (a README per primitive) first.
+- **Signed-out screens** (sign in, first password, setup closed) are loaded on demand, and an `ErrorBoundary` guards both the gate and the app: a render error shows Reload (and Sign out inside the app) instead of a blank page.
+- **Navigation** items are real links to `#devices` and so on, so they open in a new tab. The open page lives in the address and nowhere else. A page that opens because the person went to it takes focus on its h1 and sets the tab's title (`Devices - Koppel`); the first page of a visit leaves focus alone. A skip link jumps past the navigation.
+- **One live region.** `AnnouncerProvider` draws the only `role="status"`; `useAnnounce()` is how anything speaks: how a change ended (the pending store says "Role: both. Saved." or "... could not be saved: why"), the link going away and coming back, a failed copy, the outcome of a form. Rows, field help, the status card and the activity feed are plain text. react-aria keeps a separate off-screen announcer for selection changes, which is not ours.
+- **Forms** are react-aria `Form`s. A field's rules (`validate`, `isRequired`) are checked when the form is sent and the message takes the help's place; the server's refusal goes to `validationErrors` under the field it is about and clears when the person edits it. The send button stays enabled so the reason is never hidden. The password rules are in `auth/password-rules.ts`, the server's own (`koppel-web/src/auth/password.rs`), used by the first password and the password change; anything the server still refuses is shown as it says. Each form sends through a `useMutation`.
+- **The connection form** keeps only what the person changed. Everything else is the stored connection as it is now, so a connection that changes underneath shows in the fields nobody touched and never overwrites one being typed in; a confirmed save remounts it, which drops the secret.
+- **Secrets** are held only while on show: Hide drops a revealed secret, and so does a copy made while it was masked.
+
 ## Activity
 
 The server keeps an activity log in memory (`koppel-web/src/activity.rs`):

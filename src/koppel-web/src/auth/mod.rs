@@ -217,7 +217,7 @@ impl UiAuth {
         let stamp = new_id();
         self.file
             .update(|_| UiCredentials {
-                password_hash: Some(hash),
+                password_hash: Some(hash.into()),
                 security_stamp: Some(stamp),
                 revoked_sessions: None,
             })
@@ -236,7 +236,7 @@ impl UiAuth {
         lock(&self.keep).insert(stamp.clone(), keep.to_owned());
         self.file
             .update(|current| UiCredentials {
-                password_hash: Some(hash),
+                password_hash: Some(hash.into()),
                 security_stamp: Some(stamp),
                 revoked_sessions: current.revoked_sessions.clone(),
             })

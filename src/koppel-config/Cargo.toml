@@ -16,6 +16,7 @@ time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 ring.workspace = true
+zeroize.workspace = true
 rustls.workspace = true
 aes.workspace = true
 cbc.workspace = true

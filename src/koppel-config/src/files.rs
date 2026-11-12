@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use time::OffsetDateTime;
 
 use crate::json::{self, OrderedMap};
+use crate::redact::Secret;
 
 /// Which side of the link this machine plays. Written as `server`, `client` or `both`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -173,7 +174,7 @@ pub struct ClientConnection {
     #[serde(default)]
     pub client_id: Option<String>,
     #[serde(default)]
-    pub client_secret: Option<String>,
+    pub client_secret: Option<Secret<String>>,
     /// The certificate the server said it will switch to, trusted as well until then.
     #[serde(default)]
     pub next_server_fingerprint: Option<String>,
@@ -197,7 +198,7 @@ impl Serialize for ClientConnection {
             server_url: &'a Option<String>,
             server_fingerprint: &'a Option<String>,
             client_id: &'a Option<String>,
-            client_secret: &'a Option<String>,
+            client_secret: &'a Option<Secret<String>>,
             next_server_fingerprint: &'a Option<String>,
             is_complete: bool,
         }
@@ -219,7 +220,7 @@ impl Serialize for ClientConnection {
 #[serde(rename_all = "camelCase")]
 pub struct UiCredentials {
     #[serde(default)]
-    pub password_hash: Option<String>,
+    pub password_hash: Option<Secret<String>>,
     #[serde(default)]
     pub security_stamp: Option<String>,
     #[serde(default, with = "json::date_map")]
@@ -256,7 +257,7 @@ impl Serialize for UiCredentials {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Written<'a> {
-            password_hash: &'a Option<String>,
+            password_hash: &'a Option<Secret<String>>,
             security_stamp: &'a Option<String>,
             #[serde(with = "json::date_map")]
             revoked_sessions: &'a Option<OrderedMap<OffsetDateTime>>,
@@ -299,10 +300,10 @@ pub struct ServerSecrets {
     pub skakel: Option<SkakelState>,
     /// Koppel 0.1.0: the RSA signing key, base64 PKCS#8.
     #[serde(default)]
-    pub signing_key: Option<String>,
+    pub signing_key: Option<Secret<String>>,
     /// Koppel 0.1.0: the certificate, base64 PKCS#12.
     #[serde(default)]
-    pub certificate_pfx: Option<String>,
+    pub certificate_pfx: Option<Secret<String>>,
     /// Koppel 0.1.0: the registered clients.
     #[serde(default)]
     pub clients: Option<Vec<LegacyClient>>,
@@ -337,7 +338,7 @@ pub struct SkakelState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retired_signing_keys: Vec<SkakelKeyRecord>,
     /// The certificate the server presents: base64 PKCS#12 with its private key and no password.
-    pub certificate_pfx: String,
+    pub certificate_pfx: Secret<String>,
     /// The certificate prepared for a handover.
     #[serde(default)]
     pub next_certificate: Option<SkakelNextCertificateRecord>,
@@ -361,7 +362,7 @@ pub struct SkakelClientRecord {
     pub generation: i32,
     /// The secret itself: Koppel sets Skakel's `KeepClientSecrets`.
     #[serde(default)]
-    pub secret: Option<String>,
+    pub secret: Option<Secret<String>>,
 }
 
 /// A token signing key: RSA, base64 PKCS#8.
@@ -369,7 +370,7 @@ pub struct SkakelClientRecord {
 #[serde(rename_all = "camelCase")]
 pub struct SkakelKeyRecord {
     pub key_id: String,
-    pub private_key: String,
+    pub private_key: Secret<String>,
     #[serde(with = "json::date_time_offset")]
     pub created_at: OffsetDateTime,
     #[serde(default, with = "json::date_time_offset::option")]
@@ -380,7 +381,7 @@ pub struct SkakelKeyRecord {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkakelNextCertificateRecord {
-    pub pfx: String,
+    pub pfx: Secret<String>,
     #[serde(with = "json::date_time_offset")]
     pub prepared_at: OffsetDateTime,
     pub received_by: Vec<String>,
@@ -396,7 +397,7 @@ pub struct LegacyClient {
     #[serde(with = "json::date_time_offset")]
     pub created_at: OffsetDateTime,
     #[serde(default)]
-    pub secret: Option<String>,
+    pub secret: Option<Secret<String>>,
     #[serde(default = "first_generation")]
     pub generation: i32,
 }
@@ -405,7 +406,7 @@ pub struct LegacyClient {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LegacyNextCertificate {
-    pub pfx: String,
+    pub pfx: Secret<String>,
     #[serde(with = "json::date_time_offset")]
     pub prepared_at: OffsetDateTime,
     pub received_by: Vec<String>,
@@ -570,6 +571,101 @@ mod tests {
 
         let written = String::from_utf8(json::to_vec(&UiCredentials::empty()).unwrap()).unwrap();
         assert!(written.contains("\"hasPassword\": false"));
+    }
+
+    /// Every secret in every file struct is a sentinel here; none may come out of `{:?}`, plain or
+    /// pretty, however deep the struct is nested.
+    #[test]
+    fn formatting_a_config_struct_shows_no_secret() {
+        let now = OffsetDateTime::UNIX_EPOCH;
+        let state = SkakelState {
+            clients: vec![SkakelClientRecord {
+                id: "client-1".into(),
+                name: "bench".into(),
+                secret_hash: "sha256$AAAA".into(),
+                created_at: now,
+                generation: 1,
+                secret: Some("SENTINEL-CLIENT-SECRET".into()),
+            }],
+            signing_key: SkakelKeyRecord {
+                key_id: "k1".into(),
+                private_key: "SENTINEL-SIGNING-KEY".into(),
+                created_at: now,
+                accept_until: None,
+            },
+            retired_signing_keys: vec![SkakelKeyRecord {
+                key_id: "k0".into(),
+                private_key: "SENTINEL-RETIRED-KEY".into(),
+                created_at: now,
+                accept_until: None,
+            }],
+            certificate_pfx: "SENTINEL-PFX".into(),
+            next_certificate: Some(SkakelNextCertificateRecord {
+                pfx: "SENTINEL-NEXT-PFX".into(),
+                prepared_at: now,
+                received_by: Vec::new(),
+            }),
+        };
+        let legacy = ServerSecrets {
+            skakel: Some(state.clone()),
+            signing_key: Some("SENTINEL-LEGACY-KEY".into()),
+            certificate_pfx: Some("SENTINEL-LEGACY-PFX".into()),
+            clients: Some(vec![LegacyClient {
+                id: "c".into(),
+                name: "n".into(),
+                secret_hash: "pbkdf2".into(),
+                created_at: now,
+                secret: Some("SENTINEL-LEGACY-SECRET".into()),
+                generation: 1,
+            }]),
+            signing_key_id: None,
+            signing_key_since: None,
+            next_certificate: Some(LegacyNextCertificate {
+                pfx: "SENTINEL-LEGACY-NEXT".into(),
+                prepared_at: now,
+                received_by: Vec::new(),
+            }),
+        };
+        let connection = ClientConnection {
+            server_url: Some("https://a:5240".into()),
+            server_fingerprint: Some("AA".into()),
+            client_id: Some("client-1".into()),
+            client_secret: Some("SENTINEL-LINK-SECRET".into()),
+            next_server_fingerprint: None,
+        };
+        let credentials = UiCredentials {
+            password_hash: Some("SENTINEL-PASSWORD-HASH".into()),
+            ..UiCredentials::empty()
+        };
+
+        let shown = [
+            format!(
+                "{state:?}
+{state:#?}"
+            ),
+            format!(
+                "{legacy:?}
+{legacy:#?}"
+            ),
+            format!(
+                "{connection:?}
+{connection:#?}"
+            ),
+            format!(
+                "{credentials:?}
+{credentials:#?}"
+            ),
+        ]
+        .join(
+            "
+",
+        );
+
+        assert!(!shown.contains("SENTINEL"), "{shown}");
+        assert!(shown.contains("Secret(<redacted>)"));
+        // Redacted in memory only: the files still hold the values.
+        let written = String::from_utf8(json::to_vec(&connection).unwrap()).unwrap();
+        assert!(written.contains("SENTINEL-LINK-SECRET"));
     }
 
     #[test]

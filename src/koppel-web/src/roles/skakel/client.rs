@@ -425,7 +425,7 @@ impl ClientRole for SkakelClientRole {
             };
             let credentials = Credentials::new(
                 saved.client_id.clone().unwrap_or_default(),
-                saved.client_secret.clone().unwrap_or_default(),
+                saved.client_secret.as_deref().cloned().unwrap_or_default(),
             );
             let options = ClientOptions::default().request_timeout(TEST_TIMEOUT);
             let link = match skakel_client::Link::new(&address, pins, credentials, options) {

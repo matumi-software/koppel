@@ -99,6 +99,9 @@ serde_json = { version = "1.0.154", features = ["raw_value", "preserve_order"] }
 base64 = "0.23.1"
 time = "0.3.55"
 ring = "0.17.14"
+# Wiping a secret when it is dropped (koppel-config's `Secret`). zeroize (MIT OR Apache-2.0, RustCrypto) is already here
+# through the crypto crates.
+zeroize = "1.9.1"
 # What ring lacks for reading 0.1.x's files: AES-256-CBC for Data Protection payloads and 3DES-CBC
 # for .NET's PKCS#12 export. RustCrypto, MIT OR Apache-2.0.
 aes = "0.9.4"

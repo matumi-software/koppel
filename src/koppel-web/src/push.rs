@@ -3,11 +3,15 @@
 //! The UI opens `GET /api/v1/events` with its session cookie and reads one event per change: the event's
 //! name is what 0.1.x's SignalR hub called (`IUiClient`), its data the same JSON payload. Each is sent
 //! only once the change is on disk, so the UI never shows what was not saved. A stream that falls
-//! behind is closed rather than skipping events, and the UI fetches everything again when it opens a
-//! new one. A comment goes out every 15 seconds, so a dead connection is noticed and proxies keep it
+//! behind is closed rather than skipping events. A new stream starts with the current state of every
+//! resource the machine's role has, as the same events (`SettingsChanged`, `ClientsChanged` and so
+//! on), so a reader never needs a GET to catch up and a change made between its GET and its
+//! subscription cannot be missed. The stream subscribes first and reads the state after, so a change
+//! made in between arrives twice, the second time as an event that is at least as new. A comment goes out every 15 seconds, so a dead connection is noticed and proxies keep it
 //! open. The stream ends when its session does (the session's token is cancelled): signing out, a
 //! password change or reset elsewhere, the session running out, or the server stopping.
 
+use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,6 +34,7 @@ use crate::auth::SignedIn;
 use crate::roles::{ClientView, DiscoveredServer, KeysView, PairingOverview, PairingStatus};
 use crate::server::Shutdown;
 use crate::state::PushApi;
+use crate::surface::RoleScope;
 
 /// One push, with the payload its name goes with. The name is the SSE event name the UI listens for,
 /// the payload is the event's data as JSON and nothing else (no name inside it), so each name has
@@ -91,6 +96,19 @@ pub struct Pushed {
     pub data: String,
 }
 
+impl Pushed {
+    fn of(event: &Event<'_>) -> Option<Self> {
+        let name = event.name();
+        match serde_json::to_string(event) {
+            Ok(data) => Some(Self { name, data }),
+            Err(e) => {
+                tracing::error!("the push {name} could not be written as JSON: {e}");
+                None
+            }
+        }
+    }
+}
+
 /// Sends events to every open stream. Cheap to clone.
 #[derive(Clone)]
 pub struct Push {
@@ -116,12 +134,8 @@ impl Push {
         if self.events.receiver_count() == 0 {
             return;
         }
-        let name = event.name();
-        match serde_json::to_string(&event) {
-            Ok(data) => {
-                let _ = self.events.send(Arc::new(Pushed { name, data }));
-            }
-            Err(e) => tracing::error!("the push {name} could not be written as JSON: {e}"),
+        if let Some(pushed) = Pushed::of(&event) {
+            let _ = self.events.send(Arc::new(pushed));
         }
     }
 
@@ -131,14 +145,51 @@ impl Push {
     }
 }
 
+/// The current state of every pushed resource, read where the GET routes read it.
+impl PushApi {
+    /// What a new stream starts with: one event per resource of the machine's role, in a fixed order.
+    /// The activity log is not state, it is a feed, and its entries come from `GET /api/v1/activity`.
+    pub(crate) fn snapshot(&self) -> VecDeque<Arc<Pushed>> {
+        let settings = self.settings.current();
+        let mut events = vec![Event::SettingsChanged(&settings)];
+        // Held here so the borrows in `events` outlive the loop below.
+        let (clients, keys, requests, devices);
+        if RoleScope::Server.served_to(settings.role) {
+            clients = self.server.clients();
+            keys = self.server.keys();
+            requests = self.server.pairing();
+            devices = self.usb_server.current();
+            events.push(Event::ClientsChanged(&clients));
+            events.push(Event::ServerKeysChanged(&keys));
+            events.push(Event::PairingRequestsChanged(&requests));
+            events.push(Event::DevicesChanged(&devices));
+        }
+        let (connection, found, pairing, attached);
+        if RoleScope::Client.served_to(settings.role) {
+            connection = ConnectionView::of(&self.connection.current());
+            found = self.client.discovered();
+            pairing = self.client.pairing();
+            attached = self.usb_client.current();
+            events.push(Event::ConnectionChanged(&connection));
+            events.push(Event::ServersDiscovered(&found));
+            events.push(Event::PairingStatusChanged(&pairing));
+            events.push(Event::ClientDevicesChanged(&attached));
+        }
+        events.iter().filter_map(Pushed::of).map(Arc::new).collect()
+    }
+}
+
 /// `GET /api/v1/events`: the stream for one signed-in session.
 pub(crate) async fn events(
     State(app): State<PushApi>,
     Extension(session): Extension<SignedIn>,
     shutdown: Option<Extension<Shutdown>>,
 ) -> impl IntoResponse {
+    // Subscribed before the state is read, so no change falls between the two.
+    let events = app.push.subscribe();
     let live = Live {
-        events: app.push.subscribe(),
+        first: app.snapshot(),
+        events,
         ended: session.ended,
         // A request that did not come through the accept loop has none, and nothing ends it.
         shutdown: shutdown.map_or_else(CancellationToken::new, |Extension(Shutdown(token))| token),
@@ -154,6 +205,8 @@ pub(crate) async fn events(
 
 /// One open stream.
 struct Live {
+    /// The snapshot, sent before anything from `events`.
+    first: VecDeque<Arc<Pushed>>,
     events: broadcast::Receiver<Arc<Pushed>>,
     /// Cancelled when the session ends.
     ended: CancellationToken,
@@ -165,6 +218,9 @@ struct Live {
 impl Live {
     /// The next event, or `None` when the stream is over.
     async fn next(&mut self) -> Option<sse::Event> {
+        if let Some(pushed) = self.first.pop_front() {
+            return Some(sse::Event::default().event(pushed.name).data(&pushed.data));
+        }
         tokio::select! {
             pushed = self.events.recv() => match pushed {
                 Ok(pushed) => Some(sse::Event::default().event(pushed.name).data(&pushed.data)),
@@ -185,6 +241,7 @@ mod tests {
     fn live(push: &Push) -> (Live, CancellationToken, CancellationToken) {
         let (ended, shutdown) = (CancellationToken::new(), CancellationToken::new());
         let live = Live {
+            first: VecDeque::new(),
             events: push.subscribe(),
             ended: ended.clone(),
             shutdown: shutdown.clone(),

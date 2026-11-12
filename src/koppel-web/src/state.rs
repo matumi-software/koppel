@@ -63,6 +63,13 @@ pub(crate) struct ReadyApi {
 #[derive(Clone)]
 pub(crate) struct PushApi {
     pub push: Push,
+    // The rest is what a new stream starts with: the state the GET routes read.
+    pub settings: ConfigFile<KoppelSettings>,
+    pub connection: ConfigFile<ClientConnection>,
+    pub server: Arc<SkakelServerRole>,
+    pub usb_server: Arc<UsbServerRole>,
+    pub client: Arc<SkakelClientRole>,
+    pub usb_client: Arc<UsbClientRole>,
 }
 
 impl FromRef<Arc<App>> for AuthApi {
@@ -122,6 +129,12 @@ impl FromRef<Arc<App>> for PushApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
             push: app.push.clone(),
+            settings: app.settings.clone(),
+            connection: app.connection.clone(),
+            server: app.server.clone(),
+            usb_server: app.usb_server.clone(),
+            client: app.client.clone(),
+            usb_client: app.usb_client.clone(),
         }
     }
 }

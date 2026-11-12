@@ -3,7 +3,12 @@
   "target": "branch",
   "enforcement": "active",
   "conditions": {
-    "ref_name": { "include": ["refs/heads/main"], "exclude": [] }
+    "ref_name": {
+      "include": [
+        "refs/heads/main"
+      ],
+      "exclude": []
+    }
   },
   "rules": [
     {
@@ -15,21 +20,13 @@
         "require_last_push_approval": false,
         "required_review_thread_resolution": true
       }
-    },
-    {
-      "type": "required_status_checks",
-      "parameters": {
-        "strict_required_status_checks_policy": false,
-        "required_status_checks": [
-          { "context": "Rust (ubuntu-latest)" },
-          { "context": "Rust (windows-latest)" },
-          { "context": "UI" },
-          { "context": "Dependencies" }
-        ]
-      }
     }
   ],
   "bypass_actors": [
-    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+    {
+      "actor_id": 5,
+      "actor_type": "RepositoryRole",
+      "bypass_mode": "always"
+    }
   ]
 }

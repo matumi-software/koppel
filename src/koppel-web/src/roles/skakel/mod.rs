@@ -1,4 +1,4 @@
-//! The server and client roles on Skakel 0.2.0 (protocol version 2, gRPC).
+//! The server and client roles on Skakel 0.2.1 (protocol version 2, gRPC).
 //!
 //! | Module | What |
 //! |---|---|

@@ -20,8 +20,8 @@ use serde::Serialize;
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::Instant;
 
-use crate::app::App;
 use crate::auth::{SessionEnd, SignedIn};
+use crate::state::PushApi;
 
 /// `settings.json` was written: the settings.
 pub const SETTINGS_CHANGED: &str = "SettingsChanged";
@@ -96,7 +96,7 @@ impl Push {
 
 /// `GET /api/events`: the stream for one signed-in session.
 pub(crate) async fn events(
-    State(app): State<Arc<App>>,
+    State(app): State<PushApi>,
     Extension(session): Extension<SignedIn>,
 ) -> impl IntoResponse {
     let live = Live {

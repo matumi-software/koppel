@@ -1,14 +1,17 @@
-//! The guards in front of every route, in 0.1.x's order:
+//! The guards, as layers on the routers that need them (see `routes.rs` for where each sits). A new
+//! route is safe by construction: it joins a router and gets that router's layers.
 //!
-//! 1. Security headers on every answer, whatever answers.
-//! 2. Port and role: a path whose surface is not on the port the connection came in on, or that the
-//!    current role does not have, gets 404. The port is the local one, never the `Host` header.
-//! 3. `Ui:AllowFrom`: a UI path from an address it does not take gets 403 and a line saying so.
-//! 4. Origin and header: a UI API call from another origin gets 403, and so does a change (anything
-//!    but GET or HEAD) without `X-Koppel-UI: 1`.
-//! 5. The rate limit on setup, login and password change, per address, after the port and role
-//!    check so a request for the wrong port does not use up the allowance.
-//! 6. The session: every UI API path but the anonymous ones needs a good cookie, else 401.
+//! | Layer | On | Answers |
+//! |---|---|---|
+//! | [`security_headers`] | every router, outermost | adds the headers to every answer, whatever answers |
+//! | [`connection_info`] | every router | 500 when the request has no caller address: a request must come through the accept loop (or a probe that adds one) |
+//! | [`network_paths_are_not_here`] | the UI router | 404 for a path the network surface serves, before anything else looks at it |
+//! | [`allow_from`] | the UI router | 403 from an address `Ui:AllowFrom` does not take |
+//! | [`ui_origin`] | the UI's `/api` | 403 for another origin, and for a change without `X-Koppel-UI: 1` |
+//! | [`auth_limit`] | the sign-in routes | 429 over the per-address limit |
+//! | [`session`] | the UI's `/api` | puts the session on the request when the cookie is good, and renews or clears the cookie |
+//! | [`role_gate`] | `/api/server`, `/api/client` and the network router | 404 when this machine's role does not have it |
+//! | [`require_session`] | the protected routes | 401 without a session |
 //!
 //! Skakel's limits on its token and pairing calls are Skakel's own, behind these guards, per
 //! caller's address (see `roles::skakel`).
@@ -18,6 +21,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use axum::Router;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{
     CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, HeaderName, HeaderValue, ORIGIN, REFERRER_POLICY,
@@ -26,59 +30,85 @@ use axum::http::header::{
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use koppel_config::ConfigFile;
+use koppel_config::files::KoppelSettings;
+use tower_http::set_header::SetResponseHeaderLayer;
 
-use crate::access::{UiReach, address_key};
-use crate::app::App;
-use crate::auth::{Rejected, ticket};
-use crate::surface::{Listener, Surface, requires_sign_in, starts_with_segments};
+use crate::access::{UiAccess, UiReach, address_key};
+use crate::auth::{Rejected, SignedIn, UiAuth, ticket};
+use crate::surface::{RoleScope, is_network_path};
 
 /// The header every change to the UI's API carries.
 pub(crate) const UI_HEADER: &str = "x-koppel-ui";
 const FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
-/// The paths the sign-in rate limit counts. State and logout are left out: the UI polls the state.
-const AUTH_PATHS: [&str; 3] = ["/api/auth/setup", "/api/auth/login", "/api/auth/password"];
 
-/// The local address a connection came in on, which says which port, so which surface, it is.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct LocalAddr(pub SocketAddr);
-
-pub(crate) async fn guard(State(app): State<Arc<App>>, request: Request, next: Next) -> Response {
-    let mut response = check(&app, request, next).await;
-    let headers = response.headers_mut();
-    headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
-    // Only frame-ancestors, so it cannot break the app or the Vite dev proxy.
-    headers.insert(
-        CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("frame-ancestors 'none'"),
-    );
-    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    headers.insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
-    response
+/// The four security headers on every answer. Outermost, so they go on whatever answers: a route, a
+/// guard's refusal, a panic's 500.
+pub(crate) fn security_headers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    router
+        .layer(SetResponseHeaderLayer::overriding(
+            REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        // Only frame-ancestors, so it cannot break the app or the Vite dev proxy.
+        .layer(SetResponseHeaderLayer::overriding(
+            CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("frame-ancestors 'none'"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
 }
 
-async fn check(app: &App, mut request: Request, next: Next) -> Response {
-    let path = request.uri().path().to_owned();
-    let remote = request
+/// Refuses a request that carries no `ConnectInfo`. Every guard that looks at the caller reads it,
+/// and a guess for a missing one (loopback, say) would open the UI to whoever lacked it. The accept
+/// loop adds it to each request, and so does a probe that calls the router in process.
+pub(crate) async fn connection_info(request: Request, next: Next) -> Response {
+    if request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .is_none()
+    {
+        tracing::error!(
+            "A request for {} reached the router without the caller's address and was refused",
+            request.uri().path()
+        );
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    next.run(request).await
+}
+
+fn caller(request: &Request) -> Option<SocketAddr> {
+    request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|info| info.0)
-        .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 0)));
-    let local_port = request
-        .extensions()
-        .get::<LocalAddr>()
-        .map_or(app.host.ui_port, |local| local.0.port());
+}
 
-    // The surface is the path's, never the request's own word for what it is: a gRPC call is a path
-    // under one of the services this server runs (other machines, a server's).
-    let surface = Surface::of(&path);
-    let port = match surface.listener {
-        Listener::Ui => app.host.ui_port,
-        Listener::Network => app.host.network_port,
-    };
-    if local_port != port || !surface.served_to(app.settings.current().role) {
+/// On the UI router: a path the network surface serves is not here. This answers before
+/// `Ui:AllowFrom`, so a caller the UI turns away learns nothing of the other surface from it.
+pub(crate) async fn network_paths_are_not_here(request: Request, next: Next) -> Response {
+    if is_network_path(request.uri().path()) {
         return StatusCode::NOT_FOUND.into_response();
     }
-    if surface.listener == Listener::Ui && !app.access.allows(remote.ip()) {
+    next.run(request).await
+}
+
+/// `Ui:AllowFrom`: the UI from an address it does not take gets 403 and a line saying so.
+pub(crate) async fn allow_from(
+    State(access): State<Arc<UiAccess>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(remote) = caller(&request) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if !access.allows(remote.ip()) {
         return (
             StatusCode::FORBIDDEN,
             [(
@@ -92,27 +122,47 @@ async fn check(app: &App, mut request: Request, next: Next) -> Response {
         )
             .into_response();
     }
-    if surface.listener == Listener::Ui
-        && starts_with_segments(&path, "/api")
-        && !from_the_ui(&request)
-    {
+    next.run(request).await
+}
+
+/// On the UI's `/api`: the Origin, when there is one, is this request's own, and a change carries
+/// `X-Koppel-UI: 1`, a header a page on another site cannot add without a CORS preflight this server
+/// never grants.
+pub(crate) async fn ui_origin(request: Request, next: Next) -> Response {
+    if !from_the_ui(&request) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if AUTH_PATHS
-        .iter()
-        .any(|prefix| starts_with_segments(&path, prefix))
-        && !app.auth_limit.allow(&address_key(remote.ip()))
-    {
+    next.run(request).await
+}
+
+/// The sign-in rate limit on setup, login and password change, per address. It sits on those routes
+/// alone: state and logout are left out, since the UI polls the state.
+pub(crate) async fn auth_limit(
+    State(limit): State<Arc<RateLimit>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(remote) = caller(&request) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    if !limit.allow(&address_key(remote.ip())) {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     }
+    next.run(request).await
+}
 
-    // Anonymous routes see the session too, when there is one: the state says whether it is good.
+/// Anonymous routes see the session too, when there is one: the state says whether it is good. A
+/// session that ended loses its cookie, and one past its half gets a later expiry, unless the route
+/// set a cookie of its own (a sign-in, a sign-out, a password change).
+pub(crate) async fn session(
+    State(auth): State<Arc<UiAuth>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
     let mut clear = false;
     let mut renewed = None;
-    if surface.listener == Listener::Ui
-        && let Some(value) = ticket::from_request(request.headers())
-    {
-        match app.auth.check(&value) {
+    if let Some(value) = ticket::from_request(request.headers()) {
+        match auth.check(&value) {
             Ok(session) => {
                 renewed = session.renewed.clone();
                 request.extensions_mut().insert(session);
@@ -121,17 +171,7 @@ async fn check(app: &App, mut request: Request, next: Next) -> Response {
             Err(Rejected::NotOurs) => {}
         }
     }
-    let signed_in = request
-        .extensions()
-        .get::<crate::auth::SignedIn>()
-        .is_some();
-    let mut response = if requires_sign_in(&path) && !signed_in {
-        StatusCode::UNAUTHORIZED.into_response()
-    } else {
-        next.run(request).await
-    };
-    // A session that ended loses its cookie, and one past its half gets a later expiry, unless the
-    // route set a cookie of its own (a sign-in, a sign-out, a password change).
+    let mut response = next.run(request).await;
     let cookie = if clear {
         Some(ticket::clear_cookie())
     } else {
@@ -146,8 +186,34 @@ async fn check(app: &App, mut request: Request, next: Next) -> Response {
     response
 }
 
-/// The Origin, when there is one, is this request's own, and a change carries `X-Koppel-UI: 1`, a
-/// header a page on another site cannot add without a CORS preflight this server never grants.
+/// On the protected routes, inside [`session`]: a request with no good session gets 401.
+pub(crate) async fn require_session(request: Request, next: Next) -> Response {
+    if request.extensions().get::<SignedIn>().is_none() {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    next.run(request).await
+}
+
+/// What [`role_gate`] reads: the settings, whose role is read on every request, so a role change
+/// takes effect at once, and the scope the routes belong to.
+#[derive(Clone)]
+pub(crate) struct RoleGate {
+    pub settings: ConfigFile<KoppelSettings>,
+    pub scope: RoleScope,
+}
+
+/// A route the current role does not have is not found.
+pub(crate) async fn role_gate(
+    State(gate): State<RoleGate>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !gate.scope.served_to(gate.settings.current().role) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    next.run(request).await
+}
+
 fn from_the_ui(request: &Request) -> bool {
     let headers = request.headers();
     if let Some(origin) = headers.get(ORIGIN)

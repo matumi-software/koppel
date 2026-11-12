@@ -4,7 +4,6 @@
 //! hashing other passwords, gets 429 with `Retry-After`.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Extension;
@@ -19,8 +18,8 @@ use super::throttle::Reservation;
 use super::{SetupOutcome, SignedIn, password, ticket};
 use crate::access::address_key;
 use crate::activity::{ActivityOutcome, ActivityReason, EntityRef};
-use crate::app::App;
 use crate::json::{self, JsonBody};
+use crate::state::AuthApi;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,7 +49,7 @@ pub(crate) struct ChangeRequest {
 }
 
 pub(crate) async fn state(
-    State(app): State<Arc<App>>,
+    State(app): State<AuthApi>,
     session: Option<Extension<SignedIn>>,
 ) -> Response {
     json::ok(&AuthState {
@@ -65,7 +64,7 @@ pub(crate) async fn state(
 /// Sets the first password, for whoever asks first while setup is open. There is no secret to
 /// guess, so no caller is locked out; the rate limit and the hash slots hold back a flood.
 pub(crate) async fn setup(
-    State(app): State<Arc<App>>,
+    State(app): State<AuthApi>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     JsonBody(request): JsonBody<PasswordRequest>,
 ) -> Response {
@@ -100,7 +99,7 @@ pub(crate) async fn setup(
 }
 
 pub(crate) async fn login(
-    State(app): State<Arc<App>>,
+    State(app): State<AuthApi>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     JsonBody(request): JsonBody<PasswordRequest>,
 ) -> Response {
@@ -133,7 +132,7 @@ pub(crate) async fn login(
 /// Removes the cookie from this browser and revokes the session id, so a copy of the cookie is
 /// refused too, and closes the session's live push.
 pub(crate) async fn logout(
-    State(app): State<Arc<App>>,
+    State(app): State<AuthApi>,
     Extension(session): Extension<SignedIn>,
 ) -> Response {
     if let Err(e) = app.auth.revoke(&session.id, session.issued).await {
@@ -148,7 +147,7 @@ pub(crate) async fn logout(
 /// Completes on this answer: unlike a setting there is no value to push back, and the new password
 /// is never shown again. The confirm rule is for state the server owns and echoes.
 pub(crate) async fn change_password(
-    State(app): State<Arc<App>>,
+    State(app): State<AuthApi>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     Extension(session): Extension<SignedIn>,
     JsonBody(request): JsonBody<ChangeRequest>,
@@ -192,13 +191,13 @@ pub(crate) async fn change_password(
     signed_in(auth.cookie(Some(&session.id), Some(session.issued)))
 }
 
-fn machine(app: &App) -> EntityRef {
+fn machine(app: &AuthApi) -> EntityRef {
     EntityRef::new("ui", app.host.name.clone(), "machine")
 }
 
 // Every failure goes to the log. The activity log keeps 500 entries, so it only hears of the one
 // that engages a lock: a burst of guesses is one entry, not a flood.
-fn fail(app: &App, attempt: Reservation, caller: &str, what: &str) {
+fn fail(app: &AuthApi, attempt: Reservation, caller: &str, what: &str) {
     tracing::warn!(
         "{what} failed from {caller}: wrong password ({} recent tries)",
         attempt.failures

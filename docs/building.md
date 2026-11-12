@@ -209,7 +209,7 @@ own architecture, so nothing runs under emulation, and one build serves all thre
 - **Watchdog (#71):** `WatchdogSec=30`. Koppel (`koppel/src/systemd.rs`, on the
   [sd-notify](https://crates.io/crates/sd-notify) crate) sends `READY=1` once its ports listen,
   `STOPPING=1` when it stops, and `WATCHDOG=1` every half interval, but only when its own `/healthz`
-  answers within a quarter interval. The health check goes through the router and its guard in process, on
+  answers within a quarter interval. The health check goes through the UI router and its guards in process, as a request from the loopback address, on
   the same runtime as every connection, so a runtime with every worker stuck, or a lock that never comes
   free, stops the heartbeat. Without `WATCHDOG_USEC` (Docker, Windows, a console) none of it runs.
 - **Hardening (#72):** still root, which the files in `/sys` need, with what Koppel does not use taken

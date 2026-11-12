@@ -2,8 +2,6 @@
 //! pairing requests and USB devices. Koppel's own `/api/remote/devices` for other machines is
 //! Skakel's server's (`roles/skakel/remote.rs`).
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -11,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::activity::{ActivityOutcome, ActivityReason, EntityRef};
-use crate::app::App;
 use crate::json::{self, JsonBody};
 use crate::roles::{Approval, RegisterError, is_bus_id};
+use crate::state::ServerApi;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,7 +46,7 @@ fn client_entity(id: &str, name: &str) -> EntityRef {
     EntityRef::new(id, name, "client")
 }
 
-fn machine(app: &App) -> EntityRef {
+fn machine(app: &ServerApi) -> EntityRef {
     EntityRef::new("machine", app.host.name.clone(), "machine")
 }
 
@@ -56,7 +54,7 @@ fn secret(secret: &str) -> Response {
     json::ok(&json!({ "clientSecret": secret }))
 }
 
-pub(crate) async fn identity(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn identity(State(app): State<ServerApi>) -> Response {
     json::ok(&ServerIdentity {
         name: &app.host.name,
         fingerprint: app.server.fingerprint(),
@@ -64,7 +62,7 @@ pub(crate) async fn identity(State(app): State<Arc<App>>) -> Response {
     })
 }
 
-pub(crate) async fn clients(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn clients(State(app): State<ServerApi>) -> Response {
     json::ok(&app.server.clients())
 }
 
@@ -75,7 +73,7 @@ fn name_problem(message: &str) -> Response {
 /// Answers 201 with the secret; the list follows as `ClientsChanged` once `secrets.json` is
 /// written. The secret is kept, encrypted, so it can be copied again later.
 pub(crate) async fn create_client(
-    State(app): State<Arc<App>>,
+    State(app): State<ServerApi>,
     JsonBody(request): JsonBody<CreateClient>,
 ) -> Response {
     let name = request.name.unwrap_or_default();
@@ -107,7 +105,10 @@ pub(crate) async fn create_client(
     )
 }
 
-pub(crate) async fn revoke_client(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+pub(crate) async fn revoke_client(
+    State(app): State<ServerApi>,
+    Path(id): Path<String>,
+) -> Response {
     let name = app.server.name_of(&id).unwrap_or_else(|| id.clone());
     match app.server.revoke(&id).await {
         Ok(true) => {}
@@ -125,7 +126,10 @@ pub(crate) async fn revoke_client(State(app): State<Arc<App>>, Path(id): Path<St
 }
 
 /// One client's secret, fetched only when someone reveals or copies it.
-pub(crate) async fn client_secret(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+pub(crate) async fn client_secret(
+    State(app): State<ServerApi>,
+    Path(id): Path<String>,
+) -> Response {
     match app.server.secret_of(&id) {
         None => StatusCode::NOT_FOUND.into_response(),
         Some(Some(value)) => secret(&value),
@@ -137,7 +141,10 @@ pub(crate) async fn client_secret(State(app): State<Arc<App>>, Path(id): Path<St
 }
 
 /// A new secret, given once in the answer; the list follows as `ClientsChanged`.
-pub(crate) async fn rotate_secret(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+pub(crate) async fn rotate_secret(
+    State(app): State<ServerApi>,
+    Path(id): Path<String>,
+) -> Response {
     let value = match app.server.rotate_secret(&id).await {
         Ok(Some(value)) => value,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -154,7 +161,7 @@ pub(crate) async fn rotate_secret(State(app): State<Arc<App>>, Path(id): Path<St
     secret(&value)
 }
 
-pub(crate) async fn keys(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn keys(State(app): State<ServerApi>) -> Response {
     json::ok(&app.server.keys())
 }
 
@@ -168,7 +175,7 @@ fn short(fingerprint: &str) -> String {
     format!("{}…", fingerprint.get(..11).unwrap_or(fingerprint))
 }
 
-pub(crate) async fn prepare_certificate(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn prepare_certificate(State(app): State<ServerApi>) -> Response {
     let next = match app.server.prepare_next_certificate().await {
         Ok(Some(next)) => next,
         Ok(None) => {
@@ -191,7 +198,7 @@ pub(crate) async fn prepare_certificate(State(app): State<Arc<App>>) -> Response
     json::accepted()
 }
 
-pub(crate) async fn cancel_certificate(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn cancel_certificate(State(app): State<ServerApi>) -> Response {
     let next = match app.server.cancel_next_certificate().await {
         Ok(Some(next)) => next,
         Ok(None) => return refused("There is no new certificate to cancel."),
@@ -207,7 +214,7 @@ pub(crate) async fn cancel_certificate(State(app): State<Arc<App>>) -> Response 
     json::accepted()
 }
 
-pub(crate) async fn switch_certificate(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn switch_certificate(State(app): State<ServerApi>) -> Response {
     let done = match app.server.switch_certificate().await {
         Ok(Some(done)) => done,
         Ok(None) => {
@@ -235,7 +242,7 @@ pub(crate) async fn switch_certificate(State(app): State<Arc<App>>) -> Response 
     json::accepted()
 }
 
-pub(crate) async fn pairing(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn pairing(State(app): State<ServerApi>) -> Response {
     json::ok(&app.server.pairing())
 }
 
@@ -253,7 +260,7 @@ pub(crate) struct OpenPairing {
 /// Opens the pairing window and answers 202; it shows as open in `PairingRequestsChanged` once
 /// Skakel's server says so. Opening it again moves the end.
 pub(crate) async fn open_pairing(
-    State(app): State<Arc<App>>,
+    State(app): State<ServerApi>,
     JsonBody(request): JsonBody<OpenPairing>,
 ) -> Response {
     let minutes = request.minutes.unwrap_or(DEFAULT_WINDOW_MINUTES);
@@ -269,7 +276,7 @@ pub(crate) async fn open_pairing(
 }
 
 /// Closes the pairing window and answers 202; requests that are already open carry on.
-pub(crate) async fn close_pairing(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn close_pairing(State(app): State<ServerApi>) -> Response {
     app.server.close_pairing();
     json::accepted()
 }
@@ -277,7 +284,7 @@ pub(crate) async fn close_pairing(State(app): State<Arc<App>>) -> Response {
 /// The right code answers 202; the request leaving `PairingRequestsChanged` and the new client in
 /// `ClientsChanged` confirm it. A wrong code is a validation problem at once.
 pub(crate) async fn approve(
-    State(app): State<Arc<App>>,
+    State(app): State<ServerApi>,
     Path(id): Path<String>,
     JsonBody(request): JsonBody<Approve>,
 ) -> Response {
@@ -295,7 +302,7 @@ pub(crate) async fn approve(
     }
 }
 
-pub(crate) async fn deny(State(app): State<Arc<App>>, Path(id): Path<String>) -> Response {
+pub(crate) async fn deny(State(app): State<ServerApi>, Path(id): Path<String>) -> Response {
     if app.server.deny(&id).await {
         json::accepted()
     } else {
@@ -303,14 +310,14 @@ pub(crate) async fn deny(State(app): State<Arc<App>>, Path(id): Path<String>) ->
     }
 }
 
-pub(crate) async fn devices(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn devices(State(app): State<ServerApi>) -> Response {
     json::ok(&app.usb_server.current())
 }
 
 /// Applies the choice, which is saved in `devices.json` once it took effect, and answers 202; the
 /// outcome reaches the UI as `DevicesChanged`.
 pub(crate) async fn share(
-    State(app): State<Arc<App>>,
+    State(app): State<ServerApi>,
     Path(bus_id): Path<String>,
     JsonBody(request): JsonBody<Share>,
 ) -> Response {

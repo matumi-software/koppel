@@ -57,9 +57,11 @@ contract tests.
 
 | Module | What |
 |---|---|
-| `app.rs` | `App`: opens every config file as 0.1.x does, makes the certificate on a first start, wires the pushes, builds the router |
-| `guard.rs` | The guards, in 0.1.x's order: security headers, port and role (404), `KOPPEL_UI_ALLOW_FROM` (403), Origin and `X-Koppel-UI` (403), the sign-in rate limit (429), the session (401) |
-| `surface.rs`, `access.rs` | What is served on which port and role, which paths are anonymous, and who `KOPPEL_UI_ALLOW_FROM` takes |
+| `app.rs` | `App`: opens every config file as 0.1.x does, makes the certificate on a first start, wires the pushes, builds the routers |
+| `routes.rs` | One router per surface (the UI and the network), each with its layers, and the dispatcher for one shared port |
+| `guard.rs` | The guards as layers: security headers, the caller address check, `KOPPEL_UI_ALLOW_FROM` (403), Origin and `X-Koppel-UI` (403), the sign-in rate limit (429), the session (401) and the role gate (404) |
+| `state.rs` | The state each group of handlers takes (`AuthApi`, `SettingsApi`, `ServerApi`, `ClientApi`, `PushApi`), made from the app with `FromRef` |
+| `surface.rs`, `access.rs` | Which paths are the network surface's, and which role a group needs; who `KOPPEL_UI_ALLOW_FROM` takes |
 | `auth/` | `ui-auth.json`, the setup window, password rules and hashes, the lockout, the hash slots, the session cookie, sign-out and the password change, `reset-password` |
 | `api/` | The REST endpoints: settings, activity, system, server, client and USB |
 | `activity.rs` | The activity log, in memory, 500 entries |

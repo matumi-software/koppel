@@ -141,13 +141,18 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
     .await?;
     let acceptor = app.tls();
 
-    let mut ports = vec![ui_port];
-    if network_port != ui_port {
-        ports.push(network_port);
-    }
+    // One listener for both surfaces when they share a port, otherwise one for each, each with its
+    // own router.
+    let routers = app.routers();
+    let health = routers.ui.clone();
+    let listeners = if network_port == ui_port {
+        vec![(ui_port, routers.merged())]
+    } else {
+        vec![(ui_port, routers.ui), (network_port, routers.network)]
+    };
     let (stop, stopped) = watch::channel(false);
     let mut servers = tokio::task::JoinSet::new();
-    for port in ports {
+    for (port, router) in listeners {
         let listener = koppel_web::bind(address, port).map_err(|e| {
             format!(
                 "could not listen on port {port}{}: {e}",
@@ -163,14 +168,14 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
         servers.spawn(koppel_web::serve(
             listener,
             acceptor.clone(),
-            app.router(),
+            router,
             async move {
                 let _ = stopped.changed().await;
             },
         ));
     }
     systemd::ready();
-    tokio::spawn(systemd::heartbeat(app.router()));
+    tokio::spawn(systemd::heartbeat(health));
 
     #[cfg(windows)]
     let trays = service

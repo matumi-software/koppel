@@ -4,13 +4,23 @@
 
 One HTTPS port, 5240, with the server's own self-signed certificate, serves both surfaces: the UI, for the
 people who run this machine, and the network surface, for other Koppel machines. `KOPPEL_NETWORK_PORT` moves
-the network surface onto a port of its own. Which port serves what is decided by the local port the
-connection arrived on, never the `Host` header. A request for a surface that is not on that port, or
-that this machine's current role does not have, gets 404. Plain HTTP on a web port gets a 301 to the
-same host, port and path over HTTPS, answered before TLS from the first byte of the connection
-(`koppel-web/src/redirect.rs`); it never reaches the app. The role is read from the settings on every request, so a role change takes effect at once.
-A request's surface comes from its path and the port it came in on, never from a header: a request that says it is gRPC (any `application/grpc+...` content type) is the UI's when its path is, and gets the UI's guards. A gRPC call is told by its path, `/<package>.<Service>/<Method>` with a package under `skakel.` or Koppel's `koppel.remote.v1.RemoteDevices` (`is_grpc_path`). The table is `LISTED` in `koppel-web/src/surface.rs`; a path not listed counts as the UI's,
-so a new route is never exposed to remote clients by accident. Everything Skakel maps is under `/skakel`,
+the network surface onto a port of its own. Each surface is a router (`koppel-web/src/routes.rs`) with its
+own guards, and a router answers on the listener it is given, so the port decides the surface by
+construction: with `KOPPEL_NETWORK_PORT` set, a UI path on the network port is 404 and a network path on the UI
+port is 404. On one port the two routers sit behind a small dispatcher that hands a request to the
+network router when its path is `/skakel/...`, `/api/remote/...` or a gRPC call (`is_network_path` in
+`koppel-web/src/surface.rs`, the one place that names them) and to the UI router otherwise. A request's
+surface comes from its path and the port it came in on, never from a header or the `Host` header: a request
+that says it is gRPC (any `application/grpc+...` content type) is the UI's when its path is, and gets the
+UI's guards. A gRPC call is told by its path, `/<package>.<Service>/<Method>` with a package under
+`skakel.` or Koppel's `koppel.remote.v1.RemoteDevices`. Paths are matched as they are written, in the case
+they are written: `/API/settings` is not `/api/settings`. A machine whose role lacks a surface does not
+serve it: 404, read from the settings on every request, so a role change takes effect at once. Plain HTTP
+on a web port gets a 301 to the same host, port and path over HTTPS, answered before TLS from the first
+byte of the connection (`koppel-web/src/redirect.rs`); it never reaches the routers. A new route joins a
+router and gets its layers, so it is never exposed to remote clients by accident: the UI's routes are under
+`/api` in `koppel-web/src/api/mod.rs`, the network surface's are Skakel's.
+Everything Skakel maps is under `/skakel`,
 which is on the network surface. Pairing there works only while a person has opened the pairing
 window on the server's Clients page (`POST /api/server/pairing/window` on the UI surface, see
 ["Finding servers and pairing"](skakel.md#finding-servers-and-pairing)); outside it Skakel answers
@@ -37,7 +47,7 @@ Settings that move them:
 | `KOPPEL_UI_ALLOW_FROM` | `lan`; `local` in Development | Who may use the UI, by the caller's address, as Sunshine's `origin_web_ui_allowed`. `local` is this machine only, `lan` adds the local network, `any` is everyone. A refused UI request gets 403; the network surface is not affected. The local network is loopback, 10/8, 172.16/12, 192.168/16, 169.254/16, IPv6 unique local and link-local addresses, and any network this machine has an address on (read again every 30 seconds), so a neighbour with a global IPv6 address counts. Carrier-grade NAT (100.64/10) does not. The Windows installer sets `local`, because the native app's UI is used on that machine only |
 | `KOPPEL_GATEWAY_PORT` | 3242 on native Windows, off elsewhere | See ["USB client"](usb.md#usb-client). A compose file sets it by environment variable |
 | `KOPPEL_GATEWAY_ADDRESS` | `127.0.0.1` | Where the gateway listens |
-| `KOPPEL_RATE_TOKEN_PER_MINUTE`, `KOPPEL_RATE_PAIR_PER_MINUTE` | 60, 120 | Skakel's limits on its token and pairing endpoints, per address. In the Rust build Skakel counts them behind the port and role check, so a call to the wrong port or role does not count |
+| `KOPPEL_RATE_TOKEN_PER_MINUTE`, `KOPPEL_RATE_PAIR_PER_MINUTE` | 60, 120 | Skakel's limits on its token and pairing endpoints, per address. In the Rust build Skakel counts them behind the network router and its role gate, so a call to the wrong port or role does not count |
 | `KOPPEL_RATE_AUTH_PER_MINUTE` | 30 | See ["Guards on the web surface"](security.md#guards-on-the-web-surface) |
 
 `GET /healthz` is on the UI port, anonymous, answers `ok` in any role and needs no header. The Docker

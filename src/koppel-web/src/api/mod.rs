@@ -1,5 +1,18 @@
 //! The REST API, with 0.1.x's paths, JSON and errors. A change answers 202 with no body (or 201 or
 //! 200 where 0.1.x gave something back), and the confirmed state follows over the live push.
+//!
+//! [`router`] is the whole `/api` tree, nested at `/api` by the UI router, in four kinds of routes:
+//!
+//! - **anonymous:** `/auth/state`, the first password and login, which work signed out (the state
+//!   says whether the caller is signed in). Setup and login sit behind the sign-in rate limit.
+//! - **protected:** everything else, behind [`require_session`](crate::guard::require_session): the
+//!   settings, activity, system, the push and sign-out, and the password change (also rate limited).
+//!   A route added here needs a session without anyone remembering to ask for one, and so does a
+//!   path no route has, which answers 401 signed out and 404 signed in.
+//! - **server** and **client:** the role's own routes, protected as well, and not found while the
+//!   machine's role lacks them (the role is read on each request, and answers before the session).
+//!
+//! Every route of the tree is behind the origin check and carries the session when there is one.
 
 pub(crate) mod client;
 mod server;
@@ -8,75 +21,136 @@ mod settings;
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::FromRef;
+use axum::http::StatusCode;
+use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{delete, get, post, put};
 
 use crate::app::App;
 use crate::auth::endpoints as auth;
+use crate::guard::{self, RoleGate};
 use crate::push;
+use crate::state::{AuthApi, ClientApi, PushApi, ServerApi, SettingsApi};
+use crate::surface::RoleScope;
 
-/// Every route of the UI's API and of Koppel's own network API. The guards in front of them decide
-/// who reaches which (see `guard.rs`).
-pub(crate) fn routes() -> Router<Arc<App>> {
-    Router::new()
-        .route("/api/auth/state", get(auth::state))
-        .route("/api/auth/setup", post(auth::setup))
-        .route("/api/auth/login", post(auth::login))
-        .route("/api/auth/logout", post(auth::logout))
-        .route("/api/auth/password", post(auth::change_password))
-        .route("/api/events", get(push::events))
-        .route(
-            "/api/settings",
-            get(settings::get_settings).patch(settings::patch_settings),
+/// The API's routes with their guards. Nested at `/api`.
+pub(crate) fn router(app: &Arc<App>) -> Router {
+    let role = |scope| {
+        from_fn_with_state(
+            RoleGate {
+                settings: app.settings.clone(),
+                scope,
+            },
+            guard::role_gate,
         )
-        .route("/api/activity", get(settings::activity))
-        .route("/api/system/checks", get(settings::checks))
-        .route("/api/system/info", get(settings::info))
-        .route("/api/server/identity", get(server::identity))
+    };
+    let signed_in = || from_fn(guard::require_session);
+
+    let anonymous = Router::new()
+        .route("/auth/state", get(auth::state))
+        .with_state(AuthApi::from_ref(app));
+
+    // The first password and sign-in: no session yet, and a limit per address on each try.
+    let sign_in = Router::new()
+        .route("/auth/setup", post(auth::setup))
+        .route("/auth/login", post(auth::login))
         .route(
-            "/api/server/clients",
+            "/auth/password",
+            post(auth::change_password).route_layer(signed_in()),
+        )
+        .route_layer(from_fn_with_state(
+            app.auth_limit.clone(),
+            guard::auth_limit,
+        ))
+        .with_state(AuthApi::from_ref(app));
+
+    let protected = Router::new()
+        .merge(
+            Router::new()
+                .route("/auth/logout", post(auth::logout))
+                .with_state(AuthApi::from_ref(app)),
+        )
+        .merge(
+            Router::new()
+                .route("/events", get(push::events))
+                .with_state(PushApi::from_ref(app)),
+        )
+        .merge(
+            Router::new()
+                .route(
+                    "/settings",
+                    get(settings::get_settings).patch(settings::patch_settings),
+                )
+                .route("/activity", get(settings::activity))
+                .route("/system/checks", get(settings::checks))
+                .route("/system/info", get(settings::info))
+                .with_state(SettingsApi::from_ref(app)),
+        )
+        .fallback(|| async { StatusCode::NOT_FOUND })
+        .layer(signed_in());
+
+    // The roles' routes. The role gate is outside the session check: a route the role does not have
+    // is not found, signed in or not.
+    let server = Router::new()
+        .route("/server/identity", get(server::identity))
+        .route(
+            "/server/clients",
             get(server::clients).post(server::create_client),
         )
-        .route("/api/server/clients/{id}", delete(server::revoke_client))
+        .route("/server/clients/{id}", delete(server::revoke_client))
+        .route("/server/clients/{id}/secret", get(server::client_secret))
+        .route("/server/clients/{id}/rotate", post(server::rotate_secret))
+        .route("/server/keys", get(server::keys))
         .route(
-            "/api/server/clients/{id}/secret",
-            get(server::client_secret),
-        )
-        .route(
-            "/api/server/clients/{id}/rotate",
-            post(server::rotate_secret),
-        )
-        .route("/api/server/keys", get(server::keys))
-        .route(
-            "/api/server/keys/next-certificate",
+            "/server/keys/next-certificate",
             post(server::prepare_certificate).delete(server::cancel_certificate),
         )
         .route(
-            "/api/server/keys/next-certificate/switch",
+            "/server/keys/next-certificate/switch",
             post(server::switch_certificate),
         )
-        .route("/api/server/pairing", get(server::pairing))
+        .route("/server/pairing", get(server::pairing))
         .route(
-            "/api/server/pairing/window",
+            "/server/pairing/window",
             post(server::open_pairing).delete(server::close_pairing),
         )
-        .route("/api/server/pairing/{id}/approve", post(server::approve))
-        .route("/api/server/pairing/{id}/deny", post(server::deny))
-        .route("/api/server/devices", get(server::devices))
-        .route("/api/server/devices/{bus_id}/shared", put(server::share))
+        .route("/server/pairing/{id}/approve", post(server::approve))
+        .route("/server/pairing/{id}/deny", post(server::deny))
+        .route("/server/devices", get(server::devices))
+        .route("/server/devices/{bus_id}/shared", put(server::share))
+        .with_state(ServerApi::from_ref(app))
+        .route_layer(signed_in())
+        .route_layer(role(RoleScope::Server));
+
+    let client = Router::new()
         .route(
-            "/api/client/connection",
+            "/client/connection",
             get(client::connection).put(client::save_connection),
         )
-        .route("/api/client/connection/test", post(client::test))
-        .route("/api/client/discovery", get(client::discovery))
+        .route("/client/connection/test", post(client::test))
+        .route("/client/discovery", get(client::discovery))
         .route(
-            "/api/client/pairing",
+            "/client/pairing",
             get(client::pairing)
                 .post(client::begin_pairing)
                 .delete(client::cancel_pairing),
         )
-        .route("/api/client/pairing/confirm", post(client::confirm_pairing))
-        .route("/api/client/devices", get(client::devices))
-        .route("/api/client/devices/{bus_id}/attach", post(client::attach))
-        .route("/api/client/devices/{bus_id}/detach", post(client::detach))
+        .route("/client/pairing/confirm", post(client::confirm_pairing))
+        .route("/client/devices", get(client::devices))
+        .route("/client/devices/{bus_id}/attach", post(client::attach))
+        .route("/client/devices/{bus_id}/detach", post(client::detach))
+        .with_state(ClientApi::from_ref(app))
+        .route_layer(signed_in())
+        .route_layer(role(RoleScope::Client));
+
+    Router::new()
+        .merge(protected)
+        .merge(server)
+        .merge(client)
+        .merge(anonymous)
+        .merge(sign_in)
+        // Anonymous routes see the session too, when there is one. The origin check is outside it, so
+        // a request from another site is turned away before its cookie is looked at.
+        .layer(from_fn_with_state(app.auth.clone(), guard::session))
+        .layer(from_fn(guard::ui_origin))
 }

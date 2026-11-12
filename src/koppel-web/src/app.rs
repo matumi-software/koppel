@@ -7,12 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{Request, State};
-use axum::http::Method;
-use axum::http::StatusCode;
-use axum::middleware;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
 use koppel_config::files::{ClientConnection, KoppelSettings, Role};
 use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox, open};
 use koppel_usb::{
@@ -25,10 +19,10 @@ use tokio::sync::watch;
 
 use crate::access::{UiAccess, UiReach};
 use crate::activity::ActivityLog;
-use crate::api::{self, client::ConnectionView};
+use crate::api::client::ConnectionView;
 use crate::auth::UiAuth;
 use crate::auth::ticket::CookieKey;
-use crate::guard::{self, RateLimit};
+use crate::guard::RateLimit;
 use crate::host::Host;
 use crate::push::{self, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
@@ -37,7 +31,7 @@ use crate::roles::{
     ClientRole, ServerRole, SkakelClientRole, SkakelServerRole, UsbActivity, UsbClient,
     UsbClientRole, UsbServer, UsbServerRole,
 };
-use crate::surface::{is_grpc_path, starts_with_segments};
+use crate::routes::Routers;
 use crate::tls::{self, Acceptors, CertificateSlot};
 
 /// What the app is started with.
@@ -159,8 +153,8 @@ pub struct App {
     pub(crate) settings: ConfigFile<KoppelSettings>,
     pub(crate) connection: ConfigFile<ClientConnection>,
     pub(crate) auth: Arc<UiAuth>,
-    pub(crate) access: UiAccess,
-    pub(crate) auth_limit: RateLimit,
+    pub(crate) access: Arc<UiAccess>,
+    pub(crate) auth_limit: Arc<RateLimit>,
     pub(crate) activity: Arc<ActivityLog>,
     pub(crate) push: Push,
     pub(crate) server: Arc<dyn ServerRole>,
@@ -351,8 +345,8 @@ impl App {
 
         Ok(Arc::new(Self {
             host,
-            access: UiAccess::new(reach),
-            auth_limit: RateLimit::per_minute(auth_per_minute),
+            access: Arc::new(UiAccess::new(reach)),
+            auth_limit: Arc::new(RateLimit::per_minute(auth_per_minute)),
             activity,
             server: skakel.clone(),
             client,
@@ -401,14 +395,20 @@ impl App {
         })
     }
 
-    /// Every route, with the guards in front of them.
+    /// Skakel's server, which the network router hands its requests to.
+    pub(crate) fn skakel(&self) -> Arc<SkakelServerRole> {
+        self.running.skakel.clone()
+    }
+
+    /// The router of each surface, with its guards. When `Ports:Network` sets the network port apart,
+    /// each is served on its own listener.
+    pub fn routers(self: &Arc<Self>) -> Routers {
+        Routers::of(self)
+    }
+
+    /// Both surfaces in one router, for one listener: the UI and network ports are the same port.
     pub fn router(self: &Arc<Self>) -> Router {
-        api::routes()
-            .route("/api/remote/devices", get(forward))
-            .route("/healthz", get(crate::healthz))
-            .fallback(fallback)
-            .layer(middleware::from_fn_with_state(self.clone(), guard::guard))
-            .with_state(self.clone())
+        self.routers().merged()
     }
 
     /// Stops everything in the reverse of the order it started: the client's link and devices
@@ -431,29 +431,6 @@ impl App {
             stop();
         }
     }
-}
-
-/// A path no route took: Skakel's (a gRPC call, or under `/skakel`), the UI's files for GET and
-/// HEAD, and 404 for anything else. An unknown path under `/api` is 404 too, where 0.1.2 answered a
-/// signed-in GET of one with index.html. The guard in front already decided the request may reach
-/// what it asks for.
-async fn fallback(State(app): State<Arc<App>>, request: Request) -> Response {
-    let path = request.uri().path();
-    if is_grpc_path(path) || starts_with_segments(path, "/skakel") {
-        return forward(State(app), request).await;
-    }
-    if request.method() == Method::GET || request.method() == Method::HEAD {
-        let (parts, _) = request.into_parts();
-        crate::ui::serve(parts.uri, parts.headers).await
-    } else {
-        StatusCode::NOT_FOUND.into_response()
-    }
-}
-
-/// Hands a request to Skakel's server, mounted here. It carries the caller's address from the
-/// accept loop, which Skakel's limits count by.
-async fn forward(State(app): State<Arc<App>>, request: Request) -> Response {
-    app.running.skakel.serve(request).await
 }
 
 /// Earlier versions wrote a setup code to `setup-code.txt`. It does nothing now, so it should not lie

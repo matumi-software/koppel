@@ -3,7 +3,7 @@
 //! the program, and the UI's server side: sign-in, the REST API and the live push.
 //!
 //! - [`App`]: everything the UI's server side holds, started from the config files, and
-//!   [`App::router`], the routes with the guards in front of them.
+//!   [`App::routers`], one router for each surface (the UI and the network), each with its guards.
 //! - [`serve`]: the accept loop for one listener, and [`bind`] to make one.
 //! - [`roles`]: the server and client roles on Skakel, and the USB layer behind the UI.
 //! - [`push`]: the live push, Server-Sent Events at `/api/events`.
@@ -20,7 +20,9 @@ mod json;
 pub mod push;
 mod redirect;
 pub mod roles;
+mod routes;
 mod server;
+mod state;
 mod surface;
 pub mod tls;
 pub mod tray;
@@ -36,6 +38,7 @@ pub use activity::{ActivityEvent, ActivityLog, ActivityOutcome, ActivityReason, 
 pub use app::{App, AppOptions, NetworkOptions, StartError, UsbOptions};
 pub use auth::reset_password;
 pub use host::{Host, machine_name, os_label};
+pub use routes::Routers;
 pub use server::{bind, serve};
 pub use tls::CertificateSlot;
 

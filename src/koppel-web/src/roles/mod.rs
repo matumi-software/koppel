@@ -1,20 +1,16 @@
-//! The seams the REST endpoints and the push talk to, with 0.1.x's JSON shapes, and what fills them:
+//! What the REST endpoints and the push talk to, with 0.1.x's JSON shapes, and what fills them:
 //!
-//! - [`ServerRole`]: the server's registered clients, its certificate, the pairing window and
-//!   pairing requests. [`SkakelServerRole`] runs skakel-server over `secrets.json`.
-//! - [`ClientRole`]: the client's connection test, the servers found on the network and pairing.
-//!   [`SkakelClientRole`] does them with skakel-client.
-//! - [`UsbServer`] and [`UsbClient`]: the devices, sharing, attaching and detaching, and the
-//!   client's link. [`UsbServerRole`] and [`UsbClientRole`] are koppel-usb's server and client,
-//!   whose link to the server is Skakel's (`skakel::SkakelLinks`).
+//! - [`SkakelServerRole`]: the server's registered clients, its certificate, the pairing window and
+//!   pairing requests, over skakel-server and `secrets.json`.
+//! - [`SkakelClientRole`]: the client's connection test, the servers found on the network and
+//!   pairing, with skakel-client.
+//! - [`UsbServerRole`] and [`UsbClientRole`]: koppel-usb's server and client with the push and the
+//!   system checks. Their views are koppel-usb's own types, serialised as they are.
 //!
-//! An implementation pushes its own changes through [`crate::push::Push`] once they are saved.
+//! A role pushes its own changes through [`crate::push::Push`] once they are saved.
 
 pub mod skakel;
 mod usb;
-
-use std::future::Future;
-use std::pin::Pin;
 
 use serde::Serialize;
 use time::OffsetDateTime;
@@ -22,9 +18,6 @@ use time::OffsetDateTime;
 pub use skakel::{SkakelClientRole, SkakelServerRole};
 pub(crate) use usb::UsbActivity;
 pub use usb::{UsbClientRole, UsbServerRole};
-
-/// A boxed future, so the traits can be used as `dyn`.
-pub type Fut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A change that could not be saved. The caller gets 500 and the log gets the whole chain.
 #[derive(Debug, thiserror::Error)]
@@ -174,39 +167,6 @@ pub enum RegisterError {
     Failed(#[source] RoleError),
 }
 
-/// The server role: Skakel's clients, certificates and pairing. See the module docs.
-pub trait ServerRole: Send + Sync {
-    /// The SHA-256 fingerprint of the certificate presented now.
-    fn fingerprint(&self) -> String;
-    fn clients(&self) -> Vec<ClientView>;
-    /// A client's name, or `None` when there is no such client.
-    fn name_of(&self, id: &str) -> Option<String>;
-    /// `None` when there is no such client; `Some(None)` when its secret was not kept.
-    fn secret_of(&self, id: &str) -> Option<Option<String>>;
-    fn register<'a>(&'a self, name: &'a str) -> Fut<'a, Result<NewClient, RegisterError>>;
-    /// False when there was no such client.
-    fn revoke<'a>(&'a self, id: &'a str) -> Fut<'a, Result<bool, RoleError>>;
-    /// The new secret, or `None` when there was no such client.
-    fn rotate_secret<'a>(&'a self, id: &'a str) -> Fut<'a, Result<Option<String>, RoleError>>;
-    fn keys(&self) -> KeysView;
-    /// The new certificate's fingerprint, or `None` when one is already prepared.
-    fn prepare_next_certificate(&self) -> Fut<'_, Result<Option<String>, RoleError>>;
-    /// The cancelled certificate's fingerprint, or `None` when none was prepared.
-    fn cancel_next_certificate(&self) -> Fut<'_, Result<Option<String>, RoleError>>;
-    /// `None` when there is no prepared certificate to switch to.
-    fn switch_certificate(&self) -> Fut<'_, Result<Option<Switched>, RoleError>>;
-    fn pairing(&self) -> PairingOverview;
-    /// Takes new pairing requests for `duration` from now (Skakel holds it between one minute and
-    /// one hour). The window shows in [`ServerRole::pairing`] and over the push once Skakel's
-    /// server says it is open.
-    fn open_pairing(&self, duration: std::time::Duration);
-    /// Closes the window now.
-    fn close_pairing(&self);
-    fn approve<'a>(&'a self, id: &'a str, code: &'a str) -> Fut<'a, Approval>;
-    /// False when there was no such request.
-    fn deny<'a>(&'a self, id: &'a str) -> Fut<'a, bool>;
-}
-
 /// How a connection test ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -340,135 +300,6 @@ impl PairingStatus {
     }
 }
 
-/// The client role: the link to a server, discovery and pairing. See the module docs. The stored
-/// connection itself is `connection.json`, which the web side reads and writes.
-pub trait ClientRole: Send + Sync {
-    fn test(&self) -> Fut<'_, ConnectionTest>;
-    fn discovered(&self) -> Vec<DiscoveredServer>;
-    fn pairing(&self) -> PairingStatus;
-    fn begin_pairing<'a>(
-        &'a self,
-        server_url: &'a str,
-        fingerprint: &'a str,
-        server_name: Option<&'a str>,
-    ) -> Fut<'a, ()>;
-    /// False when there is nothing to confirm.
-    fn confirm_pairing(&self) -> Fut<'_, bool>;
-    fn cancel_pairing(&self) -> Fut<'_, ()>;
-}
-
-/// A USB device as the UI shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceView {
-    pub bus_id: String,
-    pub vid_pid: String,
-    pub name: String,
-    pub manufacturer: Option<String>,
-    pub speed: String,
-    /// `local`, `shared`, `attached` or `offline`.
-    pub state: String,
-    pub attached_to: Option<String>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub attached_since: Option<OffsetDateTime>,
-    pub fault: Option<String>,
-    pub serial: Option<String>,
-    pub driver: Option<String>,
-    pub interfaces: Option<Vec<String>>,
-}
-
-/// What the server's UI shows: its devices, or why it cannot share any.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerDevices {
-    pub devices: Vec<DeviceView>,
-    pub unavailable: Option<String>,
-}
-
-/// A remote device as the client's UI shows it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClientDeviceView {
-    pub device: DeviceView,
-    pub attached_here: bool,
-    pub port: Option<i32>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    pub attached_since: Option<OffsetDateTime>,
-    pub fault: Option<String>,
-    pub attached_via: Option<String>,
-}
-
-/// What the client's UI shows: the link to the server and the devices it shares.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClientDevices {
-    /// `unconfigured`, `connecting`, `connected` or `error`.
-    pub link: String,
-    pub link_message: Option<String>,
-    pub devices: Vec<ClientDeviceView>,
-    pub unavailable: Option<String>,
-    pub gateway: bool,
-    pub gateway_fault: Option<String>,
-}
-
-/// One thing Koppel needs from this machine, for the first-run checks.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SystemCheck {
-    pub id: String,
-    pub ok: bool,
-    pub title: String,
-    pub detail: String,
-}
-
-impl SystemCheck {
-    pub fn new(id: &str, ok: bool, title: &str, detail: &str) -> Self {
-        Self {
-            id: id.to_owned(),
-            ok,
-            title: title.to_owned(),
-            detail: detail.to_owned(),
-        }
-    }
-}
-
-/// The server's USB side (#86 on Linux, #87 on Windows).
-pub trait UsbServer: Send + Sync {
-    fn current(&self) -> ServerDevices;
-    /// Applies a share choice; the outcome follows as `DevicesChanged`.
-    fn set_shared<'a>(&'a self, bus_id: &'a str, shared: bool) -> Fut<'a, ()>;
-    /// Whether this machine can share, for `/api/system/checks`.
-    fn check(&self) -> SystemCheck;
-    /// Why `devices.json` was not used, or `None`.
-    fn problem(&self) -> Option<String>;
-}
-
-/// The client's USB side (#86 on Linux, #87 on Windows).
-pub trait UsbClient: Send + Sync {
-    fn current(&self) -> ClientDevices;
-    /// Remembers the device and attaches it; the outcome follows as `ClientDevicesChanged`.
-    fn attach<'a>(&'a self, bus_id: &'a str) -> Fut<'a, ()>;
-    /// Detaches the device and forgets it.
-    fn detach<'a>(&'a self, bus_id: &'a str) -> Fut<'a, ()>;
-    /// Whether this machine can attach, for `/api/system/checks`.
-    fn check(&self) -> SystemCheck;
-    /// Why `attached.json` was not used, or `None`.
-    fn problem(&self) -> Option<String>;
-}
-
-/// A kernel bus ID such as `1-1.4`: a bus number, a dash, then the port path, at most 31
-/// characters, as 0.1.x's `UsbBusId` checks it.
-pub fn is_bus_id(text: &str) -> bool {
-    if text.is_empty() || text.len() > 31 {
-        return false;
-    }
-    let Some((bus, ports)) = text.split_once('-') else {
-        return false;
-    };
-    let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-    digits(bus) && ports.split('.').all(digits)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -534,18 +365,5 @@ mod tests {
             std::io::Error::other("disk"),
         )));
         assert!(error.source().is_some());
-    }
-
-    #[test]
-    fn bus_ids_are_the_kernels_form() {
-        for good in ["1-1", "1-1.4", "12-3.4.5", "0-0"] {
-            assert!(is_bus_id(good), "{good}");
-        }
-        let too_long = format!("1-{}", "1".repeat(30));
-        for bad in [
-            "bogus", "1-", "a-1", "1-1.", "1-1:1.0", "-1", "1--1", "", &too_long,
-        ] {
-            assert!(!is_bus_id(bad), "{bad}");
-        }
     }
 }

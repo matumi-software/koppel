@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-use crate::{HostKind, UsbAttacher, UsbHost, UsbIpDriver};
+use crate::{HostKind, Platform};
 
 /// One line of the system checks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -15,7 +15,7 @@ pub struct SystemCheck {
 }
 
 impl SystemCheck {
-    fn new(id: &str, ok: bool, title: &str, detail: impl Into<String>) -> Self {
+    pub fn new(id: &str, ok: bool, title: &str, detail: impl Into<String>) -> Self {
         Self {
             id: id.to_owned(),
             ok,
@@ -27,8 +27,10 @@ impl SystemCheck {
 
 /// On Linux the host is usbip-host. On native Windows Koppel cannot share by itself: a server
 /// there is usbipd-win reached through `Usb:Upstream`, which the upstream host reports on.
-pub fn share_check(host: &dyn UsbHost, native_windows: bool) -> SystemCheck {
-    if native_windows && host.kind() == HostKind::Unsupported {
+pub fn share_check(platform: &Platform) -> SystemCheck {
+    let (host, native_windows) = (&platform.host, platform.native_windows);
+    let kind = host.capabilities().kind;
+    if native_windows && kind == HostKind::Unsupported {
         return SystemCheck::new(
             "share",
             false,
@@ -39,7 +41,7 @@ pub fn share_check(host: &dyn UsbHost, native_windows: bool) -> SystemCheck {
     if let Some(problem) = host.unavailable() {
         return SystemCheck::new("share", false, "Sharing is not available.", problem);
     }
-    if native_windows && host.kind() == HostKind::Upstream {
+    if native_windows && kind == HostKind::Upstream {
         return SystemCheck::new(
             "share",
             true,
@@ -56,13 +58,9 @@ pub fn share_check(host: &dyn UsbHost, native_windows: bool) -> SystemCheck {
 }
 
 /// On Linux the kernel's vhci-hcd attaches. On native Windows it is usbip-win2's driver.
-pub fn attach_check(
-    attacher: &dyn UsbAttacher,
-    driver: &dyn UsbIpDriver,
-    native_windows: bool,
-) -> SystemCheck {
-    if native_windows {
-        return match driver.unavailable() {
+pub fn attach_check(platform: &Platform) -> SystemCheck {
+    if platform.native_windows {
+        return match platform.driver_unavailable() {
             Some(problem) => SystemCheck::new(
                 "attach",
                 false,
@@ -77,7 +75,7 @@ pub fn attach_check(
             ),
         };
     }
-    match attacher.unavailable() {
+    match platform.attach_unavailable() {
         Some(problem) => SystemCheck::new("attach", false, "Attaching is not available.", problem),
         None => SystemCheck::new(
             "attach",

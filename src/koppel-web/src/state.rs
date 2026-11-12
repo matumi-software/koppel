@@ -13,7 +13,7 @@ use crate::app::App;
 use crate::auth::UiAuth;
 use crate::host::Host;
 use crate::push::Push;
-use crate::roles::{ClientRole, ServerRole, UsbClient, UsbServer};
+use crate::roles::{SkakelClientRole, SkakelServerRole, UsbClientRole, UsbServerRole};
 
 /// `/api/auth/*`: sign-in and the password.
 #[derive(Clone)]
@@ -29,16 +29,16 @@ pub(crate) struct SettingsApi {
     pub settings: ConfigFile<KoppelSettings>,
     pub activity: Arc<ActivityLog>,
     pub host: Host,
-    pub server: Arc<dyn ServerRole>,
-    pub usb_server: Arc<dyn UsbServer>,
-    pub usb_client: Arc<dyn UsbClient>,
+    pub server: Arc<SkakelServerRole>,
+    pub usb_server: Arc<UsbServerRole>,
+    pub usb_client: Arc<UsbClientRole>,
 }
 
 /// `/api/server/*`.
 #[derive(Clone)]
 pub(crate) struct ServerApi {
-    pub server: Arc<dyn ServerRole>,
-    pub usb_server: Arc<dyn UsbServer>,
+    pub server: Arc<SkakelServerRole>,
+    pub usb_server: Arc<UsbServerRole>,
     pub activity: Arc<ActivityLog>,
     pub host: Host,
 }
@@ -46,9 +46,9 @@ pub(crate) struct ServerApi {
 /// `/api/client/*`.
 #[derive(Clone)]
 pub(crate) struct ClientApi {
-    pub client: Arc<dyn ClientRole>,
+    pub client: Arc<SkakelClientRole>,
     pub connection: ConfigFile<ClientConnection>,
-    pub usb_client: Arc<dyn UsbClient>,
+    pub usb_client: Arc<UsbClientRole>,
 }
 
 /// `/api/events`.

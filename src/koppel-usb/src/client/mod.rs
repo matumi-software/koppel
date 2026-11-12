@@ -28,8 +28,8 @@ use tokio_util::sync::CancellationToken;
 use self::slots::{AttachKey, Attachment, DriverHold, Outcome, RegisterError};
 use crate::tasks::{Listener, Tasks, listen, lock};
 use crate::{
-    ActivitySink, BoxFuture, BusId, ClientDevices, Clock, DeviceView, RemoteDevices, StreamOpener,
-    UsbAttacher, UsbDevice, UsbIpDriver,
+    ActivitySink, BoxFuture, BusId, ClientDevices, Clock, DeviceView, Platform, RemoteDevices,
+    StreamOpener, UsbDevice,
 };
 
 /// How long stopping waits for the driver to let go of every device. The driver's own command
@@ -66,10 +66,8 @@ pub struct Deps {
     pub connection: ConfigFile<ClientConnection>,
     /// `attached.json`, opened with [`koppel_config::open::attached`].
     pub remembered: ConfigFile<AttachedDevices>,
-    /// Attaches through this kernel.
-    pub attacher: Arc<dyn UsbAttacher>,
-    /// Attaches through a USB/IP driver on this machine.
-    pub driver: Arc<dyn UsbIpDriver>,
+    /// What attaches on this machine: this kernel, or a USB/IP driver.
+    pub platform: Platform,
     /// Makes the link to the server.
     pub links: Arc<dyn Links>,
     pub activity: Arc<dyn ActivitySink>,
@@ -348,8 +346,7 @@ pub(crate) struct Shared {
     settings: ConfigFile<KoppelSettings>,
     connection: ConfigFile<ClientConnection>,
     remembered: ConfigFile<AttachedDevices>,
-    attacher: Arc<dyn UsbAttacher>,
-    driver: Arc<dyn UsbIpDriver>,
+    platform: Platform,
     links: Arc<dyn Links>,
     activity: Arc<dyn ActivitySink>,
     clock: Arc<dyn Clock>,
@@ -385,7 +382,7 @@ impl Shared {
     /// True when attaching goes through a driver on this machine (usbip-win2 on Windows) by way
     /// of the gateway, rather than through this kernel's virtual host controller.
     fn uses_driver(&self, view: &View) -> bool {
-        view.gateway_port.is_some() && self.driver.unavailable().is_none()
+        view.gateway_port.is_some() && self.platform.driver_unavailable().is_none()
     }
 
     /// The device the server's list offers under this bus ID, as the user saw it when picking.
@@ -503,7 +500,7 @@ impl UsbClient {
         } else {
             view.gateway_fault
                 .clone()
-                .or_else(|| self.shared.attacher.unavailable())
+                .or_else(|| self.shared.platform.attach_unavailable())
         };
         devices.gateway = view.gateway_port.is_some() && !uses_driver;
         devices

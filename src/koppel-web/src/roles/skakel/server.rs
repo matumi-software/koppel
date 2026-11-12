@@ -35,11 +35,11 @@ use tower_service::Service;
 use super::remote;
 use super::store::SecretsStore;
 use super::streams::{USB_STREAM, usb_handler};
-use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityRef};
+use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::push::{self, Push};
 use crate::roles::{
-    Approval, ClientView, Fut, KeysView, NewClient, PairingOverview, PairingRequestView,
-    PairingWindowView, RegisterError, RequestState, RoleError, ServerRole, Switched,
+    Approval, ClientView, KeysView, NewClient, PairingOverview, PairingRequestView,
+    PairingWindowView, RegisterError, RequestState, RoleError, Switched,
 };
 use crate::surface::is_grpc_path;
 
@@ -362,7 +362,7 @@ impl Wiring {
         match &decision.client_id {
             Some(client_id) => {
                 self.activity.record(
-                    EntityRef::new(client_id, &decision.client_name, "client"),
+                    EntityRef::new(client_id, &decision.client_name, EntityKind::Client),
                     ActivityReason::ClientAdded,
                     ActivityOutcome::Succeeded,
                     format!("{} paired from {from}", decision.client_name),
@@ -371,7 +371,11 @@ impl Wiring {
             }
             None => {
                 self.activity.record(
-                    EntityRef::new(&decision.request_id, &decision.client_name, "client"),
+                    EntityRef::new(
+                        &decision.request_id,
+                        &decision.client_name,
+                        EntityKind::Client,
+                    ),
                     ActivityReason::ClientAdded,
                     ActivityOutcome::Failed,
                     format!("Pairing with {} was refused", decision.client_name),
@@ -413,14 +417,14 @@ fn window_view(window: &PairingWindow) -> PairingWindowView {
     }
 }
 
-impl ServerRole for SkakelServerRole {
+impl SkakelServerRole {
     /// The certificate the web ports present, which is Skakel's: a save that switches it replaces
     /// both. Read from there, so it answers while Skakel's server starts again or stops.
-    fn fingerprint(&self) -> String {
+    pub fn fingerprint(&self) -> String {
         skakel_wire::fingerprints::of_der(&self.parts.store.slot().current().cert[0])
     }
 
-    fn clients(&self) -> Vec<ClientView> {
+    pub fn clients(&self) -> Vec<ClientView> {
         self.clients_handle()
             .all()
             .iter()
@@ -428,100 +432,88 @@ impl ServerRole for SkakelServerRole {
             .collect()
     }
 
-    fn name_of(&self, id: &str) -> Option<String> {
+    pub fn name_of(&self, id: &str) -> Option<String> {
         self.clients_handle().name_of(id)
     }
 
-    fn secret_of(&self, id: &str) -> Option<Option<String>> {
+    pub fn secret_of(&self, id: &str) -> Option<Option<String>> {
         let clients = self.clients_handle();
         clients.name_of(id)?;
         Some(clients.secret_of(id))
     }
 
-    fn register<'a>(&'a self, name: &'a str) -> Fut<'a, Result<NewClient, RegisterError>> {
-        Box::pin(async move {
-            if skakel_wire::pairing::clean_client_name(name).is_empty() {
-                return Err(RegisterError::EmptyName);
-            }
-            let client = self
-                .clients_handle()
-                .register(name)
-                .await
-                .map_err(|e| RegisterError::Failed(e.into()))?;
-            Ok(NewClient {
-                client_id: client.client_id,
-                client_secret: client.client_secret,
-                name: client.name,
-            })
+    pub async fn register(&self, name: &str) -> Result<NewClient, RegisterError> {
+        if skakel_wire::pairing::clean_client_name(name).is_empty() {
+            return Err(RegisterError::EmptyName);
+        }
+        let client = self
+            .clients_handle()
+            .register(name)
+            .await
+            .map_err(|e| RegisterError::Failed(e.into()))?;
+        Ok(NewClient {
+            client_id: client.client_id,
+            client_secret: client.client_secret,
+            name: client.name,
         })
     }
 
-    fn revoke<'a>(&'a self, id: &'a str) -> Fut<'a, Result<bool, RoleError>> {
-        Box::pin(async move {
-            self.clients_handle()
-                .revoke(id)
-                .await
-                .map_err(RoleError::from)
-        })
+    pub async fn revoke(&self, id: &str) -> Result<bool, RoleError> {
+        self.clients_handle()
+            .revoke(id)
+            .await
+            .map_err(RoleError::from)
     }
 
-    fn rotate_secret<'a>(&'a self, id: &'a str) -> Fut<'a, Result<Option<String>, RoleError>> {
-        Box::pin(async move {
-            let secret = self
-                .clients_handle()
-                .rotate_secret(id)
-                .await
-                .map_err(RoleError::from)?;
-            if secret.is_some() {
-                // Nothing the list shows changes, so Skakel does not say; 0.1.x pushed it anyway.
-                self.push_clients();
-            }
-            Ok(secret)
-        })
+    pub async fn rotate_secret(&self, id: &str) -> Result<Option<String>, RoleError> {
+        let secret = self
+            .clients_handle()
+            .rotate_secret(id)
+            .await
+            .map_err(RoleError::from)?;
+        if secret.is_some() {
+            // Nothing the list shows changes, so Skakel does not say; 0.1.x pushed it anyway.
+            self.push_clients();
+        }
+        Ok(secret)
     }
 
-    fn keys(&self) -> KeysView {
+    pub fn keys(&self) -> KeysView {
         keys_view(&self.certificates_handle().view())
     }
 
-    fn prepare_next_certificate(&self) -> Fut<'_, Result<Option<String>, RoleError>> {
-        Box::pin(async move {
-            self.certificates_handle()
-                .prepare_next_certificate()
-                .await
-                .map_err(RoleError::from)
-        })
+    pub async fn prepare_next_certificate(&self) -> Result<Option<String>, RoleError> {
+        self.certificates_handle()
+            .prepare_next_certificate()
+            .await
+            .map_err(RoleError::from)
     }
 
-    fn cancel_next_certificate(&self) -> Fut<'_, Result<Option<String>, RoleError>> {
-        Box::pin(async move {
-            let certificates = self.certificates_handle();
-            let Some(next) = certificates.next_fingerprint() else {
-                return Ok(None);
-            };
-            let cancelled = certificates
-                .cancel_next_certificate()
-                .await
-                .map_err(RoleError::from)?;
-            Ok(cancelled.then_some(next))
-        })
+    pub async fn cancel_next_certificate(&self) -> Result<Option<String>, RoleError> {
+        let certificates = self.certificates_handle();
+        let Some(next) = certificates.next_fingerprint() else {
+            return Ok(None);
+        };
+        let cancelled = certificates
+            .cancel_next_certificate()
+            .await
+            .map_err(RoleError::from)?;
+        Ok(cancelled.then_some(next))
     }
 
-    fn switch_certificate(&self) -> Fut<'_, Result<Option<Switched>, RoleError>> {
-        Box::pin(async move {
-            let switched = self
-                .certificates_handle()
-                .switch_certificate()
-                .await
-                .map_err(RoleError::from)?;
-            Ok(switched.map(|s| Switched {
-                to: s.to,
-                not_received: s.not_received,
-            }))
-        })
+    pub async fn switch_certificate(&self) -> Result<Option<Switched>, RoleError> {
+        let switched = self
+            .certificates_handle()
+            .switch_certificate()
+            .await
+            .map_err(RoleError::from)?;
+        Ok(switched.map(|s| Switched {
+            to: s.to,
+            not_received: s.not_received,
+        }))
     }
 
-    fn pairing(&self) -> PairingOverview {
+    pub fn pairing(&self) -> PairingOverview {
         self.wiring
             .overview
             .lock()
@@ -529,45 +521,41 @@ impl ServerRole for SkakelServerRole {
             .clone()
     }
 
-    fn open_pairing(&self, duration: Duration) {
+    pub fn open_pairing(&self, duration: Duration) {
         self.with(|server| server.open_pairing(duration));
     }
 
-    fn close_pairing(&self) {
+    pub fn close_pairing(&self) {
         self.with(SkakelServer::close_pairing);
     }
 
-    fn approve<'a>(&'a self, id: &'a str, code: &'a str) -> Fut<'a, Approval> {
-        Box::pin(async move {
-            match self.pairing_handle().approve(id, code).await {
-                Ok(skakel_server::Approval::Approved) => Approval::Approved,
-                Ok(skakel_server::Approval::WrongCode) => Approval::WrongCode,
-                Ok(_) => Approval::NotFound,
-                Err(e) => {
-                    tracing::error!("Approving a pairing request failed: {e}");
-                    Approval::NotFound
-                }
+    pub async fn approve(&self, id: &str, code: &str) -> Approval {
+        match self.pairing_handle().approve(id, code).await {
+            Ok(skakel_server::Approval::Approved) => Approval::Approved,
+            Ok(skakel_server::Approval::WrongCode) => Approval::WrongCode,
+            Ok(_) => Approval::NotFound,
+            Err(e) => {
+                tracing::error!("Approving a pairing request failed: {e}");
+                Approval::NotFound
             }
-        })
+        }
     }
 
-    fn deny<'a>(&'a self, id: &'a str) -> Fut<'a, bool> {
-        Box::pin(async move {
-            // Noted first: the list Skakel raises while it refuses leaves the request out already.
+    pub async fn deny(&self, id: &str) -> bool {
+        // Noted first: the list Skakel raises while it refuses leaves the request out already.
+        self.wiring
+            .refused
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned());
+        let denied = self.pairing_handle().deny(id).await;
+        if !denied {
             self.wiring
                 .refused
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .insert(id.to_owned());
-            let denied = self.pairing_handle().deny(id).await;
-            if !denied {
-                self.wiring
-                    .refused
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .remove(id);
-            }
-            denied
-        })
+                .remove(id);
+        }
+        denied
     }
 }

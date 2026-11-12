@@ -4,10 +4,10 @@
 use axum::extract::{Path, State};
 use axum::response::Response;
 use koppel_config::files::ClientConnection;
+use koppel_usb::BusId;
 use serde::{Deserialize, Serialize};
 
 use crate::json::{self, JsonBody};
-use crate::roles::is_bus_id;
 use crate::state::ClientApi;
 
 /// What the UI may see of the connection: never the secret, only whether one is stored.
@@ -330,7 +330,7 @@ pub(crate) async fn devices(State(app): State<ClientApi>) -> Response {
 /// Attach remembers the device, so it is attached again after a restart. Answers 202; the device
 /// shows as attached, or with its fault, when `ClientDevicesChanged` arrives.
 pub(crate) async fn attach(State(app): State<ClientApi>, Path(bus_id): Path<String>) -> Response {
-    if !is_bus_id(&bus_id) {
+    if bus_id.parse::<BusId>().is_err() {
         return json::problem(&[("busId", "That is not a USB bus ID.")]);
     }
     app.usb_client.attach(&bus_id).await;
@@ -339,7 +339,7 @@ pub(crate) async fn attach(State(app): State<ClientApi>, Path(bus_id): Path<Stri
 
 /// Detach forgets the device. Detaching one that is not attached is fine too.
 pub(crate) async fn detach(State(app): State<ClientApi>, Path(bus_id): Path<String>) -> Response {
-    if !is_bus_id(&bus_id) {
+    if bus_id.parse::<BusId>().is_err() {
         return json::problem(&[("busId", "That is not a USB bus ID.")]);
     }
     app.usb_client.detach(&bus_id).await;

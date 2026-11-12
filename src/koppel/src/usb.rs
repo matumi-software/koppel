@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use koppel_usb::{
-    ClientOptions, GatewayOptions, SystemClock, Unsupported, UpstreamAddress, UsbAttacher, UsbHost,
+    ClientOptions, GatewayOptions, Platform, SystemClock, UpstreamAddress, UsbAttacher, UsbHost,
     UsbIpDriver, UsbIpUpstreamHost,
 };
 use koppel_web::UsbOptions;
@@ -21,7 +21,6 @@ const UNSUPPORTED: &str = "Sharing and attaching USB devices needs Linux, or a U
 
 /// The USB side as the settings say.
 pub fn options(settings: &Settings) -> Result<UsbOptions, String> {
-    let unsupported = Arc::new(Unsupported::new(UNSUPPORTED));
     let sys_root = settings.usb_sys_root().to_owned();
 
     let host: Arc<dyn UsbHost> = match settings.usb_upstream() {
@@ -34,11 +33,14 @@ pub fn options(settings: &Settings) -> Result<UsbOptions, String> {
                 Arc::new(SystemClock),
             ))
         }
-        None => native_host(&sys_root).unwrap_or_else(|| unsupported.clone()),
+        None => native_host(&sys_root).unwrap_or_else(|| Platform::unsupported(UNSUPPORTED).host),
     };
-    let attacher: Arc<dyn UsbAttacher> =
-        native_attacher(&sys_root).unwrap_or_else(|| unsupported.clone());
-    let driver: Arc<dyn UsbIpDriver> = native_driver(settings).unwrap_or(unsupported);
+    let platform = Platform::new(
+        host,
+        native_attacher(&sys_root),
+        native_driver(settings),
+        UNSUPPORTED,
+    );
 
     let gateway = GatewayOptions {
         port: settings
@@ -50,9 +52,7 @@ pub fn options(settings: &Settings) -> Result<UsbOptions, String> {
             .map_or(GatewayOptions::DEFAULT_MAX_SESSIONS, |n| n as usize),
     };
     Ok(UsbOptions {
-        host,
-        attacher,
-        driver,
+        platform,
         client: ClientOptions {
             attach_timeout: Duration::from_secs(u64::from(settings.usb_attach_timeout_seconds())),
             ..ClientOptions::default()

@@ -18,7 +18,7 @@ use time::OffsetDateTime;
 use super::throttle::Reservation;
 use super::{SetupOutcome, SignedIn, password, ticket};
 use crate::access::{address_key, throttle_key};
-use crate::activity::{ActivityOutcome, ActivityReason, EntityRef};
+use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::{self, JsonBody};
 use crate::state::AuthApi;
 
@@ -218,7 +218,7 @@ pub(crate) async fn change_password(
 }
 
 fn machine(app: &AuthApi) -> EntityRef {
-    EntityRef::new("ui", app.host.name.clone(), "machine")
+    EntityRef::new("ui", app.host.name.clone(), EntityKind::Machine)
 }
 
 // Every failure goes to the log. The activity log keeps 500 entries, so it only hears of the one

@@ -27,7 +27,7 @@ use super::remote::from_proto;
 use super::remote::proto::WatchDevicesRequest;
 use super::remote::proto::remote_devices_client::RemoteDevicesClient;
 use super::streams::open_usb;
-use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityRef};
+use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 
 /// How long a remote device list that ended waits before it is asked for again, while the link
 /// stays up.
@@ -259,7 +259,7 @@ impl Shared {
                     .server_url = Some(to.clone());
                 tracing::info!("The server moved from {from} to {to}; the connection follows it");
                 self.activity.record(
-                    EntityRef::new("link", host_of(&to), "link"),
+                    EntityRef::new("link", host_of(&to), EntityKind::Link),
                     ActivityReason::ServerMoved,
                     ActivityOutcome::Succeeded,
                     format!(

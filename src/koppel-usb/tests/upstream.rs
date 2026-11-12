@@ -197,8 +197,7 @@ async fn lists_what_the_server_exports_and_leaves_hubs_out() {
         vec!["2-3"]
     );
     assert_eq!(host.unavailable(), None);
-    assert!(!host.can_share());
-    assert!(!host.can_unshare());
+    assert_eq!(host.capabilities(), koppel_usb::Capabilities::UPSTREAM);
 }
 
 #[tokio::test]

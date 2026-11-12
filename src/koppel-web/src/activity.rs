@@ -18,57 +18,7 @@ const CAPACITY: usize = 500;
 /// Entries a watcher may fall behind by before it misses some.
 const WATCH_BACKLOG: usize = 64;
 
-/// What an entry is about: a device, a client, this machine or a server link.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct EntityRef {
-    pub id: String,
-    pub name: String,
-    /// `device`, `client`, `machine`, `link` or `ui`.
-    #[serde(rename = "type")]
-    pub kind: String,
-}
-
-impl EntityRef {
-    pub fn new(id: impl Into<String>, name: impl Into<String>, kind: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
-            name: name.into(),
-            kind: kind.into(),
-        }
-    }
-}
-
-/// Why an entry was recorded. Sent as a camelCase name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ActivityReason {
-    Shared,
-    Unshared,
-    Attached,
-    Detached,
-    Plugged,
-    Unplugged,
-    ClientAdded,
-    ClientRevoked,
-    SecretRotated,
-    Reconfigured,
-    LinkUp,
-    LinkDown,
-    SignInFailed,
-    PasswordChanged,
-    CertificatePrepared,
-    CertificateCancelled,
-    CertificateSwitched,
-    ServerMoved,
-}
-
-/// Whether what the entry describes happened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ActivityOutcome {
-    Succeeded,
-    Failed,
-}
+pub use koppel_usb::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 
 /// One thing that happened. `summary` is the sentence the UI shows; `detail` carries the reason when
 /// it failed.
@@ -175,7 +125,7 @@ mod tests {
 
     fn record(log: &ActivityLog, id: &str) {
         log.record(
-            EntityRef::new(id, id, "machine"),
+            EntityRef::new(id, id, EntityKind::Machine),
             ActivityReason::Reconfigured,
             ActivityOutcome::Succeeded,
             "x",
@@ -200,7 +150,7 @@ mod tests {
     fn written_as_0_1_writes_it() {
         let log = ActivityLog::new(Push::new());
         let event = log.record(
-            EntityRef::new("machine", "PC", "machine"),
+            EntityRef::new("machine", "PC", EntityKind::Machine),
             ActivityReason::SignInFailed,
             ActivityOutcome::Failed,
             "s",

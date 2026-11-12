@@ -289,7 +289,7 @@ impl Inner {
             return;
         };
 
-        if host.can_reset()
+        if host.capabilities().reset
             && let Err(e) = host.reset(bus_id).await
         {
             // Most devices work without it, so the attach goes ahead.

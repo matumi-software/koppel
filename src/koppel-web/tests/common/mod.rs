@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 use koppel_config::{KoppelPaths, SecretBox};
 use koppel_usb::{
-    BoxFuture, BusId, DeviceStream, Export, ExportStatus, GatewayOptions, UsbAttacher, UsbDevice,
-    UsbError, UsbHost, UsbInterface, UsbSpeed, VhciPort,
+    BoxFuture, BusId, Capabilities, DeviceStream, Export, ExportStatus, GatewayOptions, Platform,
+    UsbAttacher, UsbDevice, UsbError, UsbHost, UsbInterface, UsbSpeed, VhciPort,
 };
 use koppel_web::{App, AppOptions, Host, NetworkOptions, UiReach, UsbOptions};
 use reqwest::Method;
@@ -125,16 +125,11 @@ impl UsbHost for FakeKernel {
         None
     }
 
-    fn can_share(&self) -> bool {
-        true
-    }
-
-    fn can_unshare(&self) -> bool {
-        true
-    }
-
-    fn can_reset(&self) -> bool {
-        false
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            reset: false,
+            ..Capabilities::KERNEL
+        }
     }
 
     fn list_devices(&self) -> BoxFuture<'_, Result<Vec<UsbDevice>, UsbError>> {
@@ -336,9 +331,12 @@ impl Node {
         let port = port.unwrap_or_else(free_port);
         let listener = koppel_web::bind(Some("127.0.0.1".parse().unwrap()), port).unwrap();
         let usb = UsbOptions {
-            host: kernel.clone(),
-            attacher: kernel.clone(),
-            driver: Arc::new(koppel_usb::Unsupported::new("No driver in the tests.")),
+            platform: {
+                let mut platform = Platform::unsupported("No driver in the tests.");
+                platform.host = kernel.clone();
+                platform.attacher = Some(kernel.clone());
+                platform
+            },
             client: koppel_usb::ClientOptions {
                 attach_timeout: Duration::from_secs(20),
                 retry_interval: Duration::from_millis(500),

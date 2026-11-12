@@ -18,9 +18,9 @@ use koppel_usb::stream::memory;
 use koppel_usb::{
     ActivityOutcome, ActivityReason, ActivitySink, BoxFuture, BusId, ClientOptions, CloseReason,
     Deps, DeviceStream, EntityRef, Export, ExportStatus, GatewayOptions, Link, LinkEvents,
-    LinkState, LinkStatus, Links, Listener, OpenError, RemoteClient, ServerDeps, StreamOpener,
-    SystemClock, UsbAttacher, UsbClient, UsbDataPlane, UsbDevice, UsbError, UsbHost, UsbInterface,
-    UsbIpDriver, UsbIpGateway, UsbServer, UsbSpeed, VhciPort, protocol,
+    LinkState, LinkStatus, Links, Listener, OpenError, Platform, RemoteClient, ServerDeps,
+    StreamOpener, SystemClock, UsbAttacher, UsbClient, UsbDataPlane, UsbDevice, UsbError, UsbHost,
+    UsbInterface, UsbIpDriver, UsbIpGateway, UsbServer, UsbSpeed, VhciPort, protocol,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -325,16 +325,8 @@ impl UsbHost for FakeKernel {
         None
     }
 
-    fn can_share(&self) -> bool {
-        true
-    }
-
-    fn can_unshare(&self) -> bool {
-        true
-    }
-
-    fn can_reset(&self) -> bool {
-        true
+    fn capabilities(&self) -> koppel_usb::Capabilities {
+        koppel_usb::Capabilities::KERNEL
     }
 
     fn list_devices(&self) -> BoxFuture<'_, Result<Vec<UsbDevice>, UsbError>> {
@@ -841,8 +833,8 @@ pub struct ClientSetup {
     pub role: Role,
     /// How `attached.json` is written; plain text unless a test needs a save to fail.
     pub attached_codec: Arc<dyn FileCodec>,
-    pub attacher: Arc<dyn UsbAttacher>,
-    pub driver: Arc<dyn UsbIpDriver>,
+    pub attacher: Option<Arc<dyn UsbAttacher>>,
+    pub driver: Option<Arc<dyn UsbIpDriver>>,
     pub gateway: GatewayOptions,
     pub options: ClientOptions,
 }
@@ -853,8 +845,8 @@ impl ClientSetup {
         Self {
             role: Role::Client,
             attached_codec: Arc::new(PlainText),
-            attacher,
-            driver: Arc::new(koppel_usb::Unsupported::new("No driver here.")),
+            attacher: Some(attacher),
+            driver: None,
             gateway: GatewayOptions {
                 port: 0,
                 ..GatewayOptions::default()
@@ -871,8 +863,9 @@ impl ClientSetup {
 
     /// With a USB/IP driver on this machine, which needs the gateway.
     pub fn driver(driver: Arc<dyn UsbIpDriver>) -> Self {
-        let mut setup = Self::kernel(Arc::new(koppel_usb::Unsupported::new("No vhci-hcd here.")));
-        setup.driver = driver;
+        let mut setup = Self::kernel(FakeKernel::new());
+        setup.attacher = None;
+        setup.driver = Some(driver);
         setup.with_gateway()
     }
 }
@@ -921,8 +914,12 @@ impl ClientSide {
                     ..Options::default()
                 },
             ),
-            attacher: setup.attacher,
-            driver: setup.driver,
+            platform: {
+                let mut platform = Platform::unsupported("No driver or vhci-hcd here.");
+                platform.attacher = setup.attacher;
+                platform.driver = setup.driver;
+                platform
+            },
             links: links.clone(),
             activity: activity.clone(),
             clock: Arc::new(SystemClock),

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use common::*;
 use koppel_usb::{
-    BoxFuture, Unsupported, UsbError, UsbIpDriver, UsbIpUpstreamHost, attach_check, share_check,
+    BoxFuture, Platform, UsbError, UsbIpDriver, UsbIpUpstreamHost, attach_check, share_check,
 };
 
 const MISSING: &str =
@@ -39,9 +39,24 @@ impl UsbIpDriver for WorkingDriver {
     }
 }
 
+/// A machine with only what the test names, as Windows or not.
+fn platform(
+    attacher: Option<Arc<FakeKernel>>,
+    driver: Option<Arc<dyn UsbIpDriver>>,
+    windows: bool,
+) -> Platform {
+    let mut platform = Platform::unsupported(MISSING).on_windows(windows);
+    if let Some(kernel) = attacher {
+        platform.host = kernel.clone();
+        platform.attacher = Some(kernel);
+    }
+    platform.driver = driver;
+    platform
+}
+
 #[test]
 fn attach_on_native_windows_passes_when_the_driver_is_installed() {
-    let check = attach_check(&Unsupported::new(MISSING), &WorkingDriver, true);
+    let check = attach_check(&platform(None, Some(Arc::new(WorkingDriver)), true));
 
     assert!(check.ok);
     assert!(check.title.contains("usbip-win2"));
@@ -49,7 +64,7 @@ fn attach_on_native_windows_passes_when_the_driver_is_installed() {
 
 #[test]
 fn attach_on_native_windows_fails_without_the_driver_and_says_to_reinstall() {
-    let check = attach_check(&*FakeKernel::new(), &Unsupported::new(MISSING), true);
+    let check = attach_check(&platform(Some(FakeKernel::new()), None, true));
 
     assert!(!check.ok);
     assert!(check.detail.contains("Reinstall Koppel"));
@@ -57,16 +72,16 @@ fn attach_on_native_windows_fails_without_the_driver_and_says_to_reinstall() {
 
 #[test]
 fn attach_off_windows_still_reads_the_attacher() {
-    assert!(!attach_check(&Unsupported::new(MISSING), &WorkingDriver, false).ok);
+    assert!(!attach_check(&platform(None, Some(Arc::new(WorkingDriver)), false)).ok);
     assert_eq!(
-        attach_check(&*FakeKernel::new(), &Unsupported::new(MISSING), false).title,
+        attach_check(&platform(Some(FakeKernel::new()), None, false)).title,
         "vhci-hcd is loaded."
     );
 }
 
 #[test]
 fn share_on_native_windows_without_an_upstream_names_usbipd_win_and_the_setting() {
-    let check = share_check(&Unsupported::new(MISSING), true);
+    let check = share_check(&platform(None, None, true));
 
     assert!(!check.ok);
     assert!(check.detail.contains("usbipd-win") && check.detail.contains("Usb:Upstream"));
@@ -74,12 +89,9 @@ fn share_on_native_windows_without_an_upstream_names_usbipd_win_and_the_setting(
 
 #[test]
 fn share_off_windows_keeps_the_host_message() {
+    assert_eq!(share_check(&platform(None, None, false)).detail, MISSING);
     assert_eq!(
-        share_check(&Unsupported::new(MISSING), false).detail,
-        MISSING
-    );
-    assert_eq!(
-        share_check(&*FakeKernel::new(), false).title,
+        share_check(&platform(Some(FakeKernel::new()), None, false)).title,
         "usbip-host is loaded."
     );
 }
@@ -98,10 +110,18 @@ async fn share_on_native_windows_through_a_reachable_upstream_says_so() {
             .await;
         }
     });
-    let host = UsbIpUpstreamHost::new("127.0.0.1", port, Arc::new(koppel_usb::SystemClock));
-    koppel_usb::UsbHost::list_devices(&host).await.unwrap();
+    let host = Arc::new(UsbIpUpstreamHost::new(
+        "127.0.0.1",
+        port,
+        Arc::new(koppel_usb::SystemClock),
+    ));
+    koppel_usb::UsbHost::list_devices(host.as_ref())
+        .await
+        .unwrap();
+    let mut platform = Platform::unsupported(MISSING).on_windows(true);
+    platform.host = host;
 
-    let check = share_check(&host, true);
+    let check = share_check(&platform);
 
     assert!(check.ok);
     assert_eq!(check.title, "usbipd-win is reachable.");

@@ -7,7 +7,7 @@ use koppel_config::files::{KoppelSettings, Role};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::activity::{ActivityOutcome, ActivityReason, EntityRef};
+use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::{self, JsonBody};
 use crate::state::SettingsApi;
 
@@ -104,7 +104,7 @@ pub(crate) async fn patch_settings(
     }
     if !summary.is_empty() {
         app.activity.record(
-            EntityRef::new("machine", app.host.name.clone(), "machine"),
+            EntityRef::new("machine", app.host.name.clone(), EntityKind::Machine),
             ActivityReason::Reconfigured,
             ActivityOutcome::Succeeded,
             summary,
@@ -199,7 +199,7 @@ pub(crate) async fn checks(State(app): State<SettingsApi>) -> Response {
     ];
     for (id, title, problem) in files {
         if let Some(problem) = problem {
-            checks.push(crate::roles::SystemCheck::new(id, false, title, &problem));
+            checks.push(koppel_usb::SystemCheck::new(id, false, title, &problem));
         }
     }
     json::ok(&checks)

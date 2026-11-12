@@ -24,6 +24,7 @@ pub mod json;
 mod migrate;
 mod paths;
 pub mod pkcs12;
+mod redact;
 mod secret;
 
 use std::sync::Arc;
@@ -39,6 +40,7 @@ pub use file::{
 pub use harden::harden_directory;
 pub use migrate::{Conversion, ConversionError, convert_0_1_secrets};
 pub use paths::{KoppelPaths, default_root};
+pub use redact::Secret;
 pub use secret::{SecretBox, SecretError, SecretFormat, format_of};
 
 use files::{

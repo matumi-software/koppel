@@ -439,7 +439,7 @@ async fn an_encrypted_file_round_trips_and_is_not_readable_as_text() {
     let again = open::connection(&paths, &secrets);
     again.start().await.unwrap();
     assert_eq!(
-        again.current().client_secret.as_deref(),
+        again.current().client_secret.as_deref().map(String::as_str),
         Some("very secret")
     );
     again.stop();

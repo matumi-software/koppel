@@ -967,7 +967,7 @@ impl ClientSide {
                         .into(),
                 ),
                 client_id: Some(format!("client-{n}")),
-                client_secret: Some(format!("secret-{n}")),
+                client_secret: Some(format!("secret-{n}").into()),
                 next_server_fingerprint: None,
             })
             .await

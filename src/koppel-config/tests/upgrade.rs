@@ -262,7 +262,10 @@ async fn a_0_1_2_install_is_converted_and_keeps_its_certificate_clients_connecti
         .find(|c| c.id == "client-9419f1711c")
         .unwrap();
     assert_eq!(
-        (bench.name.as_str(), bench.secret.as_deref()),
+        (
+            bench.name.as_str(),
+            bench.secret.as_deref().map(String::as_str)
+        ),
         ("bench", Some("tBQSIdMdQONeoLmAIJ507c791ZpSVOl5YkJtXkIwL9A"))
     );
     let lab = state
@@ -280,7 +283,7 @@ async fn a_0_1_2_install_is_converted_and_keeps_its_certificate_clients_connecti
         Some(LINUX_012_FINGERPRINT)
     );
     assert_eq!(
-        link.client_secret.as_deref(),
+        link.client_secret.as_deref().map(String::as_str),
         Some("tBQSIdMdQONeoLmAIJ507c791ZpSVOl5YkJtXkIwL9A")
     );
     assert!(link.is_complete());

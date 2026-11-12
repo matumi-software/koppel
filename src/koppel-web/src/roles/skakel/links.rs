@@ -98,7 +98,11 @@ fn make(
     .map_err(|_| "The saved fingerprint is not a SHA-256 fingerprint.".to_owned())?;
     let credentials = Credentials::new(
         connection.client_id.clone().unwrap_or_default(),
-        connection.client_secret.clone().unwrap_or_default(),
+        connection
+            .client_secret
+            .as_deref()
+            .cloned()
+            .unwrap_or_default(),
     );
     skakel_client::Link::new(
         &address,

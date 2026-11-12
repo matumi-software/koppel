@@ -219,7 +219,7 @@ impl ConnectionUpdate {
             server_fingerprint: fingerprint.map(normalize),
             client_id: self.client_id.as_deref().map(|id| id.trim().to_owned()),
             client_secret: match self.client_secret.as_deref() {
-                Some(secret) if !secret.is_empty() => Some(secret.to_owned()),
+                Some(secret) if !secret.is_empty() => Some(secret.into()),
                 _ if keeps => current.client_secret.clone(),
                 _ => None,
             },
@@ -405,7 +405,10 @@ mod tests {
         };
         assert!(same.keeps_server(&current));
         let applied = same.apply(&current);
-        assert_eq!(applied.client_secret.as_deref(), Some("s"));
+        assert_eq!(
+            applied.client_secret.as_deref().map(String::as_str),
+            Some("s")
+        );
         assert_eq!(applied.client_id.as_deref(), Some("c"));
         let other = ConnectionUpdate {
             server_url: Some("https://b:5240".into()),

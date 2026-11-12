@@ -4,6 +4,8 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::sync::Unpoisoned;
+
 /// Who may use the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiReach {
@@ -99,10 +101,7 @@ impl UiAccess {
     }
 
     fn local_networks(&self) -> Networks {
-        let mut cached = self
-            .networks
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut cached = self.networks.locked();
         match &*cached {
             Some((read, networks)) if read.elapsed() < NETWORKS_FOR => networks.clone(),
             _ => {

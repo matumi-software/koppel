@@ -24,6 +24,7 @@ mod routes;
 mod server;
 mod state;
 mod surface;
+mod sync;
 mod tasks;
 pub mod tls;
 pub mod tray;

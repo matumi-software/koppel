@@ -9,7 +9,7 @@
 //! oldest when the table is full.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use axum::http::HeaderMap;
@@ -19,6 +19,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use cookie::{Cookie, SameSite};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+
+use crate::sync::Unpoisoned;
 
 /// The cookie's name. The `__Host-` prefix makes a browser take it only from a secure origin, with
 /// `Path=/` and no `Domain`, so a sibling host cannot set it. It is not the name 0.1.x used
@@ -94,7 +96,7 @@ pub(crate) struct Sessions {
 
 impl Sessions {
     fn table(&self) -> std::sync::MutexGuard<'_, Table> {
-        self.table.lock().unwrap_or_else(PoisonError::into_inner)
+        self.table.locked()
     }
 
     /// A new session, and its id for the cookie.

@@ -13,7 +13,7 @@
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::Request;
@@ -42,6 +42,7 @@ use crate::roles::{
     PairingWindowView, RegisterError, RequestState, RoleError, Switched,
 };
 use crate::surface::is_grpc_path;
+use crate::sync::Unpoisoned;
 use crate::tasks::Tasks;
 
 /// Skakel's app id for Koppel.
@@ -128,8 +129,7 @@ impl SkakelServerRole {
     pub(crate) async fn serve(&self, request: Request) -> Response {
         let service = self
             .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .locked()
             .as_ref()
             .map(|running| running.server.service());
         let Some(mut service) = service else {
@@ -145,8 +145,7 @@ impl SkakelServerRole {
     /// moves new connections to the new server's.
     pub(crate) fn acceptor(&self) -> Option<TlsAcceptor> {
         self.running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .locked()
             .as_ref()
             .map(|running| TlsAcceptor::from(running.server.tls_config()))
     }
@@ -159,10 +158,7 @@ impl SkakelServerRole {
         settings.subscribe(move |value| {
             let weak = weak.clone();
             let now = value.role != Role::Client;
-            let was = std::mem::replace(
-                &mut *serving.lock().unwrap_or_else(PoisonError::into_inner),
-                now,
-            );
+            let was = std::mem::replace(&mut *serving.locked(), now);
             async move {
                 if was
                     && !now
@@ -186,18 +182,10 @@ impl SkakelServerRole {
         };
         // From here new connections and requests reach the new server; the old one's calls end
         // with STOPPING when it shuts down.
-        let old = self
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .replace(next);
+        let old = self.running.locked().replace(next);
         // The new server has no pairing requests yet, and its pairing window is closed.
         let empty = PairingOverview::empty();
-        *self
-            .wiring
-            .overview
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = empty.clone();
+        *self.wiring.overview.locked() = empty.clone();
         self.wiring
             .push
             .send(push::PAIRING_REQUESTS_CHANGED, &empty);
@@ -209,11 +197,7 @@ impl SkakelServerRole {
 
     /// Stops Skakel's server, telling the clients it is stopping.
     pub(crate) async fn stop(&self) {
-        let old = self
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let old = self.running.locked().take();
         if let Some(old) = old {
             old.shut_down().await;
         }
@@ -222,7 +206,7 @@ impl SkakelServerRole {
     /// Runs `use_it` on the running server, or returns `None` once Skakel's server has stopped with
     /// Koppel, which a request still in flight can outlast.
     fn with<T>(&self, use_it: impl FnOnce(&SkakelServer) -> T) -> Option<T> {
-        let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let running = self.running.locked();
         running.as_ref().map(|running| use_it(&running.server))
     }
 
@@ -304,7 +288,7 @@ impl Wiring {
             ServerEvent::Pairing(overview) => {
                 let ids: Vec<String> = overview.requests.iter().map(|r| r.id.clone()).collect();
                 let refused = {
-                    let mut refused = self.refused.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut refused = self.refused.locked();
                     refused.retain(|id| ids.contains(id));
                     refused.clone()
                 };
@@ -329,12 +313,12 @@ impl Wiring {
                     budget_exhausted: overview.budget_exhausted,
                     window: self.current_window(),
                 };
-                *self.overview.lock().unwrap_or_else(PoisonError::into_inner) = view.clone();
+                *self.overview.locked() = view.clone();
                 self.push.send(push::PAIRING_REQUESTS_CHANGED, &view);
             }
             ServerEvent::PairingWindow(window) => {
                 let view = {
-                    let mut overview = self.overview.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut overview = self.overview.locked();
                     overview.window = window_view(window);
                     overview.clone()
                 };
@@ -355,11 +339,7 @@ impl Wiring {
     }
 
     fn current_window(&self) -> PairingWindowView {
-        self.overview
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .window
-            .clone()
+        self.overview.locked().window.clone()
     }
 
     /// Each pairing that was approved or refused goes to the activity log, as 0.1.x's
@@ -531,11 +511,7 @@ impl SkakelServerRole {
     }
 
     pub fn pairing(&self) -> PairingOverview {
-        self.wiring
-            .overview
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.wiring.overview.locked().clone()
     }
 
     pub fn open_pairing(&self, duration: Duration) {
@@ -563,21 +539,13 @@ impl SkakelServerRole {
 
     pub async fn deny(&self, id: &str) -> bool {
         // Noted first: the list Skakel raises while it refuses leaves the request out already.
-        self.wiring
-            .refused
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.to_owned());
+        self.wiring.refused.locked().insert(id.to_owned());
         let denied = match self.pairing_handle() {
             Some(pairing) => pairing.deny(id).await,
             None => false,
         };
         if !denied {
-            self.wiring
-                .refused
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .remove(id);
+            self.wiring.refused.locked().remove(id);
         }
         denied
     }

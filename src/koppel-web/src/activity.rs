@@ -12,6 +12,7 @@ use ts_rs::TS;
 use tokio::sync::broadcast;
 
 use crate::push::{self, Push};
+use crate::sync::Unpoisoned;
 
 /// How many entries the log keeps.
 const CAPACITY: usize = 500;
@@ -99,9 +100,7 @@ impl ActivityLog {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<ActivityEvent>> {
-        self.events
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.events.locked()
     }
 }
 

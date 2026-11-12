@@ -6,7 +6,7 @@ pub(crate) mod password;
 pub(crate) mod session;
 pub(crate) mod throttle;
 
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use koppel_config::files::UiCredentials;
@@ -18,6 +18,8 @@ use tokio::sync::{Semaphore, broadcast};
 use session::Sessions;
 pub(crate) use session::SignedIn;
 use throttle::{Reservation, Throttle};
+
+use crate::sync::Unpoisoned;
 
 /// Password hashes that may run at once, for the whole server.
 const HASH_SLOTS: usize = 2;
@@ -71,7 +73,7 @@ pub(crate) struct UiAuth {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+    mutex.locked()
 }
 
 impl UiAuth {
@@ -118,7 +120,7 @@ impl UiAuth {
     /// Until when the first password may be set, or `None` once there is one. It may lie in the
     /// past: setup has timed out.
     pub(crate) fn setup_until(&self) -> Option<OffsetDateTime> {
-        let until = *lock(&self.setup_until);
+        let until = *self.setup_until.locked();
         if self.has_password() { None } else { until }
     }
 
@@ -145,7 +147,7 @@ impl UiAuth {
         if !self.setup_token_required {
             return true;
         }
-        let (Some(given), Some(token)) = (given, lock(&self.setup_token).clone()) else {
+        let (Some(given), Some(token)) = (given, self.setup_token.locked().clone()) else {
             return false;
         };
         same_bytes(given.trim().as_bytes(), token.as_bytes())
@@ -164,15 +166,15 @@ impl UiAuth {
     /// How long until `key` may try a password, or `None`: the global budget and the caller's lock,
     /// read before a hash slot is taken so a locked caller cannot hold one.
     pub(crate) fn precheck(&self, key: &str) -> Option<Duration> {
-        lock(&self.throttle).check(key, Instant::now())
+        self.throttle.locked().check(key, Instant::now())
     }
 
     pub(crate) fn reserve(&self, key: &str) -> Reservation {
-        lock(&self.throttle).reserve(key, Instant::now())
+        self.throttle.locked().reserve(key, Instant::now())
     }
 
     pub(crate) fn clear(&self, key: &str) {
-        lock(&self.throttle).clear(key);
+        self.throttle.locked().clear(key);
     }
 
     /// True when `password` is the one set. An empty or overlong one is not hashed at all.
@@ -204,13 +206,13 @@ impl UiAuth {
         }
         let hash: Secret<String> = hash_off_thread(password).await?.into();
         // Set before the write, so the file's own change is not taken for one from outside.
-        *lock(&self.seen_hash) = Some(hash.clone());
+        *self.seen_hash.locked() = Some(hash.clone());
         self.file
             .update(|_| UiCredentials {
                 password_hash: Some(hash),
             })
             .await?;
-        *lock(&self.setup_token) = None;
+        *self.setup_token.locked() = None;
         Ok(SetupOutcome::Done)
     }
 
@@ -240,7 +242,7 @@ impl UiAuth {
         keep: &str,
     ) -> Result<(), SetPasswordError> {
         let hash: Secret<String> = hash_off_thread(next).await?.into();
-        *lock(&self.seen_hash) = Some(hash.clone());
+        *self.seen_hash.locked() = Some(hash.clone());
         self.file
             .update(|_| UiCredentials {
                 password_hash: Some(hash),
@@ -255,7 +257,7 @@ impl UiAuth {
     // open.
     fn changed(&self, credentials: &UiCredentials) {
         let outside = {
-            let mut seen = lock(&self.seen_hash);
+            let mut seen = self.seen_hash.locked();
             let outside = *seen != credentials.password_hash;
             seen.clone_from(&credentials.password_hash);
             outside
@@ -271,10 +273,10 @@ impl UiAuth {
     // password edited out of the file), or again when asked (a reset).
     fn sync_window(&self, reopen: bool) {
         let opened = {
-            let mut until = lock(&self.setup_until);
+            let mut until = self.setup_until.locked();
             if self.has_password() {
                 *until = None;
-                *lock(&self.setup_token) = None;
+                *self.setup_token.locked() = None;
                 None
             } else if until.is_none() || reopen {
                 let closes = OffsetDateTime::now_utc() + self.window;
@@ -292,7 +294,7 @@ impl UiAuth {
                 .unwrap_or_default();
             if self.setup_token_required {
                 let token = crate::activity::hex(&random_bytes::<16>());
-                *lock(&self.setup_token) = Some(token.clone());
+                *self.setup_token.locked() = Some(token.clone());
                 tracing::warn!(
                     "Koppel is waiting for its first password. Open {} and set it before {} (UTC). The setup token is {token}: the page asks for it, and it works once. After that time, restart Koppel to set it.",
                     self.address,
@@ -404,7 +406,7 @@ mod tests {
     }
 
     fn window_token(auth: &UiAuth) -> Option<String> {
-        lock(&auth.setup_token).clone()
+        auth.setup_token.locked().clone()
     }
 
     #[tokio::test]

@@ -79,7 +79,7 @@ mod tests {
         }
         for path in [
             "/",
-            "/api/auth/login",
+            "/api/v1/auth/login",
             "/skakel/info",
             "/skakel.v3.ControlService",
             "/Skakel.v3.ControlService/Connect",
@@ -104,8 +104,8 @@ mod tests {
         for path in [
             "/",
             "/healthz",
-            "/api/settings",
-            "/api/server/clients",
+            "/api/v1/settings",
+            "/api/v1/server/clients",
             "/api/remotes",
             "/skakels",
             "/SKAKEL/info",

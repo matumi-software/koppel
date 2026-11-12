@@ -85,8 +85,8 @@ async fn start_pairing(client: &Session, url: &str, fingerprint: &str, name: &st
         let status = pairing(client).await;
         match status["state"].as_str() {
             Some("waiting") => Some(status),
-            // The 202 comes before the first state change, so idle is still the old state.
-            Some("idle" | "requesting") => None,
+            // The 202 already shows requesting; idle here would be the old race.
+            Some("requesting") => None,
             other => panic!("pairing went to {other:?}: {status}"),
         }
     })

@@ -179,7 +179,6 @@ impl SkakelClientRole {
 
     async fn run(self: Arc<Self>, run: Arc<Run>) {
         let mut status = Self::status(&run, PairingState::Requesting);
-        self.set(&run, status.clone());
         let address = match Url::parse(&run.server_url) {
             Ok(address) => address,
             Err(e) => {
@@ -527,6 +526,9 @@ impl SkakelClientRole {
             });
             pairings.approved = None;
             pairings.confirming = false;
+            // The status the request answers 202 for is already what a read shows: the run is
+            // requesting from this moment, not from when its task first gets to run.
+            pairings.status = Self::status(&run, PairingState::Requesting);
             if let Some(previous) = pairings.run.replace(run.clone()) {
                 previous.stop.cancel();
             }
@@ -535,6 +537,10 @@ impl SkakelClientRole {
         let Some(run) = started else {
             return;
         };
+        self.push.send(
+            push::PAIRING_STATUS_CHANGED,
+            &Self::status(&run, PairingState::Requesting),
+        );
         tokio::spawn(me.run(run));
     }
 

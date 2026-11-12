@@ -11,7 +11,8 @@ use std::io::Read;
 
 use axum::body::{Body, Bytes};
 use axum::http::header::{
-    ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, VARY,
+    ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, ETAG, HeaderMap, IF_NONE_MATCH,
+    VARY,
 };
 use axum::http::{StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
@@ -35,8 +36,8 @@ const HASHED: &str = "public, max-age=31536000, immutable";
 const CHECK_EACH_TIME: &str = "no-cache";
 
 enum Stored {
-    Raw(Cow<'static, [u8]>),
-    Gzipped(Cow<'static, [u8]>),
+    Raw(Cow<'static, [u8]>, [u8; 32]),
+    Gzipped(Cow<'static, [u8]>, [u8; 32]),
 }
 
 /// GET (and HEAD) for any path no route took: the file, index.html for a path of the single page
@@ -45,16 +46,35 @@ pub(crate) async fn serve(uri: Uri, headers: HeaderMap) -> Response {
     let Some((name, stored)) = find(uri.path()) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let response = Response::builder()
+    let gzip = accepts_gzip(&headers);
+    // Files that keep their name are checked each time, so they carry a validator and a client
+    // that has the current one gets 304. The inflated copy is a different representation.
+    let etag = (cache_control(name) == CHECK_EACH_TIME).then(|| match &stored {
+        Stored::Gzipped(_, hash) if !gzip => etag_of(hash, "-identity"),
+        Stored::Raw(_, hash) | Stored::Gzipped(_, hash) => etag_of(hash, ""),
+    });
+    let mut response = Response::builder()
         .header(CONTENT_TYPE, content_type(name))
         .header(CACHE_CONTROL, cache_control(name));
+    if let Some(etag) = &etag {
+        if matches(&headers, etag) {
+            return Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header(ETAG, etag)
+                .header(CACHE_CONTROL, cache_control(name))
+                .header(VARY, "accept-encoding")
+                .body(Body::empty())
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+        response = response.header(ETAG, etag);
+    }
     let built = match stored {
-        Stored::Raw(data) => response.body(body(data)),
-        Stored::Gzipped(data) if accepts_gzip(&headers) => response
+        Stored::Raw(data, _) => response.body(body(data)),
+        Stored::Gzipped(data, _) if gzip => response
             .header(CONTENT_ENCODING, "gzip")
             .header(VARY, "accept-encoding")
             .body(body(data)),
-        Stored::Gzipped(data) => {
+        Stored::Gzipped(data, _) => {
             let mut inflated = Vec::new();
             if let Err(e) = GzDecoder::new(data.as_ref()).read_to_end(&mut inflated) {
                 tracing::error!("the embedded {name} does not inflate: {e}");
@@ -89,9 +109,32 @@ fn find(path: &str) -> Option<(&str, Stored)> {
 
 fn stored(name: &str) -> Option<Stored> {
     if let Some(file) = Gzipped::get(name) {
-        return Some(Stored::Gzipped(file.data));
+        return Some(Stored::Gzipped(file.data, file.metadata.sha256_hash()));
     }
-    Raw::get(name).map(|file| Stored::Raw(file.data))
+    Raw::get(name).map(|file| Stored::Raw(file.data, file.metadata.sha256_hash()))
+}
+
+/// A strong validator: the first 16 bytes of the SHA-256 of what is embedded, in hex.
+fn etag_of(hash: &[u8; 32], representation: &str) -> String {
+    use std::fmt::Write;
+    let mut tag = String::from("\"");
+    for byte in &hash[..16] {
+        let _ = write!(tag, "{byte:02x}");
+    }
+    tag.push_str(representation);
+    tag.push('"');
+    tag
+}
+
+/// Whether `If-None-Match` names `etag` (weak or strong, as the comparison for GET says) or `*`.
+fn matches(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get_all(IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|text| text.split(','))
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || candidate.trim_start_matches("W/") == etag)
 }
 
 fn body(data: Cow<'static, [u8]>) -> Body {
@@ -188,6 +231,42 @@ mod tests {
         assert!(!accepts_gzip(&accept(&["gzip;q=0, *"])));
         assert!(!accepts_gzip(&accept(&["*;q=0"])));
         assert!(!accepts_gzip(&accept(&["gzip;q=nonsense"])));
+    }
+
+    #[test]
+    fn if_none_match_names_the_validator_weak_or_strong_or_star() {
+        let tag = etag_of(&[7; 32], "");
+        let with = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(IF_NONE_MATCH, HeaderValue::from_str(value).unwrap());
+            headers
+        };
+        assert!(matches(&with(&tag), &tag));
+        assert!(matches(&with(&format!("W/{tag}")), &tag));
+        assert!(matches(&with(&format!("\"other\", {tag}")), &tag));
+        assert!(matches(&with("*"), &tag));
+        assert!(!matches(&with("\"other\""), &tag));
+        assert!(!matches(&HeaderMap::new(), &tag));
+        assert_ne!(etag_of(&[7; 32], ""), etag_of(&[7; 32], "-identity"));
+    }
+
+    #[tokio::test]
+    async fn index_has_a_validator_and_a_matching_one_gets_304() {
+        let first = serve(Uri::from_static("/"), accept(&["gzip"])).await;
+        assert_eq!(first.status(), StatusCode::OK);
+        let tag = first.headers()[ETAG].clone();
+        let mut headers = accept(&["gzip"]);
+        headers.insert(IF_NONE_MATCH, tag.clone());
+        let again = serve(Uri::from_static("/"), headers).await;
+        assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(again.headers()[ETAG], tag);
+        // Asking without gzip is another representation, so the same validator does not match it.
+        let mut headers = HeaderMap::new();
+        headers.insert(IF_NONE_MATCH, tag);
+        assert_eq!(
+            serve(Uri::from_static("/"), headers).await.status(),
+            StatusCode::OK
+        );
     }
 
     #[test]

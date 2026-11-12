@@ -94,10 +94,12 @@ async fn text(response: Response<Body>) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
+const CONTENT_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
 fn security_headers(response: &Response<Body>, what: &str) {
     for (name, value) in [
         ("x-frame-options", "DENY"),
-        ("content-security-policy", "frame-ancestors 'none'"),
+        ("content-security-policy", CONTENT_POLICY),
         ("x-content-type-options", "nosniff"),
         ("referrer-policy", "no-referrer"),
     ] {

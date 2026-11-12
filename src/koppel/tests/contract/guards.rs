@@ -10,10 +10,12 @@ use crate::support::{Answer, Body, Main, json};
 use reqwest::Method;
 
 #[track_caller]
+const CONTENT_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
 fn security_headers(answer: &Answer, what: &str) {
     for (name, value) in [
         ("x-frame-options", "DENY"),
-        ("content-security-policy", "frame-ancestors 'none'"),
+        ("content-security-policy", CONTENT_POLICY),
         ("x-content-type-options", "nosniff"),
         ("referrer-policy", "no-referrer"),
     ] {

@@ -66,6 +66,16 @@ pub(crate) struct PairStart {
     server_name: Option<String>,
 }
 
+impl PairStart {
+    /// Pairing has no client ID yet: the server gives one when it approves.
+    fn validate(&self) -> Vec<(&'static str, &'static str)> {
+        server_problems(
+            self.server_url.as_deref(),
+            self.server_fingerprint.as_deref(),
+        )
+    }
+}
+
 const URL_PROBLEM: &str = "Use the server's HTTPS address, such as https://lab-rack-3:5240.";
 const FINGERPRINT_PROBLEM: &str =
     "Paste the SHA-256 fingerprint shown in the server's Clients section.";
@@ -114,6 +124,21 @@ fn https_authority(url: &str) -> Option<String> {
         Some(port) => format!("https://{host}:{port}"),
         None => format!("https://{host}"),
     })
+}
+
+/// What is wrong with the address and fingerprint of a server, shared by the connection and pairing.
+fn server_problems(
+    server_url: Option<&str>,
+    fingerprint: Option<&str>,
+) -> Vec<(&'static str, &'static str)> {
+    let mut errors = Vec::new();
+    if server_url.and_then(https_authority).is_none() {
+        errors.push(("serverUrl", URL_PROBLEM));
+    }
+    if !is_fingerprint(fingerprint) {
+        errors.push(("serverFingerprint", FINGERPRINT_PROBLEM));
+    }
+    errors
 }
 
 /// A fingerprint's hex digits alone.
@@ -177,18 +202,10 @@ impl ConnectionUpdate {
     }
 
     fn validate(&self) -> Vec<(&'static str, &'static str)> {
-        let mut errors = Vec::new();
-        if self
-            .server_url
-            .as_deref()
-            .and_then(https_authority)
-            .is_none()
-        {
-            errors.push(("serverUrl", URL_PROBLEM));
-        }
-        if !is_fingerprint(self.server_fingerprint.as_deref()) {
-            errors.push(("serverFingerprint", FINGERPRINT_PROBLEM));
-        }
+        let mut errors = server_problems(
+            self.server_url.as_deref(),
+            self.server_fingerprint.as_deref(),
+        );
         if self
             .client_id
             .as_deref()
@@ -288,13 +305,7 @@ pub(crate) async fn begin_pairing(
     State(app): State<ClientApi>,
     JsonBody(request): JsonBody<PairStart>,
 ) -> ApiResult<StatusCode> {
-    let check = ConnectionUpdate {
-        server_url: request.server_url.clone(),
-        server_fingerprint: request.server_fingerprint.clone(),
-        client_id: Some("pairing".into()),
-        client_secret: None,
-    };
-    let errors = check.validate();
+    let errors = request.validate();
     if !errors.is_empty() {
         return Err(ApiError::invalid(&errors));
     }
@@ -390,6 +401,23 @@ mod tests {
         ] {
             assert_eq!(https_authority(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn pairing_is_checked_without_a_client_id() {
+        let good = PairStart {
+            server_url: Some("https://lab:5240".into()),
+            server_fingerprint: Some("ab".repeat(32)),
+            server_name: None,
+        };
+        assert!(good.validate().is_empty());
+        let bad = PairStart {
+            server_url: Some("http://lab".into()),
+            server_fingerprint: None,
+            server_name: None,
+        };
+        let fields: Vec<_> = bad.validate().iter().map(|(f, _)| *f).collect();
+        assert_eq!(fields, ["serverUrl", "serverFingerprint"]);
     }
 
     #[test]

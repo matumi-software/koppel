@@ -155,6 +155,8 @@ pub enum Approval {
     Approved,
     WrongCode,
     NotFound,
+    /// The approval could not be saved. The request stays, so the person can try again.
+    Failed,
 }
 
 /// Why a client could not be added.

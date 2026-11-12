@@ -300,6 +300,9 @@ pub(crate) async fn approve(
             "That is not the code the client shows. Check it on the client and type it again.",
         )]),
         Approval::NotFound => StatusCode::NOT_FOUND.into_response(),
+        // 0.2.0 answered 404 here, which a person reads as "that request is gone" when it is a
+        // write that failed and can be tried again.
+        Approval::Failed => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 

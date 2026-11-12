@@ -216,6 +216,43 @@ async fn rotating_the_secret_ends_the_link_and_says_to_pair_again() {
     server.stop().await;
 }
 
+/// The 202 of a new pairing and a read straight after it must agree, so a poller never sees the
+/// state the pairing had before (idle after a cancel, the last result after another run).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_straight_after_the_202_shows_the_pairing_that_started() {
+    let (server_dir, client_dir) = (TempDir::new("server"), TempDir::new("client"));
+    let server = Node::start(server_dir.path(), "server", None, FakeKernel::new()).await;
+    let client = Node::start(client_dir.path(), "client", None, FakeKernel::new()).await;
+    open_pairing(&server).await;
+    let fingerprint = server.get("/api/server/identity").await["fingerprint"].clone();
+    let body = json!({ "serverUrl": server.url(), "serverFingerprint": fingerprint, "serverName": "bench" });
+
+    for round in 0..8 {
+        assert_eq!(
+            client.post("/api/client/pairing", body.clone()).await,
+            202,
+            "round {round}"
+        );
+        let state = client.get("/api/client/pairing").await["state"].clone();
+        assert!(
+            state == json!("requesting") || state == json!("waiting"),
+            "round {round}: {state}"
+        );
+        let (status, _) = client
+            .call(Method::DELETE, "/api/client/pairing", None)
+            .await;
+        assert_eq!(status, 202);
+        // A cancel leaves idle, the state a poller must not see right after the next 202.
+        assert_eq!(
+            client.get("/api/client/pairing").await["state"],
+            json!("idle")
+        );
+    }
+
+    client.stop().await;
+    server.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn leaving_the_server_role_ends_the_link_and_coming_back_takes_it_again() {
     let (server_dir, client_dir) = (TempDir::new("server"), TempDir::new("client"));

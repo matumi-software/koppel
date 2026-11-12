@@ -536,7 +536,7 @@ impl SkakelServerRole {
             Ok(_) => Approval::NotFound,
             Err(e) => {
                 tracing::error!("Approving a pairing request failed: {e}");
-                Approval::NotFound
+                Approval::Failed
             }
         }
     }

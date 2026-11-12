@@ -6,7 +6,7 @@ import { useLive } from '@/live/live-context';
 import { downAfterFailures, pushEvents, retryDelay } from '@/live/push-table';
 import { FakeEventSource } from './fake-event-source';
 import { json, mockFetch, renderApp } from './harness';
-import { settingsOptions } from '@/queries';
+import { settingsOptions, systemChecksOptions } from '@/queries';
 
 const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
 
@@ -14,6 +14,8 @@ const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupC
 function Probe() {
   const { state } = useLive();
   const query = useQuery(settingsOptions());
+  // Not pushed, so a reconnect has to fetch it.
+  useQuery(systemChecksOptions());
   return (
     <div>
       <span data-testid="state">{state}</span>
@@ -37,7 +39,7 @@ describe('the live link', () => {
   });
 
   it('listens once for each event in the push table, on one stream', async () => {
-    mockFetch({ 'GET /api/v1/settings': () => json(settings) });
+    mockFetch({ 'GET /api/v1/settings': () => json(settings), 'GET /api/v1/system/checks': () => json([]) });
     renderApp(<Probe />);
     await waitFor(() => expect(state()).toBe('live'));
 
@@ -46,18 +48,20 @@ describe('the live link', () => {
   });
 
   it('does not fetch again when the first stream opens', async () => {
-    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(settings) });
+    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(settings), 'GET /api/v1/system/checks': () => json([]) });
     renderApp(<Probe />);
     await waitFor(() => expect(state()).toBe('live'));
     await screen.findByText('server');
 
     expect(count('GET /api/v1/settings')).toBe(1);
+    expect(count('GET /api/v1/system/checks')).toBe(1);
   });
 
-  it('keeps trying after a first connect that failed, and fetches everything once it is back', async () => {
+  it('keeps trying after a first connect that failed, and fetches only what the opening events do not cover once it is back', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     FakeEventSource.answering = false;
-    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(settings) });
+    let current = settings;
+    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(current), 'GET /api/v1/system/checks': () => json([]) });
     renderApp(<Probe />);
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
     expect(state()).toBe('reconnecting');
@@ -71,7 +75,14 @@ describe('the live link', () => {
     await act(() => vi.advanceTimersByTimeAsync(retryDelay(2)));
 
     await waitFor(() => expect(state()).toBe('live'));
-    await waitFor(() => expect(count('GET /api/v1/settings')).toBe(2));
+    await waitFor(() => expect(count('GET /api/v1/system/checks')).toBe(2));
+
+    // The server opens the stream with the current settings, which is what the cache then holds
+    // without a fetch of its own.
+    current = { ...settings, role: 'client' };
+    act(() => FakeEventSource.emit('SettingsChanged', current));
+    await screen.findByText('client');
+    expect(count('GET /api/v1/settings')).toBe(1);
   });
 
   it('calls the link down once it has been away through every step, and goes on trying', async () => {

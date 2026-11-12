@@ -1,4 +1,4 @@
-import type { QueryClient, QueryKey } from '@tanstack/react-query';
+import { hashKey, type Query, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { mergeActivity } from '@/activity/activity-context';
 import type { ActivityEvent } from '@/api/activity';
 import { activityOptions, clientDevicesOptions, clientsOptions, connectionOptions, discoveredServersOptions, pairingRequestsOptions, pairingStatusOptions, serverDevicesOptions, serverKeysOptions, settingsOptions, systemInfoOptions } from '@/queries';
@@ -63,6 +63,21 @@ export const pushTable: Record<string, Push> = {
 };
 
 export const pushEvents = Object.keys(pushTable);
+
+/**
+ * The cache entries a new stream brings current by itself: it opens with one event for the state of
+ * each resource the machine's role has (the whole-value pushes), so a reconnect needs no fetch for
+ * them. The activity feed is not state, so it is not among them, and neither are the entries the push
+ * only marks stale (the system info, whose own fetch is started by the settings or keys event).
+ */
+const snapshotKeys = new Set(
+  Object.entries(pushTable)
+    .filter(([name]) => name !== 'ActivityRecorded')
+    .map(([, push]) => hashKey(push.keys[0])),
+);
+
+/** True for a cache entry the opening events of a stream do not cover: what a reconnect still fetches. */
+export const notInSnapshot = (query: Query) => !snapshotKeys.has(hashKey(query.queryKey));
 
 /**
  * Applies one push event. A payload that is not JSON, or that the cache entry cannot take, is logged

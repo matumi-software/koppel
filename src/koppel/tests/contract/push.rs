@@ -56,15 +56,19 @@ fn payload(name: &str, value: &Value) {
     }
 }
 
-/// The live push for `session`, open and answering as an event stream.
+/// The live push for `session`, open and answering as an event stream, with the snapshot it starts
+/// with already read: a test that opens a stream then changes something waits for that change, not
+/// for the state from before it.
 async fn open(session: &Session) -> Events {
-    let events = session.events().await;
+    let mut events = session.events().await;
     assert_eq!(events.status, 200, "GET /api/v1/events");
     assert!(
         events.content_type.starts_with("text/event-stream"),
         "{}",
         events.content_type
     );
+    // The snapshot comes at once and nothing else is pending, so a quiet moment ends it.
+    while let Next::Event(..) = events.next(Duration::from_millis(400)).await {}
     events
 }
 
@@ -73,6 +77,21 @@ async fn expect(events: &mut Events, name: &str, accept: impl FnMut(&Value) -> b
     let value = events.wait_for(name, WAIT, accept).await;
     payload(name, &value);
     value
+}
+
+#[tokio::test]
+async fn a_new_stream_starts_with_the_settings_as_they_are() {
+    let main = Main::get().await;
+    // Not through `open`, which reads the snapshot away.
+    let mut events = main.admin.events().await;
+    assert_eq!(events.status, 200);
+    let Next::Event(name, value) = events.next(WAIT).await else {
+        panic!("the stream opened with no event");
+    };
+    assert_eq!(name, "SettingsChanged");
+    payload(&name, &value);
+    let read = main.admin.get("/api/v1/settings").await.expect(200).json();
+    assert_eq!(value, read);
 }
 
 #[tokio::test]

@@ -3,14 +3,16 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useAnnounce, type LinkState } from '@koppel/react-ui';
 import { useAuth } from '@/auth/auth-context';
 import { LiveContext } from './live-context';
-import { applyPush, downAfterFailures, eventsUrl, pushEvents, retryDelay } from './push-table';
+import { applyPush, downAfterFailures, eventsUrl, notInSnapshot, pushEvents, retryDelay } from './push-table';
 
 /**
  * Owns the UI's live link to the server, one EventSource on /api/v1/events, applies every push to the
  * query cache and reports the link's state. The browser would reconnect by itself, but not after a
  * refused request, so a failed stream is closed and a new one opened on retryDelay's steps, the first
  * connect included, asking the server each time whether the session is still good. Once the link is
- * back after a failure, everything is fetched again: what was pushed meanwhile is lost. The first
+ * back after a failure, what the stream's opening events do not cover is fetched again (the activity
+ * feed, the system info, the checks, the sign-in state): the server starts every stream with the
+ * current state of each resource it pushes, so what was pushed meanwhile is already there. The first
  * open needs no refetch, the queries just ran.
  */
 export function LiveProvider({ children }: { children: ReactNode }) {
@@ -40,7 +42,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         setState('live');
         if (away) {
           announce('Live again. Changes can be saved.');
-          void queryClient.invalidateQueries();
+          void queryClient.invalidateQueries({ predicate: notInSnapshot });
         }
       };
       current.onerror = () => {

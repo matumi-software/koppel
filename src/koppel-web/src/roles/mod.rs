@@ -1,7 +1,7 @@
 //! The seams the REST endpoints and the push talk to, with 0.1.x's JSON shapes, and what fills them:
 //!
-//! - [`ServerRole`]: the server's registered clients, its certificate and signing key, and pairing
-//!   requests. [`SkakelServerRole`] runs skakel-server over `secrets.json`.
+//! - [`ServerRole`]: the server's registered clients, its certificate, the pairing window and
+//!   pairing requests. [`SkakelServerRole`] runs skakel-server over `secrets.json`.
 //! - [`ClientRole`]: the client's connection test, the servers found on the network and pairing.
 //!   [`SkakelClientRole`] does them with skakel-client.
 //! - [`UsbServer`] and [`UsbClient`]: the devices, sharing, attaching and detaching, and the
@@ -63,7 +63,7 @@ pub struct NewClient {
     pub name: String,
 }
 
-/// The server's certificate and token signing key.
+/// The server's certificate, and the next one while a handover is under way.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeysView {
@@ -71,12 +71,6 @@ pub struct KeysView {
     pub next_fingerprint: Option<String>,
     #[serde(with = "koppel_config::json::date_time_offset::option")]
     pub next_prepared_at: Option<OffsetDateTime>,
-    pub signing_key_id: String,
-    #[serde(with = "koppel_config::json::date_time_offset")]
-    pub signing_key_since: OffsetDateTime,
-    /// Until when tokens signed by a replaced key are still taken.
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
-    pub retired_keys_until: Option<OffsetDateTime>,
 }
 
 /// The server switched to its prepared certificate.
@@ -87,13 +81,49 @@ pub struct Switched {
     pub not_received: Vec<String>,
 }
 
-/// The pairing requests waiting on the server.
+/// Whether the server takes new pairing requests. Skakel 0.3.0 takes them only while a person at
+/// the server has opened a window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingWindowView {
+    pub open: bool,
+    /// The server takes requests at any time (not something Koppel sets; kept so the UI need not
+    /// guess if a build ever does).
+    pub always_open: bool,
+    /// When the window closes by itself. `None` when it is closed.
+    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    pub until: Option<OffsetDateTime>,
+}
+
+impl PairingWindowView {
+    pub fn closed() -> Self {
+        Self {
+            open: false,
+            always_open: false,
+            until: None,
+        }
+    }
+}
+
+/// The pairing window and the requests waiting on the server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingOverview {
     pub requests: Vec<PairingRequestView>,
     /// The server had its fill of requests for now and turns new ones away.
     pub budget_exhausted: bool,
+    pub window: PairingWindowView,
+}
+
+impl PairingOverview {
+    /// No requests and the window closed: a server that has just started.
+    pub fn empty() -> Self {
+        Self {
+            requests: Vec::new(),
+            budget_exhausted: false,
+            window: PairingWindowView::closed(),
+        }
+    }
 }
 
 /// One pairing request on the server.
@@ -127,7 +157,7 @@ pub enum RegisterError {
     Failed(RoleError),
 }
 
-/// The server role: Skakel's clients, keys and pairing. See the module docs.
+/// The server role: Skakel's clients, certificates and pairing. See the module docs.
 pub trait ServerRole: Send + Sync {
     /// The SHA-256 fingerprint of the certificate presented now.
     fn fingerprint(&self) -> String;
@@ -142,8 +172,6 @@ pub trait ServerRole: Send + Sync {
     /// The new secret, or `None` when there was no such client.
     fn rotate_secret<'a>(&'a self, id: &'a str) -> Fut<'a, Result<Option<String>, RoleError>>;
     fn keys(&self) -> KeysView;
-    /// The new key's id.
-    fn rotate_signing_key(&self) -> Fut<'_, Result<String, RoleError>>;
     /// The new certificate's fingerprint, or `None` when one is already prepared.
     fn prepare_next_certificate(&self) -> Fut<'_, Result<Option<String>, RoleError>>;
     /// The cancelled certificate's fingerprint, or `None` when none was prepared.
@@ -151,6 +179,12 @@ pub trait ServerRole: Send + Sync {
     /// `None` when there is no prepared certificate to switch to.
     fn switch_certificate(&self) -> Fut<'_, Result<Option<Switched>, RoleError>>;
     fn pairing(&self) -> PairingOverview;
+    /// Takes new pairing requests for `duration` from now (Skakel holds it between one minute and
+    /// one hour). The window shows in [`ServerRole::pairing`] and over the push once Skakel's
+    /// server says it is open.
+    fn open_pairing(&self, duration: std::time::Duration);
+    /// Closes the window now.
+    fn close_pairing(&self);
     fn approve<'a>(&'a self, id: &'a str, code: &'a str) -> Fut<'a, Approval>;
     /// False when there was no such request.
     fn deny<'a>(&'a self, id: &'a str) -> Fut<'a, bool>;

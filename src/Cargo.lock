@@ -986,9 +986,8 @@ dependencies = [
  "serde",
  "serde_json",
  "skakel-client",
- "skakel-discovery",
- "skakel-protocol",
  "skakel-server",
+ "skakel-wire",
  "socket2",
  "time",
  "tokio",
@@ -1531,7 +1530,6 @@ dependencies = [
  "rustls-platform-verifier",
  "serde",
  "serde_json",
- "serde_urlencoded",
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
@@ -1921,24 +1919,24 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
 name = "skakel-client"
-version = "0.2.1"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.2.1#6c35d5a22389c46a068771c349a046a3f314161a"
+version = "0.3.0"
+source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#d9c2f825c8e6f8ef71f42ecf24faac5571c9e187"
 dependencies = [
+ "getrandom 0.4.3",
+ "http",
  "http-body-util",
  "hyper",
  "hyper-util",
  "if-addrs",
  "log",
  "prost",
- "reqwest",
  "rustls",
  "serde",
  "serde_json",
- "skakel-discovery",
- "skakel-pairing",
  "skakel-proto",
- "skakel-protocol",
  "skakel-serial",
+ "skakel-wire",
+ "socket2",
  "time",
  "tokio",
  "tokio-rustls",
@@ -1948,58 +1946,26 @@ dependencies = [
  "tonic-types",
  "tower-service",
  "url",
-]
-
-[[package]]
-name = "skakel-discovery"
-version = "0.2.1"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.2.1#6c35d5a22389c46a068771c349a046a3f314161a"
-dependencies = [
- "serde",
- "serde_json",
- "skakel-protocol",
- "unicode-general-category",
-]
-
-[[package]]
-name = "skakel-pairing"
-version = "0.2.1"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.2.1#6c35d5a22389c46a068771c349a046a3f314161a"
-dependencies = [
- "base64 0.23.1",
- "getrandom 0.4.3",
- "serde",
- "sha2",
- "subtle",
- "time",
+ "zeroize",
 ]
 
 [[package]]
 name = "skakel-proto"
-version = "0.2.1"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.2.1#6c35d5a22389c46a068771c349a046a3f314161a"
+version = "0.3.0"
+source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#d9c2f825c8e6f8ef71f42ecf24faac5571c9e187"
 dependencies = [
  "prost",
  "protox",
+ "skakel-wire",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
 ]
 
 [[package]]
-name = "skakel-protocol"
-version = "0.2.1"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.2.1#6c35d5a22389c46a068771c349a046a3f314161a"
-dependencies = [
- "serde",
- "sha2",
- "subtle",
-]
-
-[[package]]
 name = "skakel-serial"
-version = "0.2.1"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.2.1#6c35d5a22389c46a068771c349a046a3f314161a"
+version = "0.3.0"
+source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#d9c2f825c8e6f8ef71f42ecf24faac5571c9e187"
 dependencies = [
  "prost",
  "skakel-proto",
@@ -2007,12 +1973,11 @@ dependencies = [
 
 [[package]]
 name = "skakel-server"
-version = "0.2.1"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.2.1#6c35d5a22389c46a068771c349a046a3f314161a"
+version = "0.3.0"
+source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#d9c2f825c8e6f8ef71f42ecf24faac5571c9e187"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "getrandom 0.4.3",
  "http-body",
  "http-body-util",
  "hyper",
@@ -2020,16 +1985,14 @@ dependencies = [
  "log",
  "prost",
  "rcgen",
- "ring",
  "rustls",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "sha2",
- "skakel-discovery",
- "skakel-pairing",
  "skakel-proto",
- "skakel-protocol",
+ "skakel-wire",
+ "socket2",
  "subtle",
  "time",
  "tokio",
@@ -2038,6 +2001,20 @@ dependencies = [
  "tonic",
  "tonic-types",
  "tower-service",
+]
+
+[[package]]
+name = "skakel-wire"
+version = "0.3.0"
+source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#d9c2f825c8e6f8ef71f42ecf24faac5571c9e187"
+dependencies = [
+ "base64 0.23.1",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "time",
  "unicode-general-category",
 ]
 
@@ -2256,6 +2233,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

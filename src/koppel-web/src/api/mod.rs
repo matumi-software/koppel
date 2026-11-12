@@ -47,10 +47,6 @@ pub(crate) fn routes() -> Router<Arc<App>> {
         )
         .route("/api/server/keys", get(server::keys))
         .route(
-            "/api/server/keys/signing-key/rotate",
-            post(server::rotate_signing_key),
-        )
-        .route(
             "/api/server/keys/next-certificate",
             post(server::prepare_certificate).delete(server::cancel_certificate),
         )
@@ -59,6 +55,10 @@ pub(crate) fn routes() -> Router<Arc<App>> {
             post(server::switch_certificate),
         )
         .route("/api/server/pairing", get(server::pairing))
+        .route(
+            "/api/server/pairing/window",
+            post(server::open_pairing).delete(server::close_pairing),
+        )
         .route("/api/server/pairing/{id}/approve", post(server::approve))
         .route("/api/server/pairing/{id}/deny", post(server::deny))
         .route("/api/server/devices", get(server::devices))

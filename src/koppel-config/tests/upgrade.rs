@@ -251,7 +251,10 @@ async fn a_0_1_2_install_is_converted_and_keeps_its_certificate_clients_connecti
         state.next_certificate().unwrap().unwrap().fingerprint(),
         LINUX_012_NEXT_FINGERPRINT
     );
-    assert_eq!(state.signing_key.key_id, "skakel-c160b88c37");
+    assert_eq!(
+        state.signing_key.as_ref().unwrap().key_id,
+        "skakel-c160b88c37"
+    );
     assert_eq!(state.retired_signing_keys.len(), 1);
     let bench = state
         .clients
@@ -463,8 +466,11 @@ fn a_0_1_0_secrets_file_carries_over_as_0_1_1_carried_it() {
             .collect::<Vec<_>>(),
         ["client-1111111111"]
     );
-    assert_eq!(carried.state.signing_key.key_id, "koppel-1");
-    assert_eq!(carried.state.signing_key.created_at, now);
+    assert_eq!(
+        carried.state.signing_key.as_ref().unwrap().key_id,
+        "koppel-1"
+    );
+    assert_eq!(carried.state.signing_key.as_ref().unwrap().created_at, now);
     assert_eq!(
         carried.state.next_certificate.unwrap().received_by,
         ["client-2222222222"]

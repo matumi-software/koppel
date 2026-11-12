@@ -181,25 +181,28 @@ async fn clients_changed_carries_the_list_after_an_add_and_a_revoke() {
 }
 
 #[tokio::test]
-async fn server_keys_changed_carries_the_keys_after_a_rotation() {
+async fn server_keys_changed_carries_the_keys_after_a_certificate_is_prepared() {
     let Some(main) = Main::get().await else {
         return;
     };
     if !sse() {
         return;
     }
-    let before = main.admin.get("/api/server/keys").await.expect(200).json();
     let mut events = open(&main.admin).await;
     main.admin
-        .post_empty("/api/server/keys/signing-key/rotate")
+        .post_empty("/api/server/keys/next-certificate")
         .await
         .expect(202);
     let pushed = expect(&mut events, "ServerKeysChanged", |k| {
-        k["signingKeyId"] != before["signingKeyId"]
+        k["nextFingerprint"].is_string()
     })
     .await;
     let read = main.admin.get("/api/server/keys").await.expect(200).json();
     assert_eq!(pushed, read);
+    main.admin
+        .delete("/api/server/keys/next-certificate")
+        .await
+        .expect(202);
 }
 
 #[tokio::test]
@@ -338,6 +341,45 @@ async fn devices_changed_follows_a_share_on_a_machine_that_can_share() {
 }
 
 #[tokio::test]
+async fn pairing_requests_changed_follows_the_window_opening_and_closing() {
+    let Some(main) = Main::get().await else {
+        return;
+    };
+    if !sse() || !needs_skakel("the pairing window") {
+        return;
+    }
+    let mut events = open(&main.admin).await;
+    main.admin
+        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .await
+        .expect(202)
+        .empty();
+    let opened = expect(&mut events, "PairingRequestsChanged", |o| {
+        o["window"]["open"] == json!(true)
+    })
+    .await;
+    assert!(opened["window"]["until"].is_string(), "{opened}");
+    let read = main
+        .admin
+        .get("/api/server/pairing")
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(read["window"]["open"], json!(true));
+
+    main.admin
+        .delete("/api/server/pairing/window")
+        .await
+        .expect(202)
+        .empty();
+    let closed = expect(&mut events, "PairingRequestsChanged", |o| {
+        o["window"]["open"] == json!(false)
+    })
+    .await;
+    assert!(closed["window"]["until"].is_null(), "{closed}");
+}
+
+#[tokio::test]
 async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
     let Some(pair) = Pair::get().await else {
         return;
@@ -351,6 +393,10 @@ async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
         .await
         .expect(200)
         .json();
+    pair.server_admin
+        .post("/api/server/pairing/window", json!({}))
+        .await
+        .expect(202);
     let mut events = open(&pair.server_admin).await;
     pair.client_admin
         .post(
@@ -365,6 +411,10 @@ async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
     .await;
     pair.client_admin
         .delete("/api/client/pairing")
+        .await
+        .expect(202);
+    pair.server_admin
+        .delete("/api/server/pairing/window")
         .await
         .expect(202);
 }

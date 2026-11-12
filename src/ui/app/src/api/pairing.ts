@@ -51,11 +51,28 @@ export const confirmPairing = () => sendChange('/api/client/pairing/confirm', 'P
 
 export const cancelPairing = () => sendChange('/api/client/pairing', 'DELETE');
 
-/** Mirrors Skakel.Server.SkakelPairingOverview. `budgetExhausted`: the server takes no new pairing requests until its window moves on. */
+/** Whether the server takes new pairing requests. It takes them only while a person has opened the window. */
+export interface PairingWindow {
+  open: boolean;
+  /** The server takes requests at any time, so there is nothing to open. */
+  alwaysOpen: boolean;
+  /** When an open window closes by itself, or null. */
+  until: string | null;
+}
+
+/** The pairing window and the requests waiting. `budgetExhausted`: the server takes no new pairing requests until its limit moves on. */
 export interface PairingOverview {
   requests: PairingRequest[];
   budgetExhausted: boolean;
+  window: PairingWindow;
 }
+
+/** How long the window stays open when a person opens it, in minutes. The server holds it to between 1 and 60. */
+export const pairingWindowMinutes = 10;
+
+/** Both answer 202; the window shows as open or closed when PairingRequestsChanged arrives. */
+export const openPairingWindow = () => sendChange('/api/server/pairing/window', 'POST', { minutes: pairingWindowMinutes });
+export const closePairingWindow = () => sendChange('/api/server/pairing/window', 'DELETE');
 
 export const getPairingRequests = () => getJson<PairingOverview>('/api/server/pairing');
 

@@ -20,7 +20,7 @@ use koppel_usb::{
     UsbIpDriver, UsbIpGateway,
 };
 use skakel_client::{Browser, BrowserOptions};
-use skakel_protocol::SkakelApp;
+use skakel_wire::SkakelApp;
 use tokio::sync::watch;
 
 use crate::access::{UiAccess, UiReach};
@@ -289,11 +289,12 @@ impl App {
 
         // The client side: the browser, the link on Skakel's client, USB, the gateway.
         let browser = network.discovery.then(|| {
-            Browser::with_options(BrowserOptions {
-                app_ids: Some(vec![APP_ID.to_owned()]),
-                probe_targets: network.probe_targets.clone(),
-                ..BrowserOptions::new(network.discovery_port)
-            })
+            let mut options =
+                BrowserOptions::new(network.discovery_port).app_ids(vec![APP_ID.to_owned()]);
+            if let Some(targets) = network.probe_targets.clone() {
+                options = options.probe_targets(targets);
+            }
+            Browser::new(options)
         });
         let links = SkakelLinks::new(connection.clone(), browser.clone(), activity.clone());
         let usb_client = koppel_usb::UsbClient::new(

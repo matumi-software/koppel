@@ -16,10 +16,11 @@ use std::time::Duration;
 
 use koppel_config::ConfigFile;
 use koppel_config::files::ClientConnection;
-use koppel_usb::{
-    BoxFuture, DeviceStream, Link, LinkEvents, LinkStatus, Links, OpenError, StreamOpener,
+use koppel_usb::LinkStatus as UsbLinkStatus;
+use koppel_usb::{BoxFuture, DeviceStream, Link, LinkEvents, Links, OpenError, StreamOpener};
+use skakel_client::{
+    Browser, ClientOptions, Credentials, EventsError, LinkEvent, LinkState, LinkStatus, Pins, Url,
 };
-use skakel_client::{Browser, ClientOptions, Credentials, LinkState, Pins, Url};
 use tokio_util::sync::CancellationToken;
 
 use super::remote::from_proto;
@@ -103,9 +104,9 @@ fn make(
         &address,
         pins,
         credentials,
-        ClientOptions {
-            browser,
-            ..ClientOptions::default()
+        match browser {
+            Some(browser) => ClientOptions::default().browser(browser),
+            None => ClientOptions::default(),
         },
     )
     .map_err(|e| e.failure().message().to_owned())
@@ -122,52 +123,32 @@ struct Shared {
     watching: Mutex<Option<CancellationToken>>,
 }
 
-/// Registers the link's handlers. They hold the link weakly, so it goes when koppel-usb drops it.
+/// Hands the link's pins to `connection.json` and reads its events on a task of Koppel's own. The
+/// task holds the link weakly and ends with it, so the link goes when koppel-usb drops it.
 fn wire(link: &Arc<skakel_client::Link>, shared: &Arc<Shared>) {
     {
         let shared = shared.clone();
-        let weak = Arc::downgrade(link);
-        link.on_status_changed(move |status| {
-            let shared = shared.clone();
-            let weak = weak.clone();
-            async move {
-                let reported = match status.state {
-                    LinkState::Stopped => None,
-                    LinkState::Connecting => Some(LinkStatus::Connecting),
-                    LinkState::Connected => Some(LinkStatus::Connected),
-                    LinkState::Failed | LinkState::Closed => Some(LinkStatus::Down(
-                        status
-                            .failure
-                            .as_ref()
-                            .map(|f| f.message().to_owned())
-                            .unwrap_or_else(|| "The connection to the server was lost.".to_owned()),
-                    )),
-                };
-                if status.state == LinkState::Connected {
-                    shared.watch_devices(weak);
-                } else {
-                    shared.stop_watching();
-                }
-                if let Some(reported) = reported {
-                    shared.events.status(reported).await;
-                }
-            }
-        });
-    }
-    {
-        let shared = shared.clone();
-        link.on_pins_changed(move |pins| {
+        link.set_pin_store(move |pins: Pins| {
             let shared = shared.clone();
             async move { shared.save_pins(&pins).await }
         });
     }
-    {
-        let shared = shared.clone();
-        link.on_address_changed(move |address| {
-            let shared = shared.clone();
-            async move { shared.move_server(&address).await }
-        });
-    }
+    let mut events = link.events();
+    let shared = shared.clone();
+    let weak = Arc::downgrade(link);
+    tokio::spawn(async move {
+        loop {
+            match events.recv().await {
+                Ok(LinkEvent::Status(status)) => shared.status_changed(&status, &weak).await,
+                Ok(LinkEvent::AddressChanged(address)) => shared.move_server(&address).await,
+                // The pin store has saved them already.
+                Ok(_) => {}
+                // Events missed because this was slow: the next one carries on.
+                Err(EventsError::Lagged(_)) => {}
+                Err(_) => return,
+            }
+        }
+    });
 }
 
 /// The address as Koppel saves it: scheme, host and port, no path.
@@ -176,6 +157,35 @@ fn address_text(url: &Url) -> String {
 }
 
 impl Shared {
+    /// Tells koppel-usb how the link stands, and follows the server's device list while it is up.
+    async fn status_changed(
+        self: &Arc<Self>,
+        status: &LinkStatus,
+        link: &Weak<skakel_client::Link>,
+    ) {
+        let reported = match status.state {
+            LinkState::Connecting => Some(UsbLinkStatus::Connecting),
+            LinkState::Connected => Some(UsbLinkStatus::Connected),
+            LinkState::Failed | LinkState::Closed => Some(UsbLinkStatus::Down(
+                status
+                    .failure
+                    .as_ref()
+                    .map(|f| f.message().to_owned())
+                    .unwrap_or_else(|| "The connection to the server was lost.".to_owned()),
+            )),
+            // Stopped, and states a later Skakel adds.
+            _ => None,
+        };
+        if status.state == LinkState::Connected {
+            self.watch_devices(link.clone());
+        } else {
+            self.stop_watching();
+        }
+        if let Some(reported) = reported {
+            self.events.status(reported).await;
+        }
+    }
+
     /// Stores the certificates the link trusts now, after the server told it of a next one,
     /// switched to it or cancelled it, as long as the saved connection is still the link's server.
     /// Writes nothing when that changes nothing. Fails when the saved connection is another
@@ -375,7 +385,7 @@ impl Link for SkakelLink {
             Err(message) => {
                 let events = self.shared.events.clone();
                 let message = message.clone();
-                tokio::spawn(async move { events.status(LinkStatus::Down(message)).await });
+                tokio::spawn(async move { events.status(UsbLinkStatus::Down(message)).await });
             }
         }
     }

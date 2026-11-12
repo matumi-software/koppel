@@ -329,10 +329,12 @@ impl ServerSecrets {
 #[serde(rename_all = "camelCase")]
 pub struct SkakelState {
     pub clients: Vec<SkakelClientRecord>,
-    /// The key new access tokens are signed with.
-    pub signing_key: SkakelKeyRecord,
-    /// Keys that no longer sign, kept until every token they signed has expired.
-    #[serde(default)]
+    /// The key access tokens were signed with before Skakel 0.3.0, whose tokens are random strings
+    /// the server remembers. Read from an older file, never written: the next save drops it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing_key: Option<SkakelKeyRecord>,
+    /// Keys that no longer signed, as above.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub retired_signing_keys: Vec<SkakelKeyRecord>,
     /// The certificate the server presents: base64 PKCS#12 with its private key and no password.
     pub certificate_pfx: String,
@@ -459,7 +461,7 @@ impl ServerSecrets {
                     secret: c.secret.clone(),
                 })
                 .collect(),
-            signing_key: SkakelKeyRecord {
+            signing_key: Some(SkakelKeyRecord {
                 key_id: self
                     .signing_key_id
                     .clone()
@@ -467,7 +469,7 @@ impl ServerSecrets {
                 private_key: signing_key.clone(),
                 created_at: self.signing_key_since.unwrap_or(now),
                 accept_until: None,
-            },
+            }),
             retired_signing_keys: Vec::new(),
             certificate_pfx: pfx.clone(),
             next_certificate: self.next_certificate.as_ref().map(|next| {

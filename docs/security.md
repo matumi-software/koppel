@@ -8,14 +8,14 @@ The certificate, the registered clients, the tokens, revoking and rotating are S
 - **Certificate:** Koppel makes a self-signed certificate on first start (`koppel-web`, with rcgen, as Skakel makes its own), valid for ten years. Every HTTPS port presents it, UI included, the current one at each handshake. Its SHA-256 fingerprint shows in the server's Clients section.
 - **Clients:** the server admin adds a client by name and gets a client ID and secret. Skakel takes control and format characters out of the name; a name with nothing left gets 400. Koppel sets Skakel's `KeepClientSecrets`, so the secret is kept inside the encrypted `secrets.json` and the admin can copy it again later from the client's row.
 - **Revoking and rotating:** both block the client at once, everywhere: its tokens, its hub connections and its USB streams. Skakel tells the client why, and Koppel's client shows that it has to pair again.
-- **Tokens:** OAuth 2.0 client credentials from Skakel, 30 minutes, over HTTPS only. Koppel's `/api/remote/*` takes them. A token names the fixed issuer `https://skakel.invalid/`, so it works at any address or name of the server.
+- **Tokens:** OAuth 2.0 client credentials from Skakel, 30 minutes, over HTTPS only. Koppel's `/api/remote/*` takes them. A token is a random string the server remembers, not a signed one, so there is no signing key to keep or rotate, and a server that restarts forgets its tokens (clients ask again).
+- **Pairing window:** Skakel 0.3.0 takes new pairing requests only while a person has opened a window on the server's Clients page (10 minutes by default, 1 to 60). Outside it a pairing request gets 403 and spends no limit, so a stranger on the network cannot fill the server's list of requests while nobody is at it. The window is closed after every start and when the role leaves the server side.
 
-### Rotating the certificate and the signing key
+### Rotating the certificate
 
-Both are replaced from the server's Clients section through `SkakelKeys`. Each action answers 202 and is
+It is replaced from the server's Clients section. Each action answers 202 and is
 confirmed by `ServerKeysChanged`, like any other change, and each is an activity entry.
 
-- **Signing key:** Rotate signs new tokens with a new key at once; the one it replaced is still accepted until its tokens have expired, so no client notices.
 - **Certificate, in two steps,** because clients pin it: Prepare makes the next certificate and Skakel tells the linked clients its fingerprint over the remote hub. The Clients section shows who has it. Switch presents it at once; switching before every client has it is allowed, after a warning. Cancel drops it. A restart anywhere in between changes nothing, because it is all in `secrets.json`.
 - **On the client:** the link saves what it learns in `connection.json`: the next fingerprint as a second trusted one (`ClientConnection.NextServerFingerprint`), and after the switch the new pinned one. Only once that is saved does the link tell the server it has it. The same credentials with the fingerprint moved on to the one it was told about is the same server (`ClientConnection.Continues`): the link and the attached devices carry on, and `attached.json` moves to the new fingerprint.
 - **A client offline the whole time** never hears of the next certificate. After the switch it reports `certificateMismatch`, as for any certificate it does not know, and must be paired again or given the new fingerprint under Configuration (the stored secret carries over when the new fingerprint is the one that server announced).
@@ -66,7 +66,7 @@ What the design holds against:
 - A web page in the admin's browser calling the UI: SameSite=Strict, the Origin check and the `X-Koppel-UI` header.
 - A stranger reaching the network surface: it is only Skakel's info, token and pairing endpoints, which have rate limits, and the remote API, the remote hub and the USB stream, which need a token from a client registered at its current generation. The UI on the same port turns away callers outside `Ui:AllowFrom` (the local network by default) and needs the password. Plain HTTP on the port gets only a fixed redirect, before TLS.
 - A stranger sending discovery packets: a server answers only a full-size probe, never with more bytes than the probe had, and a malformed or oversized datagram is dropped without stopping the answers. A probe from port 0 or from an address that is not one host (unspecified, broadcast, multicast) gets no answer, and an answer that cannot be sent is logged at debug and does not stop the next one. A client keeps a bounded list of answers (Skakel's discovery limits), and a server it hears is trusted only through its pinned certificate and the pairing code.
-- A man in the middle during pairing: Skakel derives the code from the pinned certificate and both nonces, with a commitment, so it gets one guess in a million per request, and the server limits the requests. Only the opener of a request holds its poll token, so nobody else can collect the credentials.
+- A man in the middle during pairing: Skakel derives the eight-digit code from the pinned certificate, the client's name and both nonces, with a commitment, so it gets one guess in a hundred million per request, and the server limits the requests and takes them only while a person has opened the pairing window. Only the opener of a request holds its poll token, so nobody else can collect the credentials.
 - A revoked client: its sessions end and it cannot get a new token.
 
 What it does not cover:

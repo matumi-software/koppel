@@ -13,17 +13,12 @@ export interface ClientView {
   hasNextCertificate: boolean;
 }
 
-/** Mirrors Skakel.Server.SkakelKeysView: the certificate and the token signing key. */
+/** The server's certificate, and the next one while a handover is under way. */
 export interface ServerKeysView {
   fingerprint: string;
   /** The prepared next certificate, or null when none is prepared. */
   nextFingerprint: string | null;
   nextPreparedAt: string | null;
-  signingKeyId: string;
-  /** When the signing key was made. */
-  signingKeySince: string;
-  /** While replaced keys are still accepted, when the last of them is dropped. */
-  retiredKeysUntil: string | null;
 }
 
 export interface ServerIdentity {
@@ -72,7 +67,6 @@ export async function rotateClientSecret(clientId: string): Promise<string> {
 export const getServerKeys = () => getJson<ServerKeysView>('/api/server/keys');
 
 /** Each of these answers 202; the new state arrives as ServerKeysChanged. */
-export const rotateSigningKey = () => sendChange('/api/server/keys/signing-key/rotate', 'POST');
 export const prepareCertificate = () => sendChange('/api/server/keys/next-certificate', 'POST');
 export const cancelCertificate = () => sendChange('/api/server/keys/next-certificate', 'DELETE');
 export const switchCertificate = () => sendChange('/api/server/keys/next-certificate/switch', 'POST');

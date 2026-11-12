@@ -46,7 +46,7 @@ pub const EVENTS: &[Event] = &[
     },
     Event {
         name: "ServerKeysChanged",
-        when: "server: the signing key was rotated, or a certificate prepared, cancelled or switched to",
+        when: "server: a certificate was prepared, cancelled or switched to",
         payload: Payload::Object(shape::KEYS),
     },
     Event {
@@ -81,7 +81,7 @@ pub const EVENTS: &[Event] = &[
     },
     Event {
         name: "PairingRequestsChanged",
-        when: "server: a pairing request arrived, was approved, refused, withdrawn or expired, or the budget filled",
+        when: "server: the pairing window opened or closed, a pairing request arrived, was approved, refused, withdrawn or expired, or the budget filled",
         payload: Payload::Object(shape::PAIRING_OVERVIEW),
     },
 ];

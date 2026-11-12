@@ -11,7 +11,10 @@ same host, port and path over HTTPS, answered before TLS from the first byte of 
 (`koppel-web/src/redirect.rs`); it never reaches the app. The role is read from the settings on every request, so a role change takes effect at once.
 The table is `LISTED` in `koppel-web/src/surface.rs`; a path not listed counts as the UI's,
 so a new route is never exposed to remote clients by accident. Everything Skakel maps is under `/skakel`,
-which is on the network surface.
+which is on the network surface. Pairing there works only while a person has opened the pairing
+window on the server's Clients page (`POST /api/server/pairing/window` on the UI surface, see
+["Finding servers and pairing"](skakel.md#finding-servers-and-pairing)); outside it Skakel answers
+`POST /skakel/v3/pair` with 403.
 
 | Port | Surface | Serves | Role |
 |---|---|---|---|

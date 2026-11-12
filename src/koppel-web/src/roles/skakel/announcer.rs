@@ -10,9 +10,9 @@ use std::time::Duration;
 
 use koppel_config::ConfigFile;
 use koppel_config::files::{KoppelSettings, Role};
-use skakel_discovery::net::should_answer;
-use skakel_discovery::{DiscoveryAnswer, create_answer};
-use skakel_protocol::{SkakelApp, VERSIONS};
+use skakel_wire::discovery::net::should_answer;
+use skakel_wire::discovery::{DiscoveryAnswer, create_answer};
+use skakel_wire::{SkakelApp, VERSIONS};
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -161,7 +161,7 @@ async fn answer(
                 port: announcement.port,
                 fingerprint: now.clone(),
                 app: announcement.app.clone(),
-                versions: VERSIONS.iter().map(|v| *v as i32).collect(),
+                versions: VERSIONS.to_vec(),
             }) {
                 Ok(bytes) => cached = Some((now, bytes)),
                 Err(e) => {

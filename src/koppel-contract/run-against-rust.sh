@@ -10,7 +10,7 @@
 # arguments go to `cargo test`, such as `--test push` to run one file. Needs cargo and curl; on
 # Windows, run it from Git Bash.
 #
-# The targets push over Server-Sent Events and speak Skakel protocol version 2. The client target
+# The targets push over Server-Sent Events and speak Skakel protocol version 3. The client target
 # looks for servers on the main target's port, so it finds the main target by broadcast.
 #
 # On Windows every target listens on 127.0.0.1 only, with discovery and the USB/IP gateway off, so

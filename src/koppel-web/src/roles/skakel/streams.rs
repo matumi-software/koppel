@@ -38,10 +38,10 @@ const FAILED: &str = "FAILED";
 
 /// Opens `usb` streams on the server and hands each to the data plane, with the client Skakel
 /// checked.
-pub(crate) fn usb_handler(data_plane: UsbDataPlane) -> StreamHandler {
-    Arc::new(move |request: StreamRequest| {
+pub(crate) fn usb_handler(data_plane: UsbDataPlane) -> impl StreamHandler {
+    move |request: StreamRequest| {
         let data_plane = data_plane.clone();
-        Box::pin(async move {
+        async move {
             if !request.target.is_empty() {
                 return StreamOpen::BadTarget("A usb stream takes no target.".into());
             }
@@ -53,8 +53,8 @@ pub(crate) fn usb_handler(data_plane: UsbDataPlane) -> StreamHandler {
                 let stream = Bridged::start(ServerEnd::new(session));
                 data_plane.serve(Box::new(stream), client).await;
             })
-        })
-    })
+        }
+    }
 }
 
 /// Opens a `usb` stream on `link`, on a connection of its own, as koppel-usb's client asks.
@@ -132,9 +132,10 @@ impl Frames for ClientEnd {
     fn next(&self) -> BoxFuture<'_, Option<Vec<u8>>> {
         Box::pin(async move {
             loop {
-                match self.0.recv().await? {
-                    Frame::Data(data) => return Some(data.to_vec()),
-                    Frame::Control(_) => {}
+                // Koppel's stream has no control messages, and a frame a later Skakel adds is not
+                // for it either.
+                if let Frame::Data(data) = self.0.recv().await? {
+                    return Some(data.to_vec());
                 }
             }
         })

@@ -95,6 +95,18 @@ Back it up together with the config folder.
 .I /etc/default/koppel
 Optional settings for the service, as environment variables.
 .TP
+.I /etc/koppel/key
+Optional.
+A key file kept outside
+.I /var/lib/koppel
+that seals the encrypted files instead of the key in the keys folder.
+Uncomment
+.B LoadCredential=koppel-key:/etc/koppel/key
+in the service unit to use it, or set
+.B KOPPEL_KEY_FILE
+to another path.
+Back it up apart from the config folder.
+.TP
 .I /usr/lib/systemd/system/koppel.service
 The service unit.
 .SH LOGS

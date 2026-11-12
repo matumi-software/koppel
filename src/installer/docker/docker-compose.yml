@@ -32,22 +32,20 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # Deprecated: Koppel 0.2.0 drops Paths__KeyCertificate, and an install that uses it pairs again after that
-    # upgrade. Do not start using it.
-    # To encrypt the key ring at rest, keep a PFX (no password) outside the koppel volume, mode 0600, and
-    # mount it as a secret. Without it the key ring sits as plain files in the volume, so anyone who can
-    # read the volume can decrypt Koppel's secret files. Make one with:
-    #   openssl req -x509 -newkey rsa:2048 -nodes -keyout k.pem -out c.pem -subj /CN=koppel-keys -days 3650
-    #   openssl pkcs12 -export -inkey k.pem -in c.pem -passout pass: -out koppel-keys.pfx
-    # then uncomment this, the secrets: line below and the secrets block at the bottom.
-    # environment:
-    #   Paths__KeyCertificate: /run/secrets/koppel_keys
+    # Optional: keep the key that seals Koppel's secret files outside the koppel volume, so a backup or a
+    # copy of the volume does not carry it. Without it the key sits in the volume, in the keys folder.
+    # Make a key file next to this one, mode 0600:
+    #   openssl rand -base64 32 > koppel-key
+    #   chmod 600 koppel-key
+    # then uncomment `secrets:` here and the `secrets:` block at the bottom. Docker mounts the secret at
+    # /run/secrets/koppel-key and Koppel reads it from there (see "Keeping the key outside the volume" in
+    # docs/security.md). Back the key file up apart from the volume: without it the secret files cannot be read.
     # secrets:
-    #   - koppel_keys
+    #   - koppel-key
 
 volumes:
   koppel:
 
 # secrets:
-#   koppel_keys:
-#     file: ./koppel-keys.pfx
+#   koppel-key:
+#     file: ./koppel-key

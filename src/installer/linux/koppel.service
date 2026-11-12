@@ -19,6 +19,14 @@ StateDirectoryMode=0700
 # folder moved out of /var/lib/koppel (KOPPEL_CONFIG_DIR, KOPPEL_KEYS_DIR) also needs a ReadWritePaths= for it in a
 # drop-in (systemctl edit koppel), since ProtectSystem=strict below makes the rest of the disk read-only.
 EnvironmentFile=-/etc/default/koppel
+# Optional: keep the key that seals secrets.json, connection.json and ui-auth.json outside /var/lib/koppel, so a
+# copy of that folder does not carry it. Make the key file, then uncomment the line (see "Keeping the key outside
+# the volume" in docs/security.md):
+#   install -d -m 700 /etc/koppel && openssl rand -base64 32 > /etc/koppel/key && chmod 600 /etc/koppel/key
+# systemd hands the file to Koppel as $CREDENTIALS_DIRECTORY/koppel-key, readable by this service only. With the
+# line on, the service does not start while /etc/koppel/key is missing. Off by default: the key then sits in
+# /var/lib/koppel/keys.
+#LoadCredential=koppel-key:/etc/koppel/key
 Restart=always
 RestartSec=5
 # Koppel sends a heartbeat at half this interval while it answers its own /healthz, and systemd restarts it

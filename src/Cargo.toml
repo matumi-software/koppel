@@ -128,6 +128,9 @@ sd-notify = "0.5.0"
 # resource compiler for the icon, the version, the manifest and the event log's message table, as in
 # Tweeling.
 windows-service = "0.8.1"
+# winreg (MIT) reads and writes the registry value that publishes the UI's address, in place of the
+# raw Registry calls and their unsafe blocks. It sits on windows-sys, already here.
+winreg = "0.56.0"
 winresource = "0.1.34"
 
 # The USB layer (koppel-usb). libc (MIT OR Apache-2.0), already here through tokio, for the one

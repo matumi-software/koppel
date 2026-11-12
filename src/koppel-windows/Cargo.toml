@@ -23,6 +23,7 @@ tracing-subscriber.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 windows-service.workspace = true
+winreg.workspace = true
 windows = { workspace = true, features = [
     "Win32_Graphics_Gdi",
     "Win32_Networking_WinHttp",
@@ -31,7 +32,7 @@ windows = { workspace = true, features = [
     "Win32_System_EventLog",
     "Win32_System_LibraryLoader",
     "Win32_System_Pipes",
-    "Win32_System_Registry",
+    "Win32_System_Registry", # only for ShellExecuteExW, which the bindings gate behind it
     "Win32_System_RemoteDesktop",
     "Win32_UI_HiDpi",
     "Win32_UI_WindowsAndMessaging",

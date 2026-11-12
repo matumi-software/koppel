@@ -113,7 +113,7 @@ Invoke-Checked { pnpm --dir $ui install --frozen-lockfile }
 Invoke-Checked { pnpm --dir $ui --filter koppel.ui build }
 
 Write-Host 'Building Koppel...'
-# Koppel.exe stays a console program, for the service and for commands such as --reset-password;
+# Koppel.exe stays a console program, for the service and for commands such as reset-password;
 # KoppelDesktop.exe is built as a Windows program (windows_subsystem), so neither the tray nor the Start
 # menu entry opens a console window.
 Invoke-Checked { cargo build --manifest-path (Join-Path $src 'Cargo.toml') --release --locked -p koppel -p koppel-windows }

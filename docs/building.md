@@ -259,7 +259,7 @@ bash src/koppel-contract/run-against-rust.sh --test push  # one file
 ```
 
 The script builds `koppel`, starts the same six targets as processes, each on a fresh temporary data
-folder, on ports 16240 to 16246 (`KOPPEL_CONTRACT_PORT` moves them), runs the tests and stops them. The
+folder, on seven ports, 16240 to 16246 (the guarded target takes two; `KOPPEL_CONTRACT_PORT` moves them), runs the tests and stops them. The
 client target looks for servers on the main target's port, as the two 0.1.2 containers share one. On
 Windows the targets listen on 127.0.0.1 only, with discovery and the USB/IP gateway off, so no firewall
 prompt comes up and none takes port 3242 from an installed Koppel: the discovery tests and the

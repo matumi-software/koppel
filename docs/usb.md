@@ -96,5 +96,7 @@ sections describe the behaviour; this one says where it lives in Rust and what d
   in place of `usbip.exe` (Windows only), a stand-in USB/IP server for usbipd-win, a fake `/sys` tree
   (Linux only, as the code is, and the folders have `:` in their names), and a server and a client
   joined in memory. The cases that need Skakel (pinning, revoking, the certificate handover, a moved
-  server) run in `koppel-web/tests/roles.rs`, with the fake kernels on both ends. Nothing has run on
-  real hardware yet (#86, #87).
+  server) run in `koppel-web/tests/roles.rs`, with the fake kernels on both ends. On real hardware with 0.2.0, only a Debian 13 server in Docker
+  sharing to a native Windows 11 client has run (2026-11-09); a Linux client and a Windows server through
+  usbipd-win have not (#86, #87, tracked in #115). The hardware runs under "Tested" above are of the C#
+  0.1.x build.

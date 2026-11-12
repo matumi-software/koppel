@@ -5,7 +5,7 @@
 The certificate, the registered clients, the tokens, revoking and rotating are Skakel's; see "Tokens" and
 "Certificates" in Skakel's [`docs/protocol.md`](https://github.com/matumi-software/skakel/blob/main/docs/protocol.md). What Koppel does with them:
 
-- **Certificate:** Skakel makes a self-signed certificate on first start, valid for ten years. Every HTTPS port presents it, UI included, the current one at each handshake. Its SHA-256 fingerprint shows in the server's Clients section.
+- **Certificate:** Koppel makes a self-signed certificate on first start (`koppel-web`, with rcgen, as Skakel makes its own), valid for ten years. Every HTTPS port presents it, UI included, the current one at each handshake. Its SHA-256 fingerprint shows in the server's Clients section.
 - **Clients:** the server admin adds a client by name and gets a client ID and secret. Skakel takes control and format characters out of the name; a name with nothing left gets 400. Koppel sets Skakel's `KeepClientSecrets`, so the secret is kept inside the encrypted `secrets.json` and the admin can copy it again later from the client's row.
 - **Revoking and rotating:** both block the client at once, everywhere: its tokens, its hub connections and its USB streams. Skakel tells the client why, and Koppel's client shows that it has to pair again.
 - **Tokens:** OAuth 2.0 client credentials from Skakel, 30 minutes, over HTTPS only. Koppel's `/api/remote/*` takes them. A token names the fixed issuer `https://skakel.invalid/`, so it works at any address or name of the server.

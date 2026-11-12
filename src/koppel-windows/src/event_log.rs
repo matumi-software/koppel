@@ -24,11 +24,15 @@ use windows::core::{HSTRING, PCWSTR};
 
 use crate::SERVICE_NAME;
 
+/// The module the service logs from; its information lines go to the event log too. A literal, so a
+/// moved module fails the test below instead of quietly changing the filter.
+const SERVICE_TARGET: &str = "koppel_windows::service";
+
 /// What goes to the event log: warnings and errors, and the service's own information.
 pub fn filter() -> Targets {
     Targets::new()
         .with_default(Level::WARN)
-        .with_target(module_path!().replace("event_log", "service"), Level::INFO)
+        .with_target(SERVICE_TARGET, Level::INFO)
 }
 
 /// The layer, filtered as [`filter`] says, or `None` when the event log cannot be opened.
@@ -126,6 +130,7 @@ mod tests {
 
     #[test]
     fn the_service_logs_information_and_the_rest_only_warnings() {
+        assert_eq!(SERVICE_TARGET, crate::service::TARGET);
         let filter = filter();
         assert!(filter.would_enable("koppel_windows::service", &Level::INFO));
         assert!(!filter.would_enable("koppel_windows::service", &Level::DEBUG));

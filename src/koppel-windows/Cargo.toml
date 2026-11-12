@@ -14,14 +14,17 @@ repository.workspace = true
 name = "koppel-desktop"
 path = "src/main.rs"
 
-# Everything is Windows only. Elsewhere the library is empty and the program does nothing.
-[target.'cfg(windows)'.dependencies]
+# What `wire` needs builds everywhere, so its tests run on Linux.
+[dependencies]
 koppel-web.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# The rest is Windows only. Elsewhere the library holds only `wire` and the program does nothing.
+[target.'cfg(windows)'.dependencies]
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 windows-service.workspace = true
 winreg.workspace = true
 windows = { workspace = true, features = [

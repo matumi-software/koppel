@@ -10,25 +10,36 @@
 //! - [`opener`]: Koppel in the Start menu (`KoppelDesktop.exe --open`), which starts the service
 //!   when it is stopped and opens the UI.
 //!
-//! Everything here is Windows only; on other systems the crate is empty.
+//! Everything here is Windows only except [`wire`], which is plain data, so its tests run on Linux
+//! too; on other systems the rest of the crate is empty.
 
-#![cfg(windows)]
-
-pub mod event_log;
-mod health;
-pub mod launcher;
-pub mod opener;
-pub mod service;
-mod shell;
-pub mod tray;
-pub mod ui_url;
 pub mod wire;
 
+#[cfg(windows)]
+pub mod event_log;
+#[cfg(windows)]
+mod health;
+#[cfg(windows)]
+pub mod launcher;
+#[cfg(windows)]
+pub mod opener;
+#[cfg(windows)]
+pub mod service;
+#[cfg(windows)]
+mod shell;
+#[cfg(windows)]
+pub mod tray;
+#[cfg(windows)]
+pub mod ui_url;
+
 /// The Windows service's name, which the installer registers.
+#[cfg(windows)]
 pub const SERVICE_NAME: &str = "Koppel";
 
 /// The user-defined service control that shuts Koppel down. They run from 128 to 255.
+#[cfg(windows)]
 pub const SHUT_DOWN_CONTROL: u32 = 200;
 
 /// The user-defined service control that restarts Koppel.
+#[cfg(windows)]
 pub const RESTART_CONTROL: u32 = 201;

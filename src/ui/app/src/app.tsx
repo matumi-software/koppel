@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { AppShell, NavGroup, NavItem, StatusCard } from '@koppel/react-ui';
+import { AppShell, LinkDot, NavGroup, NavItem, Note, StatusCard, useAnnounce } from '@koppel/react-ui';
 import { ClientDevicesPage } from '@/devices/client-devices';
 import { ServerDevicesPage } from '@/devices/server-devices';
 import { hostOf, useClientDevices, useServerDevices } from '@/devices/use-devices';
@@ -14,7 +14,9 @@ import { SetupPage } from '@/setup/setup-page';
 import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
 import { usePending } from '@/pending/pending-context';
 import { setupKey } from '@/pending/domains';
-import { FrameContext, goTo, pageTitles, usePage, type Page } from '@/shell/frame-context';
+import { FrameContext, pageTitles, usePage, type Page } from '@/shell/frame-context';
+import { reasonOf } from '@/errors';
+import { formatVersion, serverLine } from '@/client/server-link';
 import { useActivity } from '@/activity/activity-context';
 import { useKoppelVersion, useMachineName } from '@/shared/use-machine-name';
 import { clientsOptions, connectionOptions, settingsOptions } from '@/queries';
@@ -28,6 +30,7 @@ export function App() {
   const [isMenuOpen, setMenuOpen] = useState(false);
   const [signOutFailure, setSignOutFailure] = useState<string>();
   const [asideSlot, setAsideSlot] = useState<HTMLDivElement | null>(null);
+  const announce = useAnnounce();
   const locked = link !== 'live';
 
   const settings = useQuery(settingsOptions());
@@ -55,39 +58,35 @@ export function App() {
     (server.data?.devices ?? []).filter((d) => d.fault).length + (client.data?.devices ?? []).filter((e) => e.fault).length;
   const needs = pendingCount + faultCount;
 
-  const open = (next: Page) => {
-    goTo(next);
-    setMenuOpen(false);
-  };
+  const closeMenu = () => setMenuOpen(false);
+  const item = (page: Page) => ({ href: `#${page}`, isCurrent: shown === page, onPress: closeMenu });
 
   const nav = (
     <>
       <NavGroup>
-        <NavItem isCurrent={shown === 'overview'} count={needs || undefined} countTone="pending" onPress={() => open('overview')}>
+        <NavItem {...item('overview')} count={needs || undefined} countTone="pending">
           Overview
         </NavItem>
       </NavGroup>
       {isServer && (
         <NavGroup label={`Sharing from ${host}`}>
-          <NavItem isCurrent={shown === 'devices'} count={server.data?.devices.length} onPress={() => open('devices')}>
+          <NavItem {...item('devices')} count={server.data?.devices.length}>
             Devices
           </NavItem>
-          <NavItem isCurrent={shown === 'clients'} count={clients.data?.length} onPress={() => open('clients')}>
+          <NavItem {...item('clients')} count={clients.data?.length}>
             Clients
           </NavItem>
         </NavGroup>
       )}
       {isClient && (
         <NavGroup label="Attaching">
-          <NavItem isCurrent={shown === 'attach'} count={client.data?.devices.length} onPress={() => open('attach')}>
+          <NavItem {...item('attach')} count={client.data?.devices.length}>
             {remote ? `From ${remote}` : 'Devices'}
           </NavItem>
         </NavGroup>
       )}
       <NavGroup label="Settings">
-        <NavItem isCurrent={shown === 'configuration'} onPress={() => open('configuration')}>
-          Configuration
-        </NavItem>
+        <NavItem {...item('configuration')}>Configuration</NavItem>
       </NavGroup>
     </>
   );
@@ -96,27 +95,25 @@ export function App() {
     <StatusCard
       state={link}
       machineName={host}
-      version={version}
-      server={isClient && client.data ? { link: client.data.link, name: remote } : undefined}
+      version={formatVersion(version)}
+      detail={isClient && client.data ? serverLine(client.data.link, remote) : undefined}
       onRetry={retry}
       onSignOut={() => {
         setSignOutFailure(undefined);
-        signOut().catch((error: unknown) => setSignOutFailure(error instanceof Error ? error.message : 'the request failed.'));
+        signOut().catch((error: unknown) => {
+          const reason = reasonOf(error, 'the request failed.');
+          setSignOutFailure(reason);
+          announce(`Signing out failed: ${reason}`);
+        });
       }}
       signOutError={signOutFailure}
     />
   );
 
-  const status = (
-    <span className="kp-row" role="status" aria-label={link === 'live' ? 'Live' : link === 'reconnecting' ? 'Reconnecting' : 'Disconnected'}>
-      <span className="kp-glyph" data-state={link === 'live' ? 'live' : link === 'reconnecting' ? 'pending' : 'fault'} aria-hidden="true" />
-    </span>
-  );
-
   const frame = useMemo(() => ({ locked, asideSlot }), [locked, asideSlot]);
 
   if (!settings.data) {
-    return <p className="kp-note" style={{ padding: 24 }}>{settings.isError ? 'Could not reach Koppel. Check that it is running, then reload.' : 'Loading…'}</p>;
+    return <Note isPadded>{settings.isError ? 'Could not reach Koppel. Check that it is running, then reload.' : 'Loading…'}</Note>;
   }
 
   if (!settings.data.setupComplete) {
@@ -129,11 +126,11 @@ export function App() {
       <AppShell
         nav={nav}
         navFoot={navFoot}
-        aside={<div ref={setAsideSlot} style={{ display: 'contents' }} />}
+        asideRef={setAsideSlot}
         defaultAsideWidth={storedAsideWidth()}
         onAsideWidthChange={storeAsideWidth}
         title={pageTitles[shown]}
-        status={status}
+        status={<LinkDot state={link} />}
         isMenuOpen={isMenuOpen}
         onMenuOpenChange={setMenuOpen}
       >

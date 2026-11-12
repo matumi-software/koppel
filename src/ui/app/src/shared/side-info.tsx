@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ActivityFeed, Facts } from '@koppel/react-ui';
+import { ActivityFeed, Facts, SectionHeading } from '@koppel/react-ui';
 import { toEntries, useActivity } from '@/activity/activity-context';
 import { systemInfoOptions } from '@/queries';
 import { useNow } from './use-now';
@@ -40,9 +40,7 @@ export function SideInfo() {
           ]}
         />
       )}
-      <h2 className="kp-type-heading" style={{ margin: 0 }}>
-        Activity
-      </h2>
+      <SectionHeading>Activity</SectionHeading>
       <ActivityFeed entries={toEntries(items)} empty="Changes show here when the server confirms or rejects them." />
     </>
   );

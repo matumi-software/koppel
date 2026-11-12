@@ -51,7 +51,7 @@ export function Switch({ label, labelHidden, confirmed, pendingTarget, failure, 
       </span>
       <span className={labelHidden ? 'kp-sr-only' : undefined}>{label}</span>
       {caption && (
-        <span className="kp-switch__note" id={noteId} role="status">
+        <span className="kp-switch__note" id={noteId}>
           {caption}
         </span>
       )}

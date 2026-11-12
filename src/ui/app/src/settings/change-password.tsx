@@ -1,7 +1,9 @@
+import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, Field, Panel } from '@koppel/react-ui';
+import { Button, Field, FieldGroup, Form, Panel, PanelNote, useAnnounce } from '@koppel/react-ui';
 import { changePassword } from '@/api/auth';
-import { minPasswordLength } from '@/auth/set-password-page';
+import { passwordHelp, passwordProblem, repeatProblem } from '@/auth/password-rules';
+import { reasonOf, useServerErrors } from '@/errors';
 
 /**
  * Changes the admin password. Other signed-in browsers are signed out; this one stays in.
@@ -14,78 +16,85 @@ export function ChangePassword({ locked }: { locked: boolean }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [again, setAgain] = useState('');
-  const [sending, setSending] = useState(false);
-  const [failure, setFailure] = useState<string>();
-  const [saved, setSaved] = useState(false);
+  const announce = useAnnounce();
 
-  const tooShort = next !== '' && next.length < minPasswordLength;
-  const mismatch = again !== '' && again !== next;
-  const ready = current !== '' && next.length >= minPasswordLength && again === next;
-
-  const save = async () => {
-    setSending(true);
-    setFailure(undefined);
-    setSaved(false);
-    try {
-      await changePassword(current, next);
+  const change = useMutation({
+    mutationFn: () => changePassword(current, next),
+    onSuccess: () => {
       setCurrent('');
       setNext('');
       setAgain('');
-      setSaved(true);
-    } catch (error) {
-      setFailure(error instanceof Error ? error.message : 'the server did not answer.');
-    } finally {
-      setSending(false);
-    }
-  };
+      announce('The password was changed. Other browsers are signed out.');
+    },
+    onError: (error) => announce(`The password was not changed. ${reasonOf(error, 'The server did not answer.')}`),
+  });
+  // The form has already checked the new password against the server's rules, so a refusal that
+  // gets through is the server not accepting the current one; one that still names the new password
+  // (the rules moved on) goes under that field.
+  const refused = change.error && (passwordProblem(next) ? 'next' : 'current');
+  const errors = useServerErrors(change.error, refused || undefined, 'the server did not answer.');
 
-  const note = sending ? 'Saving…' : failure ? `Not saved: ${failure}` : saved ? 'Saved. Other browsers are signed out.' : undefined;
+  const note = change.isPending
+    ? 'Saving…'
+    : change.isError
+      ? `Not saved: ${reasonOf(change.error, 'the server did not answer.')}`
+      : change.isSuccess
+        ? 'Saved. Other browsers are signed out.'
+        : undefined;
 
   return (
-    <Panel
-      title="Password"
-      meta={
-        <span className="kp-panel__note" data-state={sending ? 'pending' : failure ? 'fault' : undefined} role="status">
-          {note}
-        </span>
-      }
-    >
-      <form
-        className="kp-panel__body"
-        aria-label="Change password"
-        style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 420 }}
+    <Panel title="Password" meta={<PanelNote state={change.isPending ? 'pending' : change.isError ? 'fault' : undefined}>{note}</PanelNote>}>
+      <Form
+        label="Change password"
+        variant="panel"
+        isNarrow
+        validationErrors={errors}
         onSubmit={(event) => {
           event.preventDefault();
-          if (ready && !sending && !locked) void save();
+          if (!change.isPending && !locked) change.mutate();
         }}
       >
-        <Field label="Current password" type="password" autoComplete="current-password" value={current} onChange={setCurrent} isDisabled={locked || sending} />
-        <Field
-          label="New password"
-          type="password"
-          autoComplete="new-password"
-          value={next}
-          onChange={setNext}
-          isDisabled={locked || sending}
-          state={tooShort ? 'invalid' : undefined}
-          help={tooShort ? `Use at least ${minPasswordLength} characters.` : `At least ${minPasswordLength} characters.`}
-        />
-        <Field
-          label="Repeat the new password"
-          type="password"
-          autoComplete="new-password"
-          value={again}
-          onChange={setAgain}
-          isDisabled={locked || sending}
-          state={mismatch ? 'invalid' : undefined}
-          help={mismatch ? 'The two passwords differ.' : undefined}
-        />
+        <FieldGroup label="Passwords">
+          <Field
+            label="Current password"
+            name="current"
+            type="password"
+            autoComplete="current-password"
+            isRequired
+            value={current}
+            onChange={setCurrent}
+            isDisabled={locked || change.isPending}
+          />
+          <Field
+            label="New password"
+            name="next"
+            type="password"
+            autoComplete="new-password"
+            isRequired
+            value={next}
+            onChange={setNext}
+            isDisabled={locked || change.isPending}
+            validate={passwordProblem}
+            help={passwordHelp}
+          />
+          <Field
+            label="Repeat the new password"
+            name="again"
+            type="password"
+            autoComplete="new-password"
+            isRequired
+            value={again}
+            onChange={setAgain}
+            isDisabled={locked || change.isPending}
+            validate={(value) => repeatProblem(value, next)}
+          />
+        </FieldGroup>
         <div>
-          <Button variant="primary" type="submit" isSending={sending} isDisabled={locked || !ready}>
+          <Button variant="primary" type="submit" isSending={change.isPending} isDisabled={locked}>
             Change password
           </Button>
         </div>
-      </form>
+      </Form>
     </Panel>
   );
 }

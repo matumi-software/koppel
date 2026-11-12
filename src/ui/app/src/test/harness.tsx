@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
+import { AnnouncerProvider } from '@koppel/react-ui';
+import { render, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
 import { ActivityProvider } from '@/activity/activity-provider';
@@ -24,18 +25,23 @@ export const live = {
 export function renderApp(ui: ReactElement, queryClient = newQueryClient()) {
   const tree = (node: ReactElement) => (
     <QueryClientProvider client={queryClient}>
-      <AuthContext.Provider value={signedIn}>
-        <LiveProvider>
-          <ActivityProvider>
-            <PendingProvider>{node}</PendingProvider>
-          </ActivityProvider>
-        </LiveProvider>
-      </AuthContext.Provider>
+      <AnnouncerProvider>
+        <AuthContext.Provider value={signedIn}>
+          <LiveProvider>
+            <ActivityProvider>
+              <PendingProvider>{node}</PendingProvider>
+            </ActivityProvider>
+          </LiveProvider>
+        </AuthContext.Provider>
+      </AnnouncerProvider>
     </QueryClientProvider>
   );
   const result = render(tree(ui));
   return { ...result, live, queryClient, rerenderApp: (next: ReactElement) => result.rerender(tree(next)) };
 }
+
+/** What the app's one live region says now: what a screen reader was last told. */
+export const announced = () => screen.getByRole('status').textContent;
 
 export const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 export const accepted = () => new Response(null, { status: 202 });

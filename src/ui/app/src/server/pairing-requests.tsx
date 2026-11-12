@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, Field } from '@koppel/react-ui';
+import { Button, Caption, Card, Field, Note, Row, SectionHeading } from '@koppel/react-ui';
 import { pairingWindowMinutes, type PairingRequest, type PairingWindow } from '@/api/pairing';
 import { usePending } from '@/pending/pending-context';
 import { pairingRequestsOptions } from '@/queries';
@@ -34,56 +34,54 @@ function PairingWindowCard({ window, locked }: { window: PairingWindow; locked: 
   const failure = failures[pairingWindowKey];
   const until = untilText(window.until);
   return (
-    <section className="kp-card" aria-label="Pairing" style={{ gap: 8 }}>
-      <span className="kp-type-heading">Pairing</span>
+    <Card label="Pairing" gap="sm">
+      <SectionHeading>Pairing</SectionHeading>
       {window.alwaysOpen ? (
-        <span className="kp-field__help" role="status">
-          This server takes pairing requests at any time.
-        </span>
+        <Caption tone="faint">This server takes pairing requests at any time.</Caption>
       ) : window.open ? (
         <>
-          <span className="kp-field__help" role="status">
+          <Caption tone="faint">
             {until ? `Pairing is open until ${until}. ` : 'Pairing is open. '}A client that asks now shows a code to type below.
-          </span>
-          <div className="kp-row">
+          </Caption>
+          <Row>
             <Button variant="secondary" isSending={sending === 'close'} isDisabled={locked || sending !== undefined} onPress={() => request({ type: 'close' })}>
               {sending === 'close' ? 'Closing' : 'Close pairing'}
             </Button>
             <Button variant="secondary" isSending={sending === 'open'} isDisabled={locked || sending !== undefined} onPress={() => request({ type: 'open' })}>
               {sending === 'open' ? 'Extending' : `Keep open for ${pairingWindowMinutes} more minutes`}
             </Button>
-          </div>
+          </Row>
         </>
       ) : (
         <>
-          <span className="kp-field__help" role="status">
+          <Caption tone="faint">
             This server takes no pairing requests until you allow it. Allow pairing while you are at the machine that needs to pair, then start pairing there.
-          </span>
-          <div className="kp-row">
+          </Caption>
+          <Row>
             <Button variant="primary" isSending={sending === 'open'} isDisabled={locked || sending !== undefined} onPress={() => request({ type: 'open' })}>
               {sending === 'open' ? 'Allowing' : `Allow pairing for ${pairingWindowMinutes} minutes`}
             </Button>
-          </div>
+          </Row>
         </>
       )}
-      {failure && <p className="kp-error">Not done: {failure}</p>}
-    </section>
+      {failure && <Note tone="error">Not done: {failure}</Note>}
+    </Card>
   );
 }
 
 function PairingRequestList({ list, exhausted, locked }: { list: PairingRequest[]; exhausted: boolean; locked: boolean }) {
   return (
-    <section className="kp-card" aria-label="Waiting to pair" style={{ gap: 12 }}>
+    <Card label="Waiting to pair" gap="md">
       {exhausted && (
-        <p className="app-error" role="alert">
+        <Note tone="error">
           This server has had too many pairing requests and is turning new ones away. It takes them again in a few minutes. If you did not expect this, something on your network is sending them.
-        </p>
+        </Note>
       )}
-      {list.length > 0 && <span className="kp-type-heading">{list.some((r) => r.state === 'waiting') ? 'Waiting to pair' : 'Pairing refused'}</span>}
+      {list.length > 0 && <SectionHeading>{list.some((r) => r.state === 'waiting') ? 'Waiting to pair' : 'Pairing refused'}</SectionHeading>}
       {list.map((request) => (
         <PairingRequestRow key={request.id} request={request} locked={locked} />
       ))}
-    </section>
+    </Card>
   );
 }
 
@@ -91,9 +89,9 @@ function PairingRequestRow({ request, locked }: { request: PairingRequest; locke
   if (request.state === 'denied') {
     // Shown for a moment, so the request does not just vanish: the server dropped it after wrong codes.
     return (
-      <p className="app-error" role="status">
+      <Note tone="error">
         Refused {request.clientName} from {request.from}: {request.message ?? 'the request was refused.'}
-      </p>
+      </Note>
     );
   }
 
@@ -119,14 +117,14 @@ function WaitingRow({ request, locked }: { request: PairingRequest; locked: bool
       state={pending ? 'pending' : failure ? 'invalid' : undefined}
       help={failure ? `Not done: ${failure}` : `Type the eight digits ${request.clientName} shows. The request stays open until ${until}.`}
       action={
-        <span className="app-inline">
+        <Row as="span">
           <Button variant="primary" isSending={pending?.type === 'approve'} isDisabled={locked || pending !== undefined || digits.length !== 8} onPress={() => send({ type: 'approve', id: request.id, name: request.clientName, code: digits })}>
             Approve
           </Button>
           <Button variant="secondary" isSending={pending?.type === 'deny'} isDisabled={locked || pending !== undefined} onPress={() => send({ type: 'deny', id: request.id, name: request.clientName })}>
             Refuse
           </Button>
-        </span>
+        </Row>
       }
     />
   );

@@ -45,3 +45,13 @@ export function ItemList<T>({ label, items, getKey, getText, selectedKey, onSele
     </GridList>
   );
 }
+
+/** The text of a row: a name, then lines under it. */
+export function ItemMain({ children }: { children: ReactNode }) {
+  return <div className="kp-list__main">{children}</div>;
+}
+
+/** What an ItemList shows when it has no rows. */
+export function EmptyNote({ children }: { children: ReactNode }) {
+  return <p className="kp-mini__empty">{children}</p>;
+}

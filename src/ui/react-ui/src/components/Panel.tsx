@@ -24,6 +24,25 @@ export function Panel({ title, meta, tone, footer, children }: PanelProps) {
   );
 }
 
+/** The padded body of a panel whose content is not a list, such as a form or role cards. */
+export function PanelBody({ children }: { children: ReactNode }) {
+  return <div className="kp-panel__body">{children}</div>;
+}
+
+/** Panels side by side, stacking to one column on a phone. */
+export function PanelGrid({ children }: { children: ReactNode }) {
+  return <div className="kp-panels">{children}</div>;
+}
+
+/** What a panel's setting is doing, in its header: Saving, Not saved and why. Plain text, not announced. */
+export function PanelNote({ state, children }: { state?: 'pending' | 'fault'; children: ReactNode }) {
+  return (
+    <span className="kp-panel__note" data-state={state}>
+      {children}
+    </span>
+  );
+}
+
 export interface MiniListItem {
   id: string;
   name: ReactNode;

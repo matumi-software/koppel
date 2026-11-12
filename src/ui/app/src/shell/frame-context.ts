@@ -30,6 +30,14 @@ export function usePage(fallback: Page = 'overview'): Page {
   return isPage(value) ? value : fallback;
 }
 
+let navigated = false;
+window.addEventListener('hashchange', () => {
+  navigated = true;
+});
+
+/** True once the person has gone to another page, as opposed to the page the visit opened on. */
+export const hasNavigated = () => navigated;
+
 /** Opens a page. */
 export const goTo = (page: Page) => {
   window.location.hash = page;

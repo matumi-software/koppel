@@ -27,7 +27,7 @@
   to { background-position: 11.31px 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .kp-stripe, .kp-switch[data-state^="pending"] .kp-switch__track, .kp-link[data-state="live"] .kp-link__dot,
+  .kp-stripe, .kp-switch[data-state^="pending"] .kp-switch__track,
   .kp-status-card[data-state="live"] .kp-status-card__state .kp-glyph { animation: none; }
 }
 
@@ -157,6 +157,7 @@
   min-width: 0;
 }
 .kp-device[data-selected="true"] { border-color: var(--accent); background: var(--accent-subtle); }
+.kp-device__title { min-width: 0; }
 .kp-device__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
 .kp-device__name { font: 600 16px/24px var(--font-sans); color: var(--text-primary); margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .kp-device__ids { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -180,25 +181,6 @@
   flex-wrap: wrap;
 }
 
-/* ---------- Live link banner ---------- */
-.kp-link {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  font: 500 13px/18px var(--font-sans);
-}
-.kp-link__dot { width: 8px; height: 8px; border-radius: var(--radius-pill); flex: none; }
-.kp-link__detail { font-weight: 400; color: var(--text-secondary); }
-.kp-link[data-state="live"] { background: transparent; color: var(--text-secondary); padding-inline: 0; }
-.kp-link[data-state="live"] .kp-link__dot { background: var(--shared); animation: kp-breathe 2.4s ease-in-out infinite; }
-.kp-link[data-state="reconnecting"] { background: var(--pending-subtle); color: var(--pending-text); }
-.kp-link[data-state="reconnecting"] .kp-link__dot { background-image: repeating-linear-gradient(-45deg, var(--pending) 0 2px, transparent 2px 4px); }
-.kp-link[data-state="reconnecting"] .kp-link__detail { color: var(--pending-text); }
-.kp-link[data-state="down"] { background: var(--fault-subtle); color: var(--fault-text); }
-.kp-link[data-state="down"] .kp-link__dot { background: var(--fault); border-radius: 1px; }
-.kp-link[data-state="down"] .kp-link__detail { color: var(--fault-text); }
 @keyframes kp-breathe { 50% { opacity: 0.35; } }
 
 /* ---------- Status card ---------- */
@@ -277,37 +259,6 @@
 .kp-field[data-state="pending"] .kp-field__help { color: var(--pending-text); }
 .kp-field[data-state="invalid"] .kp-field__help { color: var(--fault-text); }
 
-/* ---------- Segmented control ---------- */
-.kp-segment {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border-radius: var(--radius-md);
-  background: var(--bg-inset);
-  border: 1px solid var(--border-default);
-}
-.kp-segment__item {
-  min-height: 28px;
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: 500 13px/18px var(--font-sans);
-  cursor: pointer;
-}
-.kp-segment__item:hover { color: var(--text-primary); }
-.kp-segment__item[aria-checked="true"], .kp-segment__item[data-selected] { background: var(--bg-surface); color: var(--accent-text); box-shadow: inset 0 0 0 1px var(--accent); }
-.kp-segment__item:focus-visible, .kp-segment__item[data-focus-visible] { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-/* A segment that changes a stored setting waits for the server like a switch does. */
-.kp-segment[data-state="pending"] .kp-segment__item[aria-checked="true"],
-.kp-segment[data-state="pending"] .kp-segment__item[data-selected] {
-  color: var(--pending-text);
-  box-shadow: inset 0 0 0 1px var(--pending);
-  background-image: repeating-linear-gradient(-45deg, var(--pending-subtle) 0 4px, var(--bg-surface) 4px 8px);
-}
-.kp-segment[data-disabled]:not([data-state="pending"]) { opacity: 0.5; }
-
 /* ================= App shell ================= */
 /* Sidebar for navigation, main column, and an aside for activity or details.
    At phone width the sidebar becomes a top bar with a menu, and the aside folds below the page. */
@@ -335,6 +286,11 @@
 .kp-shell__resize:focus-visible::after { background: var(--focus-ring); }
 .kp-shell[data-resizing="true"] { cursor: col-resize; user-select: none; }
 .kp-shell__top { display: none; }
+/* Where the open page puts the side panel's content: the aside body itself. */
+.kp-shell__main:focus { outline: none; }
+/* The first thing the keyboard reaches: jumps past the navigation to the page. */
+.kp-skip { position: absolute; left: 8px; top: -48px; z-index: 30; padding: 8px 12px; border-radius: var(--radius-md); background: var(--accent); color: var(--on-accent); font: 500 13px/18px var(--font-sans); text-decoration: none; }
+.kp-skip:focus-visible { top: 8px; outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .kp-brand { display: flex; align-items: center; gap: 8px; padding: 0 10px; font: 600 17px/24px var(--font-sans); white-space: nowrap; }
 /* Holds the status card at the bottom of the sidebar and the phone menu. The card draws itself. */
 .kp-shell__foot { margin-top: auto; display: grid; min-width: 0; }
@@ -548,3 +504,44 @@
 /* Pairing code: the six digits a client shows and a person types on the server, as two groups of three. */
 .kp-paircode { display: grid; gap: var(--space-2); justify-items: start; }
 .kp-paircode__digits { display: flex; gap: var(--space-3); font: 600 32px/40px var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0.08em; color: var(--text-primary); background: var(--bg-inset); border: 1px solid var(--border-default); border-radius: var(--radius-md); padding: var(--space-2) var(--space-4); }
+
+/* ================= Layout parts ================= */
+/* Containers pages are built from, so no page sets its own flex, gap or padding. */
+.kp-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.kp-stack[data-gap="sm"] { gap: 8px; }
+.kp-stack[data-gap="md"] { gap: 12px; }
+.kp-stack[data-gap="lg"] { gap: 24px; }
+.kp-stack[data-align="start"] { align-items: flex-start; }
+.kp-row[data-gap="xs"] { gap: 4px; }
+.kp-row[data-justify="end"] { justify-content: flex-end; }
+.kp-row[data-justify="between"] { justify-content: space-between; }
+.kp-card[data-gap="sm"] { gap: 8px; }
+.kp-card[data-gap="md"] { gap: 12px; }
+.kp-card[data-flush] { padding: 0; gap: 0; }
+.kp-note[data-padded] { padding: 24px; }
+.kp-heading { margin: 0; }
+.kp-type-caption[data-tone="faint"] { color: var(--text-tertiary); }
+.kp-type-caption[data-tone="pending"] { color: var(--pending-text); }
+.kp-type-caption[data-tone="fault"] { color: var(--fault-text); }
+.kp-kv > div { display: contents; }
+.kp-form { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.kp-form[data-width="narrow"] { max-width: 420px; }
+.kp-fieldgroup { display: flex; flex-direction: column; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.kp-fieldgroup > legend { padding: 0; font: 500 13px/18px var(--font-sans); color: var(--text-primary); }
+
+/* Detail drawer parts: the title block, a section with its rule, and who holds the device. */
+.kp-drawer__title { display: grid; gap: 6px; min-width: 0; justify-items: start; }
+.kp-drawer__section { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border-default); }
+.kp-drawer__section > h3 { margin: 0; font: 600 14px/20px var(--font-sans); }
+.kp-holder__text { display: grid; gap: 2px; min-width: 0; }
+
+/* First run and sign-in: a plain page, not the app shell. */
+.kp-firstrun { display: flex; flex-direction: column; min-height: 100vh; background: var(--bg-page); color: var(--text-primary); }
+.kp-firstrun__bar { display: flex; align-items: center; gap: 8px; padding: 14px 24px; border-bottom: 1px solid var(--border-default); background: var(--bg-surface); font: 600 17px/24px var(--font-sans); }
+.kp-firstrun__main { display: flex; justify-content: center; padding: 40px 16px; }
+.kp-firstrun__column { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.kp-firstrun[data-width="wide"] .kp-firstrun__column { max-width: 920px; gap: 28px; }
+.kp-firstrun, .kp-firstrun *, .kp-firstrun *::before, .kp-firstrun *::after { box-sizing: border-box; }
+
+/* The one live region: what the app announces to a screen reader, kept out of sight. */
+.kp-announcer { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

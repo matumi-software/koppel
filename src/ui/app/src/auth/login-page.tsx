@@ -1,49 +1,35 @@
-import { useState } from 'react';
-import { Button, Field } from '@koppel/react-ui';
+import { useMutation } from '@tanstack/react-query';
+import { Button, Field, FirstRunShell, Form, Note, PageHead, Row } from '@koppel/react-ui';
 import { login } from '@/api/auth';
-import { AuthFrame } from './auth-frame';
+import { useServerErrors } from '@/errors';
 
 /** Sign in with the admin password. The server's answer is shown as it comes, including how long to wait after too many tries. */
-export function LoginPage({ machineName, onSignedIn }: { machineName: string; onSignedIn: () => void }) {
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string>();
-  const [sending, setSending] = useState(false);
-
-  const submit = async () => {
-    setSending(true);
-    setError(undefined);
-    try {
-      await login(password);
-      onSignedIn();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not sign in.');
-      setSending(false);
-    }
-  };
+export default function LoginPage({ machineName, onSignedIn }: { machineName: string; onSignedIn: () => void }) {
+  const signIn = useMutation({ mutationFn: login, onSuccess: onSignedIn });
+  const errors = useServerErrors(signIn.error, 'password', 'Could not sign in.');
 
   return (
-    <AuthFrame>
-      <div className="kp-page-head">
-        <h1>Sign in to {machineName}</h1>
-        <p>Enter the admin password for this machine.</p>
-      </div>
-      <form
-        className="kp-card"
-        aria-label="Sign in"
-        style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+    <FirstRunShell title="Sign in">
+      <PageHead title={`Sign in to ${machineName}`} lede="Enter the admin password for this machine." />
+      <Form
+        label="Sign in"
+        variant="card"
+        validationErrors={errors}
         onSubmit={(event) => {
           event.preventDefault();
-          if (password && !sending) void submit();
+          if (!signIn.isPending) signIn.mutate(String(new FormData(event.currentTarget).get('password')));
         }}
       >
-        <Field label="Password" type="password" autoComplete="current-password" autoFocus value={password} onChange={setPassword} state={error ? 'invalid' : undefined} help={error} />
-        <div className="kp-row" style={{ justifyContent: 'flex-end' }}>
-          <Button variant="primary" type="submit" isSending={sending} isDisabled={!password}>
-            {sending ? 'Signing in' : 'Sign in'}
+        <Field label="Password" name="password" type="password" autoComplete="current-password" autoFocus isRequired />
+        <Row justify="end">
+          <Button variant="primary" type="submit" isSending={signIn.isPending || signIn.isSuccess}>
+            {signIn.isPending || signIn.isSuccess ? 'Signing in' : 'Sign in'}
           </Button>
-        </div>
-      </form>
-      <p className="kp-note">Forgot it? Run <code>Koppel --reset-password</code> on this machine to clear it, then set a new one here.</p>
-    </AuthFrame>
+        </Row>
+      </Form>
+      <Note>
+        Forgot it? Run <code>Koppel --reset-password</code> on this machine to clear it, then set a new one here.
+      </Note>
+    </FirstRunShell>
   );
 }

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, KoppelMark, RoleCards, SetupChecks, Steps } from '@koppel/react-ui';
+import { Button, Caption, Card, FirstRunShell, Note, PageHead, RoleCards, Row, SetupChecks, Steps } from '@koppel/react-ui';
 import type { KoppelRole } from '@/api/settings';
 import { roleOptions } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
@@ -24,45 +24,34 @@ export function SetupPage({ locked }: { locked: boolean }) {
   const blocking = (checks.data ?? []).filter((c) => needed.includes(c.id) && !c.ok);
 
   return (
-    <div className="kp-shell" style={{ flexDirection: 'column' }}>
-      <header className="kp-row" style={{ padding: '14px 24px', borderBottom: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
-        <KoppelMark size={26} />
-        <span className="kp-type-heading">koppel</span>
-      </header>
-      <main style={{ display: 'flex', justifyContent: 'center', padding: '40px 16px' }}>
-        <div style={{ width: '100%', maxWidth: 920, display: 'flex', flexDirection: 'column', gap: 28 }}>
-          <Steps steps={['Admin password', 'What this machine does', chosen === 'client' ? 'Server connection' : 'Clients']} current={1} />
-          <div className="kp-page-head">
-            <h1>Set up {host}</h1>
-            <p>Pick what this machine does. You can change it later under Configuration.</p>
-          </div>
+    <FirstRunShell title="Set up" width="wide">
+      <Steps steps={['Admin password', 'What this machine does', chosen === 'client' ? 'Server connection' : 'Clients']} current={1} />
+      <PageHead title={`Set up ${host}`} lede="Pick what this machine does. You can change it later under Configuration." />
 
-          <RoleCards label="Role" options={roleOptions} value={chosen} isDisabled={locked || pending} onChange={setRole} />
+      <RoleCards label="Role" options={roleOptions} value={chosen} isDisabled={locked || pending} onChange={setRole} />
 
-          <section className="kp-card" aria-label="Checking this machine">
-            <h2>Checking this machine</h2>
-            {checks.data ? (
-              <SetupChecks
-                checks={checks.data
-                  .filter((c) => needed.includes(c.id))
-                  .map((c) => ({ id: c.id, ok: c.ok, title: c.title, detail: c.detail }))}
-              />
-            ) : (
-              <p className="kp-note">Checking…</p>
-            )}
-          </section>
+      <Card label="Checking this machine">
+        <h2>Checking this machine</h2>
+        {checks.data ? (
+          <SetupChecks
+            checks={checks.data
+              .filter((c) => needed.includes(c.id))
+              .map((c) => ({ id: c.id, ok: c.ok, title: c.title, detail: c.detail }))}
+          />
+        ) : (
+          <Note>Checking…</Note>
+        )}
+      </Card>
 
-          {failure && <p className="kp-error" role="status">Not saved: {failure}</p>}
-          <div className="kp-row" style={{ justifyContent: 'space-between' }}>
-            <span className="kp-type-caption" style={{ color: blocking.length ? 'var(--fault-text)' : 'var(--text-tertiary)' }}>
-              {blocking.length ? 'Koppel can save this role, but it cannot use USB until the problems above are fixed.' : 'Everything this role needs is here.'}
-            </span>
-            <Button variant="primary" isSending={pending} isDisabled={locked} onPress={() => requestSetup(chosen)}>
-              {pending ? 'Saving' : 'Continue'}
-            </Button>
-          </div>
-        </div>
-      </main>
-    </div>
+      {failure && <Note tone="error">Not saved: {failure}</Note>}
+      <Row justify="between">
+        <Caption tone={blocking.length ? 'fault' : 'faint'}>
+          {blocking.length ? 'Koppel can save this role, but it cannot use USB until the problems above are fixed.' : 'Everything this role needs is here.'}
+        </Caption>
+        <Button variant="primary" isSending={pending} isDisabled={locked} onPress={() => requestSetup(chosen)}>
+          {pending ? 'Saving' : 'Continue'}
+        </Button>
+      </Row>
+    </FirstRunShell>
   );
 }

@@ -3,7 +3,7 @@
 ## Known limits
 
 - The Linux container is privileged and runs as root. Narrowing it needs a test on a real kernel. The Windows composes also run as root, because the volume belongs to it.
-- The installer is not code signed, and there is no CI pipeline or image signing.
+- The installer is not code signed. The release workflow signs the image and `SHA256SUMS` with cosign (keyless) once the Docker Hub secrets are set and a release is cut with it; releases before that are unsigned. CI (`.github/workflows/ci.yml`) runs on every pull request.
 - The rollback of a failed fresh install was not exercised (see ["Tested"](usb.md#tested)).
 - Printers are untried, and the arm64 image and `.deb` are untested on a Raspberry Pi.
 - Webcams do not stream from a Linux server to a Windows client (#22); a Windows server through usbipd-win to a Linux client does.

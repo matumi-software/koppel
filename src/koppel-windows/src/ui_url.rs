@@ -4,15 +4,11 @@
 
 use std::net::IpAddr;
 
-use windows::Win32::Foundation::ERROR_SUCCESS;
-use windows::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
-    RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW,
-};
-use windows::core::w;
+use winreg::RegKey;
+use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_SET_VALUE};
 
-const KEY: windows::core::PCWSTR = w!(r"SOFTWARE\Matumi\Koppel");
-const VALUE: windows::core::PCWSTR = w!("UiUrl");
+const KEY: &str = r"SOFTWARE\Matumi\Koppel";
+const VALUE: &str = "UiUrl";
 
 /// What the Start menu entry opens when the service has not said.
 pub const DEFAULT: &str = "https://localhost:5240/";
@@ -29,72 +25,36 @@ pub fn for_listener(address: Option<IpAddr>, port: u16) -> String {
 /// Writes the address for the Start menu entry. The service runs as LocalSystem, which may; if it
 /// cannot, the entry opens [`DEFAULT`], which is right unless the UI port was moved.
 pub fn publish(url: &str) {
-    let mut key = HKEY::default();
-    // SAFETY: the out parameter is ours; the key is closed below.
-    let created = unsafe {
-        RegCreateKeyExW(
-            HKEY_LOCAL_MACHINE,
-            KEY,
-            None,
-            None,
-            REG_OPTION_NON_VOLATILE,
-            KEY_SET_VALUE,
-            None,
-            &mut key,
-            None,
-        )
-    };
-    if created != ERROR_SUCCESS {
+    let written = RegKey::predef(HKEY_LOCAL_MACHINE)
+        .create_subkey_with_flags(KEY, KEY_SET_VALUE)
+        .and_then(|(key, _)| key.set_value(VALUE, &url));
+    if let Err(e) = written {
         tracing::warn!(
-            "Could not write the UI's address for the Start menu entry ({created:?}); it opens {DEFAULT}"
-        );
-        return;
-    }
-    let wide: Vec<u8> = url
-        .encode_utf16()
-        .chain(Some(0))
-        .flat_map(u16::to_le_bytes)
-        .collect();
-    // SAFETY: the key is open and the data is a terminated UTF-16 string.
-    let set = unsafe { RegSetValueExW(key, VALUE, None, REG_SZ, Some(&wide)) };
-    if set != ERROR_SUCCESS {
-        tracing::warn!(
-            "Could not write the UI's address for the Start menu entry ({set:?}); it opens {DEFAULT}"
+            "Could not write the UI's address for the Start menu entry ({e}); it opens {DEFAULT}"
         );
     }
-    // SAFETY: opened above, closed once.
-    let _ = unsafe { RegCloseKey(key) };
 }
 
 /// The address the service published, when it is an HTTPS address, or [`DEFAULT`].
 pub fn read() -> String {
-    let mut buffer = [0u16; 512];
-    let mut size = size_of_val(&buffer) as u32;
-    // SAFETY: the buffer and its size in bytes are ours.
-    let read = unsafe {
-        RegGetValueW(
-            HKEY_LOCAL_MACHINE,
-            KEY,
-            VALUE,
-            RRF_RT_REG_SZ,
-            None,
-            Some(buffer.as_mut_ptr().cast()),
-            Some(&mut size),
-        )
-    };
-    if read != ERROR_SUCCESS {
-        return DEFAULT.to_owned();
-    }
-    let length = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
-    let value = String::from_utf16_lossy(&buffer[..length]);
-    checked(&value).unwrap_or_else(|| DEFAULT.to_owned())
+    RegKey::predef(HKEY_LOCAL_MACHINE)
+        .open_subkey_with_flags(KEY, KEY_READ)
+        .and_then(|key| key.get_value::<String, _>(VALUE))
+        .ok()
+        .and_then(|value| checked(&value))
+        .unwrap_or_else(|| DEFAULT.to_owned())
 }
 
 /// `value` when it is an absolute HTTPS address with a host, ending in a slash.
 pub fn checked(value: &str) -> Option<String> {
     let rest = value.strip_prefix("https://")?;
     let host = rest.split('/').next()?;
-    if host.is_empty() || value.chars().any(|c| c.is_whitespace() || c.is_control()) {
+    // A quote would end the quoted argument the launcher builds.
+    if host.is_empty()
+        || value
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '"')
+    {
         return None;
     }
     Some(if value.ends_with('/') {
@@ -138,6 +98,7 @@ mod tests {
         assert_eq!(checked("http://localhost:5240/"), None);
         assert_eq!(checked("https:///"), None);
         assert_eq!(checked("https://a b/"), None);
+        assert_eq!(checked("https://a\"b/"), None);
         assert_eq!(checked("file:///c:/x"), None);
     }
 }

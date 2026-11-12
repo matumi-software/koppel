@@ -132,7 +132,7 @@ docker compose run --rm koppel reset-password
 service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, and the Visual C++
 runtime, which usbip-win2's tools need (Koppel's own programs do not). From 0.2.0 it installs the Rust build: `Koppel.exe`, the service, and
 `KoppelDesktop.exe`, the tray icon and the Start menu entry, about 11 MB in all. The service logs warnings, errors, and its
-starts and stops with their reason, to the Application event log under the source Koppel. It adds an inbound firewall rule for `Koppel.exe` (TCP and UDP, any port, so it
+starts and stops with their reason, to the Application event log under the source Koppel, and everything at Info and above to `%ProgramData%\Koppel\logs\koppel.log` (5 MiB, five files). `Koppel.exe diagnostics`, run elevated, writes a report to attach to a support request. It adds an inbound firewall rule for `Koppel.exe` (TCP and UDP, any port, so it
 follows a changed `Ports` setting) on Private and Domain networks, never Public. It is removed on uninstall and kept on repair and
 upgrade. The UI is at https://localhost:5240 and answers on
 this machine only: the installer sets `KOPPEL_UI_ALLOW_FROM=local` for the service. A native Windows server

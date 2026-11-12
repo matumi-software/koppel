@@ -1,15 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { getClientDevices, getServerDevices } from '@/api/usb';
-import { clientDevicesKey, serverDevicesKey } from '@/query-keys';
+import { clientDevicesOptions, serverDevicesOptions } from '@/queries';
 
 /** This machine's devices (server role). DevicesChanged keeps them current, see live/push-table.ts. */
 export function useServerDevices(enabled = true) {
-  return useQuery({ queryKey: serverDevicesKey, queryFn: getServerDevices, enabled });
+  return useQuery({ ...serverDevicesOptions(), enabled });
 }
 
 /** The server's shared devices and what is attached here (client role). ClientDevicesChanged keeps them current. */
 export function useClientDevices(enabled = true) {
-  return useQuery({ queryKey: clientDevicesKey, queryFn: getClientDevices, enabled });
+  return useQuery({ ...clientDevicesOptions(), enabled });
 }
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });

@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, Field } from '@koppel/react-ui';
-import { approvePairing, closePairingWindow, denyPairing, getPairingRequests, openPairingWindow, pairingWindowMinutes, type PairingRequest, type PairingWindow } from '@/api/pairing';
+import { pairingWindowMinutes, type PairingRequest, type PairingWindow } from '@/api/pairing';
 import { usePending } from '@/pending/pending-context';
-import { pairingRequestsKey } from '@/query-keys';
+import { pairingRequestsOptions } from '@/queries';
+import { pairingWindowKey } from '@/pending/domains';
 
 /**
  * Server role: the pairing window and the clients asking to pair. A server takes pairing requests only
@@ -13,7 +14,7 @@ import { pairingRequestsKey } from '@/query-keys';
  * is refused at once.
  */
 export function PairingRequests({ locked }: { locked: boolean }) {
-  const requests = useQuery({ queryKey: pairingRequestsKey, queryFn: getPairingRequests });
+  const requests = useQuery(pairingRequestsOptions());
 
   const list = requests.data?.requests ?? [];
   const exhausted = requests.data?.budgetExhausted ?? false;
@@ -29,8 +30,8 @@ const untilText = (until: string | null) => (until ? new Date(until).toLocaleTim
 
 function PairingWindowCard({ window, locked }: { window: PairingWindow; locked: boolean }) {
   const { pending, failures, request } = usePending('pairingWindow');
-  const sending = pending.window;
-  const failure = failures.window;
+  const sending = pending[pairingWindowKey]?.type;
+  const failure = failures[pairingWindowKey];
   const until = untilText(window.until);
   return (
     <section className="kp-card" aria-label="Pairing" style={{ gap: 8 }}>
@@ -45,10 +46,10 @@ function PairingWindowCard({ window, locked }: { window: PairingWindow; locked: 
             {until ? `Pairing is open until ${until}. ` : 'Pairing is open. '}A client that asks now shows a code to type below.
           </span>
           <div className="kp-row">
-            <Button variant="secondary" isSending={sending === 'close'} isDisabled={locked || sending !== undefined} onPress={() => request('window', 'close', closePairingWindow)}>
+            <Button variant="secondary" isSending={sending === 'close'} isDisabled={locked || sending !== undefined} onPress={() => request({ type: 'close' })}>
               {sending === 'close' ? 'Closing' : 'Close pairing'}
             </Button>
-            <Button variant="secondary" isSending={sending === 'open'} isDisabled={locked || sending !== undefined} onPress={() => request('window', 'open', openPairingWindow)}>
+            <Button variant="secondary" isSending={sending === 'open'} isDisabled={locked || sending !== undefined} onPress={() => request({ type: 'open' })}>
               {sending === 'open' ? 'Extending' : `Keep open for ${pairingWindowMinutes} more minutes`}
             </Button>
           </div>
@@ -59,7 +60,7 @@ function PairingWindowCard({ window, locked }: { window: PairingWindow; locked: 
             This server takes no pairing requests until you allow it. Allow pairing while you are at the machine that needs to pair, then start pairing there.
           </span>
           <div className="kp-row">
-            <Button variant="primary" isSending={sending === 'open'} isDisabled={locked || sending !== undefined} onPress={() => request('window', 'open', openPairingWindow)}>
+            <Button variant="primary" isSending={sending === 'open'} isDisabled={locked || sending !== undefined} onPress={() => request({ type: 'open' })}>
               {sending === 'open' ? 'Allowing' : `Allow pairing for ${pairingWindowMinutes} minutes`}
             </Button>
           </div>
@@ -119,10 +120,10 @@ function WaitingRow({ request, locked }: { request: PairingRequest; locked: bool
       help={failure ? `Not done: ${failure}` : `Type the eight digits ${request.clientName} shows. The request stays open until ${until}.`}
       action={
         <span className="app-inline">
-          <Button variant="primary" isSending={pending === 'approve'} isDisabled={locked || pending !== undefined || digits.length !== 8} onPress={() => send(request.id, 'approve', () => approvePairing(request.id, digits))}>
+          <Button variant="primary" isSending={pending?.type === 'approve'} isDisabled={locked || pending !== undefined || digits.length !== 8} onPress={() => send({ type: 'approve', id: request.id, name: request.clientName, code: digits })}>
             Approve
           </Button>
-          <Button variant="secondary" isSending={pending === 'deny'} isDisabled={locked || pending !== undefined} onPress={() => send(request.id, 'deny', () => denyPairing(request.id))}>
+          <Button variant="secondary" isSending={pending?.type === 'deny'} isDisabled={locked || pending !== undefined} onPress={() => send({ type: 'deny', id: request.id, name: request.clientName })}>
             Refuse
           </Button>
         </span>

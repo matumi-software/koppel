@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import { getSettings, patchSettings, type KoppelRole, type KoppelSettings } from '@/api/settings';
+import type { KoppelRole, KoppelSettings } from '@/api/settings';
+import { setting, setupKey } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';
-import { settingsKey } from '@/query-keys';
+import { settingsOptions } from '@/queries';
 
 type Key = keyof KoppelSettings;
 
@@ -22,29 +23,34 @@ export interface SettingStatus<K extends Key> {
  * state lives above the page, so it survives leaving it.
  */
 export function useSettings() {
-  const query = useQuery({ queryKey: settingsKey, queryFn: getSettings });
+  const query = useQuery(settingsOptions());
   const { pending, failures, saved, request } = usePending('settings');
 
   const requestChange = useCallback(
-    <K extends Key>(key: K, value: KoppelSettings[K]) => request(key, value, () => patchSettings({ [key]: value })),
+    <K extends Key>(key: K, value: KoppelSettings[K]) => request(setting(key, value)),
     [request],
   );
 
   /** First run: the role and "setup complete" go in one PATCH, so they are saved or not saved together. */
   const requestSetup = useCallback(
-    (role: KoppelRole) => request('setup', { role }, () => patchSettings({ role, setupComplete: true })),
+    (role: KoppelRole) => request({ type: 'setup', role }),
     [request],
   );
+
+  const pendingValue = <K extends Key>(key: K) => {
+    const action = pending[key];
+    return action?.type === 'set' ? (action.value as KoppelSettings[K]) : undefined;
+  };
 
   const status = <K extends Key>(key: K): SettingStatus<K> | undefined =>
     query.data && {
       confirmed: query.data[key],
-      pendingTarget: key in pending ? (pending[key] as KoppelSettings[K]) : undefined,
+      pendingTarget: pendingValue(key),
       failure: failures[key],
       saved: (saved[key] ?? 0) > 0,
     };
 
-  const setup = { isPending: 'setup' in pending, failure: failures.setup };
+  const setup = { isPending: setupKey in pending, failure: failures[setupKey] };
 
   return { query, status, requestChange, requestSetup, setup };
 }

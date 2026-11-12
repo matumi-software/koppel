@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { DeviceCardBody, DeviceCards, DeviceGroup, Switch, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
-import { getClients } from '@/api/server';
-import { setShared, type DeviceView } from '@/api/usb';
+import type { DeviceView } from '@/api/usb';
 import { Frame } from '@/shell/frame';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useFrame } from '@/shell/frame-context';
 import { usePending } from '@/pending/pending-context';
 import { DeviceDrawer } from './device-drawer';
 import { since, useServerDevices } from './use-devices';
+import { clientsOptions } from '@/queries';
 
 /**
  * Server role: the devices on this machine, grouped by what they need. Sharing is pending until
@@ -18,7 +18,7 @@ export function ServerDevicesPage() {
   const host = useMachineName();
   const { locked } = useFrame();
   const [selected, setSelected] = useState<string | null>(null);
-  const clients = useQuery({ queryKey: ['clients'], queryFn: getClients });
+  const clients = useQuery(clientsOptions());
   const clientName = (id: string | null) => clients.data?.find((c) => c.id === id)?.name ?? id ?? 'a client';
   const { pending, failures, request } = usePending('serverDevices');
   const query = useServerDevices();
@@ -29,10 +29,10 @@ export function ServerDevicesPage() {
     <Switch
       label="Share"
       confirmed={d.state !== 'local'}
-      pendingTarget={pending[d.busId]}
+      pendingTarget={pending[d.busId]?.share}
       failure={failures[d.busId] ?? d.fault ?? undefined}
       isDisabled={locked || !!data?.unavailable || d.state === 'attached'}
-      onRequestChange={(share) => request(d.busId, share, () => setShared(d.busId, share))}
+      onRequestChange={(share) => request({ busId: d.busId, share })}
     />
   );
   const where = (d: DeviceView) =>

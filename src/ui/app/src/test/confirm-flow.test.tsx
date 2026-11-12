@@ -4,9 +4,9 @@ import { useActivity } from '@/activity/activity-context';
 import type { KoppelSettings } from '@/api/settings';
 import { confirmTimeoutMs } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';
-import { settingsKey } from '@/query-keys';
 import { useSettings } from '@/settings/use-settings';
 import { accepted, deferred, json, mockFetch, renderApp } from './harness';
+import { settingsOptions } from '@/queries';
 
 const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
 
@@ -164,7 +164,7 @@ describe('the confirm rule', () => {
     await screen.findByText('Turn on');
 
     // A refetch starts with the old value, then the push arrives, then the old fetch lands.
-    void queryClient.invalidateQueries({ queryKey: settingsKey });
+    void queryClient.invalidateQueries({ queryKey: settingsOptions().queryKey });
     await waitFor(() => expect(calls).toBe(2));
     await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
     await act(async () => {
@@ -173,7 +173,7 @@ describe('the confirm rule', () => {
     });
 
     await waitFor(() => expect(text('confirmed')).toBe('true'));
-    expect(queryClient.getQueryData<KoppelSettings>(settingsKey)?.shareOnStartup).toBe(true);
+    expect(queryClient.getQueryData<KoppelSettings>(settingsOptions().queryKey)?.shareOnStartup).toBe(true);
   });
 });
 

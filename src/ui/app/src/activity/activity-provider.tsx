@@ -1,8 +1,7 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getActivity } from '@/api/activity';
-import { activityKey } from '@/query-keys';
-import { ActivityContext, fromServer, maxActivity, mergeActivity, type ActivityItem } from './activity-context';
+import { ActivityContext, fromServer, maxActivity, type ActivityItem } from './activity-context';
+import { activityOptions } from '@/queries';
 
 /**
  * The activity log: the server's log (loaded once, then followed over the live push, so it
@@ -10,15 +9,7 @@ import { ActivityContext, fromServer, maxActivity, mergeActivity, type ActivityI
  * answered yet.
  */
 export function ActivityProvider({ children }: { children: ReactNode }) {
-  const queryClient = useQueryClient();
-  const server = useQuery({
-    queryKey: activityKey,
-    // Events pushed while the fetch ran must survive it, so the cache is read after the await.
-    queryFn: async () => {
-      const fetched = await getActivity();
-      return mergeActivity(queryClient.getQueryData(activityKey), fetched);
-    },
-  });
+  const server = useQuery(activityOptions());
   const [local, setLocal] = useState<ActivityItem[]>([]);
   const next = useRef(0);
 

@@ -1,13 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, Field, Panel } from '@koppel/react-ui';
-import { getConnection, putConnection, testConnection, type ConnectionTestResult, type ConnectionView } from '@/api/client';
-import { hexOf } from '@/pending/domains';
+import { testConnection, type ConnectionTestResult, type ConnectionView } from '@/api/client';
+import { connectionKey as connectionPending } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';
-import { connectionKey } from '@/query-keys';
 import { NearbyServers } from './nearby-servers';
-
-const connectionPending = 'connection';
+import { connectionOptions } from '@/queries';
 
 /**
  * Client role: the server this machine attaches devices from. Saving is pending until the pushed
@@ -15,7 +13,7 @@ const connectionPending = 'connection';
  * sent; a push about some other change does not confirm it.
  */
 export function ConnectionSection({ locked }: { locked: boolean }) {
-  const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection });
+  const connection = useQuery(connectionOptions());
   const { completed } = usePending('connection');
   if (!connection.data) {
     return null;
@@ -59,9 +57,7 @@ function ConnectionForm({ stored, locked }: { stored: ConnectionView; locked: bo
 
   const save = () => {
     setTest(undefined);
-    request(connectionPending, { serverUrl, serverFingerprint: hexOf(fingerprint), clientId }, () =>
-      putConnection({ serverUrl, serverFingerprint: fingerprint, clientId, clientSecret: secret }),
-    );
+    request({ serverUrl, serverFingerprint: fingerprint, clientId }, secret);
   };
 
   const runTest = () => {

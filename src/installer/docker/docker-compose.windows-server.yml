@@ -14,7 +14,7 @@ services:
     hostname: ${KOPPEL_HOSTNAME:-${COMPUTERNAME:-koppel}}
     environment:
       # usbipd-win listens on the host's port 3240.
-      Usb__Upstream: host.docker.internal:3240
+      KOPPEL_USB_UPSTREAM: host.docker.internal:3240
     ports:
       - "5240:5240"   # the UI and everything other Koppel machines do, USB traffic included (HTTPS)
     volumes:

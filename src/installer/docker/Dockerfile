@@ -84,6 +84,9 @@ COPY koppel-usb ./koppel-usb
 COPY koppel-web ./koppel-web
 COPY koppel-windows ./koppel-windows
 COPY --from=ui /build/ui/app/dist ./ui/app/dist
+# The commit `koppel --version` names. The build has no .git, so the caller passes it (build.ps1, deploy.sh);
+# without it the version says `unknown`.
+ARG KOPPEL_GIT_COMMIT
 # The registry, Zig's cache and target/ are cache mounts, kept between builds. The binaries are copied out of
 # target/ to /out/<TARGETARCH>/koppel, where the stages below find them: amd64, arm64, and arm for ARMv6.
 RUN --mount=type=cache,id=koppel-cargo-registry,target=/usr/local/cargo/registry \
@@ -199,15 +202,15 @@ USER 65532:65532
 # 5240: the UI and everything other Koppel machines do, USB traffic included, over HTTPS; discovery on UDP.
 EXPOSE 5240 5240/udp
 
-ENV Paths__Config=/koppel/config
-ENV Paths__Keys=/koppel/keys
+ENV KOPPEL_CONFIG_DIR=/koppel/config
+ENV KOPPEL_KEYS_DIR=/koppel/keys
 
-# GET /healthz on the UI port, asked at Ports__Address and Ports__Ui and then at 127.0.0.1 (koppel/src/
+# GET /healthz on the UI port, asked at KOPPEL_LISTEN_ADDRESS and KOPPEL_UI_PORT and then at 127.0.0.1 (koppel/src/
 # healthcheck.rs), as 0.1.x's image did. It is Koppel itself because the image has no shell or curl. Plain
 # Docker only reports "unhealthy": it does not restart the container (restart: unless-stopped acts on exits, not
 # on health). Swarm and Kubernetes act on it; with plain Docker, something has to watch it, for example an
 # autoheal container, or `docker ps --filter health=unhealthy`.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD ["/usr/local/bin/koppel", "--healthcheck"]
+  CMD ["/usr/local/bin/koppel", "healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/koppel"]

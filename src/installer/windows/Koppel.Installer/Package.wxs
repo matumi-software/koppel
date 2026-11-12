@@ -42,9 +42,9 @@
                               RestartServiceDelayInSeconds="5" ResetPeriodInDays="1" />
         </ServiceInstall>
         <ServiceControl Id="KoppelService" Name="Koppel" Start="install" Stop="both" Remove="uninstall" Wait="yes" />
-        <!-- The native app's UI is used on this machine only, so it answers this machine only (Ui:AllowFrom). What other
+        <!-- The native app's UI is used on this machine only, so it answers this machine only (KOPPEL_UI_ALLOW_FROM). What other
              Koppel machines do on the same port is not affected. -->
-        <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\Koppel" Name="Environment" Type="multiString" Value="Ui__AllowFrom=local" />
+        <RegistryValue Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\Koppel" Name="Environment" Type="multiString" Value="KOPPEL_UI_ALLOW_FROM=local" />
         <!-- The event log source the service writes under. Koppel.exe carries the message table that shows each entry's
              own text. 0.1.x registered the source itself, pointing at a .NET file that is gone after an upgrade; this
              rewrites it, and uninstall takes it away. -->

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use common::*;
 use koppel_config::files::Role;
-use koppel_usb::protocol;
+use koppel_usb::{UsbDevice, protocol};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -152,6 +152,60 @@ async fn the_gateway_serves_at_most_the_configured_number_of_sessions() {
             .is_err(),
         "the first connection is still open"
     );
+    client.stop().await;
+    server.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_lets_the_driver_go_of_every_device_at_the_same_time() {
+    let kernel = FakeKernel::new();
+    let second = UsbDevice {
+        product: Some("Second stick".into()),
+        ..UsbDevice::new("1-2".parse().unwrap())
+    };
+    kernel.plug(vec![dongle(), second]);
+    kernel.bind("1-2", true);
+    let dir = server_dir(
+        true,
+        Some(
+            r#"{ "busIds": ["1-1.4", "1-2"], "vidPids": { "1-1.4": "064f:2af9", "1-2": "0000:0000" } }"#,
+        ),
+    );
+    let server = ServerSide::open(dir, kernel).await;
+    let driver = FakeDriver::new();
+    let client = ClientSide::start(
+        MemoryLinks::new(&server),
+        ClientSetup::driver(driver.clone()),
+    )
+    .await;
+    client.link().await;
+    client.client.begin_attach("1-1.4").await.unwrap();
+    client.client.begin_attach("1-2").await.unwrap();
+    eventually("both devices attached", || {
+        client
+            .client
+            .current()
+            .devices
+            .iter()
+            .filter(|d| d.attached_here && d.port.is_some())
+            .count()
+            == 2
+    })
+    .await;
+
+    // The fake driver takes half a second to detach one device, so one after the other would
+    // take a second.
+    let started = std::time::Instant::now();
+    client.client.stop().await;
+
+    assert!(
+        started.elapsed() < Duration::from_millis(900),
+        "stopping took {:?}",
+        started.elapsed()
+    );
+    let mut detached = driver.detached();
+    detached.sort();
+    assert_eq!(detached, vec!["1-1.4@1", "1-2@1"]);
     client.stop().await;
     server.stop().await;
 }

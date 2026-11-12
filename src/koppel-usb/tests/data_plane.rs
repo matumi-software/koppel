@@ -217,3 +217,15 @@ async fn an_import_of_a_bus_id_that_is_not_one_is_refused() {
     );
     side.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_lock_for_a_bus_id_is_gone_once_the_export_has_begun() {
+    let side = ServerSide::start(FakeKernel::new(), true, true).await;
+    let mut session = side.open_stream("bench-lock");
+
+    import(&mut session, "1-1.4").await;
+
+    assert_eq!(side.plane.bus_locks(), 0, "the map does not keep the lock");
+    drop(session);
+    side.stop().await;
+}

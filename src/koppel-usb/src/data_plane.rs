@@ -46,15 +46,64 @@ struct Inner {
     server: UsbServer,
     activity: Arc<dyn ActivitySink>,
     settings: ConfigFile<KoppelSettings>,
-    sessions: Mutex<HashMap<u64, CancellationToken>>,
+    sessions: Mutex<HashMap<u64, Session>>,
     next_session: AtomicU64,
     /// One lock per bus ID for the status check, the reset and the start of an export.
-    bus_locks: Mutex<HashMap<BusId, Arc<tokio::sync::Mutex<()>>>>,
+    bus_locks: BusLocks,
     /// Cancelled when the role leaves the server side; replaced for the sessions after.
     serving: Mutex<CancellationToken>,
-    /// Cancelled when a session ends; a new one per session.
-    ended: Mutex<HashMap<u64, CancellationToken>>,
     subscription: Mutex<Option<Subscription>>,
+}
+
+/// One session being served. `ended` is cancelled when it is over, which ending the sessions
+/// waits for; what ends a session early is its token, a child of the one `serving` holds.
+struct Session {
+    ended: CancellationToken,
+}
+
+/// One lock per bus ID, for as long as someone holds or waits for it. An entry nobody holds or
+/// waits for is removed, so the map does not grow with every device that was ever imported.
+#[derive(Default)]
+struct BusLocks(Mutex<HashMap<BusId, Arc<tokio::sync::Mutex<()>>>>);
+
+impl BusLocks {
+    /// Waits for the lock on `bus_id`. Dropping the returned future, or the guard, gives it up.
+    async fn lock(&self, bus_id: &BusId) -> BusGuard<'_> {
+        let mutex = lock(&self.0).entry(bus_id.clone()).or_default().clone();
+        let mut guard = BusGuard {
+            locks: self,
+            bus_id: bus_id.clone(),
+            mutex: Some(mutex.clone()),
+            held: None,
+        };
+        guard.held = Some(mutex.lock_owned().await);
+        guard
+    }
+
+    fn len(&self) -> usize {
+        lock(&self.0).len()
+    }
+}
+
+struct BusGuard<'a> {
+    locks: &'a BusLocks,
+    bus_id: BusId,
+    mutex: Option<Arc<tokio::sync::Mutex<()>>>,
+    held: Option<tokio::sync::OwnedMutexGuard<()>>,
+}
+
+impl Drop for BusGuard<'_> {
+    fn drop(&mut self) {
+        drop(self.held.take());
+        drop(self.mutex.take());
+        let mut map = lock(&self.locks.0);
+        if map
+            .get(&self.bus_id)
+            .is_some_and(|m| Arc::strong_count(m) == 1)
+        {
+            map.remove(&self.bus_id);
+        }
+    }
 }
 
 fn serves(role: Role) -> bool {
@@ -74,9 +123,8 @@ impl UsbDataPlane {
                 settings,
                 sessions: Mutex::new(HashMap::new()),
                 next_session: AtomicU64::new(1),
-                bus_locks: Mutex::new(HashMap::new()),
+                bus_locks: BusLocks::default(),
                 serving: Mutex::new(CancellationToken::new()),
-                ended: Mutex::new(HashMap::new()),
                 subscription: Mutex::new(None),
             }),
         }
@@ -111,6 +159,12 @@ impl UsbDataPlane {
         lock(&self.inner.sessions).len()
     }
 
+    /// How many bus IDs have a lock somebody holds or waits for, for tests that prove the map does
+    /// not grow.
+    pub fn bus_locks(&self) -> usize {
+        self.inner.bus_locks.len()
+    }
+
     /// Serves one stream until the session ends, then closes it: with [`CloseReason::Stopping`]
     /// when the role left the server side, otherwise [`CloseReason::Done`].
     pub async fn serve(&self, mut stream: Box<dyn DeviceStream>, client: RemoteClient) {
@@ -118,15 +172,18 @@ impl UsbDataPlane {
         let abort = lock(&inner.serving).child_token();
         let id = inner.next_session.fetch_add(1, Ordering::Relaxed);
         let ended = CancellationToken::new();
-        lock(&inner.sessions).insert(id, abort.clone());
-        lock(&inner.ended).insert(id, ended.clone());
+        lock(&inner.sessions).insert(
+            id,
+            Session {
+                ended: ended.clone(),
+            },
+        );
 
         if !abort.is_cancelled() {
             inner.serve_core(&mut *stream, &client, &abort).await;
         }
 
         lock(&inner.sessions).remove(&id);
-        lock(&inner.ended).remove(&id);
         let reason = if abort.is_cancelled() {
             CloseReason::Stopping
         } else {
@@ -210,13 +267,9 @@ impl Inner {
         // Without it, two imports can both see the device available, and the second one's reset
         // hits the first one's session. The lock is let go as soon as the export has begun, when
         // the device reads as in use.
-        let bus_lock = lock(&self.bus_locks)
-            .entry(bus_id.clone())
-            .or_default()
-            .clone();
         let mut guard = tokio::select! {
-            g = bus_lock.lock_owned() => Some(g),
-            _ = abort.cancelled() => return,
+            g = self.bus_locks.lock(bus_id) => Some(g),
+            () = abort.cancelled() => return,
         };
 
         let host = self.server.host().clone();
@@ -251,7 +304,7 @@ impl Inner {
                 return;
             }
         };
-        guard.take();
+        drop(guard.take());
 
         if let Err(e) = session
             .write_all(&protocol::import_reply(Some(&device)))
@@ -289,7 +342,10 @@ impl Inner {
     /// little for them to finish, so nothing outlives its owner.
     async fn end_serving(&self) {
         let ending = std::mem::replace(&mut *lock(&self.serving), CancellationToken::new());
-        let running: Vec<CancellationToken> = lock(&self.ended).values().cloned().collect();
+        let running: Vec<CancellationToken> = lock(&self.sessions)
+            .values()
+            .map(|s| s.ended.clone())
+            .collect();
         ending.cancel();
         if running.is_empty() {
             return;

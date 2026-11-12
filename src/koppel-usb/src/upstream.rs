@@ -454,6 +454,20 @@ fn port_after_colon(colon_and_port: &str) -> Option<u16> {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn a_refresh_that_panics_still_lets_the_ones_waiting_for_it_go() {
+        let done = CancellationToken::new();
+        let finished = done.clone();
+
+        let refresh = tokio::spawn(async move {
+            let _done = Finished(finished);
+            panic!("on purpose");
+        });
+
+        assert!(refresh.await.unwrap_err().is_panic());
+        assert!(done.is_cancelled());
+    }
+
     #[test]
     fn parse_reads_host_and_port() {
         for (value, host, port) in [

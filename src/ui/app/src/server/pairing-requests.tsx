@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, Caption, Card, Field, Note, Row, SectionHeading } from '@koppel/react-ui';
-import { pairingWindowMinutes, type PairingRequest, type PairingWindow } from '@/api/pairing';
+import { pairingWindowMinutes, type PairingRequestView, type PairingWindowView } from '@/api/pairing';
 import { usePending } from '@/pending/pending-context';
 import { pairingRequestsOptions } from '@/queries';
 import { pairingWindowKey } from '@/pending/domains';
@@ -28,7 +28,7 @@ export function PairingRequests({ locked }: { locked: boolean }) {
 
 const untilText = (until: string | null) => (until ? new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null);
 
-function PairingWindowCard({ window, locked }: { window: PairingWindow; locked: boolean }) {
+function PairingWindowCard({ window, locked }: { window: PairingWindowView; locked: boolean }) {
   const { pending, failures, request } = usePending('pairingWindow');
   const sending = pending[pairingWindowKey]?.type;
   const failure = failures[pairingWindowKey];
@@ -69,7 +69,7 @@ function PairingWindowCard({ window, locked }: { window: PairingWindow; locked: 
   );
 }
 
-function PairingRequestList({ list, exhausted, locked }: { list: PairingRequest[]; exhausted: boolean; locked: boolean }) {
+function PairingRequestList({ list, exhausted, locked }: { list: PairingRequestView[]; exhausted: boolean; locked: boolean }) {
   return (
     <Card label="Waiting to pair" gap="md">
       {exhausted && (
@@ -85,7 +85,7 @@ function PairingRequestList({ list, exhausted, locked }: { list: PairingRequest[
   );
 }
 
-function PairingRequestRow({ request, locked }: { request: PairingRequest; locked: boolean }) {
+function PairingRequestRow({ request, locked }: { request: PairingRequestView; locked: boolean }) {
   if (request.state === 'denied') {
     // Shown for a moment, so the request does not just vanish: the server dropped it after wrong codes.
     return (
@@ -98,7 +98,7 @@ function PairingRequestRow({ request, locked }: { request: PairingRequest; locke
   return <WaitingRow request={request} locked={locked} />;
 }
 
-function WaitingRow({ request, locked }: { request: PairingRequest; locked: boolean }) {
+function WaitingRow({ request, locked }: { request: PairingRequestView; locked: boolean }) {
   const [code, setCode] = useState('');
   const { pending: pendingRequests, failures, request: send } = usePending('pairingRequests');
   const pending = pendingRequests[request.id];

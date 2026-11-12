@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import type { KoppelRole, KoppelSettings } from '@/api/settings';
+import type { Role, KoppelSettings } from '@/api/settings';
 import { setting, setupKey } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';
 import { settingsOptions } from '@/queries';
@@ -33,7 +33,7 @@ export function useSettings() {
 
   /** First run: the role and "setup complete" go in one PATCH, so they are saved or not saved together. */
   const requestSetup = useCallback(
-    (role: KoppelRole) => request({ type: 'setup', role }),
+    (role: Role) => request({ type: 'setup', role }),
     [request],
   );
 

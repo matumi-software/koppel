@@ -66,6 +66,7 @@ contract tests.
 | `api/` | The REST endpoints: settings, activity, system, server, client and USB |
 | `activity.rs` | The activity log, in memory, 500 entries |
 | `push.rs` | The live push |
+| `wire.rs` | Test only: writes the TypeScript types of the wire (`src/ui/app/src/api/generated/wire.ts`) from the Rust types, fails when the checked-in file differs, and reads the JSON fixtures in `src/ui/app/src/test/wire/` through the Rust types; see "Wire types generated from the Rust DTOs" in `decisions.md` |
 | `roles/` | The seams the endpoints talk to, the server and client roles on Skakel (`roles/skakel/`) and the USB layer behind them (`roles/usb.rs`); see ["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust) |
 | `redirect.rs`, `server.rs` | Plain HTTP answered with a 301 from the first byte, then TLS, and the dual-stack listener |
 

@@ -1,38 +1,17 @@
-import { getJson, sendChange, uiFetch } from './http';
+import { getJson, readJson, sendChange, uiFetch } from './http';
+import type { ConnectionTest, ConnectionUpdate, ConnectionView } from './generated/wire';
 
-/** Mirrors Koppel.Client.ConnectionView. The secret never comes back, only whether one is stored. */
-export interface ConnectionView {
-  serverUrl: string | null;
-  serverFingerprint: string | null;
-  clientId: string | null;
-  hasSecret: boolean;
-  /** The certificate the server said it will switch to, trusted as well until then. */
-  nextServerFingerprint: string | null;
-}
-
-export interface ConnectionUpdate {
-  serverUrl: string;
-  serverFingerprint: string;
-  clientId: string;
-  /** Empty keeps the stored secret. */
-  clientSecret: string;
-}
-
-export interface ConnectionTestResult {
-  ok: boolean;
-  /** One of a fixed set, such as `unreachable`, `certificateMismatch` or `versionMismatch`. */
-  outcome?: string;
-  message: string;
-}
+export type { ConnectionTest, ConnectionUpdate, ConnectionView, Outcome } from './generated/wire';
 
 export const getConnection = () => getJson<ConnectionView>('/api/client/connection');
 
+/** `clientSecret` empty keeps the stored secret. */
 export const putConnection = (update: ConnectionUpdate) => sendChange('/api/client/connection', 'PUT', update);
 
-export async function testConnection(): Promise<ConnectionTestResult> {
+export async function testConnection(): Promise<ConnectionTest> {
   const response = await uiFetch('/api/client/connection/test', { method: 'POST' });
   if (!response.ok) {
-    return { ok: false, outcome: 'failed', message: `The test failed (${response.status}).` };
+    return { ok: false, outcome: 'unexpectedAnswer', message: `The test failed (${response.status}).` };
   }
-  return (await response.json()) as ConnectionTestResult;
+  return readJson<ConnectionTest>(response);
 }

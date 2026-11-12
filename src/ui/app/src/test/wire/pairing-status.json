@@ -1,0 +1,9 @@
+{
+  "state": "waiting",
+  "serverName": "lab-rack-3",
+  "serverUrl": "https://lab-rack-3:5241",
+  "code": "482913",
+  "message": null,
+  "expiresAt": "2026-01-01T08:40:00Z",
+  "serverFingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99"
+}

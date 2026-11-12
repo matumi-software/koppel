@@ -15,6 +15,7 @@ tokio = { workspace = true, features = ["io-util", "process"] }
 tokio-util.workspace = true
 tracing.workspace = true
 serde.workspace = true
+ts-rs.workspace = true
 time.workspace = true
 thiserror.workspace = true
 http.workspace = true

@@ -1,0 +1,4 @@
+[
+  { "id": "share", "ok": true, "title": "This machine can share USB devices.", "detail": "usbip-host is loaded." },
+  { "id": "attach", "ok": false, "title": "Attaching needs vhci-hcd.", "detail": "Load the vhci-hcd module." }
+]

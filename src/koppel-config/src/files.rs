@@ -10,12 +10,13 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize};
 use skakel_server::SkakelState;
+use ts_rs::TS;
 
 use crate::redact::Secret;
 
 /// Which side of the link this machine plays. Written as `server`, `client` or `both`; a hand edit
 /// may capitalise it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     #[default]
@@ -48,7 +49,7 @@ where
 
 /// `settings.json`: plain, and people may edit it by hand. A name missing from the file takes the
 /// value a new install writes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 pub struct KoppelSettings {
     #[serde(alias = "Role")]

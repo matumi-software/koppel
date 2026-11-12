@@ -1,6 +1,6 @@
 import type { QueryClient, QueryKey } from '@tanstack/react-query';
 import { mergeActivity } from '@/activity/activity-context';
-import type { ServerActivity } from '@/api/activity';
+import type { ActivityEvent } from '@/api/activity';
 import { activityOptions, clientDevicesOptions, clientsOptions, connectionOptions, discoveredServersOptions, pairingRequestsOptions, pairingStatusOptions, serverDevicesOptions, serverKeysOptions, settingsOptions, systemInfoOptions } from '@/queries';
 
 const activityKey = activityOptions().queryKey;
@@ -8,10 +8,11 @@ const activityKey = activityOptions().queryKey;
 /** Where the server pushes, as Server-Sent Events. */
 export const eventsUrl = '/api/events';
 
-interface Push {
+interface Push<T = unknown> {
   /** The cache entries this event keeps current: refetched when a payload cannot be applied. */
   keys: readonly QueryKey[];
-  apply: (queryClient: QueryClient, payload: unknown) => void;
+  // A method, not a property, so a push of one wire type fits the table's `Push<unknown>`.
+  apply(queryClient: QueryClient, payload: T): void;
 }
 
 /**
@@ -53,9 +54,9 @@ export const pushTable: Record<string, Push> = {
   // The fetch in flight is not cancelled: it merges with the cache after it lands, so it keeps this event.
   ActivityRecorded: {
     keys: [activityKey],
-    apply: (queryClient, event) => {
+    apply: (queryClient, event: ActivityEvent) => {
       const loaded = queryClient.getQueryData(activityKey) !== undefined;
-      queryClient.setQueryData<ServerActivity[]>(activityKey, (current) => mergeActivity(current, [event as ServerActivity]));
+      queryClient.setQueryData<ActivityEvent[]>(activityKey, (current) => mergeActivity(current, [event]));
       if (!loaded) void queryClient.invalidateQueries({ queryKey: activityKey });
     },
   },

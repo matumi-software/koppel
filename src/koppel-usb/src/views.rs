@@ -3,13 +3,14 @@
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Deserializer, Serialize};
 use time::OffsetDateTime;
+use ts_rs::TS;
 
 use crate::{BusId, UsbSpeed};
 
 /// Where a device stands, in the design system's state words: `local`, `shared`, `attached`, or
 /// `offline` (shared but unplugged). A word this version does not know reads as `local`, so a
 /// newer server's list still loads and the device is simply not offered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviceState {
     Shared,
@@ -42,7 +43,7 @@ impl DeviceState {
 }
 
 /// Where the link to the server stands: `unconfigured`, `connecting`, `connected` or `error`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum LinkState {
     #[default]
@@ -65,9 +66,10 @@ impl LinkState {
 
 /// A device as the UI sees it. `state` uses the design system's state words: `local`, `shared`,
 /// `attached`, or `offline` (shared but unplugged).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceView {
+    #[ts(type = "string")]
     pub bus_id: BusId,
     #[serde(default)]
     pub vid_pid: String,
@@ -82,6 +84,7 @@ pub struct DeviceView {
     #[serde(default)]
     pub attached_to: Option<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
+    #[ts(type = "string | null")]
     pub attached_since: Option<OffsetDateTime>,
     /// Why the last change to this device failed, for the UI.
     #[serde(default)]
@@ -115,7 +118,7 @@ impl DeviceView {
 }
 
 /// What the server's UI shows: its devices, or why it cannot share any.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerDevices {
     pub devices: Vec<DeviceView>,
@@ -183,7 +186,7 @@ impl ServerDevices {
 }
 
 /// A remote device as the client's UI sees it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientDeviceView {
     pub device: DeviceView,
@@ -191,6 +194,7 @@ pub struct ClientDeviceView {
     /// The port this machine's kernel or driver attached it on; `None` for another gateway attach.
     pub port: Option<u32>,
     #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
     pub attached_since: Option<OffsetDateTime>,
     pub fault: Option<String>,
     /// Where a gateway attach came from, such as `172.17.0.1`.
@@ -198,7 +202,7 @@ pub struct ClientDeviceView {
 }
 
 /// What the client's UI shows: the link to the server and the devices it shares.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientDevices {
     pub link: LinkState,

@@ -8,35 +8,39 @@ use axum::response::{IntoResponse, Response};
 use koppel_usb::BusId;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use ts_rs::TS;
 
 use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::{self, JsonBody};
 use crate::roles::{Approval, RegisterError};
 use crate::state::ServerApi;
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
-struct ServerIdentity<'a> {
+pub(crate) struct ServerIdentity<'a> {
     name: &'a str,
     fingerprint: String,
     https_port: u16,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct CreateClient {
     #[serde(default)]
     name: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct Approve {
     #[serde(default)]
     code: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Share {
     #[serde(default)]
@@ -251,10 +255,12 @@ pub(crate) async fn pairing(State(app): State<ServerApi>) -> Response {
 /// one minute and one hour.
 const DEFAULT_WINDOW_MINUTES: u64 = 10;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct OpenPairing {
     #[serde(default)]
+    #[ts(type = "number", optional)]
     minutes: Option<u64>,
 }
 

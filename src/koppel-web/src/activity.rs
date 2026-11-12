@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use serde::Serialize;
 use time::OffsetDateTime;
+use ts_rs::TS;
 
 use tokio::sync::broadcast;
 
@@ -22,11 +23,13 @@ pub use koppel_usb::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 
 /// One thing that happened. `summary` is the sentence the UI shows; `detail` carries the reason when
 /// it failed.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEvent {
     pub id: String,
     #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
     pub timestamp_utc: OffsetDateTime,
     pub entity: EntityRef,
     pub reason: ActivityReason,

@@ -1,0 +1,9 @@
+{
+  "id": "0000019b8a1c2d3e-0001",
+  "timestampUtc": "2026-01-01T08:15:00Z",
+  "entity": { "id": "1-1.4", "name": "USB Receiver", "type": "device" },
+  "reason": "attached",
+  "outcome": "failed",
+  "summary": "USB Receiver could not be attached.",
+  "detail": "The link dropped."
+}

@@ -14,6 +14,7 @@ use axum::http::header::{HeaderValue, RETRY_AFTER, SET_COOKIE};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
+use ts_rs::TS;
 
 use super::session::clear_cookie;
 use super::throttle::Reservation;
@@ -23,9 +24,10 @@ use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::{self, JsonBody};
 use crate::state::AuthApi;
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
-struct AuthState {
+pub(crate) struct AuthState {
     signed_in: bool,
     password_set: bool,
     machine_name: String,
@@ -33,11 +35,13 @@ struct AuthState {
     /// Setup asks for the one-time token the log shows.
     setup_token_required: bool,
     #[serde(with = "time::serde::rfc3339::option")]
+    #[ts(type = "string | null")]
     setup_until: Option<OffsetDateTime>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct PasswordRequest {
     #[serde(default)]
     password: Option<String>,
@@ -46,8 +50,9 @@ pub(crate) struct PasswordRequest {
     setup_token: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct ChangeRequest {
     #[serde(default)]
     current: Option<String>,

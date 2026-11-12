@@ -3,12 +3,13 @@
 //! its own: it records with these types, including the entries that are not about USB, and
 //! implements [`ActivitySink`] over its log.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::BusId;
 
 /// What an event is about, sent as `device`, `client`, `machine` or `link`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum EntityKind {
     Device,
@@ -18,7 +19,7 @@ pub enum EntityKind {
 }
 
 /// What an event is about: a device, a client, this machine or a server link.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct EntityRef {
     pub id: String,
     pub name: String,
@@ -54,7 +55,7 @@ impl EntityRef {
 
 /// Why an event was recorded: 0.1.x's `ActivityReason`. The USB layer records the first eight; the
 /// web side the rest. Sent as a camelCase string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ActivityReason {
     Shared,
@@ -78,7 +79,7 @@ pub enum ActivityReason {
 }
 
 /// Whether the thing the event describes happened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ActivityOutcome {
     Succeeded,

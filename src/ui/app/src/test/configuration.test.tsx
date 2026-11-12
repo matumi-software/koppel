@@ -5,6 +5,7 @@ import type { KoppelSettings } from '@/api/settings';
 import { confirmTimeoutMs } from '@/pending/domains';
 import { accepted, announced, json, mockFetch, renderApp } from './harness';
 import { baseRoutes, configuration, connection, fingerprint, settings } from './fixtures';
+import { systemInfo } from './wire';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -41,7 +42,7 @@ describe('notifications', () => {
     ...baseRoutes,
     'GET /api/settings': () => json({ ...settings, role }),
     'GET /api/system/info': () =>
-      json({ name: 'bench-pc', version: '1.0.0', startedAt: '2026-01-01T00:00:00Z', role, uiPort: 5240, httpsPort: 5241, fingerprint, os: 'Windows', tray: true }),
+      json({ ...systemInfo, role, os: 'Windows', tray: true }),
     'PATCH /api/settings': () => accepted(),
   });
 

@@ -6,12 +6,14 @@ use axum::response::Response;
 use koppel_config::files::ClientConnection;
 use koppel_usb::BusId;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::json::{self, JsonBody};
 use crate::state::ClientApi;
 
 /// What the UI may see of the connection: never the secret, only whether one is stored.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionView {
     server_url: Option<String>,
@@ -35,8 +37,9 @@ impl ConnectionView {
 
 /// A change to the connection. A null or empty secret keeps the stored one, but only while the
 /// server stays the same.
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct ConnectionUpdate {
     #[serde(default)]
     server_url: Option<String>,
@@ -48,8 +51,9 @@ pub(crate) struct ConnectionUpdate {
     client_secret: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub(crate) struct PairStart {
     #[serde(default)]
     server_url: Option<String>,

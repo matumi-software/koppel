@@ -1,54 +1,24 @@
-import { getJson, rejection, sendChange, uiFetch } from './http';
+import { getJson, readJson, rejection, sendChange, uiFetch } from './http';
+import type { ClientView, CreateClient, KeysView, NewClient, ServerIdentity } from './generated/wire';
 
-/** Mirrors Skakel.Server.SkakelClientView, as the server pushes it. */
-export interface ClientView {
-  id: string;
-  name: string;
-  createdAt: string;
-  /** False for clients made before secrets were kept: rotate to get one to copy. */
-  hasSecret: boolean;
-  /** When it last got a token, since the server started. */
-  lastSeen: string | null;
-  /** It stored the fingerprint of the prepared next certificate. */
-  hasNextCertificate: boolean;
-}
-
-/** The server's certificate, and the next one while a handover is under way. */
-export interface ServerKeysView {
-  fingerprint: string;
-  /** The prepared next certificate, or null when none is prepared. */
-  nextFingerprint: string | null;
-  nextPreparedAt: string | null;
-}
-
-export interface ServerIdentity {
-  name: string;
-  fingerprint: string;
-  httpsPort: number;
-}
-
-/** Returned once when a client is created. The secret is never shown again. */
-export interface CreatedClient {
-  clientId: string;
-  clientSecret: string;
-  name: string;
-}
+export type { ClientView, KeysView, NewClient, ServerIdentity } from './generated/wire';
 
 export const getIdentity = () => getJson<ServerIdentity>('/api/server/identity');
 
 export const getClients = () => getJson<ClientView[]>('/api/server/clients');
 
 /** Creates a client. The list itself updates when ClientsChanged arrives. */
-export async function createClient(name: string): Promise<CreatedClient> {
+export async function createClient(name: string): Promise<NewClient> {
+  const body: CreateClient = { name };
   const response = await uiFetch('/api/server/clients', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(body),
   });
   if (response.status !== 201) {
     throw await rejection(response);
   }
-  return (await response.json()) as CreatedClient;
+  return readJson<NewClient>(response);
 }
 
 /** One client's secret, fetched only when someone reveals or copies it. */
@@ -61,10 +31,10 @@ export async function getClientSecret(clientId: string): Promise<string> {
 export async function rotateClientSecret(clientId: string): Promise<string> {
   const response = await uiFetch(`/api/server/clients/${encodeURIComponent(clientId)}/rotate`, { method: 'POST' });
   if (!response.ok) throw await rejection(response);
-  return ((await response.json()) as { clientSecret: string }).clientSecret;
+  return (await readJson<{ clientSecret: string }>(response)).clientSecret;
 }
 
-export const getServerKeys = () => getJson<ServerKeysView>('/api/server/keys');
+export const getServerKeys = () => getJson<KeysView>('/api/server/keys');
 
 /** Each of these answers 202; the new state arrives as ServerKeysChanged. */
 export const prepareCertificate = () => sendChange('/api/server/keys/next-certificate', 'POST');

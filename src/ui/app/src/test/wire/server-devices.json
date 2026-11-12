@@ -1,0 +1,33 @@
+{
+  "devices": [
+    {
+      "busId": "1-1.4",
+      "vidPid": "046d:c52b",
+      "name": "USB Receiver",
+      "manufacturer": "Logitech",
+      "speed": "USB 2.0 (480 Mbit/s)",
+      "state": "attached",
+      "attachedTo": "bench-laptop",
+      "attachedSince": "2026-01-01T08:15:00Z",
+      "fault": null,
+      "serial": "ABC123",
+      "driver": "usbip-host",
+      "interfaces": ["HID (keyboard, mouse, game pad)"]
+    },
+    {
+      "busId": "1-2",
+      "vidPid": "0781:5581",
+      "name": "Flash drive",
+      "manufacturer": null,
+      "speed": "USB 3.0 (5 Gbit/s)",
+      "state": "local",
+      "attachedTo": null,
+      "attachedSince": null,
+      "fault": "The device is busy.",
+      "serial": null,
+      "driver": null,
+      "interfaces": null
+    }
+  ],
+  "unavailable": null
+}

@@ -226,7 +226,7 @@ fn from_skakel(
         {
             current.certificate_pfx.clone()
         }
-        _ => certificate.to_pfx_base64().map_err(|e| e.0)?,
+        _ => certificate.to_pfx_base64().map_err(|e| e.0)?.into(),
     };
     let next_certificate = match &state.next_certificate {
         Some(next) => {
@@ -238,7 +238,7 @@ fn from_skakel(
                 {
                     kept.pfx.clone()
                 }
-                _ => next_certificate.to_pfx_base64().map_err(|e| e.0)?,
+                _ => next_certificate.to_pfx_base64().map_err(|e| e.0)?.into(),
             };
             Some(SkakelNextCertificateRecord {
                 pfx,
@@ -258,7 +258,7 @@ fn from_skakel(
                 secret_hash: c.secret_hash.clone(),
                 created_at: c.created_at,
                 generation: i32::try_from(c.generation).unwrap_or(i32::MAX),
-                secret: c.secret.clone(),
+                secret: c.secret.clone().map(Into::into),
             })
             .collect(),
         signing_key: None,
@@ -294,7 +294,7 @@ fn new_state(host_name: &str, now: OffsetDateTime) -> Result<SkakelState, String
         clients: Vec::new(),
         signing_key: None,
         retired_signing_keys: Vec::new(),
-        certificate_pfx: certificate.to_pfx_base64().map_err(|e| e.0)?,
+        certificate_pfx: certificate.to_pfx_base64().map_err(|e| e.0)?.into(),
         next_certificate: None,
     })
 }
@@ -363,7 +363,7 @@ mod tests {
         });
         let next = new_certificate("bench", now).unwrap();
         state.next_certificate = Some(SkakelNextCertificateRecord {
-            pfx: next.to_pfx_base64().unwrap(),
+            pfx: next.to_pfx_base64().unwrap().into(),
             prepared_at: now,
             received_by: vec!["client-1".into()],
         });

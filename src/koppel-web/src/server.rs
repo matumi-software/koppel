@@ -18,7 +18,6 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tower_service::Service;
 
-use crate::guard::LocalAddr;
 use crate::redirect;
 use crate::tls::Acceptors;
 
@@ -64,7 +63,7 @@ fn listen(address: SocketAddr, dual_stack: bool) -> io::Result<TcpListener> {
 
 /// Serves `router` over TLS on `listener` until `stop` completes, then gives open connections a
 /// moment to finish. Each connection shakes hands with the acceptor `tls` picks for it. Each request
-/// carries `ConnectInfo<SocketAddr>` with the caller's address and the local address it came in on.
+/// carries `ConnectInfo<SocketAddr>` with the caller's address.
 pub async fn serve(
     listener: TcpListener,
     tls: impl Into<Acceptors>,
@@ -136,7 +135,6 @@ async fn serve_connection(
     };
     let service = hyper::service::service_fn(move |mut request: hyper::Request<Incoming>| {
         request.extensions_mut().insert(ConnectInfo(remote));
-        request.extensions_mut().insert(LocalAddr(local));
         let mut router = router.clone();
         async move { router.call(request).await }
     });

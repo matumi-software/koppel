@@ -1,106 +1,44 @@
-//! What is served where: the one table of path prefixes, the port each is on and the role that has
-//! it, as `Surface.Listed` in 0.1.x's `SurfaceGuard.cs`. A path not listed is the UI's, so a new
-//! route is never exposed to remote clients by accident. The surface comes from the path and the port
-//! only, never from a header: a request that says it is gRPC is the UI's when its path is.
+//! What is served where. There are two surfaces, each with its own router (see `routes.rs`): the UI
+//! (the people who run this machine: the UI's files, `/healthz` and `/api`) and the network (other
+//! Koppel machines: `/skakel`, `/api/remote` and the gRPC services). A router answers on the port its
+//! listener is on, so which surface a request reaches follows from the port by construction. When the
+//! two ports are the same port, [`is_network_path`] says which router a path goes to; it is the only
+//! place that names the network surface's paths, and it reads the path alone, never a header.
+//!
+//! The role a surface needs is a layer on its router (`guard::role_gate`).
 
 use koppel_config::files::Role;
 
 use crate::roles::skakel::remote;
 
-/// Which port a surface is served on. Both are the same port unless `Ports:Network` is set.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Listener {
-    /// The UI port: the people who run this machine.
-    Ui,
-    /// The network port: other Koppel machines.
-    Network,
-}
-
-/// Which role a surface belongs to. A machine that is both serves both.
+/// Which role a surface or a group of routes belongs to. A machine that is both serves both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RoleScope {
-    Any,
     Server,
     Client,
 }
 
-/// A path prefix, the port that serves it and the role that needs it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Surface {
-    pub prefix: &'static str,
-    pub listener: Listener,
-    pub role: RoleScope,
+impl RoleScope {
+    pub(crate) fn served_to(self, role: Role) -> bool {
+        match self {
+            Self::Server => role != Role::Client,
+            Self::Client => role != Role::Server,
+        }
+    }
 }
 
-/// Everything not listed below, the UI's files and its own API included.
-const UI: Surface = Surface {
-    prefix: "/",
-    listener: Listener::Ui,
-    role: RoleScope::Any,
-};
-
-const LISTED: &[Surface] = &[
-    // Skakel's HTTPS calls: info, pairing and tokens. Its gRPC calls are `Surface::GRPC`.
-    Surface {
-        prefix: "/skakel",
-        listener: Listener::Network,
-        role: RoleScope::Server,
-    },
-    Surface {
-        prefix: "/api/remote",
-        listener: Listener::Network,
-        role: RoleScope::Server,
-    },
-    Surface {
-        prefix: "/api/server",
-        listener: Listener::Ui,
-        role: RoleScope::Server,
-    },
-    Surface {
-        prefix: "/api/client",
-        listener: Listener::Ui,
-        role: RoleScope::Client,
-    },
-];
-
-/// The UI paths a person may reach without signing in. Everything else of the UI's under `/api`, a
-/// route added tomorrow included, needs the session cookie. The UI's files and `/healthz` are not
-/// under `/api`, so they stay open.
-const ANONYMOUS: &[&str] = &["/api/auth/state", "/api/auth/setup", "/api/auth/login"];
-
-impl Surface {
-    /// A gRPC call, told by its path (see [`is_grpc_path`]): Skakel's control and stream services and
-    /// Koppel's own remote device list, for other machines.
-    pub(crate) const GRPC: Surface = Surface {
-        prefix: "/",
-        listener: Listener::Network,
-        role: RoleScope::Server,
-    };
-
-    pub(crate) fn of(path: &str) -> Surface {
-        if is_grpc_path(path) {
-            return Self::GRPC;
-        }
-        LISTED
-            .iter()
-            .copied()
-            .find(|surface| starts_with_segments(path, surface.prefix))
-            .unwrap_or(UI)
-    }
-
-    pub(crate) fn served_to(self, role: Role) -> bool {
-        match self.role {
-            RoleScope::Server => role != Role::Client,
-            RoleScope::Client => role != Role::Server,
-            RoleScope::Any => true,
-        }
-    }
+/// True for a path the network surface serves: Skakel's HTTPS calls under `/skakel`, Koppel's own
+/// `/api/remote`, and the gRPC services. Exact and case sensitive, as the routers are.
+pub(crate) fn is_network_path(path: &str) -> bool {
+    starts_with_segments(path, "/skakel")
+        || starts_with_segments(path, "/api/remote")
+        || is_grpc_path(path)
 }
 
 /// True for the path of a call to a gRPC service this server runs: `/<package>.<Service>/<Method>`,
 /// with a package under `skakel` (Skakel's own services) or Koppel's `koppel.remote.v1.RemoteDevices`.
-/// Exact and case sensitive, as gRPC routes it. No UI path has a dot in its first segment, so a UI
-/// path is never taken for one.
+/// A request that only says it is gRPC, by a content type, is not one. No UI path has a dot in its
+/// first segment, so a UI path is never taken for one.
 pub(crate) fn is_grpc_path(path: &str) -> bool {
     let Some(rest) = path.strip_prefix('/') else {
         return false;
@@ -109,26 +47,11 @@ pub(crate) fn is_grpc_path(path: &str) -> bool {
     !method.is_empty() && (service.starts_with("skakel.") || service == remote::SERVICE_NAME)
 }
 
-/// True when the path is the UI's API, the live push included, and not one of the anonymous paths.
-pub(crate) fn requires_sign_in(path: &str) -> bool {
-    Surface::of(path).listener == Listener::Ui
-        && starts_with_segments(path, "/api")
-        && !ANONYMOUS
-            .iter()
-            .any(|anonymous| path.eq_ignore_ascii_case(anonymous))
-}
-
-/// ASP.NET's `PathString.StartsWithSegments`: `prefix` is the whole path or is followed by `/`,
-/// without regard to case. `/` starts every path.
+/// `prefix` is the whole path or is followed by `/`. Case sensitive: a router that is case
+/// sensitive and a guard that is not disagree about what a path is.
 pub(crate) fn starts_with_segments(path: &str, prefix: &str) -> bool {
-    if prefix == "/" {
-        return true;
-    }
-    let Some(head) = path.get(..prefix.len()) else {
-        return false;
-    };
-    head.eq_ignore_ascii_case(prefix)
-        && matches!(path.as_bytes().get(prefix.len()), None | Some(b'/'))
+    path.strip_prefix(prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
 
 #[cfg(test)]
@@ -136,9 +59,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prefixes_match_whole_segments_in_any_case() {
+    fn prefixes_match_whole_segments_and_the_case_they_are_written_in() {
         assert!(starts_with_segments("/api/server", "/api/server"));
-        assert!(starts_with_segments("/API/Server/clients", "/api/server"));
+        assert!(starts_with_segments("/api/server/clients", "/api/server"));
+        assert!(!starts_with_segments("/API/Server/clients", "/api/server"));
         assert!(!starts_with_segments("/api/servers", "/api/server"));
         assert!(!starts_with_segments("/ap", "/api"));
     }
@@ -151,7 +75,7 @@ mod tests {
             "/koppel.remote.v1.RemoteDevices/Watch",
         ] {
             assert!(is_grpc_path(path), "{path}");
-            assert_eq!(Surface::of(path), Surface::GRPC);
+            assert!(is_network_path(path), "{path}");
         }
         for path in [
             "/",
@@ -165,23 +89,38 @@ mod tests {
         ] {
             assert!(!is_grpc_path(path), "{path}");
         }
-        assert_eq!(Surface::of("/skakel/info").listener, Listener::Network);
     }
 
     #[test]
-    fn each_path_has_its_surface_and_sign_in_rule() {
-        assert_eq!(Surface::of("/skakel/info").listener, Listener::Network);
-        assert_eq!(Surface::of("/api/client/devices").role, RoleScope::Client);
-        assert_eq!(Surface::of("/api/settings"), UI);
-        assert!(requires_sign_in("/api/settings"));
-        assert!(requires_sign_in("/api/not-a-route-yet"));
-        assert!(requires_sign_in("/api/events"));
-        assert!(!requires_sign_in("/api/auth/state"));
-        assert!(!requires_sign_in("/API/AUTH/LOGIN"));
-        assert!(!requires_sign_in("/api/remote/devices"));
-        assert!(!requires_sign_in("/healthz"));
-        assert!(!requires_sign_in("/"));
-        assert!(!Surface::of("/api/server/clients").served_to(Role::Client));
-        assert!(Surface::of("/api/server/clients").served_to(Role::Both));
+    fn each_path_belongs_to_one_surface() {
+        for path in [
+            "/skakel/info",
+            "/skakel/v3/token",
+            "/api/remote/devices",
+            "/skakel.v3.ControlService/Hello",
+        ] {
+            assert!(is_network_path(path), "{path}");
+        }
+        for path in [
+            "/",
+            "/healthz",
+            "/api/settings",
+            "/api/server/clients",
+            "/api/remotes",
+            "/skakels",
+            "/SKAKEL/info",
+        ] {
+            assert!(!is_network_path(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_role_serves_its_own_scope() {
+        assert!(RoleScope::Server.served_to(Role::Server));
+        assert!(RoleScope::Server.served_to(Role::Both));
+        assert!(!RoleScope::Server.served_to(Role::Client));
+        assert!(RoleScope::Client.served_to(Role::Client));
+        assert!(RoleScope::Client.served_to(Role::Both));
+        assert!(!RoleScope::Client.served_to(Role::Server));
     }
 }

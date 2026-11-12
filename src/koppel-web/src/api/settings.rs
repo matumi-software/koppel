@@ -1,7 +1,5 @@
 //! `/api/settings`, `/api/activity` and `/api/system/*`.
 
-use std::sync::Arc;
-
 use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -10,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::activity::{ActivityOutcome, ActivityReason, EntityRef};
-use crate::app::App;
 use crate::json::{self, JsonBody};
+use crate::state::SettingsApi;
 
 /// A partial change to the settings. A field left out or null stays as it is.
 #[derive(Debug, Default, Deserialize)]
@@ -90,14 +88,14 @@ impl SettingsPatch {
 }
 
 /// The settings as stored.
-pub(crate) async fn get_settings(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn get_settings(State(app): State<SettingsApi>) -> Response {
     json::ok(&*app.settings.current())
 }
 
 /// Writes a change and answers 202 with no body: the confirmed settings reach the UI as
 /// `SettingsChanged`, never in the answer.
 pub(crate) async fn patch_settings(
-    State(app): State<Arc<App>>,
+    State(app): State<SettingsApi>,
     JsonBody(patch): JsonBody<SettingsPatch>,
 ) -> Response {
     let summary = patch.describe(&app.settings.current());
@@ -118,7 +116,10 @@ pub(crate) async fn patch_settings(
 
 /// `GET /api/activity?entity=&max=`: recent entries, newest first, 100 unless `max` says otherwise,
 /// from 1 to 500.
-pub(crate) async fn activity(State(app): State<Arc<App>>, RawQuery(query): RawQuery) -> Response {
+pub(crate) async fn activity(
+    State(app): State<SettingsApi>,
+    RawQuery(query): RawQuery,
+) -> Response {
     let query = query.unwrap_or_default();
     let mut max = 100i64;
     let mut entity = None;
@@ -177,7 +178,7 @@ fn decode(text: &str) -> String {
 
 /// What this machine can do and what is wrong with its files: sharing and attaching first, then a
 /// line for each file that was not used.
-pub(crate) async fn checks(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn checks(State(app): State<SettingsApi>) -> Response {
     let mut checks = vec![app.usb_server.check(), app.usb_client.check()];
     let files = [
         (
@@ -220,7 +221,7 @@ struct SystemInfo<'a> {
 }
 
 /// What the side panel shows about this machine.
-pub(crate) async fn info(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn info(State(app): State<SettingsApi>) -> Response {
     let host = &app.host;
     json::ok(&SystemInfo {
         name: &host.name,

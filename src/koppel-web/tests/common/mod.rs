@@ -409,6 +409,11 @@ impl Node {
         format!("https://127.0.0.1:{}", self.port)
     }
 
+    /// The session cookie as a `Cookie` header's value, for a test that calls the routers itself.
+    pub fn cookie(&self) -> &str {
+        &self.cookie
+    }
+
     async fn sign_in(&mut self) {
         let setup = self
             .http

@@ -36,6 +36,17 @@
 - **Dead design system parts removed.** `SegmentedControl` and `LinkBanner` (nothing used them), the plain `DeviceCard` (only its body is used) and their CSS, specs and previews. The status card is the one place the link shows.
 - **The phone title is the page's name.** `Devices` on both device pages, where it said `Devices on lab` or `Devices on this machine`; the page heading still says which.
 
+## Guards as routers (koppel-web, 2026-11-12)
+
+- **One router per surface, not a table.** The UI and the network surface are two `Router`s with their own layers; the port decides which a request reaches. On one shared port a dispatcher picks by `is_network_path`, the only place that names the network surface's paths. The gRPC services are the network router's fallback beside Skakel's `/skakel` calls: Skakel's paths cannot be routes, because a route with a parameter leaves it on the request and Skakel's own router counts it among its routes' parameters (a `Path<String>` there fails with 500).
+- **`Ui:AllowFrom` is outside the role gate.** It was inside, so a refused address saw 404 for a path of the role this machine lacks and 403 for the rest. With the guard a layer on the whole UI router, it is outermost and answers 403 for every UI path. The network surface's paths on the UI router stay 404 before it.
+- **Paths are case sensitive, and nothing is decoded for the guards.** The routers decide what a path is, so `/API/settings` and `/api/%73ettings` are not API paths. They are the UI's page or 404, never data; they used to answer 401 for the case variant.
+- **The session reader is on `/api` only.** It used to run for every UI path and could clear a cookie on a file request; the page asks `/api/auth/state` on load, which does it.
+- **The sign-in rate limit counts before the session check on the password change,** as before, because the limit is a layer on the three routes outside the password route's own session requirement.
+- **A request with no caller address is refused (500).** `Ui:AllowFrom` used to assume loopback for one. The systemd watchdog probe adds the loopback address to its in-process request.
+- **`tower-http`** (MIT, already in the tree through tonic) for the security headers (`SetResponseHeaderLayer`), `CatchPanicLayer` (a handler that panics answers 500), `TimeoutLayer` (30 seconds on the UI router only, since gRPC calls and USB streams are long) and `TraceLayer` (debug level). **`tower`** is a dev dependency of koppel-web, for `ServiceExt::oneshot` in the guard tests. The headers were a hand-written middleware before; the layer is the standard form. The feature flags add `http-body-util`, `tokio` and `tracing` to tower-http's own dependencies in the lock file, all already in the tree, and no new crate.
+- **Not done here:** a typed error model, versioned paths and generated types are separate issues.
+
 ## koppel-usb 0.2.1 decisions
 
 - **States and ids are types.** `DeviceState`, `LinkState` and `EntityKind` serialise to the same words as before (`local`, `shared`, `attached`, `offline`; `unconfigured`, `connecting`, `connected`, `error`; `device`, `link`), so nothing on the wire or in the UI changes. A state word this version does not know reads as `local`. `BusId` can only be made from a valid bus ID, and reading a device list leaves out a row whose bus ID is not one instead of failing the whole list. `UsbError` is a `thiserror` enum whose `Display` is the sentence the UI shows and whose I/O source stays for the log.

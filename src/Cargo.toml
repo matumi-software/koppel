@@ -49,6 +49,10 @@ tower-service = "0.3.3"
 # tower (MIT, already in the tree through axum): its `ServiceExt::oneshot` drives the router in the guard tests, one
 # request at a time with the extensions the accept loop would add.
 tower = { version = "0.5.3", default-features = false, features = ["util"] }
+# The guards' layers (koppel-web), tower-http (MIT, Tower project, already in the tree through tonic):
+# the security headers on every answer, a panic caught as a 500, a timeout on the UI's handlers and a
+# trace of each request at debug level.
+tower-http = { version = "0.6.11", default-features = false, features = ["set-header", "catch-panic", "timeout", "trace"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 # The server certificate Koppel makes on its first start, and the next one for a handover.

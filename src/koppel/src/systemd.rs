@@ -8,10 +8,12 @@
 //! none of this does anything.
 
 use std::future::Future;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
+use axum::extract::ConnectInfo;
 use axum::http::Request;
 use tower_service::Service;
 
@@ -77,16 +79,20 @@ pub async fn heartbeat(router: Router) {
     beat(interval, healthz(router), || notify(State::Watchdog)).await;
 }
 
-/// Asks the router for `/healthz` in process, as a request from this machine. That goes through the
-/// guard and its settings, on the same runtime as every connection, so a runtime with every worker
+/// Asks the router for `/healthz` in process, as a request from this machine: the router refuses a
+/// request that has no caller address, so the probe gives it the loopback one the accept loop would.
+/// That goes through the guards and their settings, on the same runtime as every connection, so a runtime with every worker
 /// stuck or a lock that never comes free fails it.
 fn healthz(router: Router) -> impl FnMut() -> std::pin::Pin<Box<dyn Future<Output = bool> + Send>> {
     move || {
         let mut router = router.clone();
         Box::pin(async move {
-            let request = Request::get("/healthz")
+            let mut request = Request::get("/healthz")
                 .body(Body::empty())
                 .expect("a GET of a fixed path is a valid request");
+            request
+                .extensions_mut()
+                .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
             matches!(router.call(request).await, Ok(response) if response.status().is_success())
         })
     }
@@ -230,6 +236,23 @@ mod tests {
     #[tokio::test]
     async fn healthz_passes_when_the_route_answers() {
         let mut probe = healthz(Router::new().route("/healthz", get(|| async { "ok" })));
+        assert!(probe().await);
+    }
+
+    #[tokio::test]
+    async fn the_probe_comes_from_the_loopback_address() {
+        // The router refuses a request that has no caller address, so the probe has to give one.
+        let router = Router::new().route(
+            "/healthz",
+            get(|ConnectInfo(from): ConnectInfo<SocketAddr>| async move {
+                if from.ip().is_loopback() {
+                    axum::http::StatusCode::OK
+                } else {
+                    axum::http::StatusCode::FORBIDDEN
+                }
+            }),
+        );
+        let mut probe = healthz(router);
         assert!(probe().await);
     }
 

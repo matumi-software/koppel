@@ -1,16 +1,14 @@
 //! The client role's endpoints: the stored connection and its test, the servers found on the
 //! network, pairing, and the devices.
 
-use std::sync::Arc;
-
 use axum::extract::{Path, State};
 use axum::response::Response;
 use koppel_config::files::ClientConnection;
 use serde::{Deserialize, Serialize};
 
-use crate::app::App;
 use crate::json::{self, JsonBody};
 use crate::roles::is_bus_id;
+use crate::state::ClientApi;
 
 /// What the UI may see of the connection: never the secret, only whether one is stored.
 #[derive(Debug, Serialize)]
@@ -236,14 +234,14 @@ impl ConnectionUpdate {
     }
 }
 
-pub(crate) async fn connection(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn connection(State(app): State<ClientApi>) -> Response {
     json::ok(&ConnectionView::of(&app.connection.current()))
 }
 
 /// Answers 202 with no body; the stored connection reaches the UI as `ConnectionChanged` once
 /// `connection.json` is written. The secret is never sent back.
 pub(crate) async fn save_connection(
-    State(app): State<Arc<App>>,
+    State(app): State<ClientApi>,
     JsonBody(update): JsonBody<ConnectionUpdate>,
 ) -> Response {
     let errors = update.validate();
@@ -265,22 +263,22 @@ pub(crate) async fn save_connection(
 }
 
 /// A query, so it answers with its result.
-pub(crate) async fn test(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn test(State(app): State<ClientApi>) -> Response {
     json::ok(&app.client.test().await)
 }
 
 /// Servers found on the local network. The list also follows as `ServersDiscovered`.
-pub(crate) async fn discovery(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn discovery(State(app): State<ClientApi>) -> Response {
     json::ok(&app.client.discovered())
 }
 
-pub(crate) async fn pairing(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn pairing(State(app): State<ClientApi>) -> Response {
     json::ok(&app.client.pairing())
 }
 
 /// Answers 202 and pairs in the background; `PairingStatusChanged` carries the code and the outcome.
 pub(crate) async fn begin_pairing(
-    State(app): State<Arc<App>>,
+    State(app): State<ClientApi>,
     JsonBody(request): JsonBody<PairStart>,
 ) -> Response {
     let check = ConnectionUpdate {
@@ -309,7 +307,7 @@ pub(crate) async fn begin_pairing(
 }
 
 /// The server approved, but saving replaces the connection to another server: the person confirms.
-pub(crate) async fn confirm_pairing(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn confirm_pairing(State(app): State<ClientApi>) -> Response {
     if app.client.confirm_pairing().await {
         json::accepted()
     } else {
@@ -320,18 +318,18 @@ pub(crate) async fn confirm_pairing(State(app): State<Arc<App>>) -> Response {
     }
 }
 
-pub(crate) async fn cancel_pairing(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn cancel_pairing(State(app): State<ClientApi>) -> Response {
     app.client.cancel_pairing().await;
     json::accepted()
 }
 
-pub(crate) async fn devices(State(app): State<Arc<App>>) -> Response {
+pub(crate) async fn devices(State(app): State<ClientApi>) -> Response {
     json::ok(&app.usb_client.current())
 }
 
 /// Attach remembers the device, so it is attached again after a restart. Answers 202; the device
 /// shows as attached, or with its fault, when `ClientDevicesChanged` arrives.
-pub(crate) async fn attach(State(app): State<Arc<App>>, Path(bus_id): Path<String>) -> Response {
+pub(crate) async fn attach(State(app): State<ClientApi>, Path(bus_id): Path<String>) -> Response {
     if !is_bus_id(&bus_id) {
         return json::problem(&[("busId", "That is not a USB bus ID.")]);
     }
@@ -340,7 +338,7 @@ pub(crate) async fn attach(State(app): State<Arc<App>>, Path(bus_id): Path<Strin
 }
 
 /// Detach forgets the device. Detaching one that is not attached is fine too.
-pub(crate) async fn detach(State(app): State<Arc<App>>, Path(bus_id): Path<String>) -> Response {
+pub(crate) async fn detach(State(app): State<ClientApi>, Path(bus_id): Path<String>) -> Response {
     if !is_bus_id(&bus_id) {
         return json::problem(&[("busId", "That is not a USB bus ID.")]);
     }

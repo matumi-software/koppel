@@ -75,7 +75,7 @@ at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`,
 
 - **Skakel on the web ports:** Skakel's server is started mounted (`start_mounted`): it binds no
   port of its own, and Koppel's web ports serve the UI, the plain HTTP redirect and the port and role
-  rules on the same port as 0.1.x, with Skakel beside them. After the port and role check, the web
+  rules on the same port as 0.1.x, with Skakel beside them. Once the network router's role gate has let a request through, the web
   ports hand Skakel's service what is Skakel's: the gRPC calls (told by their path, a service under `skakel.` or `koppel.remote.v1.RemoteDevices`, never by their content type; network
   surface, server role), `/skakel/*` and `/api/remote/*`. Each request carries the caller's real
   address (`ConnectInfo`) from the accept loop. Skakel's calls run on the caller's own connection, so
@@ -91,7 +91,7 @@ at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`,
   keeps on the same certificate, with the same settings.
 - **Limits:** Skakel keeps its own per-address limits, by the caller's real address:
   `KOPPEL_RATE_TOKEN_PER_MINUTE` and `KOPPEL_RATE_PAIR_PER_MINUTE`, 5 pairing requests opened in 5 minutes
-  and 3 open at once. Since Skakel sits behind the port and role check, a call to the wrong port or
+  and 3 open at once. Since Skakel sits behind the network router and its role gate, a call to the wrong port or
   role gets its 404 without counting, where 0.1.x counted it. The address a pairing request came
   from, in the server's UI and the activity log, is the one Skakel saw.
 - **State:** `secrets.json` keeps 0.1.x's shape (Skakel 0.1's state, the certificates as PKCS#12),

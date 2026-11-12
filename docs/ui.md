@@ -29,7 +29,7 @@ Code: `koppel-web/src/api/settings.rs` (write, then answer 202) and `koppel-web/
 (the push). The UI:
 `src/ui/app/src/live/` (the `EventSource` and the pushes into the cache), `src/ui/app/src/pending/`
 (pending, confirm, fail), `src/ui/app/src/settings/use-settings.ts`. The contract tests check every push
-against the Rust build (`koppel-contract/tests/push.rs`); the UI has its own tests (`pnpm --filter koppel.ui test`, run in `src/ui/`).
+against the program (`koppel/tests/contract/push.rs`); the UI has its own tests (`pnpm --filter koppel.ui test`, run in `src/ui/`).
 
 ## Pages, forms and accessibility
 

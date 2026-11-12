@@ -1024,8 +1024,11 @@ dependencies = [
  "koppel-usb",
  "koppel-web",
  "koppel-windows",
+ "reqwest",
+ "ring",
  "rustls",
  "sd-notify",
+ "serde_json",
  "time",
  "tokio",
  "tokio-rustls",
@@ -1056,17 +1059,6 @@ dependencies = [
  "tracing",
  "windows",
  "zeroize",
-]
-
-[[package]]
-name = "koppel-contract"
-version = "0.2.0"
-dependencies = [
- "reqwest",
- "ring",
- "rustls",
- "serde_json",
- "tokio",
 ]
 
 [[package]]

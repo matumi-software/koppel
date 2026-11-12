@@ -1,16 +1,12 @@
-//! The live push over Server-Sent Events: every event of [`koppel_contract::push::EVENTS`] follows the
+//! The live push over Server-Sent Events: every event of [`crate::support::push::EVENTS`] follows the
 //! change that causes it, with the payload the REST read of the same thing has, and the stream ends
-//! when its session does. Runs against a target with `KOPPEL_CONTRACT_PUSH=sse`; 0.1.x pushes over
-//! SignalR, so against it each test says it was skipped.
+//! when its session does.
 
 use std::time::Duration;
 
-use koppel_contract::push::{EVENTS, Payload};
-use koppel_contract::shape::{self, Kind};
-use koppel_contract::{
-    Events, Main, Next, Pair, Push, Session, json, needs_discovery, needs_skakel, password,
-    push_kind, unique,
-};
+use crate::support::push::{EVENTS, Payload};
+use crate::support::shape::{self, Kind};
+use crate::support::{Events, Main, Next, Pair, Session, json, password, unique};
 use serde_json::Value;
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -37,14 +33,7 @@ fn every_event_of_the_contract_has_a_test() {
     contract.sort_unstable();
     tested.sort_unstable();
     assert_eq!(contract, tested);
-}
-
-fn sse() -> bool {
-    if push_kind() == Push::Sse {
-        return true;
-    }
-    eprintln!("skipped: the target pushes over SignalR, and these tests read Server-Sent Events");
-    false
+    assert!(EVENTS.iter().all(|e| !e.when.is_empty()));
 }
 
 /// Checks `value` against the payload the contract gives the event `name`.
@@ -59,7 +48,7 @@ fn payload(name: &str, value: &Value) {
         Payload::List(fields) => {
             let mut fields = fields.to_vec();
             if name == "ServersDiscovered" {
-                // 0.1.x also writes the address as a URL, as GET /api/client/discovery does.
+                // The address as a URL too, as GET /api/client/discovery has it.
                 fields.push(("url", Kind::Str));
             }
             shape::each(value, name, |item| shape::fields(item, &fields, name));
@@ -88,12 +77,7 @@ async fn expect(events: &mut Events, name: &str, accept: impl FnMut(&Value) -> b
 
 #[tokio::test]
 async fn settings_changed_carries_the_settings_as_written() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     let mut events = open(&main.admin).await;
     main.admin
         .patch("/api/settings", json!({ "shareOnStartup": false }))
@@ -109,12 +93,7 @@ async fn settings_changed_carries_the_settings_as_written() {
 
 #[tokio::test]
 async fn activity_recorded_carries_the_entry_the_log_has() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     main.admin
         .patch("/api/settings", json!({ "notifyLink": true }))
         .await
@@ -144,12 +123,7 @@ async fn activity_recorded_carries_the_entry_the_log_has() {
 
 #[tokio::test]
 async fn clients_changed_carries_the_list_after_an_add_and_a_revoke() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     let mut events = open(&main.admin).await;
     let created = main
         .admin
@@ -182,12 +156,7 @@ async fn clients_changed_carries_the_list_after_an_add_and_a_revoke() {
 
 #[tokio::test]
 async fn server_keys_changed_carries_the_keys_after_a_certificate_is_prepared() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     let mut events = open(&main.admin).await;
     main.admin
         .post_empty("/api/server/keys/next-certificate")
@@ -207,12 +176,7 @@ async fn server_keys_changed_carries_the_keys_after_a_certificate_is_prepared() 
 
 #[tokio::test]
 async fn connection_changed_carries_the_connection_without_its_secret() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     let admin = &main.admin;
     admin
         .patch("/api/settings", json!({ "role": "both" }))
@@ -245,27 +209,32 @@ async fn connection_changed_carries_the_connection_without_its_secret() {
     assert_eq!(pushed, read);
 }
 
+// The device comes from the fake sysfs, which only Linux builds.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn client_devices_changed_follows_an_attach_and_a_detach() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
-    let admin = &main.admin;
-    admin
-        .patch("/api/settings", json!({ "role": "both" }))
+    // A client linked to a server that offers a device. The attach fails here, since the instance has
+    // no virtual host controller, and the failure is what the client shows and pushes.
+    let pair = Pair::with(crate::support::Options::default().usb_device()).await;
+    pair.server_admin
+        .put("/api/server/devices/1-1/shared", json!({ "shared": true }))
         .await
         .expect(202);
+    pair.connect().await;
+    let admin = &pair.client_admin;
+    crate::support::eventually("the client to list the server's device", WAIT, || async {
+        let devices = admin.get("/api/client/devices").await.expect(200).json();
+        (devices["devices"].as_array().is_some_and(|l| !l.is_empty())).then_some(())
+    })
+    .await;
     let mut events = open(admin).await;
     admin
-        .post_empty("/api/client/devices/9-9/attach")
+        .post_empty("/api/client/devices/1-1/attach")
         .await
         .expect(202);
     expect(&mut events, "ClientDevicesChanged", |_| true).await;
     admin
-        .post_empty("/api/client/devices/9-9/detach")
+        .post_empty("/api/client/devices/1-1/detach")
         .await
         .expect(202);
     expect(&mut events, "ClientDevicesChanged", |_| true).await;
@@ -273,12 +242,7 @@ async fn client_devices_changed_follows_an_attach_and_a_detach() {
 
 #[tokio::test]
 async fn pairing_status_changed_follows_a_cancel() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     let admin = &main.admin;
     admin
         .patch("/api/settings", json!({ "role": "both" }))
@@ -294,32 +258,24 @@ async fn pairing_status_changed_follows_a_cancel() {
     assert_eq!(pushed, read);
 }
 
+// Sharing writes to the Linux kernel's sysfs, which the instance gets as a folder of files here.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn devices_changed_follows_a_share_on_a_machine_that_can_share() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::with(crate::support::Options::default().usb_device()).await;
     let devices = main
         .admin
         .get("/api/server/devices")
         .await
         .expect(200)
         .json();
-    let Some(device) = devices["devices"]
+    assert!(devices["unavailable"].is_null(), "{devices}");
+    let device = devices["devices"]
         .as_array()
         .and_then(|list| list.first())
-        .filter(|_| devices["unavailable"].is_null())
         .cloned()
-    else {
-        eprintln!(
-            "skipped: this target has no USB device it can share ({}), so nothing makes DevicesChanged",
-            devices["unavailable"]
-        );
-        return;
-    };
+        .expect("the one device the instance was given");
+    shape::fields(&device, shape::DEVICE, "a server device");
     let bus_id = device["busId"].as_str().unwrap_or_default().to_owned();
     let shared = device["state"] == json!("shared");
     let mut events = open(&main.admin).await;
@@ -342,12 +298,7 @@ async fn devices_changed_follows_a_share_on_a_machine_that_can_share() {
 
 #[tokio::test]
 async fn pairing_requests_changed_follows_the_window_opening_and_closing() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() || !needs_skakel("the pairing window") {
-        return;
-    }
+    let main = Main::get().await;
     let mut events = open(&main.admin).await;
     main.admin
         .post("/api/server/pairing/window", json!({ "minutes": 5 }))
@@ -381,12 +332,7 @@ async fn pairing_requests_changed_follows_the_window_opening_and_closing() {
 
 #[tokio::test]
 async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !sse() || !needs_skakel("a pairing request") {
-        return;
-    }
+    let pair = Pair::get().await;
     let identity = pair
         .server_admin
         .get("/api/server/identity")
@@ -419,14 +365,11 @@ async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
         .expect(202);
 }
 
+// Broadcast works on Linux, in a container too; see the discovery test in client.rs.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn servers_discovered_follows_the_client_finding_the_server() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !sse() || !needs_discovery("discovery") {
-        return;
-    }
+    let pair = Pair::get().await;
     let fingerprint = pair
         .server_admin
         .get("/api/server/identity")
@@ -455,12 +398,7 @@ async fn servers_discovered_follows_the_client_finding_the_server() {
 
 #[tokio::test]
 async fn signing_out_ends_that_sessions_stream_only() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     let leaving = main.target.sign_in().await;
     let mut ended = open(&leaving).await;
     let mut staying = open(&main.admin).await;
@@ -481,12 +419,7 @@ async fn signing_out_ends_that_sessions_stream_only() {
 
 #[tokio::test]
 async fn a_password_change_ends_the_other_sessions_streams_and_keeps_its_own() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !sse() {
-        return;
-    }
+    let main = Main::get().await;
     let changer = main.target.sign_in().await;
     let other = main.target.sign_in().await;
     let mut kept = open(&changer).await;

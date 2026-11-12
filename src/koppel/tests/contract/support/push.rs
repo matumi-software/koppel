@@ -1,21 +1,18 @@
-//! The push contract to come: what the server pushes to the UI after it wrote a change.
+//! The push contract: what the server pushes to the UI after it wrote a change.
 //!
-//! 0.1.x pushes these over SignalR at `/api/hubs/ui` (`IUiClient` in `Hubs/UiHub.cs`, forwarded by
-//! `UiHubRelay`). The Rust build pushes the same events, with the same names and payloads, as
-//! Server-Sent Events (#84). They are not tested against 0.1.x, whose transport goes away; the tests
-//! come with the Rust build's SSE endpoint, and each one then checks that a REST change it makes is
-//! followed by its event, carrying the shape the REST read of the same thing has.
+//! The program pushes these over Server-Sent Events at `/api/events`, with the names and payloads
+//! below. Each test in `push.rs` makes a REST change and checks that its event follows, carrying the
+//! shape the REST read of the same thing has.
 //!
-//! A push test starts from [`crate::Session::get_stream`] with the session cookie, reads events until
-//! the one it waits for or a timeout, and checks the payload with [`crate::shape`]. It runs only when
-//! `KOPPEL_CONTRACT_PUSH=sse` ([`crate::push_kind`]). Besides the events, the contract has the stream
-//! answering 401 without a session, and closing when its session ends (sign-out, a password change
-//! elsewhere, the cookie running out).
+//! A push test starts from [`super::Session::events`] with the session cookie, reads events until the
+//! one it waits for or a timeout, and checks the payload with [`super::shape`]. Besides the events,
+//! the contract has the stream answering 401 without a session, and closing when its session ends
+//! (sign-out, a password change elsewhere, the cookie running out).
 //!
-//! The remote hub other Koppel machines use (Skakel's, at `/skakel/v1/hub`, with Koppel's own
-//! `DevicesChanged`) is not the UI's push and is not part of this list.
+//! The remote hub other Koppel machines use (Skakel's) is not the UI's push and is not part of this
+//! list.
 
-use crate::shape::{self, Kind};
+use super::shape::{self, Kind};
 
 /// One event: its name, what makes the server send it, and the shape of its payload.
 pub struct Event {
@@ -32,7 +29,7 @@ pub enum Payload {
     List(&'static [(&'static str, Kind)]),
 }
 
-/// Every event the UI's push carries in 0.1.x, as `IUiClient` declares them.
+/// Every event the UI's push carries.
 pub const EVENTS: &[Event] = &[
     Event {
         name: "SettingsChanged",

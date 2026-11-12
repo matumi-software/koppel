@@ -1,45 +1,32 @@
 //! Trusting a target's self-signed certificate, and only that one.
 //!
 //! Koppel makes its own certificate on first start, so there is no CA to trust. The first certificate
-//! a target presents in a test run is pinned by its SHA-256 fingerprint (trust on first use), and every
-//! later handshake with that target, from any test, must present a pinned one. The scripts start the
-//! targets seconds before the tests and nothing else is on the path, so the first sight is the target.
+//! a target presents is pinned by its SHA-256 fingerprint (trust on first use), and every later
+//! handshake with that target must present a pinned one. The test starts the instance seconds before
+//! it connects and nothing else is on the path, so the first sight is the instance.
 //! A test that makes the target switch certificate pins the next one first ([`crate::Target::trust`]).
 //! The handshake's signature is still checked against the certificate's key, so only the holder of the
 //! pinned certificate passes. The name in the certificate is not checked: it is the target's machine
 //! name, while the tests reach it as `localhost`, and the pin is the stronger check.
 
-use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{WebPkiSupportedAlgorithms, ring as ring_provider};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{CertificateError, DigitallySignedStruct, SignatureScheme};
 
-/// The fingerprints one target may present, shared by every test in the process.
+/// The fingerprints one target may present.
 #[derive(Debug, Default)]
-pub(crate) struct Pins {
+pub struct Pins {
     trusted: Mutex<Vec<String>>,
     last: Mutex<Option<String>>,
 }
 
 impl Pins {
-    /// The pins of the target at `authority` (`host:port`), the same set for every caller.
-    pub(crate) fn of(authority: &str) -> Arc<Pins> {
-        static ALL: OnceLock<Mutex<HashMap<String, Arc<Pins>>>> = OnceLock::new();
-        let mut all = ALL
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        all.entry(authority.to_ascii_lowercase())
-            .or_default()
-            .clone()
-    }
-
     /// Adds a fingerprint, in any spelling with 64 hex digits.
-    pub(crate) fn trust(&self, fingerprint: &str) {
+    pub fn trust(&self, fingerprint: &str) {
         let fingerprint = normalize(fingerprint);
         let mut trusted = self.trusted.lock().unwrap_or_else(|e| e.into_inner());
         if !trusted.contains(&fingerprint) {
@@ -48,7 +35,7 @@ impl Pins {
     }
 
     /// The certificate the last handshake presented, pinned or not.
-    pub(crate) fn last(&self) -> Option<String> {
+    pub fn last(&self) -> Option<String> {
         self.last.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -145,7 +132,7 @@ impl ServerCertVerifier for PinnedVerifier {
 
 /// An HTTP client that trusts the target's pins and nothing else. It sends no cookies of its own (the
 /// tests carry the session cookie by hand, to check what the target sets) and follows no redirects.
-pub(crate) fn client(pins: Arc<Pins>) -> reqwest::Client {
+pub fn client(pins: Arc<Pins>) -> reqwest::Client {
     let provider = Arc::new(ring_provider::default_provider());
     let verifier = PinnedVerifier {
         pins,

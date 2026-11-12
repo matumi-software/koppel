@@ -1,58 +1,43 @@
 //! Contract tests for Koppel: what a running Koppel answers over HTTPS, checked from the outside.
 //!
-//! The tests in `tests/` drive a real Koppel the way the browser and other Koppel machines do, so the
-//! Rust build can be held to what 0.1.x does. They check status codes, JSON field names and shapes,
-//! errors and behaviour, never incidental values such as times and generated ids. This library is the
-//! harness they share. It talks HTTP only and never links Koppel's own crates.
+//! The tests in `tests/contract/` start the real `koppel` program (`CARGO_BIN_EXE_koppel`) the way a
+//! person or another Koppel machine meets it, and drive it over HTTPS. They check status codes, JSON
+//! field names and types, errors and behaviour, never incidental values such as times and generated
+//! ids. This module is the harness they share. It talks HTTP only and never links Koppel's own crates,
+//! so a test sees what a browser or another machine sees.
 //!
-//! # Targets
+//! # Instances
 //!
-//! Each test needs one or more running Koppels, named by environment variables. A test whose target
-//! is not set prints that it was skipped and passes, so `cargo test --workspace` stays green without
-//! one. The tests change settings, passwords, clients and certificates: point them only at a Koppel
-//! made for the run, never at an install someone uses.
-//!
-//! | Variable | The target | Started with |
-//! |---|---|---|
-//! | `KOPPEL_CONTRACT_URL` | The main one, a server. Most tests use it | `RateLimits__AuthPerMinute=1000`, since every test signs in |
-//! | `KOPPEL_CONTRACT_CLIENT_URL` | A second one the tests make a client of, paired with the main one | The same, on a network shared with the main one |
-//! | `KOPPEL_CONTRACT_PEER_URL` | The main one's address as the client reaches it, such as `https://koppel-contract-main:5240` | |
-//! | `KOPPEL_CONTRACT_FRESH_URL` | One without a password, for the first-run setup and then the lockout | Defaults |
-//! | `KOPPEL_CONTRACT_EXPIRED_URL` | One whose setup window closes while the tests wait | `Ui__SetupWindowMinutes=1` |
-//! | `KOPPEL_CONTRACT_GUARDED_URL`, `KOPPEL_CONTRACT_GUARDED_NETWORK_URL` | One that turns the tests' address away from the UI, with the network surface on a port of its own | `Ui__AllowFrom=local`, `Ports__Network` set |
-//! | `KOPPEL_CONTRACT_LIMITS_URL` | One nothing else touches, for the sign-in rate limit | Defaults (30 a minute) |
-//! | `KOPPEL_CONTRACT_PASSWORD` | The UI password the tests set and use. Optional | |
-//! | `KOPPEL_CONTRACT_PUSH` | How the target pushes to the UI: `signalr` (0.1.x) or `sse` (the Rust build, #84). Optional, `signalr` by default | |
-//! | `KOPPEL_CONTRACT_SKAKEL` | `0` when the target has no Skakel: no token endpoint, `/skakel/info`, pairing, discovery or link, as the Rust build before #85. Optional, on by default | |
-//! | `KOPPEL_CONTRACT_DISCOVERY` | `0` when the client target cannot hear the main one's discovery answers. Optional, on by default | |
-//!
-//! `run-against-0.1.2.sh` in this crate starts all of them from the published image in Docker, runs the
-//! tests and removes what it started. `run-against-rust.sh` does the same with the Rust build, started
-//! from a temporary data folder for each target. The tests take one lock, so they run one at a time
-//! whatever the thread count: they share targets and change their settings.
+//! Each test starts the instances it needs ([`Main`], [`Pair`], [`Single`] or [`Instance`] itself) on
+//! a free port, with a temporary config and keys folder, and a guard that stops the program and removes
+//! the folders when the test ends, whether it passed or not. Nothing is shared between tests, so they
+//! run in parallel like any other, and `cargo test --workspace` runs them for real. Because they start
+//! the program, they need no environment variables and no Docker.
 //!
 //! # Skakel and discovery
 //!
-//! 0.1.x speaks Skakel protocol version 1 and the Rust build version 3; the tests take the version
-//! a target lists ([`skakel_path`]). With `KOPPEL_CONTRACT_SKAKEL=0`, for a build without Skakel, the
-//! parts of a test that need its endpoints or a link say they were skipped ([`needs_skakel`]) and
-//! the rest runs. With `KOPPEL_CONTRACT_DISCOVERY=0` the tests that need the client to find the main
-//! target by broadcast say they were skipped ([`needs_discovery`]).
+//! The program speaks Skakel protocol version 3; the tests take the version it lists
+//! ([`skakel_path`]). Discovery works by broadcast, which a container or a Linux machine allows and
+//! the Windows runs here turn off (see [`Options`]), so the two tests that need it only build on Linux.
 //!
 //! # Certificates
 //!
-//! A target's certificate is self-signed. The first one it presents is pinned, and the run trusts that
-//! one only; see [`tls`].
+//! An instance's certificate is self-signed. The first one it presents is pinned, and the test trusts
+//! that one only; see [`tls`].
 //!
 //! # The live push
 //!
-//! 0.1.x pushes over SignalR, the Rust build over Server-Sent Events at `/api/events` (#84). [`push`]
-//! lists the events, and `tests/push.rs` checks each against a target with `KOPPEL_CONTRACT_PUSH=sse`,
-//! reading the stream with [`Session::events`]. Against 0.1.x those tests say they were skipped.
+//! The program pushes to the UI over Server-Sent Events at `/api/events`. [`push`] lists the events,
+//! and `push.rs` checks each, reading the stream with [`Session::events`].
 
+mod process;
 pub mod push;
 pub mod shape;
 pub mod tls;
+
+#[cfg(target_os = "linux")]
+pub use process::own_address;
+pub use process::{Instance, Options};
 
 use std::future::Future;
 use std::sync::Arc;
@@ -61,11 +46,10 @@ use std::time::{Duration, Instant};
 use reqwest::Method;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
-use tokio::sync::{Mutex, MutexGuard};
 
 pub use serde_json::json;
 
-/// The password the tests set on a target without one, unless `KOPPEL_CONTRACT_PASSWORD` says another.
+/// The password the tests set on an instance without one.
 pub const DEFAULT_PASSWORD: &str = "contract-password-1";
 
 /// The header every change to the UI's API carries, as the UI's `uiFetch` adds it.
@@ -74,62 +58,13 @@ pub const UI_HEADER: &str = "X-Koppel-UI";
 /// The UI's session cookie.
 pub const COOKIE: &str = "koppel.ui";
 
-/// The UI password for this run.
+/// The UI password the tests set and use.
 pub fn password() -> String {
-    std::env::var("KOPPEL_CONTRACT_PASSWORD").unwrap_or_else(|_| DEFAULT_PASSWORD.to_owned())
-}
-
-/// How the target pushes to the UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Push {
-    /// SignalR at `/api/hubs/ui`, as 0.1.x does.
-    SignalR,
-    /// Server-Sent Events, as the Rust build will (#84).
-    Sse,
-}
-
-/// What `KOPPEL_CONTRACT_PUSH` says the target pushes with.
-pub fn push_kind() -> Push {
-    match std::env::var("KOPPEL_CONTRACT_PUSH").as_deref() {
-        Ok("sse") => Push::Sse,
-        _ => Push::SignalR,
-    }
-}
-
-/// Whether the target has Skakel's endpoints and link (`KOPPEL_CONTRACT_SKAKEL`, on unless `0`).
-pub fn skakel() -> bool {
-    std::env::var("KOPPEL_CONTRACT_SKAKEL").as_deref() != Ok("0")
-}
-
-/// True when the target has Skakel; otherwise says that `what` was skipped, and why.
-pub fn needs_skakel(what: &str) -> bool {
-    if skakel() {
-        return true;
-    }
-    eprintln!("skipped: {what} needs Skakel's endpoints and link, which this target does not have");
-    false
-}
-
-/// True when the client target can hear the main one's discovery answers
-/// (`KOPPEL_CONTRACT_DISCOVERY`, on unless `0`); otherwise says that `what` was skipped, and why.
-/// Off where the targets cannot reach each other by broadcast, such as processes on Windows that
-/// listen on loopback only.
-pub fn needs_discovery(what: &str) -> bool {
-    if !needs_skakel(what) {
-        return false;
-    }
-    if std::env::var("KOPPEL_CONTRACT_DISCOVERY").as_deref() != Ok("0") {
-        return true;
-    }
-    eprintln!(
-        "skipped: {what} needs the targets to hear each other's broadcasts, which this run turned off"
-    );
-    false
+    DEFAULT_PASSWORD.to_owned()
 }
 
 /// The path of one of Skakel's HTTPS calls, such as `token`, in the highest protocol version the
-/// target lists in `/skakel/info`: `/skakel/v2/token` for the Rust build, `/skakel/v1/token` for
-/// 0.1.x.
+/// target lists in `/skakel/info`, such as `/skakel/v3/token`.
 pub async fn skakel_path(target: &Target, call: &str) -> String {
     let info = target
         .anonymous()
@@ -156,25 +91,15 @@ pub struct Target {
 }
 
 impl Target {
-    /// The target at `base`. Its pins are shared by every test in the process.
+    /// The target at `base`, with pins of its own: the first certificate it presents is the one
+    /// this target and its clones trust.
     pub fn new(base: &str) -> Target {
         let base = base.trim_end_matches('/').to_owned();
-        let pins = tls::Pins::of(authority(&base));
+        let pins = Arc::new(tls::Pins::default());
         Target {
             http: tls::client(pins.clone()),
             pins,
             base,
-        }
-    }
-
-    /// The target named by `variable`, or `None` after saying the test was skipped.
-    pub fn from_env(variable: &str) -> Option<Target> {
-        match std::env::var(variable) {
-            Ok(base) if !base.trim().is_empty() => Some(Target::new(base.trim())),
-            _ => {
-                skipped(variable);
-                None
-            }
         }
     }
 
@@ -216,7 +141,11 @@ impl Target {
     /// The fingerprint of the certificate the target presents now, on a new connection. It must be
     /// one the run trusts.
     pub async fn current_certificate(&self) -> String {
-        let fresh = Target::new(&self.base);
+        let fresh = Target {
+            http: tls::client(self.pins.clone()),
+            pins: self.pins.clone(),
+            base: self.base.clone(),
+        };
         fresh.anonymous().get("/healthz").await;
         fresh
             .presented()
@@ -249,7 +178,7 @@ impl Target {
         assert_eq!(
             answer.status,
             204,
-            "signing in to {} failed: {} {}. A target with another password needs KOPPEL_CONTRACT_PASSWORD.",
+            "signing in to {} failed: {} {}",
             self.base,
             answer.status,
             answer.text()
@@ -264,13 +193,6 @@ impl Target {
 fn authority(base: &str) -> &str {
     let rest = base.split_once("://").map_or(base, |(_, rest)| rest);
     rest.split('/').next().unwrap_or(rest)
-}
-
-/// Says why a test did nothing. The test then passes.
-pub fn skipped(variable: &str) {
-    eprintln!(
-        "skipped: {variable} is not set, so this test has no Koppel to run against. See the koppel-contract docs."
-    );
 }
 
 /// A request body.
@@ -289,10 +211,6 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn target(&self) -> &Target {
-        &self.target
-    }
-
     /// The `koppel.ui` cookie value this session sends, if any.
     pub fn cookie(&self) -> Option<&str> {
         self.cookie.as_deref()
@@ -639,36 +557,35 @@ impl Answer {
     }
 }
 
-/// The one lock every test holds, because the tests share targets and change their state.
-pub async fn lock() -> MutexGuard<'static, ()> {
-    static LOCK: Mutex<()> = Mutex::const_new(());
-    LOCK.lock().await
-}
-
-/// The main target, signed in and back at the settings the tests start from: a server, no certificate
-/// prepared. Holds the lock while it lives.
+/// A server started for one test, signed in and at the settings the tests start from. Stops with the
+/// test.
 pub struct Main {
     pub target: Target,
     pub admin: Session,
-    _lock: MutexGuard<'static, ()>,
+    pub instance: Instance,
 }
 
 impl Main {
-    /// The main target, or `None` (skipped) when `KOPPEL_CONTRACT_URL` is not set.
-    pub async fn get() -> Option<Main> {
-        let lock = lock().await;
-        let target = Target::from_env("KOPPEL_CONTRACT_URL")?;
+    /// Starts the program as a server and signs in.
+    pub async fn get() -> Main {
+        Main::with(Options::default()).await
+    }
+
+    /// The same, started with these options.
+    pub async fn with(options: Options) -> Main {
+        let instance = Instance::start(options).await;
+        let target = instance.target.clone();
         let admin = target.sign_in().await;
         baseline_server(&admin).await;
-        Some(Main {
+        Main {
             target,
             admin,
-            _lock: lock,
-        })
+            instance,
+        }
     }
 }
 
-/// The settings a server starts each test with, whatever the last test left behind.
+/// The settings a server starts each test with.
 async fn baseline_server(admin: &Session) {
     admin
         .patch(
@@ -677,36 +594,35 @@ async fn baseline_server(admin: &Session) {
         )
         .await
         .expect(202);
-    let keys = admin.get("/api/server/keys").await.expect(200).json();
-    if !keys["nextFingerprint"].is_null() {
-        admin
-            .delete("/api/server/keys/next-certificate")
-            .await
-            .expect(202);
-    }
 }
 
-/// The main target as a server and the client target as its client, both signed in. Holds the lock.
+/// A server and a second instance as its client, both signed in, each started for one test.
 pub struct Pair {
-    pub server: Target,
     pub server_admin: Session,
     pub client: Target,
     pub client_admin: Session,
     /// The server's address as the client reaches it.
     pub peer_url: String,
-    _lock: MutexGuard<'static, ()>,
+    pub _server_instance: Instance,
+    pub client_instance: Instance,
 }
 
 impl Pair {
-    /// Both targets, or `None` (skipped) when any of their variables is not set.
-    pub async fn get() -> Option<Pair> {
-        let lock = lock().await;
-        let server = Target::from_env("KOPPEL_CONTRACT_URL")?;
-        let client = Target::from_env("KOPPEL_CONTRACT_CLIENT_URL")?;
-        let Ok(peer_url) = std::env::var("KOPPEL_CONTRACT_PEER_URL") else {
-            skipped("KOPPEL_CONTRACT_PEER_URL");
-            return None;
-        };
+    /// Starts both. The client looks for servers on the server's port, so it finds the server by
+    /// broadcast where broadcast works.
+    pub async fn get() -> Pair {
+        Pair::with(Options::default()).await
+    }
+
+    /// The same, with the server started with these options.
+    pub async fn with(server: Options) -> Pair {
+        let server_instance = Instance::start(server).await;
+        let server = server_instance.target.clone();
+        let client_instance = Instance::start(
+            Options::default().setting("KOPPEL_DISCOVERY_PORT", server_instance.port().to_string()),
+        )
+        .await;
+        let client = client_instance.target.clone();
         let server_admin = server.sign_in().await;
         baseline_server(&server_admin).await;
         let client_admin = client.sign_in().await;
@@ -714,33 +630,84 @@ impl Pair {
             .patch("/api/settings", json!({ "role": "client" }))
             .await
             .expect(202);
-        client_admin.delete("/api/client/pairing").await.expect(202);
-        Some(Pair {
-            server,
+        let peer_url = server.base().to_owned();
+        Pair {
             server_admin,
             client,
             client_admin,
-            peer_url: peer_url.trim_end_matches('/').to_owned(),
-            _lock: lock,
-        })
+            peer_url,
+            _server_instance: server_instance,
+            client_instance,
+        }
     }
 }
 
-/// A target only one test uses, with the lock held.
+impl Pair {
+    /// Registers a client on the server, saves its credentials on the client and waits until the
+    /// client's link is up. Returns the new client's id and secret.
+    pub async fn connect(&self) -> (String, String) {
+        let created = self
+            .server_admin
+            .post(
+                "/api/server/clients",
+                json!({ "name": unique("contract-client") }),
+            )
+            .await
+            .expect(201)
+            .json();
+        let fingerprint = self
+            .server_admin
+            .get("/api/server/identity")
+            .await
+            .expect(200)
+            .json()["fingerprint"]
+            .clone();
+        self.client_admin
+            .put(
+                "/api/client/connection",
+                json!({
+                    "serverUrl": self.peer_url,
+                    "serverFingerprint": fingerprint,
+                    "clientId": created["clientId"],
+                    "clientSecret": created["clientSecret"],
+                }),
+            )
+            .await
+            .expect(202);
+        eventually("the client to link", Duration::from_secs(60), || async {
+            let devices = self
+                .client_admin
+                .get("/api/client/devices")
+                .await
+                .expect(200)
+                .json();
+            (devices["link"] == json!("connected")).then_some(())
+        })
+        .await;
+        (
+            created["clientId"].as_str().unwrap_or_default().to_owned(),
+            created["clientSecret"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+        )
+    }
+}
+
+/// An instance only one test uses, started with its own settings.
 pub struct Single {
     pub target: Target,
-    _lock: MutexGuard<'static, ()>,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub instance: Instance,
 }
 
 impl Single {
-    /// The target named by `variable`, or `None` (skipped).
-    pub async fn get(variable: &str) -> Option<Single> {
-        let lock = lock().await;
-        let target = Target::from_env(variable)?;
-        Some(Single {
-            target,
-            _lock: lock,
-        })
+    pub async fn start(options: Options) -> Single {
+        let instance = Instance::start(options).await;
+        Single {
+            target: instance.target.clone(),
+            instance,
+        }
     }
 }
 

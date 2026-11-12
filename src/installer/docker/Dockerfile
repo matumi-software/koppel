@@ -190,7 +190,7 @@ WORKDIR /home/nonroot
 
 FROM base-${TARGETARCH} AS image
 ARG TARGETARCH
-# On the PATH, so `docker compose exec koppel koppel --reset-password` finds it.
+# On the PATH, so `docker compose exec koppel koppel reset-password` finds it.
 COPY --from=build /out/${TARGETARCH}/koppel /usr/local/bin/koppel
 COPY --from=notices /notices/THIRD-PARTY-NOTICES.txt /usr/share/doc/koppel/THIRD-PARTY-NOTICES.txt
 # One volume root for everything Koppel writes.

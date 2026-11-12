@@ -56,7 +56,7 @@ async fn healthz_stays_a_plain_ok() {
 async fn the_system_info_carries_the_build() {
     let dir = TempDir::new("ready-build");
     let node = Node::start(dir.path(), "server", None, FakeKernel::new()).await;
-    let info = node.get("/api/system/info").await;
+    let info = node.get("/api/v1/system/info").await;
     assert_eq!(info["commit"], "abc123def");
     assert_eq!(info["built"], "2026-01-01");
     node.stop().await;

@@ -62,7 +62,7 @@ export async function getClientSecret(clientId: string): Promise<string> {
   return (await getJson<{ clientSecret: string }>(`/api/server/clients/${encodeURIComponent(clientId)}/secret`)).clientSecret;
 }
 
-/** Replaces the secret and returns the new one. The client list follows over the hub. */
+/** Replaces the secret and returns the new one. The client list follows over the live push. */
 export async function rotateClientSecret(clientId: string): Promise<string> {
   const response = await uiFetch(`/api/server/clients/${encodeURIComponent(clientId)}/rotate`, { method: 'POST' });
   if (!response.ok) throw await rejection(response);

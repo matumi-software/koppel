@@ -4,51 +4,37 @@ import type { ReactElement } from 'react';
 import { vi } from 'vitest';
 import { ActivityProvider } from '@/activity/activity-provider';
 import { AuthContext } from '@/auth/auth-context';
-import { HubContext, type PushSource } from '@/hub/hub-context';
-import { HubPushes } from '@/hub/hub-pushes';
+import { LiveProvider } from '@/live/live-provider';
 import { PendingProvider } from '@/pending/pending-provider';
-
-/** A push source that only knows how to subscribe, and lets a test push. */
-export class FakeHub implements PushSource {
-  private readonly handlers = new Map<string, Set<(payload: unknown) => void>>();
-
-  on = (name: string, handler: (payload: unknown) => void) => {
-    const set = this.handlers.get(name) ?? new Set();
-    set.add(handler);
-    this.handlers.set(name, set);
-  };
-
-  off = (name: string, handler: (payload: unknown) => void) => {
-    this.handlers.get(name)?.delete(handler);
-  };
-
-  /** How many handlers listen to an event. */
-  count = (name: string) => this.handlers.get(name)?.size ?? 0;
-
-  emit = (name: string, payload: unknown) => {
-    for (const handler of [...(this.handlers.get(name) ?? [])]) handler(payload);
-  };
-}
+import { FakeEventSource } from './fake-event-source';
 
 export const newQueryClient = () =>
   new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: false, gcTime: Infinity } } });
 
-/** Renders under the same providers as main.tsx, with a fake hub. */
-export function renderApp(ui: ReactElement, hub = new FakeHub(), queryClient = newQueryClient()) {
+const signedIn = { recheck: () => {}, signOut: async () => {} };
+
+/** What a test does to the live link the app opened: push an event, or count who listens to it. */
+export const live = {
+  emit: (name: string, payload: unknown) => FakeEventSource.emit(name, payload),
+  emitRaw: (name: string, data: string) => FakeEventSource.current.emitRaw(name, data),
+  count: (name: string) => FakeEventSource.current.count(name),
+};
+
+/** Renders under the same providers as main.tsx, with a fake EventSource behind the live link. */
+export function renderApp(ui: ReactElement, queryClient = newQueryClient()) {
   const tree = (node: ReactElement) => (
     <QueryClientProvider client={queryClient}>
-      <AuthContext.Provider value={{ recheck: () => {}, signOut: async () => {} }}>
-        <HubContext.Provider value={{ connection: hub, state: 'live', retry: () => {} }}>
-          <HubPushes />
+      <AuthContext.Provider value={signedIn}>
+        <LiveProvider>
           <ActivityProvider>
             <PendingProvider>{node}</PendingProvider>
           </ActivityProvider>
-        </HubContext.Provider>
+        </LiveProvider>
       </AuthContext.Provider>
     </QueryClientProvider>
   );
   const result = render(tree(ui));
-  return { ...result, hub, queryClient, rerenderApp: (next: ReactElement) => result.rerender(tree(next)) };
+  return { ...result, live, queryClient, rerenderApp: (next: ReactElement) => result.rerender(tree(next)) };
 }
 
 export const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

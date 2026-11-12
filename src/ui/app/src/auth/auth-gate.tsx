@@ -13,7 +13,7 @@ const setupRecheckMs = 15_000;
 /**
  * Shows the app only to a signed-in browser: the login screen when there is a password, the first-run
  * password step when there is not and setup is open, and the timeout screen once it has closed.
- * Everything under it, the hub included, mounts only after sign-in and goes away on sign-out or when the
+ * Everything under it, the live link included, mounts only after sign-in and goes away on sign-out or when the
  * server answers 401.
  */
 export function AuthGate({ children }: { children: ReactNode }) {

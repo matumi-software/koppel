@@ -8,7 +8,7 @@ import { ClientDevicesPage } from '@/devices/client-devices';
 import { ServerDevicesPage } from '@/devices/server-devices';
 import { hostOf, useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { useAuth } from '@/auth/auth-context';
-import { useHub } from '@/hub/hub-context';
+import { useLive } from '@/live/live-context';
 import { OverviewPage } from '@/overview/overview-page';
 import { ClientsPage } from '@/server/clients-page';
 import { ConfigurationPage } from '@/settings/configuration-page';
@@ -23,7 +23,7 @@ import { useKoppelVersion, useMachineName } from '@/shared/use-machine-name';
 export function App() {
   const host = useMachineName();
   const version = useKoppelVersion();
-  const { state: link, retry } = useHub();
+  const { state: link, retry } = useLive();
   const { signOut } = useAuth();
   const { items } = useActivity();
   const [page, go] = usePageFromHash();

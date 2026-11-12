@@ -51,7 +51,7 @@ export async function getJson<T>(url: string): Promise<T> {
 
 /**
  * Sends a change and resolves once the server accepted it (202). That is not a confirmation:
- * the confirmed value arrives over the hub.
+ * the confirmed value arrives over the live push.
  */
 export async function sendChange(url: string, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', body?: unknown): Promise<void> {
   const response = await uiFetch(url, {

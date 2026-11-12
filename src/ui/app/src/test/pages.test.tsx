@@ -5,12 +5,12 @@ import type { ConnectionView } from '@/api/client';
 import type { KoppelSettings } from '@/api/settings';
 import { App } from '@/app';
 import { AuthContext } from '@/auth/auth-context';
-import { HubContext } from '@/hub/hub-context';
+import { LiveContext } from '@/live/live-context';
 import { confirmTimeoutMs } from '@/pending/domains';
 import { ConfigurationPage } from '@/settings/configuration-page';
 import { SetupPage } from '@/setup/setup-page';
 import { FrameContext, type FrameApi } from '@/shell/frame-context';
-import { accepted, deferred, FakeHub, json, mockFetch, renderApp } from './harness';
+import { accepted, deferred, json, mockFetch, renderApp } from './harness';
 
 const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
@@ -74,14 +74,14 @@ describe('setup', () => {
 
   it('stays pending until the settings show both the role and setupComplete', async () => {
     mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => accepted() });
-    const { hub } = renderApp(<SetupPage locked={false} onDone={() => {}} />);
+    const { live } = renderApp(<SetupPage locked={false} onDone={() => {}} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
     await screen.findByRole('button', { name: 'Saving' });
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'client' }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'client' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Saving' })).toBeTruthy());
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'server' }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'server' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Saving' })).toBeNull());
   });
 });
@@ -136,11 +136,11 @@ describe('the status card', () => {
 
   const card = () => document.querySelector('.kp-shell__side .kp-status-card') as HTMLElement;
 
-  /** The app with the live link in a given state, under the harness's own hub. */
+  /** The app with the live link in a given state, over the harness's live link. */
   const appWithLink = (state: 'live' | 'reconnecting' | 'down', retry = () => {}) => (
-    <HubContext.Provider value={{ connection: new FakeHub(), state, retry }}>
+    <LiveContext.Provider value={{ state, retry }}>
       <App />
-    </HubContext.Provider>
+    </LiveContext.Provider>
   );
 
   it('shows the machine name and the version from the system info, fetched once', async () => {
@@ -213,13 +213,13 @@ describe('the role', () => {
 
   it('announces Saving and Saved through a status region', async () => {
     mockFetch({ ...baseRoutes, 'PATCH /api/settings': () => accepted() });
-    const { hub } = renderApp(configuration());
+    const { live } = renderApp(configuration());
     await screen.findByText('Role');
 
     fireEvent.click(screen.getByRole('radio', { name: /Both/ }));
     await waitFor(() => expect(screen.getByText('Saving…').getAttribute('role')).toBe('status'));
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, role: 'both' }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, role: 'both' }));
     await waitFor(() => expect(screen.getByText('Saved').getAttribute('role')).toBe('status'));
   });
 });
@@ -258,12 +258,12 @@ describe('notifications', () => {
 
   it('turn one off with a PATCH of that setting, confirmed by the push', async () => {
     const { calls } = mockFetch(withTray('client'));
-    const { hub } = renderApp(configuration());
+    const { live } = renderApp(configuration());
 
     fireEvent.click(await screen.findByRole('switch', { name: /When the link to the server drops/ }));
     await waitFor(() => expect(calls.filter((c) => c.key === 'PATCH /api/settings').map((c) => c.body)).toEqual([{ notifyLink: false }]));
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, role: 'client', notifyLink: false }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, role: 'client', notifyLink: false }));
     await waitFor(() => expect((screen.getByRole('switch', { name: /When the link to the server drops/ }) as HTMLInputElement).checked).toBe(false));
   });
 });
@@ -278,7 +278,7 @@ describe('the server connection', () => {
 
   it('is confirmed only by a push that carries what was sent, then clears the secret and enables Test', async () => {
     const { calls } = mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
-    const { hub } = renderApp(configuration());
+    const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
 
     await userEvent.clear(clientId());
@@ -290,11 +290,11 @@ describe('the server connection', () => {
     await waitFor(() => expect(clientId().disabled).toBe(true));
 
     // A push for some other connection does not confirm it.
-    await act(async () => hub.emit('ConnectionChanged', { ...connection, clientId: 'someone-else' }));
+    await act(async () => live.emit('ConnectionChanged', { ...connection, clientId: 'someone-else' }));
     await waitFor(() => expect(clientId().value).toBe('someone-else'));
     expect(screen.queryByText(/Not saved/)).toBeNull();
 
-    await act(async () => hub.emit('ConnectionChanged', { ...connection, clientId: 'bench-2' }));
+    await act(async () => live.emit('ConnectionChanged', { ...connection, clientId: 'bench-2' }));
 
     await waitFor(() => expect(clientId().disabled).toBe(false));
     expect(secret().value).toBe('');
@@ -303,12 +303,12 @@ describe('the server connection', () => {
 
   it('clears the secret when only the secret was changed and the push repeats the stored values', async () => {
     mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
-    const { hub } = renderApp(configuration());
+    const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
 
     await userEvent.type(secret(), 'hunter2');
     await userEvent.click(saveConnection());
-    await act(async () => hub.emit('ConnectionChanged', connection));
+    await act(async () => live.emit('ConnectionChanged', connection));
 
     await waitFor(() => expect(secret().value).toBe(''));
     expect(testButton().disabled).toBe(false);
@@ -316,7 +316,7 @@ describe('the server connection', () => {
 
   it('recognises the push when the server spells the address and fingerprint its own way', async () => {
     mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
-    const { hub } = renderApp(configuration());
+    const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
 
     await userEvent.clear(screen.getByLabelText('Server address'));
@@ -326,14 +326,14 @@ describe('the server connection', () => {
     await userEvent.click(saveConnection());
     await waitFor(() => expect(clientId().disabled).toBe(true));
 
-    await act(async () => hub.emit('ConnectionChanged', { ...connection, serverUrl: 'https://lab.example:5241' }));
+    await act(async () => live.emit('ConnectionChanged', { ...connection, serverUrl: 'https://lab.example:5241' }));
 
     await waitFor(() => expect(clientId().disabled).toBe(false));
   });
 
   it('does not rebuild the form under someone typing when a save that had failed is confirmed late', async () => {
     mockFetch({ ...clientRole, 'PUT /api/client/connection': () => accepted() });
-    const { hub } = renderApp(configuration());
+    const { live } = renderApp(configuration());
     await screen.findByLabelText('Client secret');
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
@@ -349,7 +349,7 @@ describe('the server connection', () => {
     // Back to editing, then the server's confirmation of the old save arrives.
     fireEvent.change(secret(), { target: { value: 'hunter2' } });
 
-    await act(async () => hub.emit('ConnectionChanged', { ...connection, clientId: 'bench-2' }));
+    await act(async () => live.emit('ConnectionChanged', { ...connection, clientId: 'bench-2' }));
 
     expect(secret().value).toBe('hunter2');
     expect(screen.queryByText(/Not saved/)).toBeNull();

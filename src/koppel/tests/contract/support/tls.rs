@@ -147,6 +147,8 @@ pub fn client(pins: Arc<Pins>) -> reqwest::Client {
     reqwest::Client::builder()
         .tls_backend_preconfigured(config)
         .no_proxy()
+        // A target that restarts leaves a pooled connection dead, and Windows answers its reuse with a reset.
+        .pool_max_idle_per_host(0)
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(90))

@@ -244,6 +244,8 @@ async fn a_hand_edit_of_settings_json_is_applied_pushed_and_a_bad_one_is_kept_ou
     .await;
 }
 
+/// Windows seals with DPAPI, not a key file, so moving the keys folder aside loses nothing there.
+#[cfg(unix)]
 #[tokio::test]
 async fn without_its_keys_koppel_says_which_file_it_cannot_read_and_changes_nothing() {
     let mut main = Main::get().await;

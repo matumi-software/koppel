@@ -12,12 +12,27 @@ use std::sync::Arc;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use koppel_config::files::ServerSecrets;
-use koppel_config::{ConfigFile, ServerCertificate};
+use koppel_config::{CertificateError, ConfigFile, ConfigFileError, ServerCertificate};
 use serde_json::json;
 use skakel_server::{CertificateRecord, SkakelStore, StoreFuture};
 use time::{Duration, OffsetDateTime};
 
 use crate::tls::CertificateSlot;
+
+/// `secrets.json` held nothing the server could start from. The source stays for the log; the
+/// message names the file.
+#[derive(Debug, thiserror::Error)]
+pub enum SecretsError {
+    /// The new server state could not be saved.
+    #[error(transparent)]
+    Save(#[from] ConfigFileError),
+    #[error("the server certificate in secrets.json cannot be used: {0}")]
+    Certificate(#[source] CertificateError),
+    #[error("a certificate could not be made: {0}")]
+    Generate(#[source] rcgen::Error),
+    #[error("a new server state could not be made: {0}")]
+    State(#[source] serde_json::Error),
+}
 
 /// A certificate lasts ten years, as Skakel makes them.
 const CERTIFICATE_LIFETIME: Duration = Duration::days(3650);
@@ -36,14 +51,12 @@ impl SecretsStore {
     pub(crate) async fn open(
         file: ConfigFile<ServerSecrets>,
         host_name: &str,
-    ) -> Result<Arc<Self>, String> {
+    ) -> Result<Arc<Self>, SecretsError> {
         let state = match file.current().skakel.clone() {
             Some(state) => state,
             None => {
                 let state = new_state(host_name, OffsetDateTime::now_utc())?;
-                file.update(|_| ServerSecrets::of(state.clone()))
-                    .await
-                    .map_err(|e| e.to_string())?;
+                file.update(|_| ServerSecrets::of(state.clone())).await?;
                 let certificate = certificate_of(&state.certificate)?;
                 tracing::info!(
                     "Made the server certificate, fingerprint {}",
@@ -54,7 +67,7 @@ impl SecretsStore {
         };
         let certified = certificate_of(&state.certificate)?
             .certified_key()
-            .map_err(|e| format!("the server certificate in secrets.json cannot be used: {e}"))?;
+            .map_err(SecretsError::Certificate)?;
         Ok(Arc::new(Self {
             file,
             slot: CertificateSlot::new(certified),
@@ -98,13 +111,16 @@ impl SkakelStore for SecretsStore {
     }
 }
 
-fn certificate_of(record: &CertificateRecord) -> Result<ServerCertificate, String> {
-    ServerCertificate::from_record(record).map_err(|e| e.to_string())
+fn certificate_of(record: &CertificateRecord) -> Result<ServerCertificate, SecretsError> {
+    ServerCertificate::from_record(record).map_err(SecretsError::Certificate)
 }
 
 /// A new server state: a certificate and no clients. Skakel's state cannot be built field by field
 /// (its types are `#[non_exhaustive]`), so it is read from the JSON it keeps.
-fn new_state(host_name: &str, now: OffsetDateTime) -> Result<skakel_server::SkakelState, String> {
+fn new_state(
+    host_name: &str,
+    now: OffsetDateTime,
+) -> Result<skakel_server::SkakelState, SecretsError> {
     let certificate = new_certificate(host_name, now)?;
     serde_json::from_value(json!({
         "clients": [],
@@ -113,18 +129,20 @@ fn new_state(host_name: &str, now: OffsetDateTime) -> Result<skakel_server::Skak
             "privateKey": STANDARD.encode(&certificate.private_key),
         },
     }))
-    .map_err(|e| format!("a new server state could not be made: {e}"))
+    .map_err(SecretsError::State)
 }
 
 /// A self-signed ECDSA P-256 certificate for this machine's name (and `localhost`), valid from a day
 /// ago for ten years, as 0.1.x made them. Clients pin its fingerprint and ignore the names.
-fn new_certificate(host_name: &str, now: OffsetDateTime) -> Result<ServerCertificate, String> {
+fn new_certificate(
+    host_name: &str,
+    now: OffsetDateTime,
+) -> Result<ServerCertificate, SecretsError> {
     use rcgen::{
         CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose, SanType,
     };
 
-    let failed = |e: rcgen::Error| format!("a certificate could not be made: {e}");
-    let key = KeyPair::generate().map_err(failed)?;
+    let key = KeyPair::generate().map_err(SecretsError::Generate)?;
     let mut params = CertificateParams::default();
     params
         .distinguished_name
@@ -142,9 +160,41 @@ fn new_certificate(host_name: &str, now: OffsetDateTime) -> Result<ServerCertifi
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
     params.not_before = now - Duration::days(1);
     params.not_after = now + CERTIFICATE_LIFETIME;
-    let certificate = params.self_signed(&key).map_err(failed)?;
+    let certificate = params.self_signed(&key).map_err(SecretsError::Generate)?;
     Ok(ServerCertificate {
         certificate: certificate.der().to_vec(),
         private_key: key.serialize_der(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::*;
+
+    #[test]
+    fn a_certificate_that_cannot_be_read_names_the_file_and_keeps_its_cause() {
+        let record: CertificateRecord = serde_json::from_value(json!({
+            "certificate": "not base64!",
+            "privateKey": "",
+        }))
+        .expect("a record");
+        let error = certificate_of(&record).expect_err("not base64");
+        assert!(matches!(error, SecretsError::Certificate(_)));
+        assert!(
+            error
+                .to_string()
+                .starts_with("the server certificate in secrets.json cannot be used:"),
+            "{error}"
+        );
+        assert!(error.source().is_some(), "the cause is kept for the log");
+    }
+
+    #[test]
+    fn a_new_state_has_a_certificate_the_slot_can_present() {
+        let state = new_state("a-host", OffsetDateTime::now_utc()).expect("a state");
+        let certificate = certificate_of(&state.certificate).expect("readable");
+        certificate.certified_key().expect("usable");
+    }
 }

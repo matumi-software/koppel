@@ -25,7 +25,9 @@ use crate::guard::RateLimit;
 use crate::host::Host;
 use crate::push::{self, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
-use crate::roles::skakel::{APP_ID, SecretsStore, ServerParts, ServerStartError, SkakelLinks};
+use crate::roles::skakel::{
+    APP_ID, SecretsError, SecretsStore, ServerParts, ServerStartError, SkakelLinks,
+};
 use crate::roles::{SkakelClientRole, SkakelServerRole, UsbActivity, UsbClientRole, UsbServerRole};
 use crate::routes::Routers;
 use crate::tasks::{STOP_WAIT, Tasks};
@@ -109,8 +111,8 @@ pub enum StartError {
     #[error(transparent)]
     File(#[from] ConfigFileError),
     /// `secrets.json` held nothing the server could start from.
-    #[error("{0}")]
-    Secrets(String),
+    #[error(transparent)]
+    Secrets(#[from] SecretsError),
     #[error(transparent)]
     Tls(#[from] WebError),
     #[error(transparent)]
@@ -224,9 +226,7 @@ impl App {
 
         // The server side: USB, then Skakel's server over secrets.json with the USB streams and the
         // remote device list.
-        let store = SecretsStore::open(server_secrets.clone(), &host.name)
-            .await
-            .map_err(StartError::Secrets)?;
+        let store = SecretsStore::open(server_secrets.clone(), &host.name).await?;
         let certificate = store.slot();
         let own_acceptor = tls::acceptor(certificate.clone())?;
         let usb_server = koppel_usb::UsbServer::new(koppel_usb::ServerDeps {

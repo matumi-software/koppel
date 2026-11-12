@@ -22,4 +22,4 @@ pub use client::SkakelClientRole;
 pub(crate) use links::SkakelLinks;
 pub use server::SkakelServerRole;
 pub(crate) use server::{APP_ID, ServerParts, ServerStartError};
-pub(crate) use store::SecretsStore;
+pub(crate) use store::{SecretsError, SecretsStore};

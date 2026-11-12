@@ -807,12 +807,11 @@ fn attached_expects(
 ) -> bool {
     remembered
         .bus_ids
-        .as_ref()
-        .is_some_and(|ids| ids.iter().any(|b| b == device.bus_id.as_str()))
+        .iter()
+        .any(|b| b == device.bus_id.as_str())
         && remembered
             .vid_pids
-            .as_ref()
-            .and_then(|v| v.get(device.bus_id.as_str()))
+            .get(device.bus_id.as_str())
             .is_none_or(|vid_pid| *vid_pid == device.vid_pid)
 }
 

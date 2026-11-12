@@ -1,29 +1,23 @@
 //! Koppel's files on disk: the JSON config files, the encrypted secret files and the server
-//! certificate, in the same folders and with the same JSON as Koppel 0.1.x, and the one-time
-//! conversion of a 0.1.x install's secrets.
+//! certificate, in the same folders as Koppel 0.1.x. What an older install wrote is brought up to
+//! date once, at start, by `koppel-upgrade`.
 //!
 //! - [`KoppelPaths`]: where the files are, and [`KoppelPaths::prepare`], which restricts the
 //!   folders as 0.1.x does.
 //! - [`ConfigFile`]: one file, written through a temp file and a replace, with ordered change
 //!   deliveries and hand edits picked up.
-//! - [`files`]: what each file holds, and [`open`]: each file opened as 0.1.x opens it.
+//! - [`files`]: what each file holds, and [`open`]: each file opened with its defaults and checks.
 //! - [`SecretBox`]: the secret file format, machine DPAPI on Windows and AES-256-GCM with a key
 //!   file elsewhere.
-//! - [`convert_0_1_secrets`]: reads 0.1.x's Data Protection key ring and writes its secret files
-//!   again in the new format.
 //! - [`ServerCertificate`]: the server certificate from `secrets.json`, as rustls presents it.
 
 mod certificate;
-mod dataprotection;
 #[cfg(windows)]
-mod dpapi;
+pub mod dpapi;
 mod file;
 pub mod files;
 mod harden;
-pub mod json;
-mod migrate;
 mod paths;
-pub mod pkcs12;
 mod redact;
 mod secret;
 
@@ -32,13 +26,11 @@ use std::sync::Arc;
 use ring::rand::{SecureRandom, SystemRandom};
 
 pub use certificate::{CertificateError, ServerCertificate};
-pub use dataprotection::{DataProtectionError, KOPPEL_PURPOSES, KeyRing};
 pub use file::{
     CodecError, ConfigErrorKind, ConfigFile, ConfigFileError, FileCodec, Options, PlainText,
-    Subscription, ValidateFn, Validator,
+    Subscription, ValidateFn, Validator, encode_json, replace_file, utc_stamp,
 };
 pub use harden::harden_directory;
-pub use migrate::{Conversion, ConversionError, convert_0_1_secrets};
 pub use paths::{KoppelPaths, default_root};
 pub use redact::Secret;
 pub use secret::{KeySource, KeySources, SecretBox, SecretError, SecretFormat, format_of};
@@ -47,7 +39,7 @@ use files::{
     AttachedDevices, ClientConnection, KoppelSettings, ServerSecrets, SharedDevices, UiCredentials,
 };
 
-/// Each config file opened as 0.1.x opens it: the same defaults, codec and checks.
+/// Each config file opened with its defaults, codec and checks.
 pub mod open {
     use super::*;
 
@@ -67,7 +59,7 @@ pub mod open {
     pub fn devices(paths: &KoppelPaths) -> ConfigFile<SharedDevices> {
         ConfigFile::new(
             paths.devices_file(),
-            SharedDevices::empty(),
+            SharedDevices::default(),
             Options {
                 start_with_defaults_when_unusable: true,
                 warn_unknown_keys: true,
@@ -80,7 +72,7 @@ pub mod open {
     pub fn attached(paths: &KoppelPaths) -> ConfigFile<AttachedDevices> {
         ConfigFile::new(
             paths.attached_file(),
-            AttachedDevices::empty(),
+            AttachedDevices::default(),
             Options {
                 start_with_defaults_when_unusable: true,
                 warn_unknown_keys: true,

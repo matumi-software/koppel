@@ -15,6 +15,7 @@ workspace = true
 axum.workspace = true
 clap.workspace = true
 koppel-config.workspace = true
+koppel-upgrade.workspace = true
 koppel-web.workspace = true
 koppel-usb.workspace = true
 tokio.workspace = true

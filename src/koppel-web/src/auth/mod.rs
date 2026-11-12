@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use indexmap::IndexMap;
 use koppel_config::files::UiCredentials;
-use koppel_config::json::OrderedMap;
 use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox};
 use ring::rand::{SecureRandom, SystemRandom};
 use time::OffsetDateTime;
@@ -219,7 +219,7 @@ impl UiAuth {
             .update(|_| UiCredentials {
                 password_hash: Some(hash.into()),
                 security_stamp: Some(stamp),
-                revoked_sessions: None,
+                revoked_sessions: IndexMap::new(),
             })
             .await?;
         Ok(SetupOutcome::Done)
@@ -253,26 +253,25 @@ impl UiAuth {
         let now = OffsetDateTime::now_utc();
         self.file
             .update(|current| {
-                let mut kept: Vec<(String, OffsetDateTime)> = current
+                let mut kept: IndexMap<String, OffsetDateTime> = current
                     .revoked_sessions
-                    .as_ref()
-                    .map(|map| map.0.clone())
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|(id, ends)| *ends > now && id != session)
+                    .iter()
+                    .filter(|(id, ends)| **ends > now && *id != session)
+                    .map(|(id, ends)| (id.clone(), *ends))
                     .collect();
                 while kept.len() >= MAX_REVOKED {
                     let soonest = kept
                         .iter()
-                        .enumerate()
-                        .min_by_key(|(_, (_, ends))| *ends)
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    kept.remove(soonest);
+                        .min_by_key(|(_, ends)| **ends)
+                        .map(|(id, _)| id.clone());
+                    match soonest {
+                        Some(id) => kept.shift_remove(&id),
+                        None => break,
+                    };
                 }
-                kept.push((session.to_owned(), until));
+                kept.insert(session.to_owned(), until);
                 UiCredentials {
-                    revoked_sessions: Some(OrderedMap(kept)),
+                    revoked_sessions: kept,
                     ..current.clone()
                 }
             })
@@ -286,8 +285,8 @@ impl UiAuth {
         self.file
             .current()
             .revoked_sessions
-            .as_ref()
-            .and_then(|map| map.get(session).copied())
+            .get(session)
+            .copied()
             .is_some_and(|until| until > now)
     }
 
@@ -369,7 +368,11 @@ impl UiAuth {
             tracing::warn!(
                 "Koppel is waiting for its first password. Open {} and set it before {} (UTC). Whoever opens the UI first sets it. After that time, restart Koppel to set it.",
                 self.address,
-                koppel_config::json::format_date(closes.replace_nanosecond(0).unwrap_or(closes))
+                closes
+                    .replace_nanosecond(0)
+                    .unwrap_or(closes)
+                    .format(&time::format_description::well_known::Rfc3339)
+                    .unwrap_or_default()
             );
         }
     }
@@ -414,7 +417,7 @@ pub async fn reset_password(
     file.update(|_| UiCredentials {
         password_hash: None,
         security_stamp: Some(stamp),
-        revoked_sessions: None,
+        revoked_sessions: IndexMap::new(),
     })
     .await?;
     file.stop();

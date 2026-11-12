@@ -76,7 +76,7 @@ pub enum ActivityOutcome {
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEvent {
     pub id: String,
-    #[serde(with = "koppel_config::json::date_time_offset")]
+    #[serde(with = "time::serde::rfc3339")]
     pub timestamp_utc: OffsetDateTime,
     pub entity: EntityRef,
     pub reason: ActivityReason,
@@ -211,6 +211,6 @@ mod tests {
         assert_eq!(json["outcome"], "failed");
         assert_eq!(json["entity"]["type"], "machine");
         assert_eq!(event.id.len(), 32);
-        assert!(json["timestampUtc"].as_str().unwrap().ends_with("+00:00"));
+        assert!(json["timestampUtc"].as_str().unwrap().ends_with('Z'));
     }
 }

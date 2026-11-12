@@ -26,11 +26,12 @@ use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
 
-use crate::dataprotection;
 use crate::file::{CodecError, FileCodec, create_private, sync_directory};
 
 /// What every secret file starts with.
 pub const MAGIC: [u8; 4] = *b"KPSF";
+/// What an ASP.NET Core Data Protection payload, as Koppel 0.1.x wrote its secret files, starts with.
+const DATA_PROTECTION_MAGIC: [u8; 4] = [0x09, 0xF0, 0xC9, 0xF0];
 /// The format version this code writes.
 pub const VERSION: u8 = 1;
 /// Machine-scope DPAPI.
@@ -100,7 +101,7 @@ pub enum SecretFormat {
 pub fn format_of(bytes: &[u8]) -> SecretFormat {
     if bytes.starts_with(&MAGIC) {
         SecretFormat::Current
-    } else if dataprotection::is_payload(bytes) {
+    } else if bytes.starts_with(&DATA_PROTECTION_MAGIC) {
         SecretFormat::DataProtection
     } else {
         SecretFormat::Unknown
@@ -770,7 +771,7 @@ mod tests {
                 .contains("newer Koppel")
         );
         assert!(same.unprotect(b"{}").is_err());
-        let mut old = dataprotection::MAGIC.to_vec();
+        let mut old = DATA_PROTECTION_MAGIC.to_vec();
         old.extend_from_slice(&[0; 80]);
         assert!(
             same.unprotect(&old)

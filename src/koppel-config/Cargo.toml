@@ -1,6 +1,6 @@
 [package]
 name = "koppel-config"
-description = "Koppel's files on disk: config files, secret files, the server certificate and the upgrade from 0.1.x"
+description = "Koppel's files on disk: config files, secret files and the server certificate"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,10 +18,8 @@ tracing.workspace = true
 ring.workspace = true
 zeroize.workspace = true
 rustls.workspace = true
-aes.workspace = true
-cbc.workspace = true
-des.workspace = true
-roxmltree.workspace = true
+indexmap.workspace = true
+skakel-server.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

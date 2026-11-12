@@ -1,5 +1,5 @@
-//! Request bodies and answers in the shapes ASP.NET's minimal APIs gave 0.1.x: JSON read with names in
-//! any case, a body that is missing or not JSON refused with 400, validation problems as
+//! Request bodies and answers in the shapes ASP.NET's minimal APIs gave 0.1.x: JSON read with the names the UI sends
+//! (camelCase), a body that is missing or not JSON refused with 400, validation problems as
 //! `application/problem+json`, and `{ error }` for the sign-in endpoints.
 
 use axum::body::Bytes;
@@ -33,12 +33,10 @@ where
         if !is_json {
             return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response());
         }
-        match koppel_config::json::parse(&bytes) {
-            Ok(Value::Null) | Err(_) => Err(StatusCode::BAD_REQUEST.into_response()),
-            Ok(value) => koppel_config::json::from_value(value)
-                .map(JsonBody)
-                .map_err(|_| StatusCode::BAD_REQUEST.into_response()),
-        }
+        // A byte order mark is skipped, as ASP.NET did.
+        serde_json::from_slice(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&bytes))
+            .map(JsonBody)
+            .map_err(|_| StatusCode::BAD_REQUEST.into_response())
     }
 }
 

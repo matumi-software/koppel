@@ -49,6 +49,11 @@ const BLOCK_LEN: usize = 16;
 const AES_KEY_LEN: usize = 32;
 const MAC_LEN: usize = 32;
 
+/// An RFC 3339 date as the key files write them (`2026-11-09T08:30:15.1234567Z`).
+fn parse_date(text: &str) -> Option<OffsetDateTime> {
+    OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339).ok()
+}
+
 /// True when `bytes` is a Data Protection payload.
 pub fn is_payload(bytes: &[u8]) -> bool {
     bytes.starts_with(&MAGIC)
@@ -204,7 +209,7 @@ impl KeyRing {
     fn add_revocation(&mut self, text: &str) -> Result<(), String> {
         let document = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
         let root = document.root_element();
-        let date = child_text(root, "revocationDate").and_then(crate::json::parse_date);
+        let date = child_text(root, "revocationDate").and_then(parse_date);
         let id = root
             .children()
             .find(|n| n.has_tag_name("key"))
@@ -300,7 +305,7 @@ fn master_key(key: &Key) -> Result<Vec<u8>, DataProtectionError> {
 
 #[cfg(windows)]
 fn unprotect_dpapi(blob: &[u8]) -> Result<Vec<u8>, String> {
-    crate::dpapi::unprotect(blob, DPAPI_ENTROPY).map_err(|e| e.to_string())
+    koppel_config::dpapi::unprotect(blob, DPAPI_ENTROPY).map_err(|e| e.to_string())
 }
 
 #[cfg(not(windows))]
@@ -331,7 +336,7 @@ fn parse_key(text: &str) -> Result<Key, String> {
     }
     let name = root.attribute("id").ok_or("the key has no id")?.to_string();
     let id = guid_bytes(&name)?;
-    let created = child_text(root, "creationDate").and_then(crate::json::parse_date);
+    let created = child_text(root, "creationDate").and_then(parse_date);
     let outer = root
         .children()
         .find(|n| n.has_tag_name("descriptor"))
@@ -620,7 +625,7 @@ mod tests {
         let element = format!(
             "\u{feff}<?xml version=\"1.0\" encoding=\"utf-8\"?>\r\n<masterKey p4:requiresEncryption=\"true\" xmlns:p4=\"http://schemas.asp.net/2015/03/dataProtection\">\r\n  <!-- Warning: the key below is in an unencrypted form. -->\r\n  <value>{value}</value>\r\n</masterKey>"
         );
-        let blob = crate::dpapi::protect(element.as_bytes(), DPAPI_ENTROPY).unwrap();
+        let blob = koppel_config::dpapi::protect(element.as_bytes(), DPAPI_ENTROPY).unwrap();
         let encrypted = format!(
             "<encryptedSecret decryptorType=\"Microsoft.AspNetCore.DataProtection.XmlEncryption.DpapiXmlDecryptor, Microsoft.AspNetCore.DataProtection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60\" xmlns=\"http://schemas.asp.net/2015/03/dataProtection\">\n          <encryptedKey xmlns=\"\">\n            <!-- This key is encrypted with Windows DPAPI. -->\n            <value>{}</value>\n          </encryptedKey>\n        </encryptedSecret>",
             STANDARD.encode(blob)
@@ -631,7 +636,7 @@ mod tests {
             "the master key is no longer in the clear"
         );
 
-        let dir = std::env::temp_dir().join(format!("koppel-dpapi-ring-{}", crate::random_hex(6)));
+        let dir = std::env::temp_dir().join(format!("koppel-dpapi-ring-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let mut bytes = b"\xEF\xBB\xBF".to_vec();
         bytes.extend_from_slice(windows_xml.as_bytes());

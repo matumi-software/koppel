@@ -44,9 +44,9 @@ impl std::error::Error for RoleError {}
 pub struct ClientView {
     pub id: String,
     pub name: String,
-    #[serde(with = "koppel_config::json::date_time_offset")]
+    #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub last_seen: Option<OffsetDateTime>,
     /// It has the fingerprint of the certificate prepared for a handover.
     pub has_next_certificate: bool,
@@ -69,7 +69,7 @@ pub struct NewClient {
 pub struct KeysView {
     pub fingerprint: String,
     pub next_fingerprint: Option<String>,
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub next_prepared_at: Option<OffsetDateTime>,
 }
 
@@ -91,7 +91,7 @@ pub struct PairingWindowView {
     /// guess if a build ever does).
     pub always_open: bool,
     /// When the window closes by itself. `None` when it is closed.
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub until: Option<OffsetDateTime>,
 }
 
@@ -133,9 +133,9 @@ pub struct PairingRequestView {
     pub id: String,
     pub client_name: String,
     pub from: String,
-    #[serde(with = "koppel_config::json::date_time_offset")]
+    #[serde(with = "time::serde::rfc3339")]
     pub requested_at: OffsetDateTime,
-    #[serde(with = "koppel_config::json::date_time_offset")]
+    #[serde(with = "time::serde::rfc3339")]
     pub expires_at: OffsetDateTime,
     pub state: String,
     pub message: Option<String>,
@@ -225,7 +225,7 @@ pub struct PairingStatus {
     pub server_url: Option<String>,
     pub code: Option<String>,
     pub message: Option<String>,
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub expires_at: Option<OffsetDateTime>,
     pub server_fingerprint: Option<String>,
 }
@@ -277,7 +277,7 @@ pub struct DeviceView {
     /// `local`, `shared`, `attached` or `offline`.
     pub state: String,
     pub attached_to: Option<String>,
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub attached_since: Option<OffsetDateTime>,
     pub fault: Option<String>,
     pub serial: Option<String>,
@@ -300,7 +300,7 @@ pub struct ClientDeviceView {
     pub device: DeviceView,
     pub attached_here: bool,
     pub port: Option<i32>,
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub attached_since: Option<OffsetDateTime>,
     pub fault: Option<String>,
     pub attached_via: Option<String>,

@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 koppel-config.workspace = true
+indexmap.workspace = true
 koppel-usb.workspace = true
 skakel-server.workspace = true
 skakel-client.workspace = true

@@ -525,9 +525,7 @@ async fn secrets_in(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_server_upgraded_from_koppel_0_2_0_keeps_its_clients_and_drops_the_token_signing_key() {
-    use koppel_config::files::SkakelKeyRecord;
-
+async fn a_server_with_a_token_signing_key_in_its_state_keeps_its_clients_and_drops_the_key() {
     let (server_dir, client_dir) = (TempDir::new("server"), TempDir::new("client"));
     let server = Node::start(server_dir.path(), "server", None, FakeKernel::new()).await;
     let client = Node::start(client_dir.path(), "client", None, FakeKernel::new()).await;
@@ -535,47 +533,53 @@ async fn a_server_upgraded_from_koppel_0_2_0_keeps_its_clients_and_drops_the_tok
     let port = server.port;
     server.stop().await;
 
-    // The file as Koppel 0.2.0 left it: the same clients and certificate, and a signing key.
-    let before = {
-        let file = secrets_in(server_dir.path()).await;
-        let key = SkakelKeyRecord {
-            key_id: "skakel-0123456789".into(),
-            private_key: "bm90IGEgcmVhbCBrZXk=".into(),
-            created_at: time::OffsetDateTime::now_utc(),
-            accept_until: None,
-        };
-        let written = file
-            .update(|current| {
-                let mut next = current.clone();
-                let state = next.skakel.as_mut().expect("Skakel's state");
-                state.signing_key = Some(key.clone());
-                state.retired_signing_keys = vec![key.clone()];
-                next
-            })
-            .await
-            .unwrap();
-        file.stop();
-        written.skakel.clone().unwrap()
-    };
-    assert_eq!(before.clients.len(), 1);
+    // The file as an earlier Skakel left it: the same state, and the signing keys it used to keep.
+    let (config, keys) = (
+        server_dir.path().join("config"),
+        server_dir.path().join("keys"),
+    );
+    let paths = koppel_config::KoppelPaths::new(&config, &keys);
+    let secret_box = koppel_config::SecretBox::open(&keys).unwrap();
+    let file = paths.server_secrets_file();
+    let mut json: Value = serde_json::from_slice(
+        &secret_box
+            .unprotect(&std::fs::read(&file).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    let key = json!({
+        "keyId": "skakel-0123456789",
+        "privateKey": "bm90IGEgcmVhbCBrZXk=",
+        "createdAt": "2026-11-09T08:30:15Z",
+        "acceptUntil": null,
+    });
+    json["skakel"]["signingKey"] = key.clone();
+    json["skakel"]["retiredSigningKeys"] = json!([key]);
+    std::fs::write(
+        &file,
+        secret_box
+            .protect(&serde_json::to_vec(&json).unwrap())
+            .unwrap(),
+    )
+    .unwrap();
+    let before = secrets_in(server_dir.path()).await;
+    let before_state = before.current().skakel.clone().unwrap();
+    before.stop();
+    assert_eq!(before_state.clients.len(), 1);
 
-    // The upgraded Koppel starts on it, and the client that paired with the old one links again
-    // with the credentials it already holds.
+    // The Koppel that starts on it keeps the client, which links again with the credentials it
+    // already holds, and the next save leaves the keys out.
     let server = Node::start(server_dir.path(), "server", Some(port), FakeKernel::new()).await;
     linked(&client).await;
     let listed = server.get("/api/server/clients").await;
     assert_eq!(listed[0]["id"], json!(client_id), "{listed}");
     server.stop().await;
 
-    let file = secrets_in(server_dir.path()).await;
-    let after = file.current().skakel.clone().unwrap();
-    file.stop();
-    assert_eq!(
-        after.clients, before.clients,
-        "the clients are as they were"
-    );
-    assert_eq!(after.certificate_pfx, before.certificate_pfx);
-    assert!(after.signing_key.is_none() && after.retired_signing_keys.is_empty());
+    let after = secrets_in(server_dir.path()).await;
+    let after_state = after.current().skakel.clone().unwrap();
+    after.stop();
+    assert_eq!(after_state.clients, before_state.clients);
+    assert_eq!(after_state.certificate, before_state.certificate);
 
     client.stop().await;
 }

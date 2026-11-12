@@ -5,4 +5,4 @@
 src/installer/windows/usbip-win2/** binary
 
 # Files Koppel 0.1.x wrote, kept byte for byte: the tests compare against them.
-src/koppel-config/tests/fixtures/** binary
+src/koppel-upgrade/tests/fixtures/** binary

@@ -47,8 +47,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use zeroize::Zeroizing;
 
-use crate::json;
-
 const READ_ATTEMPTS: u32 = 5;
 const READ_RETRY_DELAY: Duration = Duration::from_millis(200);
 const REPLACE_ATTEMPTS: u32 = 20;
@@ -790,7 +788,7 @@ fn load_blocking<T: Serialize + DeserializeOwned>(
             format!("it is not valid JSON for this file ({e})"),
         )
     };
-    let mut value = json::parse(&text).map_err(not_json)?;
+    let mut value = parse_json(&text).map_err(not_json)?;
     if value.is_null() {
         return Err(ConfigFileError::new(
             path,
@@ -803,7 +801,7 @@ fn load_blocking<T: Serialize + DeserializeOwned>(
         (Value::Object(map), true) => map.keys().cloned().collect(),
         _ => Vec::new(),
     };
-    let value: T = json::from_value(value).map_err(not_json)?;
+    let value: T = serde_json::from_value(value).map_err(not_json)?;
     if let Some(invalid) = validate.and_then(|validate| validate(&value)) {
         return Err(ConfigFileError::new(
             path,
@@ -858,10 +856,7 @@ fn unknown_names<T: Serialize>(input: &[String], value: &T) -> Vec<String> {
     if input.is_empty() {
         return Vec::new();
     }
-    let Ok(Value::Object(known)) = json::to_vec(value)
-        .map_err(|_| ())
-        .and_then(|bytes| json::parse(&bytes).map_err(|_| ()))
-    else {
+    let Ok(Value::Object(known)) = serde_json::to_value(value) else {
         return Vec::new();
     };
     input
@@ -871,7 +866,7 @@ fn unknown_names<T: Serialize>(input: &[String], value: &T) -> Vec<String> {
         .collect()
 }
 
-/// What goes into the file: the value's fields as 0.1.x writes them, then `version`.
+/// What goes into the file: the value's fields, then `version`.
 fn versioned_json<T: Serialize>(value: &T) -> Vec<u8> {
     #[derive(Serialize)]
     struct Versioned<'a, T> {
@@ -879,11 +874,28 @@ fn versioned_json<T: Serialize>(value: &T) -> Vec<u8> {
         value: &'a T,
         version: u64,
     }
-    json::to_vec(&Versioned {
+    serde_json::to_vec_pretty(&Versioned {
         value,
         version: FORMAT_VERSION,
     })
     .expect("a config value always serializes")
+}
+
+/// The JSON of `value` as a Koppel file holds it, indented, with the `version`. For the upgrade,
+/// which writes a file the same way [`ConfigFile`] does.
+pub fn encode_json<T: Serialize>(value: &T) -> Vec<u8> {
+    versioned_json(value)
+}
+
+/// The JSON in `bytes`, after a UTF-8 byte order mark if there is one: Notepad adds one.
+fn parse_json(bytes: &[u8]) -> Result<Value, serde_json::Error> {
+    serde_json::from_slice(bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes))
+}
+
+/// Replaces `path` with `bytes` the way [`ConfigFile`] writes: a temp file, flushed, moved over the
+/// file, and the directory flushed. For the upgrade.
+pub fn replace_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic(path, bytes).map(|_| ())
 }
 
 /// The points in writing a file where a test can make it fail, to see what a crash leaves behind.
@@ -1017,7 +1029,7 @@ fn delete_stale_temp_files(path: &Path) {
 }
 
 /// `yyyyMMddHHmmssfff`, as 0.1.x names a file it moved aside.
-pub(crate) fn utc_stamp(now: OffsetDateTime) -> String {
+pub fn utc_stamp(now: OffsetDateTime) -> String {
     format!(
         "{:04}{:02}{:02}{:02}{:02}{:02}{:03}",
         now.year(),

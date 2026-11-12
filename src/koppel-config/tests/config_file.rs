@@ -8,7 +8,7 @@ use std::time::Duration;
 use koppel_config::files::{KoppelSettings, Role, SharedDevices};
 use koppel_config::{
     CodecError, ConfigErrorKind, ConfigFile, FileCodec, KoppelPaths, Options, PlainText, SecretBox,
-    json, open,
+    open,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -120,7 +120,7 @@ async fn a_lenient_file_starts_with_defaults_and_moves_the_bad_one_aside_on_the_
     let devices = open::devices(&paths);
 
     devices.start().await.unwrap();
-    assert_eq!(*devices.current(), SharedDevices::empty());
+    assert_eq!(*devices.current(), SharedDevices::default());
     assert!(
         devices
             .problem()
@@ -131,8 +131,8 @@ async fn a_lenient_file_starts_with_defaults_and_moves_the_bad_one_aside_on_the_
 
     devices
         .update(|_| SharedDevices {
-            bus_ids: Some(vec!["1-1".into()]),
-            vid_pids: None,
+            bus_ids: vec!["1-1".into()],
+            ..SharedDevices::default()
         })
         .await
         .unwrap();
@@ -152,8 +152,9 @@ async fn a_lenient_file_starts_with_defaults_and_moves_the_bad_one_aside_on_the_
         "devices.json.unreadable-".len() + 17
     );
     assert_eq!(fs::read(aside[0].path()).unwrap(), b"not json");
-    let fresh: SharedDevices = json::from_slice(&fs::read(paths.devices_file()).unwrap()).unwrap();
-    assert_eq!(fresh.bus_ids, Some(vec!["1-1".to_string()]));
+    let fresh: SharedDevices =
+        serde_json::from_slice(&fs::read(paths.devices_file()).unwrap()).unwrap();
+    assert_eq!(fresh.bus_ids, ["1-1"]);
     devices.stop();
     let _ = fs::remove_dir_all(dir);
 }
@@ -280,9 +281,7 @@ async fn concurrent_changes_are_delivered_in_the_order_they_were_written() {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let log = seen.clone();
     devices.subscribe(move |value: Arc<SharedDevices>| {
-        log.lock()
-            .unwrap()
-            .push(value.bus_ids.clone().unwrap_or_default().len());
+        log.lock().unwrap().push(value.bus_ids.len());
         async { tokio::time::sleep(Duration::from_millis(2)).await }
     });
 
@@ -291,11 +290,11 @@ async fn concurrent_changes_are_delivered_in_the_order_they_were_written() {
         let file = devices.clone();
         tasks.push(tokio::spawn(async move {
             file.update(|d| {
-                let mut ids = d.bus_ids.clone().unwrap_or_default();
+                let mut ids = d.bus_ids.clone();
                 ids.push(format!("1-{}", ids.len()));
                 SharedDevices {
-                    bus_ids: Some(ids),
-                    vid_pids: None,
+                    bus_ids: ids,
+                    ..SharedDevices::default()
                 }
             })
             .await
@@ -406,7 +405,7 @@ async fn a_change_over_a_bad_hand_edit_replaces_it_with_the_last_good_value_and_
     settings.update(client()).await.unwrap();
 
     let on_disk: KoppelSettings =
-        json::from_slice(&fs::read(paths.settings_file()).unwrap()).unwrap();
+        serde_json::from_slice(&fs::read(paths.settings_file()).unwrap()).unwrap();
     assert_eq!(
         on_disk,
         KoppelSettings {

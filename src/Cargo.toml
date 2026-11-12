@@ -4,6 +4,7 @@ resolver = "3"
 members = [
     "koppel",
     "koppel-config",
+    "koppel-upgrade",
     "koppel-usb",
     "koppel-web",
     "koppel-windows",
@@ -26,6 +27,7 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 koppel-web = { path = "koppel-web", version = "0.2.0" }
 koppel-config = { path = "koppel-config", version = "0.2.0" }
+koppel-upgrade = { path = "koppel-upgrade", version = "0.2.0" }
 koppel-usb = { path = "koppel-usb", version = "0.2.0" }
 koppel-windows = { path = "koppel-windows", version = "0.2.0" }
 
@@ -96,21 +98,24 @@ reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no
 # through rustls: AES-256-GCM, HMAC, SHA and random bytes come from it. serde_json and ring serve the
 # contract tests too.
 serde = { version = "1.0.229", features = ["derive"] }
-# `raw_value` writes dates without escaping the `+`, as .NET does, and `preserve_order` keeps a
-# dictionary in the order it was written (indexmap, already here through h2, with foldhash, Zlib).
-serde_json = { version = "1.0.154", features = ["raw_value", "preserve_order"] }
+# `preserve_order` keeps the names of a JSON object in the order they were written.
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
 base64 = "0.23.1"
-time = "0.3.55"
+# Dates are RFC 3339 strings (`time::serde::rfc3339`), in the files and in the API.
+time = { version = "0.3.55", features = ["serde-well-known"] }
+# An ordered map for the files that keep one (devices.json, ui-auth.json): MIT OR Apache-2.0, already
+# here through h2 and serde_json's `preserve_order`.
+indexmap = { version = "2.14.2", features = ["serde"] }
 ring = "0.17.14"
 # Wiping a secret when it is dropped (koppel-config's `Secret`). zeroize (MIT OR Apache-2.0, RustCrypto) is already here
 # through the crypto crates.
 zeroize = "1.9.1"
-# What ring lacks for reading 0.1.x's files: AES-256-CBC for Data Protection payloads and 3DES-CBC
-# for .NET's PKCS#12 export. RustCrypto, MIT OR Apache-2.0.
+# What ring lacks for reading 0.1.x's files, in koppel-upgrade only: AES-256-CBC for Data Protection
+# payloads and 3DES-CBC for .NET's PKCS#12 export. RustCrypto, MIT OR Apache-2.0.
 aes = "0.9.4"
 cbc = "0.2.1"
 des = "0.9.0"
-# Data Protection's key ring is XML (MIT OR Apache-2.0, no dependencies).
+# Data Protection's key ring is XML (MIT OR Apache-2.0, no dependencies); koppel-upgrade reads it.
 roxmltree = "0.21.2"
 # Microsoft's Windows bindings (MIT OR Apache-2.0), as Skakel pins them: DPAPI, ACLs, the
 # ProgramData folder, the TCP table the USB gateway checks a connection's owner in, and the Windows

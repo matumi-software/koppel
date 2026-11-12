@@ -914,7 +914,7 @@ impl ClientSide {
             connection: connection.clone(),
             remembered: ConfigFile::new(
                 paths.attached_file(),
-                AttachedDevices::empty(),
+                AttachedDevices::default(),
                 Options {
                     codec: setup.attached_codec,
                     start_with_defaults_when_unusable: true,

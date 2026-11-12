@@ -921,6 +921,8 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1021,6 +1023,7 @@ dependencies = [
  "axum",
  "clap",
  "koppel-config",
+ "koppel-upgrade",
  "koppel-usb",
  "koppel-web",
  "koppel-windows",
@@ -1042,17 +1045,15 @@ dependencies = [
 name = "koppel-config"
 version = "0.2.0"
 dependencies = [
- "aes",
  "base64 0.23.1",
- "cbc",
- "des",
+ "indexmap",
  "koppel-web",
  "libc",
  "ring",
- "roxmltree",
  "rustls",
  "serde",
  "serde_json",
+ "skakel-server",
  "time",
  "tokio",
  "tokio-rustls",
@@ -1062,10 +1063,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "koppel-upgrade"
+version = "0.2.0"
+dependencies = [
+ "aes",
+ "base64 0.23.1",
+ "cbc",
+ "des",
+ "koppel-config",
+ "koppel-web",
+ "ring",
+ "roxmltree",
+ "rustls",
+ "serde_json",
+ "skakel-server",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tracing",
+]
+
+[[package]]
 name = "koppel-usb"
 version = "0.2.0"
 dependencies = [
  "http",
+ "indexmap",
  "koppel-config",
  "libc",
  "proptest",
@@ -1092,6 +1115,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "if-addrs",
+ "indexmap",
  "koppel-config",
  "koppel-usb",
  "prost",

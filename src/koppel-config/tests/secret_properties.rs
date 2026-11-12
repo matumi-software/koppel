@@ -1,14 +1,13 @@
-//! Properties of the secret file format and of the PKCS#12 reader, checked on many random inputs.
+//! Properties of the secret file format, checked on many random inputs.
 //! The generator is fixed, so a failure repeats; the case that failed is in the message.
 //!
 //! Nothing here may panic, whatever the bytes: the files are read from a disk anyone with access
-//! can change, and the certificate comes from a file carried over from another install.
+//! can change.
 
 use std::fs;
 use std::path::PathBuf;
 
 use koppel_config::SecretBox;
-use koppel_config::pkcs12;
 
 /// xorshift64*: enough for test inputs, and the same on every run.
 struct Random(u64);
@@ -125,48 +124,4 @@ fn random_bytes_and_random_bytes_with_a_good_header_are_errors() {
         );
     }
     let _ = fs::remove_dir_all(dir);
-}
-
-#[test]
-fn the_pkcs12_reader_never_panics_on_random_input() {
-    let mut random = Random(0xC0FF_EE00_1234_5678);
-    for case in 0..3000 {
-        let length = random.below(400);
-        let bytes = random.bytes(length);
-        let _ = pkcs12::parse(&bytes);
-
-        // A DER sequence of the right length, so the reader goes past the first check.
-        let mut framed = vec![0x30];
-        if length < 128 {
-            framed.push(length as u8);
-        } else {
-            framed.extend([0x82, (length >> 8) as u8, length as u8]);
-        }
-        framed.extend_from_slice(&bytes);
-        let _ = pkcs12::parse(&framed);
-        let _ = case;
-    }
-}
-
-#[test]
-fn the_pkcs12_reader_never_panics_on_a_good_file_that_is_damaged() {
-    // Any certificate and key bytes do for `write`; it does not look inside them.
-    let good = pkcs12::write(
-        &[0x30, 0x03, 0x02, 0x01, 0x05],
-        &[0x30, 0x03, 0x02, 0x01, 0x07],
-    )
-    .unwrap();
-    assert!(pkcs12::parse(&good).is_ok());
-    let mut random = Random(99);
-    for length in 0..good.len() {
-        let _ = pkcs12::parse(&good[..length]);
-    }
-    for _ in 0..3000 {
-        let mut damaged = good.clone();
-        for _ in 0..1 + random.below(3) {
-            let position = random.below(damaged.len());
-            damaged[position] = random.next() as u8;
-        }
-        let _ = pkcs12::parse(&damaged);
-    }
 }

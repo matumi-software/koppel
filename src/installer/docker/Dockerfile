@@ -79,6 +79,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY koppel ./koppel
 COPY koppel-config ./koppel-config
+COPY koppel-upgrade ./koppel-upgrade
 COPY koppel-usb ./koppel-usb
 COPY koppel-web ./koppel-web
 COPY koppel-windows ./koppel-windows

@@ -20,7 +20,6 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use koppel_config::files::{AttachedDevices, ClientConnection, KoppelSettings};
-use koppel_config::json::OrderedMap;
 use koppel_config::{ConfigFile, ConfigFileError, Subscription};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -421,31 +420,27 @@ impl Shared {
                 let mut next = if current.server_fingerprint != fingerprint {
                     AttachedDevices {
                         server_fingerprint: fingerprint.clone(),
-                        ..AttachedDevices::empty()
+                        ..AttachedDevices::default()
                     }
                 } else {
                     current.clone()
                 };
-                let mut bus_ids = next.bus_ids.take().unwrap_or_default();
                 if attached {
-                    if !bus_ids.iter().any(|b| b == bus_id.as_str()) {
-                        bus_ids.push(bus_id.to_string());
+                    if !next.bus_ids.iter().any(|b| b == bus_id.as_str()) {
+                        next.bus_ids.push(bus_id.to_string());
                     }
                 } else {
-                    bus_ids.retain(|b| b != bus_id.as_str());
+                    next.bus_ids.retain(|b| b != bus_id.as_str());
                 }
-                next.bus_ids = Some(bus_ids);
-                next.vid_pids = match (&vid_pid, attached) {
+                match (&vid_pid, attached) {
                     (Some(vid_pid), true) => {
-                        let mut map = next.vid_pids.take().unwrap_or_else(OrderedMap::new);
-                        map.insert(bus_id.as_str(), vid_pid.clone());
-                        Some(map)
+                        next.vid_pids
+                            .insert(bus_id.as_str().to_owned(), vid_pid.clone());
                     }
-                    _ => next.vid_pids.take().map(|mut map| {
-                        map.remove(bus_id.as_str());
-                        map
-                    }),
-                };
+                    _ => {
+                        next.vid_pids.shift_remove(bus_id.as_str());
+                    }
+                }
                 next
             })
             .await

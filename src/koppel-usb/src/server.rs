@@ -12,8 +12,8 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use indexmap::IndexMap;
 use koppel_config::files::{KoppelSettings, Role, SharedDevices};
-use koppel_config::json::OrderedMap;
 use koppel_config::{ConfigFile, ConfigFileError, Subscription};
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -42,16 +42,12 @@ pub fn shared_expects(shared: &SharedDevices, device: &UsbDevice) -> bool {
     saved
         && shared
             .vid_pids
-            .as_ref()
-            .and_then(|v| v.get(device.bus_id.as_str()))
+            .get(device.bus_id.as_str())
             .is_none_or(|vid_pid| *vid_pid == device.vid_pid())
 }
 
 fn saved_contains(shared: &SharedDevices, bus_id: &BusId) -> bool {
-    shared
-        .bus_ids
-        .as_ref()
-        .is_some_and(|ids| ids.iter().any(|b| b == bus_id.as_str()))
+    shared.bus_ids.iter().any(|b| b == bus_id.as_str())
 }
 
 fn serves(role: Role) -> bool {
@@ -532,7 +528,7 @@ impl Actor {
         if !serves(settings.role) || !settings.share_on_startup {
             return;
         }
-        for bus_id in saved.bus_ids.iter().flatten() {
+        for bus_id in &saved.bus_ids {
             if let Ok(bus_id) = bus_id.parse() {
                 self.active.insert(bus_id);
             }
@@ -638,29 +634,24 @@ impl Actor {
             .shared
             .shared
             .update(|current| {
-                let mut bus_ids = current.bus_ids.clone().unwrap_or_default();
+                let mut next = current.clone();
                 if share {
-                    if !bus_ids.iter().any(|b| b == bus_id.as_str()) {
-                        bus_ids.push(bus_id.to_string());
+                    if !next.bus_ids.iter().any(|b| b == bus_id.as_str()) {
+                        next.bus_ids.push(bus_id.to_string());
                     }
                 } else {
-                    bus_ids.retain(|b| b != bus_id.as_str());
+                    next.bus_ids.retain(|b| b != bus_id.as_str());
                 }
-                let vid_pids = match (&vid_pid, share) {
+                match (&vid_pid, share) {
                     (Some(vid_pid), true) => {
-                        let mut map = current.vid_pids.clone().unwrap_or_else(OrderedMap::new);
-                        map.insert(bus_id.as_str(), vid_pid.clone());
-                        Some(map)
+                        next.vid_pids
+                            .insert(bus_id.as_str().to_owned(), vid_pid.clone());
                     }
-                    _ => current.vid_pids.clone().map(|mut map| {
-                        map.remove(bus_id.as_str());
-                        map
-                    }),
-                };
-                SharedDevices {
-                    bus_ids: Some(bus_ids),
-                    vid_pids,
+                    _ => {
+                        next.vid_pids.shift_remove(bus_id.as_str());
+                    }
                 }
+                next
             })
             .await;
         if let Err(e) = saved {
@@ -788,10 +779,9 @@ impl Actor {
         let intent: Vec<BusId> = saved
             .bus_ids
             .iter()
-            .flatten()
             .filter_map(|b| b.parse().ok())
             .collect();
-        let remembered = saved.vid_pids.as_ref();
+        let remembered = &saved.vid_pids;
         let gone: Vec<&BusId> = intent
             .iter()
             .filter(|bus_id| devices.iter().all(|d| d.bus_id != **bus_id))
@@ -801,10 +791,7 @@ impl Actor {
                 continue;
             }
             views.push(DeviceView {
-                vid_pid: remembered
-                    .and_then(|r| r.get(bus_id.as_str()))
-                    .cloned()
-                    .unwrap_or_default(),
+                vid_pid: remembered.get(bus_id.as_str()).cloned().unwrap_or_default(),
                 name: self
                     .names
                     .get(*bus_id)
@@ -879,13 +866,10 @@ struct PlugEvent {
 fn has_moved(
     bus_id: &BusId,
     gone: &[&BusId],
-    remembered: Option<&OrderedMap<String>>,
+    remembered: &IndexMap<String, String>,
     present: &[UsbDevice],
     intent: &[BusId],
 ) -> bool {
-    let Some(remembered) = remembered else {
-        return false;
-    };
     let Some(vid_pid) = remembered.get(bus_id.as_str()) else {
         return false;
     };
@@ -914,11 +898,11 @@ mod tests {
 
     #[test]
     fn a_different_device_on_a_shared_port_is_not_shared_again() {
-        let mut vid_pids = OrderedMap::new();
-        vid_pids.insert("1-1", "1209:0001".to_owned());
+        let mut vid_pids = IndexMap::new();
+        vid_pids.insert("1-1".to_owned(), "1209:0001".to_owned());
         let shared = SharedDevices {
-            bus_ids: Some(vec!["1-1".into()]),
-            vid_pids: Some(vid_pids),
+            bus_ids: vec!["1-1".into()],
+            vid_pids,
         };
 
         assert!(shared_expects(&shared, &device("1-1", 0x1209, 0x0001)));
@@ -929,8 +913,8 @@ mod tests {
     #[test]
     fn shares_saved_before_vid_pid_was_recorded_still_match_by_port() {
         let shared = SharedDevices {
-            bus_ids: Some(vec!["1-1".into()]),
-            vid_pids: None,
+            bus_ids: vec!["1-1".into()],
+            vid_pids: IndexMap::new(),
         };
 
         assert!(shared_expects(&shared, &device("1-1", 0x064f, 0x2af9)));

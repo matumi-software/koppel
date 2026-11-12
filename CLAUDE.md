@@ -13,7 +13,7 @@ folder per crate, the UI and the installers.
 | `resources/design-system/` | The design system: brand book, `tokens.json`, component specs and previews, logos. The source of every colour, size and component style |
 | `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/building.md`) |
 | `src/koppel/` | The program (package `koppel`), and `tests/contract/`, the black-box tests that start it and drive it over HTTPS |
-| `src/koppel-*/` | The library crates: `koppel-config`, `koppel-web`, `koppel-usb`, and `koppel-windows` |
+| `src/koppel-*/` | The library crates: `koppel-config`, `koppel-upgrade`, `koppel-web`, `koppel-usb`, and `koppel-windows` |
 | `src/ui/` | The UI, one pnpm workspace (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`): the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
 | `src/installer/` | The installers: `windows/` (WiX, `Koppel-Setup.exe`, with usbip-win2 vendored), `linux/` (nfpm, the `.deb` files), `docker/` (the `Dockerfile`, which builds the Linux binaries, the `.deb` files and the image, the compose files, `prepare-host.sh` and `deploy.sh`) and `notices/` (the third-party notices script and cargo-about's licence policy, shared by the Windows and Linux builds) |
 | `src/ui/tools/` | The design system scripts behind `pnpm design:sync` and `pnpm design:icons` |

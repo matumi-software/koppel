@@ -1,6 +1,5 @@
 //! What the UI and the remote clients see, with 0.1.x's JSON names.
 
-use koppel_config::json::date_time_offset;
 use serde::de::IgnoredAny;
 use serde::{Deserialize, Deserializer, Serialize};
 use time::OffsetDateTime;
@@ -82,7 +81,7 @@ pub struct DeviceView {
     pub state: DeviceState,
     #[serde(default)]
     pub attached_to: Option<String>,
-    #[serde(with = "date_time_offset::option", default)]
+    #[serde(with = "time::serde::rfc3339::option", default)]
     pub attached_since: Option<OffsetDateTime>,
     /// Why the last change to this device failed, for the UI.
     #[serde(default)]
@@ -191,7 +190,7 @@ pub struct ClientDeviceView {
     pub attached_here: bool,
     /// The port this machine's kernel or driver attached it on; `None` for another gateway attach.
     pub port: Option<u32>,
-    #[serde(with = "date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     pub attached_since: Option<OffsetDateTime>,
     pub fault: Option<String>,
     /// Where a gateway attach came from, such as `172.17.0.1`.

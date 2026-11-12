@@ -1,4 +1,5 @@
-//! The one-time conversion of a 0.1.x install's secret files to Koppel 0.2's format.
+//! The one-time conversion of a 0.1.x install's secret files from Data Protection to Koppel's own
+//! sealed format.
 //!
 //! `secrets.json`, `connection.json` and `ui-auth.json` that are still Data Protection payloads are
 //! decrypted with the 0.1.x key ring and written again with the [`SecretBox`], with the same JSON
@@ -16,12 +17,10 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 
+use koppel_config::{KoppelPaths, SecretBox, SecretFormat, format_of, replace_file, utc_stamp};
 use time::OffsetDateTime;
 
 use crate::dataprotection::{DataProtectionError, KOPPEL_PURPOSES, KeyRing};
-use crate::file::{utc_stamp, write_atomic};
-use crate::paths::KoppelPaths;
-use crate::secret::{SecretBox, SecretFormat, format_of};
 
 /// What the conversion did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +62,8 @@ impl fmt::Display for ConversionError {
 impl std::error::Error for ConversionError {}
 
 /// Converts what is left of a 0.1.x install. Run once at start, after [`KoppelPaths::prepare`] and
-/// before the secret files are opened. Logs what it did, and why when it could not.
+/// before the secret files are opened ([`crate::upgrade`] does that). Logs what it did, and why when
+/// it could not.
 pub fn convert_0_1_secrets(
     paths: &KoppelPaths,
     secrets: &SecretBox,
@@ -79,13 +79,13 @@ pub fn convert_0_1_secrets(
                 );
             }
             tracing::info!(
-                "The Koppel 0.1.x key ring in {} is no longer used. Keep it with a backup of the 0.1.x files, or delete it",
+                "The Koppel 0.1.x key ring in {} is no longer used and was left in place, as Koppel never deletes it.                  It holds the key to Koppel 0.1.x's old files, in the clear on Linux: once those files are backed up, or no downgrade is wanted, delete the key-*.xml files there",
                 paths.keys.display()
             );
         }
         Ok(Conversion::PairAgain(moved)) => {
             tracing::error!(
-                "The Koppel 0.1.x key ring in {} is protected with a key certificate (Paths:KeyCertificate), which Koppel 0.2 does not read. \
+                "The Koppel 0.1.x key ring in {} is protected with a key certificate (Paths:KeyCertificate), which Koppel no longer reads. \
                  Starting as a new install: a new certificate and signing key, no clients, no connection and no UI password. \
                  Pair every client again and set the password in the UI",
                 paths.keys.display()
@@ -101,9 +101,7 @@ pub fn convert_0_1_secrets(
         Err(e) => tracing::error!("{e}. The 0.1.x files were left as they were"),
     }
     if paths.key_certificate.is_some() {
-        tracing::warn!(
-            "Paths:KeyCertificate is set. Koppel 0.2 does not use it: remove the setting"
-        );
+        tracing::warn!("Paths:KeyCertificate is set. Koppel no longer uses it: remove the setting");
     }
     result
 }
@@ -141,7 +139,9 @@ fn convert(paths: &KoppelPaths, secrets: &SecretBox) -> Result<Conversion, Conve
     for (file, bytes) in &old {
         match ring.unprotect(&KOPPEL_PURPOSES, bytes) {
             Ok(json) => {
-                if let Err(e) = crate::json::parse(&json) {
+                if let Err(e) = serde_json::from_slice::<serde_json::Value>(
+                    json.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(&json),
+                ) {
                     return Err(ConversionError {
                         file: Some(file.clone()),
                         reason: format!("it decrypted to something that is not JSON ({e})"),
@@ -169,7 +169,7 @@ fn convert(paths: &KoppelPaths, secrets: &SecretBox) -> Result<Conversion, Conve
     }
     let mut converted = Vec::with_capacity(sealed.len());
     for (file, bytes) in sealed {
-        write_atomic(&file, &bytes).map_err(|e| ConversionError {
+        replace_file(&file, &bytes).map_err(|e| ConversionError {
             file: Some(file.clone()),
             reason: format!("it could not be written ({e})"),
         })?;

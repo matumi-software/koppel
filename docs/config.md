@@ -64,7 +64,7 @@ Ports__Ui?`). `KOPPEL_RUNNING_IN_CONTAINER`, `KOPPEL_UI_URL`, `KOPPEL_HOSTNAME`,
 The config directory holds:
 
 - `settings.json`: plain, may be edited by hand.
-- `secrets.json`: Skakel's server state (`SkakelState`): the HTTPS certificate, the registered clients and the prepared next certificate. Encrypted. Created on every machine at first start, whatever the role, because the certificate is made then. A file from Koppel 0.2.0 still holds a token signing key; Skakel 0.3.0 does not sign tokens, so it is dropped when the server starts. Skakel reads it once at start and writes it after every change (`koppel-web/src/roles/skakel/store.rs`). A file Koppel 0.1.0 wrote is carried over on the first start: the certificate and the clients whose secret hash Skakel reads (a client added before Koppel kept secrets in their current form is dropped, and logged). A 0.1.0 file that cannot be carried over is copied aside as `secrets.json.0.1.0-<UTC time>` and the server starts with a new certificate and no clients, which the log says.
+- `secrets.json`: Skakel's server state (`SkakelState`): the HTTPS certificate, the registered clients and the prepared next certificate. Encrypted. Created on every machine at first start, whatever the role, because the certificate is made then. Skakel's own type is stored as it is (`koppel-web/src/roles/skakel/store.rs`): Skakel reads it once at start and writes it after every change. A file from 0.1.x or 0.2.0 is rewritten into this shape at the first start by `koppel-upgrade` (see "The upgrade" below), and a token signing key such an older state held is dropped.
 - `connection.json` (client role): server address, pinned fingerprint, client ID and secret, and during a certificate handover the server's next fingerprint. Encrypted. Its format did not change in 0.1.1, so a client keeps its connection, and once its server runs 0.1.1 too it links as before.
 - `ui-auth.json`: the UI password hash and security stamp. Encrypted.
 - `devices.json` (server role): the bus IDs the user chose to share, with their VID:PID. Plain.
@@ -115,12 +115,13 @@ directory"). It does not make new secrets over the old ones.
 `koppel-config` reads and writes the same files in the same folders as 0.1.x (["Config on disk"](#config-on-disk)),
 with the same rules.
 
-- **JSON:** what 0.1.x wrote, byte for byte: two space indents, the
-  platform's line ending, `\uXXXX` for everything outside printable ASCII and for `" & ' + < >` and the
-  backtick, dates as `2026-11-09T08:30:15.1234567+00:00`, and the computed properties 0.1.x wrote
-  (`isComplete`, `hasPassword`) written too. Names are read in any case and unknown ones ignored, a
-  missing one takes its default, and an enum is a name in any case, never a number. The tests read
-  files 0.1.2 wrote and write them back unchanged.
+- **JSON:** plain serde, indented by `serde_json`: camelCase names, dates as RFC 3339 strings
+  (`2026-11-09T08:30:15Z`; the `+00:00` and seven digit fractions 0.1.x wrote are read), an object kept in
+  the order it was written (`IndexMap`), enums as lower case names. Reading is lenient where 0.1.x
+  files need it: a byte order mark is skipped, a `null` list or map reads as empty, `isComplete` and
+  `hasPassword` are skipped, and `settings.json`, which people edit, takes a name or a role with a
+  capital through `#[serde(alias)]`. Nothing is written that nothing reads: no `null` keys, no computed
+  properties, no legacy fields. The API's request bodies are read the same way, with camelCase names.
 - **Writes and pushes:** `ConfigFile`: temp file, flush, replace with retries,
   stale temp files swept, start-up never replacing a file, `devices.json` and `attached.json` starting
   empty and moving a bad file aside, and changes delivered in write order with a nested change queued.
@@ -151,19 +152,38 @@ with the same rules.
   `Secret(<redacted>)`, wipes itself when dropped and reads and writes as the string it holds, so the
   files do not change. The plaintext of a file being read or written is wiped after use. No copy of a
   file's JSON is kept to see whether it changed (a SHA-256 of the bytes and a typed compare do that).
-- **The upgrade from 0.1.x:** at the first start, each of `secrets.json`, `connection.json` and
-  `ui-auth.json` that is still a Data Protection payload is decrypted with the 0.1.x key ring (machine
-  DPAPI on Windows, plain XML on Linux) and written again in the new format, with the same JSON inside.
-  All are decrypted before any is written, so a failure changes nothing: the log says why, and the
-  start then stops on the first file still in the old format. The key ring is left as it was. A key
-  ring protected with `Paths:KeyCertificate` is not read: its files are renamed to
-  `<name>.0.1-key-certificate-<UTC time>`, unchanged, and Koppel starts as a new install, so every
-  client pairs again and the password is set again.
+- **The upgrade:** `koppel-upgrade` is the only crate that reads what an older Koppel wrote, and
+  `koppel` runs it at every start, before any file is opened. It finds nothing to do once the files are
+  current. Two steps, each safe to repeat:
+  - *From 0.1.x:* each of `secrets.json`, `connection.json` and `ui-auth.json` that is still a Data
+    Protection payload is decrypted with the 0.1.x key ring (machine DPAPI on Windows, plain XML on
+    Linux) and written again in the new format, with the same JSON inside. All are decrypted before any
+    is written, so a failure changes nothing: the log says why, and the start then stops on the first
+    file still in the old format. A key ring protected with `Paths:KeyCertificate` is not read: its
+    files are renamed to `<name>.0.1-key-certificate-<UTC time>`, unchanged, and Koppel starts as a new
+    install, so every client pairs again and the password is set again.
+  - *From 0.1.x and 0.2.0, `secrets.json` only:* it held Skakel 0.1's state with the certificates as
+    PKCS#12 (`certificatePfx`, `nextCertificate.pfx`), and from 0.2.0 on null legacy keys and a token
+    signing key. It is read once and written again as Skakel's own state: `clients`, `certificate` and
+    `nextCertificate`, each certificate as `{ certificate, privateKey }` (DER and PKCS#8, base64). The
+    DER is the same, so the fingerprint clients pinned does not change. A 0.1.0 file (fields at the top
+    level) is carried over as 0.1.1 did, and one that cannot be is renamed `secrets.json.0.1.0-<UTC
+    time>` and Koppel starts with a new certificate and no clients.
+  - The other files need no rewrite: the current types read what 0.1.x and 0.2.0 wrote, and each takes
+    the new shape the next time Koppel changes it. There is no downgrade: 0.1.x could not read the
+    files after 0.2.0 sealed them, and 0.2.0 cannot read the new `secrets.json`. Back up the data folder
+    before the first start of 0.2.1 if you may go back.
+- **The 0.1.x key ring is kept.** After a conversion `keys/` still holds the Data Protection key ring
+  (`key-*.xml`, with the master key in plain base64 on Linux). Koppel never deletes it: that would end a
+  rollback, and an upgrade should not remove a file its owner did not ask it to. It is no longer used,
+  and the log says so once, at the conversion. To remove it, back up the data folder and delete the
+  `key-*.xml` files in `keys/` (not `koppel-secrets.key` or `ui-session.key`). There is no command for it.
 - **What carries over:** the certificate, so pinned clients keep their pin; the clients and their
   secrets; the client's connection; the UI password. The token signing key does not carry over: Skakel 0.3.0's
   tokens are random strings the server remembers, tokens last 30 minutes and live only in a client's
   memory, and a 0.2 client cannot use a 0.1.x server's tokens anyway (the protocols differ). UI sessions end once: 0.1.x's
   cookies were protected by keys in `keys/aspnet`, which 0.2 does not read.
-- **Certificate:** 0.1.x kept it as a password-less PKCS#12 (3DES and SHA-1, where "no
-  password" is an empty BMPString without its terminator). The PKCS#12 crates refuse that form, so
-  `koppel-config` reads it itself and hands the DER certificate and PKCS#8 key to rustls.
+- **Certificate:** stored as DER and a PKCS#8 key, which is what Skakel's server keeps and what rustls
+  takes. 0.1.x and 0.2.0 kept it as a password-less PKCS#12 (3DES and SHA-1, where "no password" is an
+  empty BMPString without its terminator, which the PKCS#12 crates refuse), so `koppel-upgrade` reads
+  that form itself, once.

@@ -24,7 +24,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use config::{Command, Loaded, Settings};
-use koppel_config::{KeySource, SecretBox, convert_0_1_secrets};
+use koppel_config::{KeySource, SecretBox};
 use koppel_web::{App, AppOptions, Host, NetworkOptions};
 use time::OffsetDateTime;
 use tokio::sync::watch;
@@ -203,9 +203,9 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
     Ok(())
 }
 
-/// Prepares the data folders, opens what seals the secret files, and converts a 0.1.x install's
-/// secret files, once. A failed conversion is logged and leaves them as they were; the start then
-/// stops on the first one still in the old format.
+/// Prepares the data folders, opens what seals the secret files, and upgrades the files of a 0.1.x
+/// or 0.2.0 install, once (`koppel-upgrade`). A failed upgrade is logged and leaves the files as they
+/// were; the start then stops on the first one still in an old format.
 fn open_files(settings: &Settings) -> Result<Arc<SecretBox>, Box<dyn Error>> {
     let paths = settings.paths(&std::env::current_dir()?);
     paths.prepare().map_err(|e| {
@@ -224,9 +224,9 @@ fn open_files(settings: &Settings) -> Result<Arc<SecretBox>, Box<dyn Error>> {
     } else {
         tracing::info!("The secret files are sealed with {source}");
     }
-    if let Err(e) = convert_0_1_secrets(&paths, &secrets) {
-        tracing::error!("{e}");
-    }
+    // The upgrade logs what it did and why it could not; a start after a failure stops on the first
+    // file it could not read.
+    let _ = koppel_upgrade::upgrade(&paths, &secrets);
     // After a rotation, or a move of the key out of the keys directory, files sealed with an older
     // key are written again with the current one.
     let mut sealed = paths.secret_files().to_vec();

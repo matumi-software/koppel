@@ -28,7 +28,7 @@ struct AuthState {
     password_set: bool,
     machine_name: String,
     setup_open: bool,
-    #[serde(with = "koppel_config::json::date_time_offset::option")]
+    #[serde(with = "time::serde::rfc3339::option")]
     setup_until: Option<OffsetDateTime>,
 }
 

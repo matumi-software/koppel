@@ -210,7 +210,7 @@ pub(crate) async fn checks(State(app): State<SettingsApi>) -> Response {
 struct SystemInfo<'a> {
     name: &'a str,
     version: &'a str,
-    #[serde(with = "koppel_config::json::date_time_offset")]
+    #[serde(with = "time::serde::rfc3339")]
     started_at: OffsetDateTime,
     role: Role,
     ui_port: u16,

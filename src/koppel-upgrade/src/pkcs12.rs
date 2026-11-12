@@ -8,14 +8,13 @@
 //! the MAC on these files), so this reads the format itself: a DER walk, the RFC 7292 appendix B key
 //! derivation over SHA-1, and 3DES-CBC. The empty password with the terminator is tried as well.
 //!
-//! [`write`] makes a file of the same shape, so a certificate Koppel 0.2 makes is kept the way
-//! 0.1.x kept its own.
+//! Only reading is built into Koppel: from 0.2.1 the certificate is stored as DER and PKCS#8, and this
+//! reads the PKCS#12 of an older `secrets.json` once. The tests have a writer of the same shape.
 
 use std::fmt;
 
 use cbc::cipher::block_padding::Pkcs7;
-use cbc::cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit};
-use ring::rand::{SecureRandom, SystemRandom};
+use cbc::cipher::{BlockModeDecrypt, KeyIvInit};
 use ring::{digest, hmac};
 
 const OID_DATA: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x01];
@@ -45,6 +44,7 @@ const CONTEXT_0_PRIMITIVE: u8 = 0x80;
 /// More than any real file uses, and few enough that a hostile one cannot stall a start.
 const MAX_ITERATIONS: u64 = 1_000_000;
 /// What .NET uses for the bags and the MAC when it exports a certificate.
+#[cfg(test)]
 const WRITE_ITERATIONS: u64 = 2000;
 
 /// Why a PKCS#12 file could not be read.
@@ -363,153 +363,155 @@ fn kdf(
     }
 }
 
-/// A DER element: the tag, the length and the content.
-fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
-    let mut out = vec![tag];
-    let length = content.len();
-    if length < 0x80 {
-        out.push(length as u8);
-    } else {
-        let bytes: Vec<u8> = length
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cbc::cipher::BlockModeEncrypt;
+    use ring::rand::{SecureRandom, SystemRandom};
+
+    /// A DER element: the tag, the length and the content.
+    fn tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+        let mut out = vec![tag];
+        let length = content.len();
+        if length < 0x80 {
+            out.push(length as u8);
+        } else {
+            let bytes: Vec<u8> = length
+                .to_be_bytes()
+                .into_iter()
+                .skip_while(|b| *b == 0)
+                .collect();
+            out.push(0x80 | bytes.len() as u8);
+            out.extend(bytes);
+        }
+        out.extend_from_slice(content);
+        out
+    }
+
+    fn sequence(parts: &[&[u8]]) -> Vec<u8> {
+        tlv(SEQUENCE, &parts.concat())
+    }
+
+    fn der_integer(value: u64) -> Vec<u8> {
+        let mut bytes: Vec<u8> = value
             .to_be_bytes()
             .into_iter()
             .skip_while(|b| *b == 0)
             .collect();
-        out.push(0x80 | bytes.len() as u8);
-        out.extend(bytes);
+        if bytes.first().is_none_or(|b| b & 0x80 != 0) {
+            bytes.insert(0, 0);
+        }
+        tlv(INTEGER, &bytes)
     }
-    out.extend_from_slice(content);
-    out
-}
 
-fn sequence(parts: &[&[u8]]) -> Vec<u8> {
-    tlv(SEQUENCE, &parts.concat())
-}
-
-fn der_integer(value: u64) -> Vec<u8> {
-    let mut bytes: Vec<u8> = value
-        .to_be_bytes()
-        .into_iter()
-        .skip_while(|b| *b == 0)
-        .collect();
-    if bytes.first().is_none_or(|b| b & 0x80 != 0) {
-        bytes.insert(0, 0);
+    fn random_bytes<const N: usize>(random: &SystemRandom) -> Result<[u8; N], Pkcs12Error> {
+        let mut bytes = [0u8; N];
+        random
+            .fill(&mut bytes)
+            .map_err(|_| Pkcs12Error("the system gave no random bytes".into()))?;
+        Ok(bytes)
     }
-    tlv(INTEGER, &bytes)
-}
 
-fn random_bytes<const N: usize>(random: &SystemRandom) -> Result<[u8; N], Pkcs12Error> {
-    let mut bytes = [0u8; N];
-    random
-        .fill(&mut bytes)
-        .map_err(|_| Pkcs12Error("the system gave no random bytes".into()))?;
-    Ok(bytes)
-}
+    /// `plain` encrypted under "no password", with the pbeWithSHAAnd3-KeyTripleDES-CBC algorithm
+    /// identifier that says how.
+    fn encrypt(plain: &[u8], random: &SystemRandom) -> Result<(Vec<u8>, Vec<u8>), Pkcs12Error> {
+        let salt: [u8; 8] = random_bytes(random)?;
+        let key = kdf(&[], &salt, 1, WRITE_ITERATIONS, 24)?;
+        let iv = kdf(&[], &salt, 2, WRITE_ITERATIONS, 8)?;
+        let mut buffer = plain.to_vec();
+        buffer.resize(plain.len() + 8, 0);
+        let ciphertext = cbc::Encryptor::<des::TdesEde3>::new_from_slices(&key, &iv)
+            .expect("key and IV lengths")
+            .encrypt_padded::<Pkcs7>(&mut buffer, plain.len())
+            .map_err(|_| Pkcs12Error("the padding did not fit".into()))?
+            .to_vec();
+        let algorithm = sequence(&[
+            &tlv(OID, OID_PBE_SHA1_3DES),
+            &sequence(&[&tlv(OCTET_STRING, &salt), &der_integer(WRITE_ITERATIONS)]),
+        ]);
+        Ok((algorithm, ciphertext))
+    }
 
-/// `plain` encrypted under "no password", with the pbeWithSHAAnd3-KeyTripleDES-CBC algorithm
-/// identifier that says how.
-fn encrypt(plain: &[u8], random: &SystemRandom) -> Result<(Vec<u8>, Vec<u8>), Pkcs12Error> {
-    let salt: [u8; 8] = random_bytes(random)?;
-    let key = kdf(&[], &salt, 1, WRITE_ITERATIONS, 24)?;
-    let iv = kdf(&[], &salt, 2, WRITE_ITERATIONS, 8)?;
-    let mut buffer = plain.to_vec();
-    buffer.resize(plain.len() + 8, 0);
-    let ciphertext = cbc::Encryptor::<des::TdesEde3>::new_from_slices(&key, &iv)
-        .expect("key and IV lengths")
-        .encrypt_padded::<Pkcs7>(&mut buffer, plain.len())
-        .map_err(|_| Pkcs12Error("the padding did not fit".into()))?
-        .to_vec();
-    let algorithm = sequence(&[
-        &tlv(OID, OID_PBE_SHA1_3DES),
-        &sequence(&[&tlv(OCTET_STRING, &salt), &der_integer(WRITE_ITERATIONS)]),
-    ]);
-    Ok((algorithm, ciphertext))
-}
-
-/// Writes a certificate (DER) and its private key (PKCS#8 DER) as .NET exports them without a
-/// password: the certificate in an encrypted bag, the key in a shrouded key bag, both 3DES with
-/// 2000 iterations, paired by a `localKeyId`, and an HMAC-SHA1 over the lot.
-pub fn write(certificate: &[u8], private_key: &[u8]) -> Result<Vec<u8>, Pkcs12Error> {
-    let random = SystemRandom::new();
-    let local_key_id = digest::digest(&digest::SHA1_FOR_LEGACY_USE_ONLY, certificate);
-    let attributes = tlv(
-        SET,
-        &sequence(&[
-            &tlv(OID, OID_LOCAL_KEY_ID),
-            &tlv(SET, &tlv(OCTET_STRING, local_key_id.as_ref())),
-        ]),
-    );
-
-    let cert_bag = sequence(&[
-        &tlv(OID, OID_CERT_BAG),
-        &tlv(
-            CONTEXT_0,
+    /// Writes a certificate (DER) and its private key (PKCS#8 DER) as .NET exports them without a
+    /// password: the certificate in an encrypted bag, the key in a shrouded key bag, both 3DES with
+    /// 2000 iterations, paired by a `localKeyId`, and an HMAC-SHA1 over the lot.
+    fn write(certificate: &[u8], private_key: &[u8]) -> Result<Vec<u8>, Pkcs12Error> {
+        let random = SystemRandom::new();
+        let local_key_id = digest::digest(&digest::SHA1_FOR_LEGACY_USE_ONLY, certificate);
+        let attributes = tlv(
+            SET,
             &sequence(&[
-                &tlv(OID, OID_X509_CERTIFICATE),
-                &tlv(CONTEXT_0, &tlv(OCTET_STRING, certificate)),
+                &tlv(OID, OID_LOCAL_KEY_ID),
+                &tlv(SET, &tlv(OCTET_STRING, local_key_id.as_ref())),
             ]),
-        ),
-        &attributes,
-    ]);
-    let (algorithm, ciphertext) = encrypt(&sequence(&[&cert_bag]), &random)?;
-    let certificates = sequence(&[
-        &tlv(OID, OID_ENCRYPTED_DATA),
-        &tlv(
-            CONTEXT_0,
-            &sequence(&[
-                &der_integer(0),
+        );
+
+        let cert_bag = sequence(&[
+            &tlv(OID, OID_CERT_BAG),
+            &tlv(
+                CONTEXT_0,
                 &sequence(&[
-                    &tlv(OID, OID_DATA),
-                    &algorithm,
-                    &tlv(CONTEXT_0_PRIMITIVE, &ciphertext),
+                    &tlv(OID, OID_X509_CERTIFICATE),
+                    &tlv(CONTEXT_0, &tlv(OCTET_STRING, certificate)),
                 ]),
-            ]),
-        ),
-    ]);
+            ),
+            &attributes,
+        ]);
+        let (algorithm, ciphertext) = encrypt(&sequence(&[&cert_bag]), &random)?;
+        let certificates = sequence(&[
+            &tlv(OID, OID_ENCRYPTED_DATA),
+            &tlv(
+                CONTEXT_0,
+                &sequence(&[
+                    &der_integer(0),
+                    &sequence(&[
+                        &tlv(OID, OID_DATA),
+                        &algorithm,
+                        &tlv(CONTEXT_0_PRIMITIVE, &ciphertext),
+                    ]),
+                ]),
+            ),
+        ]);
 
-    let (algorithm, ciphertext) = encrypt(private_key, &random)?;
-    let key_bag = sequence(&[
-        &tlv(OID, OID_SHROUDED_KEY_BAG),
-        &tlv(
-            CONTEXT_0,
-            &sequence(&[&algorithm, &tlv(OCTET_STRING, &ciphertext)]),
-        ),
-        &attributes,
-    ]);
-    let keys = sequence(&[
-        &tlv(OID, OID_DATA),
-        &tlv(CONTEXT_0, &tlv(OCTET_STRING, &sequence(&[&key_bag]))),
-    ]);
-
-    let content = sequence(&[&certificates, &keys]);
-    let mac_salt: [u8; 20] = random_bytes(&random)?;
-    let mac_key = kdf(&[], &mac_salt, 3, WRITE_ITERATIONS, 20)?;
-    let mac = hmac::sign(
-        &hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, &mac_key),
-        &content,
-    );
-    let null = [0x05, 0x00];
-    let mac_data = sequence(&[
-        &sequence(&[
-            &sequence(&[&tlv(OID, OID_SHA1), &null]),
-            &tlv(OCTET_STRING, mac.as_ref()),
-        ]),
-        &tlv(OCTET_STRING, &mac_salt),
-        &der_integer(WRITE_ITERATIONS),
-    ]);
-    Ok(sequence(&[
-        &der_integer(3),
-        &sequence(&[
+        let (algorithm, ciphertext) = encrypt(private_key, &random)?;
+        let key_bag = sequence(&[
+            &tlv(OID, OID_SHROUDED_KEY_BAG),
+            &tlv(
+                CONTEXT_0,
+                &sequence(&[&algorithm, &tlv(OCTET_STRING, &ciphertext)]),
+            ),
+            &attributes,
+        ]);
+        let keys = sequence(&[
             &tlv(OID, OID_DATA),
-            &tlv(CONTEXT_0, &tlv(OCTET_STRING, &content)),
-        ]),
-        &mac_data,
-    ]))
-}
+            &tlv(CONTEXT_0, &tlv(OCTET_STRING, &sequence(&[&key_bag]))),
+        ]);
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+        let content = sequence(&[&certificates, &keys]);
+        let mac_salt: [u8; 20] = random_bytes(&random)?;
+        let mac_key = kdf(&[], &mac_salt, 3, WRITE_ITERATIONS, 20)?;
+        let mac = hmac::sign(
+            &hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, &mac_key),
+            &content,
+        );
+        let null = [0x05, 0x00];
+        let mac_data = sequence(&[
+            &sequence(&[
+                &sequence(&[&tlv(OID, OID_SHA1), &null]),
+                &tlv(OCTET_STRING, mac.as_ref()),
+            ]),
+            &tlv(OCTET_STRING, &mac_salt),
+            &der_integer(WRITE_ITERATIONS),
+        ]);
+        Ok(sequence(&[
+            &der_integer(3),
+            &sequence(&[
+                &tlv(OID, OID_DATA),
+                &tlv(CONTEXT_0, &tlv(OCTET_STRING, &content)),
+            ]),
+            &mac_data,
+        ]))
+    }
 
     #[test]
     fn what_write_makes_reads_back() {
@@ -549,5 +551,69 @@ mod tests {
         assert!(parse(b"").is_err());
         assert!(parse(&[0x30, 0x03, 0x02, 0x01, 0x03]).is_err());
         assert!(parse(&[0x30, 0x84, 0xFF, 0xFF, 0xFF, 0xFF]).is_err());
+    }
+
+    /// xorshift64*: enough for test inputs, and the same on every run.
+    struct Random(u64);
+
+    impl Random {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn below(&mut self, limit: usize) -> usize {
+            (self.next() % limit as u64) as usize
+        }
+
+        fn bytes(&mut self, length: usize) -> Vec<u8> {
+            (0..length).map(|_| self.next() as u8).collect()
+        }
+    }
+
+    #[test]
+    fn the_pkcs12_reader_never_panics_on_random_input() {
+        let mut random = Random(0xC0FF_EE00_1234_5678);
+        for case in 0..3000 {
+            let length = random.below(400);
+            let bytes = random.bytes(length);
+            let _ = parse(&bytes);
+
+            // A DER sequence of the right length, so the reader goes past the first check.
+            let mut framed = vec![0x30];
+            if length < 128 {
+                framed.push(length as u8);
+            } else {
+                framed.extend([0x82, (length >> 8) as u8, length as u8]);
+            }
+            framed.extend_from_slice(&bytes);
+            let _ = parse(&framed);
+            let _ = case;
+        }
+    }
+
+    #[test]
+    fn the_pkcs12_reader_never_panics_on_a_good_file_that_is_damaged() {
+        // Any certificate and key bytes do for `write`; it does not look inside them.
+        let good = write(
+            &[0x30, 0x03, 0x02, 0x01, 0x05],
+            &[0x30, 0x03, 0x02, 0x01, 0x07],
+        )
+        .unwrap();
+        assert!(parse(&good).is_ok());
+        let mut random = Random(99);
+        for length in 0..good.len() {
+            let _ = parse(&good[..length]);
+        }
+        for _ in 0..3000 {
+            let mut damaged = good.clone();
+            for _ in 0..1 + random.below(3) {
+                let position = random.below(damaged.len());
+                damaged[position] = random.next() as u8;
+            }
+            let _ = parse(&damaged);
+        }
     }
 }

@@ -15,9 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::host::{Capabilities, Export, UsbHost};
 use crate::tasks::lock;
-use crate::{
-    BoxFuture, BusId, Clock, DeviceStream, ExportStatus, UsbDevice, UsbError, protocol, relay,
-};
+use crate::{BoxFuture, BusId, Clock, DeviceStream, ExportStatus, UsbDevice, UsbError, protocol};
 
 /// The most devices Koppel accepts in one list.
 pub const MAX_DEVICES: usize = 256;
@@ -261,7 +259,7 @@ impl Export for UpstreamExport {
         Box::pin(async move {
             // USB traffic can be quiet for a long time; only the handshake has a deadline.
             if let Some(upstream) = self.upstream.take() {
-                relay(network, upstream, &stop).await;
+                usbip::relay(network, upstream, stop.cancelled()).await;
             }
             // The connection is closed above, before the claim goes, so a second import never
             // meets a half-closed first one.

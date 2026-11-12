@@ -10,7 +10,7 @@ use super::usbfs;
 use crate::host::{Capabilities, Export, UsbHost};
 use crate::{
     BoxFuture, BusId, DeviceStream, ExportStatus, Module, UsbDevice, UsbError, UsbInterface,
-    UsbSpeed, loopback_pair, relay,
+    UsbSpeed, loopback_pair,
 };
 
 /// The Linux kernel's USB/IP server side (`usbip-host`), driven through sysfs, the way the
@@ -149,7 +149,7 @@ impl Export for KernelExport {
                 relay_end,
             } = *self;
             // Runs until the client detaches or the link drops; the kernel then frees the device.
-            relay(network, relay_end, &stop).await;
+            usbip::relay(network, relay_end, stop.cancelled()).await;
             drop(kernel_end);
         })
     }

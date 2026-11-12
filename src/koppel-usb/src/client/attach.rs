@@ -13,7 +13,7 @@ use super::slots::{AttachKey, Attachment, DriverHold, Kind, Mode, Outcome, Plan}
 use super::{AttachError, Command, Failure, Shared, check_import};
 use crate::relay::kernel_pair;
 use crate::{
-    ActivityOutcome, ActivityReason, BusId, CloseReason, DeviceStream, DeviceView, protocol, relay,
+    ActivityOutcome, ActivityReason, BusId, CloseReason, DeviceStream, DeviceView, protocol,
 };
 
 /// The stream to the server for one imported device, and the device record it sent.
@@ -223,7 +223,7 @@ async fn hand_to_kernel(
     let relayed = shared.clone();
     let relay_key = key.clone();
     shared.workers.spawn(format!("relay {bus_id}"), async move {
-        relay(&mut *session, relay_end, &stop).await;
+        usbip::relay(&mut *session, relay_end, stop.cancelled()).await;
         drop(kernel_end);
         session.close(CloseReason::Done).await;
         relayed.send(Command::RelayEnded {

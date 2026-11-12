@@ -13,21 +13,31 @@
 //! Everything here is Windows only except [`wire`], which is plain data, so its tests run on Linux
 //! too; on other systems the rest of the crate is empty.
 
+// Unsafe code is allowed only in the modules that call the Windows API directly; `service`,
+// `ui_url` and `wire` have none.
+#![deny(unsafe_code)]
+
 pub mod wire;
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 pub mod event_log;
 #[cfg(windows)]
+#[allow(unsafe_code)]
 mod health;
 #[cfg(windows)]
+#[allow(unsafe_code)]
 pub mod launcher;
 #[cfg(windows)]
+#[allow(unsafe_code)]
 pub mod opener;
 #[cfg(windows)]
 pub mod service;
 #[cfg(windows)]
+#[allow(unsafe_code)]
 mod shell;
 #[cfg(windows)]
+#[allow(unsafe_code)]
 pub mod tray;
 #[cfg(windows)]
 pub mod ui_url;

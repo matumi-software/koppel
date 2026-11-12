@@ -378,8 +378,10 @@ impl TrayProcess {
         let Some(lines) = self.lines.as_ref() else {
             return;
         };
-        match lines.try_send(format!("{line}
-")) {
+        match lines.try_send(format!(
+            "{line}
+"
+        )) {
             Ok(()) => {
                 if !always {
                     self.sent = Some(line.to_owned());

@@ -184,7 +184,16 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
         ));
     }
     systemd::ready();
-    tokio::spawn(systemd::heartbeat(health));
+    // In the same set as the listeners, so the stop below waits for it too.
+    {
+        let mut stopped = stopped.clone();
+        servers.spawn(async move {
+            tokio::select! {
+                _ = stopped.changed() => {}
+                () = systemd::heartbeat(health) => {}
+            }
+        });
+    }
 
     #[cfg(windows)]
     let trays = service

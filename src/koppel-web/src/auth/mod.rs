@@ -31,6 +31,15 @@ pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
     bytes
 }
 
+/// Why a password could not be set.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SetPasswordError {
+    #[error(transparent)]
+    Hash(#[from] HashError),
+    #[error(transparent)]
+    Save(#[from] ConfigFileError),
+}
+
 /// What first-run setup decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SetupOutcome {
@@ -185,7 +194,7 @@ impl UiAuth {
     pub(crate) async fn set_first_password(
         &self,
         password: String,
-    ) -> Result<SetupOutcome, ConfigFileError> {
+    ) -> Result<SetupOutcome, SetPasswordError> {
         let _setup = self.setup.lock().await;
         if self.has_password() {
             return Ok(SetupOutcome::AlreadySet);
@@ -193,7 +202,7 @@ impl UiAuth {
         if !self.setup_open() {
             return Ok(SetupOutcome::Closed);
         }
-        let hash: Secret<String> = hash_off_thread(password).await.into();
+        let hash: Secret<String> = hash_off_thread(password).await?.into();
         // Set before the write, so the file's own change is not taken for one from outside.
         *lock(&self.seen_hash) = Some(hash.clone());
         self.file
@@ -229,8 +238,8 @@ impl UiAuth {
         &self,
         next: String,
         keep: &str,
-    ) -> Result<(), ConfigFileError> {
-        let hash: Secret<String> = hash_off_thread(next).await.into();
+    ) -> Result<(), SetPasswordError> {
+        let hash: Secret<String> = hash_off_thread(next).await?.into();
         *lock(&self.seen_hash) = Some(hash.clone());
         self.file
             .update(|_| UiCredentials {
@@ -321,10 +330,16 @@ fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
-async fn hash_off_thread(password: String) -> String {
+/// Why a password could not be hashed: the blocking task did not finish, as when the runtime is
+/// shutting down.
+#[derive(Debug, thiserror::Error)]
+#[error("the password could not be hashed: {0}")]
+pub(crate) struct HashError(#[source] tokio::task::JoinError);
+
+async fn hash_off_thread(password: String) -> Result<String, HashError> {
     tokio::task::spawn_blocking(move || password::hash(&password))
         .await
-        .expect("hashing does not panic")
+        .map_err(HashError)
 }
 
 /// `koppel reset-password`: clears the UI password, which ends every session of a running Koppel (a

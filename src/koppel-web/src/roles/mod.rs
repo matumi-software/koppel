@@ -25,6 +25,9 @@ pub enum RoleError {
     /// Skakel's server refused or could not write the change.
     #[error(transparent)]
     Server(#[from] skakel_server::ServerError),
+    /// Skakel's server has stopped with Koppel.
+    #[error("Skakel's server is not running")]
+    NotRunning,
 }
 
 /// One registered client, as the server's UI lists it.

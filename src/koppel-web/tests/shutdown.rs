@@ -56,3 +56,39 @@ async fn a_stop_with_the_live_push_open_does_not_wait_out_the_grace_period() {
     .await;
     assert!(end.is_ok(), "the stream ended");
 }
+
+/// A request that was already in flight when Skakel's server stopped finds it gone. It gets an
+/// answer, not a panic on the handler's task.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_after_the_stop_is_answered_and_does_not_panic() {
+    use axum::body::Body;
+    use axum::extract::ConnectInfo;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let dir = TempDir::new("shutdown-late");
+    let node = Node::start(dir.path(), "server", None, FakeKernel::new()).await;
+    let router = node.app.router();
+    let cookie = node.cookie().to_owned();
+    node.stop().await;
+
+    for path in ["/api/server/clients", "/api/server/keys"] {
+        let mut request = Request::builder()
+            .uri(path)
+            .header("Cookie", &cookie)
+            .body(Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                50_000,
+            ))));
+        let response = router.clone().oneshot(request).await.unwrap();
+        assert!(
+            response.status().is_success(),
+            "{path} answered {}",
+            response.status()
+        );
+    }
+}

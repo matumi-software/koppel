@@ -21,6 +21,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 
+use crate::tasks::Tasks;
+
 /// Koppel's stream type for one USB device.
 pub(crate) const USB_STREAM: &str = "usb";
 
@@ -38,9 +40,10 @@ const FAILED: &str = "FAILED";
 
 /// Opens `usb` streams on the server and hands each to the data plane, with the client Skakel
 /// checked.
-pub(crate) fn usb_handler(data_plane: UsbDataPlane) -> impl StreamHandler {
+pub(crate) fn usb_handler(data_plane: UsbDataPlane, tasks: Tasks) -> impl StreamHandler {
     move |request: StreamRequest| {
         let data_plane = data_plane.clone();
+        let tasks = tasks.clone();
         async move {
             if !request.target.is_empty() {
                 return StreamOpen::BadTarget("A usb stream takes no target.".into());
@@ -50,7 +53,7 @@ pub(crate) fn usb_handler(data_plane: UsbDataPlane) -> impl StreamHandler {
                     id: session.client_id.clone(),
                     name: session.client_name.clone(),
                 };
-                let stream = Bridged::start(ServerEnd::new(session));
+                let stream = Bridged::start(ServerEnd::new(session), &tasks);
                 data_plane.serve(Box::new(stream), client).await;
             })
         }
@@ -58,9 +61,14 @@ pub(crate) fn usb_handler(data_plane: UsbDataPlane) -> impl StreamHandler {
 }
 
 /// Opens a `usb` stream on `link`, on a connection of its own, as koppel-usb's client asks.
-pub(crate) async fn open_usb(link: &Link) -> Result<Box<dyn DeviceStream>, OpenError> {
+pub(crate) async fn open_usb(
+    link: &Link,
+    tasks: &Tasks,
+) -> Result<Box<dyn DeviceStream>, OpenError> {
     match link.open_stream(USB_STREAM, &[]).await {
-        Ok(OpenResult::Opened(stream)) => Ok(Box::new(Bridged::start(ClientEnd(Arc::new(stream))))),
+        Ok(OpenResult::Opened(stream)) => {
+            Ok(Box::new(Bridged::start(ClientEnd(Arc::new(stream)), tasks)))
+        }
         Ok(OpenResult::Refused(refusal)) => Err(OpenError::Refused(refusal.message)),
         Err(error) => Err(OpenError::Failed(error.failure().message().to_owned())),
     }
@@ -155,10 +163,10 @@ struct Bridged {
 }
 
 impl Bridged {
-    fn start(frames: impl Frames) -> Self {
+    fn start(frames: impl Frames, tasks: &Tasks) -> Self {
         let (ours, theirs) = tokio::io::duplex(PIPE);
         let (close, reason) = oneshot::channel();
-        let pump = tokio::spawn(pump(Arc::new(frames), theirs, reason));
+        let pump = tasks.spawn(pump(Arc::new(frames), theirs, reason, tasks.clone()));
         Self {
             io: Some(ours),
             close: Some(close),
@@ -175,11 +183,16 @@ impl Bridged {
 
 /// Moves bytes between the pipe and the frames until both ways are done, then ends the stream with
 /// the reason the USB layer closed it with.
-async fn pump(frames: Arc<dyn Frames>, pipe: DuplexStream, reason: oneshot::Receiver<CloseReason>) {
+async fn pump(
+    frames: Arc<dyn Frames>,
+    pipe: DuplexStream,
+    reason: oneshot::Receiver<CloseReason>,
+    tasks: Tasks,
+) {
     let (mut from_usb, mut to_usb) = tokio::io::split(pipe);
     let incoming = {
         let frames = frames.clone();
-        tokio::spawn(async move {
+        tasks.spawn(async move {
             while let Some(data) = frames.next().await {
                 if to_usb.write_all(&data).await.is_err() {
                     return;

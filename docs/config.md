@@ -1,5 +1,64 @@
 # Config
 
+## Settings
+
+Koppel's settings are one typed struct (`koppel/src/config.rs`), built once at start by clap. Each is a
+command line option or an environment variable, and the option wins. The name of the variable is
+`KOPPEL_` and the option's name in capitals with `_` between words (`--ui-port` and `KOPPEL_UI_PORT`).
+A blank value counts as not set. `koppel --help` lists them with their variables.
+
+```sh
+koppel [options] [serve]           # run Koppel; no command means serve
+koppel [options] reset-password    # clear the UI password and end every session
+koppel [options] healthcheck       # ask a running Koppel's /healthz: exit 0 if it answers, 1 if not
+koppel --version                   # koppel 0.2.0 (commit 1a2b3c4d5, built 2026-11-12)
+```
+
+A value that is not valid, or an option Koppel does not have, stops the start before anything runs, with
+exit code 2 and a message that names the option. `--version` gets its commit from the build (the image
+build passes it in, since it has no `.git`) and says `unknown` when it has none.
+
+| Option | Variable | 0.1.x name | Default |
+|---|---|---|---|
+| `--ui-port` | `KOPPEL_UI_PORT` | `Ports:Ui` | 5240 |
+| `--network-port` | `KOPPEL_NETWORK_PORT` | `Ports:Network` | the UI port |
+| `--listen-address` | `KOPPEL_LISTEN_ADDRESS` | `Ports:Address` | every address |
+| `--ui-allow-from` | `KOPPEL_UI_ALLOW_FROM` | `Ui:AllowFrom` | `lan`, `local` in development |
+| `--ui-setup-window-minutes` | `KOPPEL_UI_SETUP_WINDOW_MINUTES` | `Ui:SetupWindowMinutes` | 10 |
+| `--config-dir` | `KOPPEL_CONFIG_DIR` | `Paths:Config` | the platform's (see below) |
+| `--keys-dir` | `KOPPEL_KEYS_DIR` | `Paths:Keys` | the platform's |
+| (none) | (none) | `Paths:KeyCertificate` | not read since 0.2.0; setting it logs a warning |
+| `--rate-auth-per-minute` | `KOPPEL_RATE_AUTH_PER_MINUTE` | `RateLimits:AuthPerMinute` | 30 |
+| `--rate-token-per-minute` | `KOPPEL_RATE_TOKEN_PER_MINUTE` | `RateLimits:TokenPerMinute` | 60 |
+| `--rate-pair-per-minute` | `KOPPEL_RATE_PAIR_PER_MINUTE` | `RateLimits:PairPerMinute` | 120 |
+| `--discovery-enabled` | `KOPPEL_DISCOVERY_ENABLED` | `Discovery:Enabled` | true |
+| `--discovery-port` | `KOPPEL_DISCOVERY_PORT` | `Discovery:Port` | the network port |
+| `--usb-sys-root` | `KOPPEL_USB_SYS_ROOT` | `Usb:SysRoot` | `/sys` |
+| `--usb-upstream` | `KOPPEL_USB_UPSTREAM` | `Usb:Upstream` | none |
+| `--usb-usbip-path` | `KOPPEL_USB_USBIP_PATH` | `Usb:UsbipPath` | the bundled copy, then a standalone install |
+| `--usb-attach-timeout-seconds` | `KOPPEL_USB_ATTACH_TIMEOUT_SECONDS` | `Usb:AttachTimeoutSeconds` | 20 |
+| `--gateway-port` | `KOPPEL_GATEWAY_PORT` | `Gateway:Port` | 3242 on native Windows, off elsewhere; 0 turns it off |
+| `--gateway-address` | `KOPPEL_GATEWAY_ADDRESS` | `Gateway:Address` | `127.0.0.1` |
+| `--gateway-max-sessions` | `KOPPEL_GATEWAY_MAX_SESSIONS` | `Gateway:MaxSessions` | 64 |
+| `--environment` | `KOPPEL_ENVIRONMENT` | `ASPNETCORE_ENVIRONMENT`, `DOTNET_ENVIRONMENT` | none; `development` makes the UI `local` |
+
+Log levels come from `RUST_LOG`, not a setting.
+
+**0.1.x's names still work in 0.2.1**, and each one that is used is logged once at Warning as deprecated,
+with the name to use instead. That covers the environment (`Ports__Ui`, `Paths__Config`, `Ui__AllowFrom`),
+matched without regard to case; the command line (`--Ports:Ui=5250`, `--Ports:Ui 5250`, `/Ports:Ui=5250`),
+which wins over the environment as before; and the flags `--reset-password` and `--healthcheck`, which are
+the commands `reset-password` and `healthcheck`. When both the new variable and the old one are set, the
+new one wins and the log says the old one is ignored. A compose file, `/etc/default/koppel` or a service
+registry value that uses the old names needs no change to keep working, and the installers and compose files in
+this repository use the new names.
+
+**A name Koppel does not know is warned about, never silently ignored.** Any `KOPPEL_` variable that is not
+in the table, and any `Section__Key` variable that is not one of 0.1.x's, is logged at Warning with the
+nearest known name when there is one (`Ports__Uii is not a Koppel setting and is ignored. Did you mean
+Ports__Ui?`). `KOPPEL_RUNNING_IN_CONTAINER`, `KOPPEL_UI_URL`, `KOPPEL_HOSTNAME`, `KOPPEL_IMAGE` and
+`KOPPEL_CONTRACT_*` are read by other parts of Koppel and its tools, and are not warned about.
+
 ## Config on disk
 
 The config directory holds:
@@ -25,7 +84,7 @@ How a file is read and written:
 - **`shareOnStartup` has one default, true,** for a new install and for a hand-edited `settings.json` that leaves it out. 0.1.x read a missing one as false.
 - **Enums are names only:** a number where a name is expected (`"role": 1`) is refused.
 
-The encrypted files are sealed with a key in a separate keys directory (`Paths:Keys`): machine DPAPI on
+The encrypted files are sealed with a key in a separate keys directory (`KOPPEL_KEYS_DIR`): machine DPAPI on
 Windows, and on Linux AES-256-GCM with a key file that is plain on disk (see "Secret files" in "Config
 files in Rust"). 0.1.x used a Data Protection key ring there, which Koppel converts from once (see "The
 upgrade from 0.1.x" there). `Paths:KeyCertificate`, which protected that key ring on Linux, is deprecated
@@ -39,7 +98,7 @@ Data folder hardening. Before anything is written, Koppel restricts the config a
 Where the config directory is:
 
 - Docker: `/koppel/config` and `/koppel/keys` inside the `koppel` volume.
-- Otherwise: `%ProgramData%\Koppel\config` on Windows, `/var/lib/koppel/config` elsewhere, unless `Paths:Config` is set. A developer running `cargo run -p koppel` sets `Paths__Config` and `Paths__Keys` to a folder of their own.
+- Otherwise: `%ProgramData%\Koppel\config` on Windows, `/var/lib/koppel/config` elsewhere, unless `KOPPEL_CONFIG_DIR` is set. A developer running `cargo run -p koppel` sets `KOPPEL_CONFIG_DIR` and `KOPPEL_KEYS_DIR` to a folder of their own.
 
 ### If the key ring is lost
 

@@ -49,7 +49,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo deny check                                    # licences, advisories and sources, before a pull request (cargo install cargo-deny)
-cargo run -p koppel                                  # https://localhost:5240; set Paths__Config and Paths__Keys to a folder of your own
+cargo run -p koppel                                  # https://localhost:5240; set KOPPEL_CONFIG_DIR and KOPPEL_KEYS_DIR to a folder of your own
 bash koppel-contract/run-against-rust.sh             # the contract tests against a fresh build (Git Bash on Windows)
 ./installer/windows/build.ps1                        # PowerShell: Koppel-Setup.exe
 ./installer/linux/build.ps1 -Image                   # PowerShell: the .deb files and the image, loaded here, never pushed

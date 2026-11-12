@@ -53,9 +53,9 @@ That builds the image under the tag both Windows compose files name, so a build 
 The client compose file publishes 5240 as `127.0.0.1:5240:5240`, so the UI answers on this machine
 only. The server compose file publishes 5240 on every address, because clients reach the server
 there, and the UI comes with it. Docker Desktop's network translation makes every caller look like
-the same address, so `Ui:AllowFrom` cannot tell them apart, and one caller on the LAN typing wrong
+the same address, so `KOPPEL_UI_ALLOW_FROM` cannot tell them apart, and one caller on the LAN typing wrong
 passwords locks the admin out for a while. To keep the UI on this machine, give the network surface
-its own port: set `Ports__Network: "5241"` and publish `127.0.0.1:5240:5240` and `5241:5241`.
+its own port: set `KOPPEL_NETWORK_PORT: "5241"` and publish `127.0.0.1:5240:5240` and `5241:5241`.
 
 **Close usbipd-win to the network.** Its installer adds a firewall rule named `usbipd` that lets
 every machine on the local subnet connect to port 3240. That is plain USB/IP with no login, so
@@ -105,12 +105,12 @@ machine that also runs usbipd-win cannot use both at once.
 ## Signing in
 
 The UI asks for a password. The first time, whoever opens the UI sets it, within 10 minutes of
-Koppel starting (`Ui:SetupWindowMinutes`). After that the UI says setup has timed out: restart Koppel
+Koppel starting (`KOPPEL_UI_SETUP_WINDOW_MINUTES`). After that the UI says setup has timed out: restart Koppel
 (**Restart Koppel** in the menu of the tray icon, `Restart-Service Koppel` from an elevated prompt, or `docker compose restart` for Docker Desktop) and
 open it again.
 
 - Native install: the UI answers this machine only, so only someone at this machine can set it.
-- Docker Desktop: every caller looks like the same address, so `Ui:AllowFrom` cannot keep the
+- Docker Desktop: every caller looks like the same address, so `KOPPEL_UI_ALLOW_FROM` cannot keep the
   network out. With the server compose file, which publishes 5240 on every address, set the password
   right after the first start, or publish the UI on `127.0.0.1` only as described above.
 
@@ -120,10 +120,10 @@ set a new one in the UI within 10 minutes:
 
 ```powershell
 # native install, elevated prompt
-& "C:\Program Files\Matumi\Koppel\Koppel.exe" --reset-password
+& "C:\Program Files\Matumi\Koppel\Koppel.exe" reset-password
 
 # Docker Desktop
-docker compose run --rm koppel --reset-password
+docker compose run --rm koppel reset-password
 ```
 
 ## The native install
@@ -135,7 +135,7 @@ runtime, which usbip-win2's tools need (Koppel's own programs do not). From 0.2.
 starts and stops with their reason, to the Application event log under the source Koppel. It adds an inbound firewall rule for `Koppel.exe` (TCP and UDP, any port, so it
 follows a changed `Ports` setting) on Private and Domain networks, never Public. It is removed on uninstall and kept on repair and
 upgrade. The UI is at https://localhost:5240 and answers on
-this machine only: the installer sets `Ui__AllowFrom=local` for the service. A native Windows server
+this machine only: the installer sets `KOPPEL_UI_ALLOW_FROM=local` for the service. A native Windows server
 is reached on the same port, 5240, through that rule. A network Windows has marked Public gets no rule: change it to Private, or add one by hand.
 
 - **Tray icon:** while the service runs, every signed-in user gets a Koppel icon in the notification area. Windows 11 puts new icons in the overflow first; drag it onto the taskbar to keep it in sight. Its tooltip says how Koppel is doing, such as "linked to lab-pc, 2 devices attached" or "server, 3 devices shared, 1 in use", and an amber dot on the icon means something needs you: the link to the server is down, sharing is not available, or setup is waiting or has timed out. It also shows Windows notifications: on a server when a client wants to pair (click it to open Clients), and on a client when the link to the server drops and when it is back (once each, not on every retry) and when a device does not attach. Windows holds them back during Do not disturb. Each kind can be turned off under Configuration, Notifications, which only the Windows app shows. Click it, or pick **Open Koppel**, to open the UI in your browser. **Restart Koppel** asks first and then restarts the service, which also opens setup again when no password is set yet. **Shut down Koppel** asks first and then stops the service: shared and attached devices stop working, and Koppel stays off until the next boot or until you start it again from **Koppel** in the Start menu. Any signed-in user can do this, not only administrators. The icon goes when the service stops and comes back when it starts.
@@ -145,7 +145,7 @@ is reached on the same port, 5240, through that rule. A network Windows has mark
 - **Driver:** its output goes to the MSI log, not to a file in the data folder. Keep a log of the install to read it (for example `msiexec /i Koppel.msi /l*v setup.log`). If Windows says a restart finishes the driver install or its removal, setup or uninstall asks for one.
 - **A usbip-win2 you installed yourself** is found and used as it is. Koppel never changes or removes its driver. Koppel's own uninstall removes only the driver it installed itself (recorded in `%ProgramData%\Koppel\driver-state.json`), and only a package Windows still lists as one of usbip-win2's (`usbip2_*.inf`), because Windows reuses the `oemNN.inf` numbers. A usbip-win2 installed on its own is looked for first, even when a record exists. If the record is missing, or is not owned and protected by administrators, the uninstall leaves the driver and prints how to remove it by hand.
 - **The gateway is on by default** (127.0.0.1, port 3242), and serves only the Windows kernel, which is how usbip-win2's driver connects. Another program on the machine that connects to it is turned away, and so is any import Koppel did not ask for itself, such as another user's `usbip attach`. Koppel attaches devices through it by itself; you do not run `usbip attach` by hand.
-- **Servers:** a native Windows machine can be a client. As a server it still needs `Usb:Upstream` pointed at usbipd-win.
+- **Servers:** a native Windows machine can be a client. As a server it still needs `KOPPEL_USB_UPSTREAM` pointed at usbipd-win.
 
 The elevated parts of the installer were run on a clean Windows 11 22H2 VM (see "What is tested"); the rollback of a failed fresh install was not exercised.
 The installer is not code signed.
@@ -161,15 +161,15 @@ address by hand there, or use the native install, which finds servers.
 
 | Setting | Where | What |
 |---|---|---|
-| `Usb:Upstream` | server | `host:port` of a USB/IP server to share from, instead of this kernel |
-| `Gateway:Port` | client | Port of the plain USB/IP gateway. 3242 on native Windows, off elsewhere unless set. The Windows client compose file sets it |
-| `Gateway:Address` | client | Address it listens on. `127.0.0.1` unless set. The compose file sets `0.0.0.0` inside the container |
-| `Usb:AttachTimeoutSeconds` | client | How long an attach may take before it fails with a readable error. 20 |
-| `Ui:AllowFrom` | both | Who may use the UI: `local`, `lan` or `any`. `lan` unless set; the native installer sets `local` |
-| `Ui:SetupWindowMinutes` | both | How long after a start, or a password reset, the first password may be set. 10 |
-| `Ports:Network` | both | A port of its own for what other Koppel machines do. The UI's port (5240) unless set |
+| `KOPPEL_USB_UPSTREAM` | server | `host:port` of a USB/IP server to share from, instead of this kernel |
+| `KOPPEL_GATEWAY_PORT` | client | Port of the plain USB/IP gateway. 3242 on native Windows, off elsewhere unless set. The Windows client compose file sets it |
+| `KOPPEL_GATEWAY_ADDRESS` | client | Address it listens on. `127.0.0.1` unless set. The compose file sets `0.0.0.0` inside the container |
+| `KOPPEL_USB_ATTACH_TIMEOUT_SECONDS` | client | How long an attach may take before it fails with a readable error. 20 |
+| `KOPPEL_UI_ALLOW_FROM` | both | Who may use the UI: `local`, `lan` or `any`. `lan` unless set; the native installer sets `local` |
+| `KOPPEL_UI_SETUP_WINDOW_MINUTES` | both | How long after a start, or a password reset, the first password may be set. 10 |
+| `KOPPEL_NETWORK_PORT` | both | A port of its own for what other Koppel machines do. The UI's port (5240) unless set |
 
-In a compose file these are environment variables with `__` for `:`, such as `Usb__Upstream`.
+In a compose file these are environment variables, such as `KOPPEL_USB_UPSTREAM`. 0.1.x's names (`Usb__Upstream`) still work and are logged as deprecated.
 
 ## What is tested
 

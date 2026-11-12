@@ -26,9 +26,9 @@ Discovery, following a server that moved, and the pairing exchange with its code
 limits are Skakel's; see "Discovery", "Following a server" and "Pairing" in Skakel's
 [`docs/protocol.md`](https://github.com/matumi-software/skakel/blob/main/docs/protocol.md). What Koppel adds:
 
-- **Discovery:** a client browses with skakel-client's `Browser` on its discovery port (`Discovery:Port`, the HTTPS port number 5240 unless changed), keeps only servers whose app id is `koppel`, and lists them under Configuration, Servers on your network, leaving out itself. When other addresses answer with the same fingerprint, the row says so: a machine on more than one network does that, and so does one copying another server's fingerprint. A server answers probes only while its role is server or both. Koppel answers them itself (`koppel-web/src/roles/skakel/announcer.rs`), in Skakel's format, so the answers follow the role. `Discovery:Enabled=false` turns both sides off. Broadcasts stay on the local network, so a server elsewhere is entered by address.
+- **Discovery:** a client browses with skakel-client's `Browser` on its discovery port (`KOPPEL_DISCOVERY_PORT`, the HTTPS port number 5240 unless changed), keeps only servers whose app id is `koppel`, and lists them under Configuration, Servers on your network, leaving out itself. When other addresses answer with the same fingerprint, the row says so: a machine on more than one network does that, and so does one copying another server's fingerprint. A server answers probes only while its role is server or both. Koppel answers them itself (`koppel-web/src/roles/skakel/announcer.rs`), in Skakel's format, so the answers follow the role. `KOPPEL_DISCOVERY_ENABLED=false` turns both sides off. Broadcasts stay on the local network, so a server elsewhere is entered by address.
 - **Why not multicast DNS:** it worked, but it needs UDP 5353 as well, and Koppel's aim is one port number between machines.
-- **Following a moved server:** the link follows its server when the saved address stops answering and discovery hears it, with a certificate it trusts, at another address. Koppel saves the new address through `ConnectionStore` like any other write, unless the person saved another connection meanwhile, so the UI hears `ConnectionChanged` and the activity log gets a `serverMoved` entry. The attached devices carry on. With `Discovery:Enabled=false`, or a server outside broadcast reach, nothing moves.
+- **Following a moved server:** the link follows its server when the saved address stops answering and discovery hears it, with a certificate it trusts, at another address. Koppel saves the new address through `ConnectionStore` like any other write, unless the person saved another connection meanwhile, so the UI hears `ConnectionChanged` and the activity log gets a `serverMoved` entry. The attached devices carry on. With `KOPPEL_DISCOVERY_ENABLED=false`, or a server outside broadcast reach, nothing moves.
 - **Pairing:** instead of copying a client ID and secret, a person allows pairing on the server's Clients page (the pairing window, below), the client shows an eight-digit code, and the person types it on the server, under Waiting to pair, as with Moonlight and Sunshine. The code is made from the server's certificate, both sides' nonces and the client's name, so a man in the middle that shows another name gets a code that does not match. On a match the server registers the client and Skakel hands it its credentials; they go straight into `connection.json`, and `ConnectionChanged` confirms it as for any saved connection. Approve answers 202 and is confirmed by `PairingRequestsChanged` and `ClientsChanged`; a wrong code is a 400 at once. Approvals and refusals go to the activity log.
 - **The pairing window:** Skakel 0.3.0 closes pairing by default: a server takes new pairing requests only while a person at the server has opened a window. Koppel opens it from the server's Clients page (Allow pairing for 10 minutes, Close pairing, Keep open for 10 more minutes): `POST /api/server/pairing/window` with an optional `{"minutes": 1 to 60}` and `DELETE /api/server/pairing/window`, both answering 202. The window is part of `GET /api/server/pairing` and of `PairingRequestsChanged` (`window`: `open`, `alwaysOpen`, `until`), so the UI follows the confirm rule: Allow pairing is pending until the push says the window is open. A client that asks while it is closed is told so: "{name} is not taking pairing requests. On {name}, open the Clients section and choose Allow pairing, then try again." Requests already open carry on after the window closes. A server that restarts, or leaves the server role, starts with the window closed. Koppel never builds the server with Skakel's `pairing_always_open`: pairing at any time is what the window is there to stop.
 - **Replacing a connection:** if the client already has a connection to a different server, an approved pairing does not overwrite it. The client goes to a `confirm` state that shows the new server's name and fingerprint, and the person chooses Replace or Discard (`POST /api/client/pairing/confirm` to replace, `DELETE /api/client/pairing` to discard). The held credentials stay in memory until the person acts, or pairing is started again or cancelled. The `paired` state clears once the saved connection no longer matches it.
@@ -90,7 +90,7 @@ at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`,
   client role the web ports present Koppel's own certificate slot, which a save of `secrets.json`
   keeps on the same certificate, with the same settings.
 - **Limits:** Skakel keeps its own per-address limits, by the caller's real address:
-  `RateLimits:TokenPerMinute` and `RateLimits:PairPerMinute`, 5 pairing requests opened in 5 minutes
+  `KOPPEL_RATE_TOKEN_PER_MINUTE` and `KOPPEL_RATE_PAIR_PER_MINUTE`, 5 pairing requests opened in 5 minutes
   and 3 open at once. Since Skakel sits behind the port and role check, a call to the wrong port or
   role gets its 404 without counting, where 0.1.x counted it. The address a pairing request came
   from, in the server's UI and the activity log, is the one Skakel saw.
@@ -109,8 +109,8 @@ at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`,
 - **Pairing:** a request the server's person refused leaves the list at once, as in 0.1.x; Skakel
   shows refused requests for 15 seconds, which Koppel keeps only for three wrong codes.
   Approvals and refusals go to the activity log as `clientAdded`, as in 0.1.x.
-- **Discovery:** Koppel answers probes itself while the role is server or both, on `Discovery:Port`,
-  bound to `Ports:Address` when that is an IPv4 address (a server on loopback has nobody else to
+- **Discovery:** Koppel answers probes itself while the role is server or both, on `KOPPEL_DISCOVERY_PORT`,
+  bound to `KOPPEL_LISTEN_ADDRESS` when that is an IPv4 address (a server on loopback has nobody else to
   answer) and to every IPv4 address otherwise. The client browses with skakel-client's `Browser`
   while the role is client or both, leaves out its own certificate, and lists servers as 0.1.x did.
 - **Remote device list:** Koppel's own gRPC service `koppel.remote.v1.RemoteDevices`
@@ -133,8 +133,8 @@ at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`,
   `serverMoved` entry in the activity log. The link's status, address and pins arrive as events and are
   read on a task of Koppel's own; the pins go through Skakel's `PinStore`.
 - **USB:** the app runs koppel-usb's `UsbServer`, `UsbDataPlane`, `UsbClient` and `UsbIpGateway` on
-  what `koppel` picks from the settings: sysfs on Linux (`Usb:SysRoot`), a USB/IP server to share
-  from (`Usb:Upstream`), usbip-win2's `usbip.exe` on Windows (`Usb:UsbipPath`, else the bundled copy,
+  what `koppel` picks from the settings: sysfs on Linux (`KOPPEL_USB_SYS_ROOT`), a USB/IP server to share
+  from (`KOPPEL_USB_UPSTREAM`), usbip-win2's `usbip.exe` on Windows (`KOPPEL_USB_USBIP_PATH`, else the bundled copy,
   else a standalone install), as 0.1.x did.
 - **Tests:** `koppel-web/tests/roles.rs` starts a Rust server and a Rust client in one process, each
   on a temporary data folder with a fake kernel. They pair through the code, a shared device

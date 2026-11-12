@@ -4,7 +4,6 @@ resolver = "3"
 members = [
     "koppel",
     "koppel-config",
-    "koppel-contract",
     "koppel-usb",
     "koppel-web",
     "koppel-windows",
@@ -19,7 +18,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/matumi-software/koppel"
 
 [workspace.lints.rust]
-# For the crates that need no unsafe code: koppel and koppel-contract. They take this with
+# For the crates that need no unsafe code: koppel. It takes this with
 # `[lints] workspace = true`. The crates that call the operating system (koppel-config, koppel-usb,
 # koppel-web, koppel-windows) have unsafe blocks and stay out until each one is narrowed to one module.
 unsafe_code = "forbid"
@@ -82,7 +81,7 @@ clap = { version = "4.6.7", default-features = false, features = ["std", "derive
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi", "std"] }
 
-# The contract tests only (`koppel-contract`, never shipped). The HTTP client is reqwest (MIT OR
+# The contract tests only (`koppel/tests/contract`, never shipped). The HTTP client is reqwest (MIT OR
 # Apache-2.0), as in Skakel, on the rustls and ring above with a certificate check the tests set up
 # themselves, so there is no second TLS stack. JSON is serde_json (MIT OR Apache-2.0). ring (Apache-2.0
 # AND ISC) is already in the tree through rustls; it is named for the SHA-256 of a pinned certificate.

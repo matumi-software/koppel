@@ -31,6 +31,12 @@ sd-notify.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+# The contract tests in tests/contract (never shipped): they start the program and talk HTTPS to it.
+# reqwest is the client, on the rustls above with the certificate check the tests pin themselves.
+# ring takes the SHA-256 of a pinned certificate, and serde_json reads the answers.
+reqwest.workspace = true
+ring.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 koppel-windows.workspace = true

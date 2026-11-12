@@ -12,8 +12,8 @@ folder per crate, the UI and the installers.
 | `docs/` | Architecture and decisions |
 | `resources/design-system/` | The design system: brand book, `tokens.json`, component specs and previews, logos. The source of every colour, size and component style |
 | `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/building.md`) |
-| `src/koppel/` | The program (package `koppel`) |
-| `src/koppel-*/` | The library crates: `koppel-config`, `koppel-web`, `koppel-usb`, `koppel-windows`, and `koppel-contract`, the contract tests |
+| `src/koppel/` | The program (package `koppel`), and `tests/contract/`, the black-box tests that start it and drive it over HTTPS |
+| `src/koppel-*/` | The library crates: `koppel-config`, `koppel-web`, `koppel-usb`, and `koppel-windows` |
 | `src/ui/` | The UI, one pnpm workspace (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`): the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
 | `src/installer/` | The installers: `windows/` (WiX, `Koppel-Setup.exe`, with usbip-win2 vendored), `linux/` (nfpm, the `.deb` files), `docker/` (the `Dockerfile`, which builds the Linux binaries, the `.deb` files and the image, the compose files, `prepare-host.sh` and `deploy.sh`) and `notices/` (the third-party notices script and cargo-about's licence policy, shared by the Windows and Linux builds) |
 | `src/ui/tools/` | The design system scripts behind `pnpm design:sync` and `pnpm design:icons` |
@@ -45,12 +45,12 @@ pnpm --filter koppel.ui dev                          # https://localhost:61040, 
 
 # from src/
 cargo build --workspace
-cargo test --workspace
+cargo test --workspace                              # runs the contract tests too: each starts koppel on a free port
+cargo test -p koppel --test contract                # just the contract tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo deny check                                    # licences, advisories and sources, before a pull request (cargo install cargo-deny)
 cargo run -p koppel                                  # https://localhost:5240; set KOPPEL_CONFIG_DIR and KOPPEL_KEYS_DIR to a folder of your own
-bash koppel-contract/run-against-rust.sh             # the contract tests against a fresh build (Git Bash on Windows)
 ./installer/windows/build.ps1                        # PowerShell: Koppel-Setup.exe
 ./installer/linux/build.ps1 -Image                   # PowerShell: the .deb files and the image, loaded here, never pushed
 ```
@@ -65,7 +65,7 @@ Linux. Run the workspace's tests in a Linux container as well (see "The Rust wor
 `docs/building.md` for clippy and rustfmt there):
 
 ```sh
-docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c   "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
+docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c   "mkdir /work && tar -C /repo --exclude=./target --exclude=./src/target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work/src && cargo test --workspace --locked"
 ```
 
 ## Pull requests

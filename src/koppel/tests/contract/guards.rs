@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
-use koppel_contract::{Answer, Body, Main, Single, Target, json, needs_skakel};
+use crate::support::{Answer, Body, Main, json};
 use reqwest::Method;
 
 #[track_caller]
@@ -27,9 +27,7 @@ fn security_headers(answer: &Answer, what: &str) {
 
 #[tokio::test]
 async fn every_answer_carries_the_security_headers() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let anonymous = main.target.anonymous();
     security_headers(&anonymous.get("/healthz").await.expect(200), "/healthz");
     security_headers(&anonymous.get("/").await.expect(200), "/");
@@ -58,9 +56,7 @@ async fn every_answer_carries_the_security_headers() {
 
 #[tokio::test]
 async fn a_change_needs_the_ui_header_and_a_read_does_not() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     main.admin
         .send(
             Method::PATCH,
@@ -102,9 +98,7 @@ async fn a_change_needs_the_ui_header_and_a_read_does_not() {
 
 #[tokio::test]
 async fn a_request_from_another_origin_is_refused_and_the_same_origin_is_not() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let own = main.target.base().to_owned();
     let other_port = {
         let (scheme_host, port) = own.rsplit_once(':').expect("a port in the base address");
@@ -162,9 +156,7 @@ async fn a_request_from_another_origin_is_refused_and_the_same_origin_is_not() {
 
 #[tokio::test]
 async fn each_role_serves_its_own_surfaces_from_the_next_request() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let admin = &main.admin;
     let anonymous = main.target.anonymous();
     // (path, answer as server, as client, as both). /api/remote and /skakel are for other machines:
@@ -178,10 +170,10 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
         ("/api/system/info", 200, 200, 200),
         ("/api/activity", 200, 200, 200),
     ];
-    let mut network: Vec<(&str, u16, u16, u16)> = vec![("/api/remote/devices", 401, 404, 401)];
-    if needs_skakel("/skakel/info in each role") {
-        network.push(("/skakel/info", 200, 404, 200));
-    }
+    let network: Vec<(&str, u16, u16, u16)> = vec![
+        ("/api/remote/devices", 401, 404, 401),
+        ("/skakel/info", 200, 404, 200),
+    ];
     for (role, column) in [("server", 0), ("client", 1), ("both", 2), ("server", 0)] {
         admin
             .patch("/api/settings", json!({ "role": role }))
@@ -202,9 +194,7 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
 
 #[tokio::test]
 async fn the_ui_loads_without_a_session() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let anonymous = main.target.anonymous();
     for path in ["/", "/index.html", "/some/spa/route"] {
         let answer = anonymous.get(path).await.expect(200);
@@ -230,9 +220,7 @@ fn plain_http(authority: &str, path: &str) -> String {
 
 #[tokio::test]
 async fn plain_http_on_the_port_is_redirected_to_https_at_the_same_address() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let authority = main.target.authority().to_owned();
     let path = "/some/page?x=1";
     let answer = tokio::task::spawn_blocking({
@@ -260,43 +248,58 @@ async fn plain_http_on_the_port_is_redirected_to_https_at_the_same_address() {
     main.target.anonymous().get("/healthz").await.expect(200);
 }
 
-#[tokio::test]
-async fn the_ui_turns_away_an_address_allow_from_does_not_take_and_the_network_port_is_its_own() {
-    let Some(guarded) = Single::get("KOPPEL_CONTRACT_GUARDED_URL").await else {
-        return;
-    };
-    let Ok(network) = std::env::var("KOPPEL_CONTRACT_GUARDED_NETWORK_URL") else {
-        koppel_contract::skipped("KOPPEL_CONTRACT_GUARDED_NETWORK_URL");
-        return;
-    };
-    let ui = guarded.target.anonymous();
-    let network = Target::new(&network).anonymous();
+/// Needs a caller that is not this machine's loopback, which only Linux gives a test without a
+/// firewall prompt: the Windows runs listen on 127.0.0.1 only.
+#[cfg(target_os = "linux")]
+mod allow_from {
+    use super::security_headers;
+    use crate::support::{Options, Single, Target, json, own_address};
 
-    // The UI port: every UI path is refused for this address, and the network surface is not here.
-    for path in ["/api/auth/state", "/api/settings", "/healthz", "/"] {
-        let answer = ui.get(path).await.expect(403);
-        assert!(
-            answer.text().contains("Ui:AllowFrom"),
-            "{path} says which setting decides: {}",
-            answer.text()
-        );
-        security_headers(&answer, path);
-    }
-    ui.post(
-        "/api/auth/setup",
-        json!({ "password": "contract-password-1" }),
-    )
-    .await
-    .expect(403);
-    ui.get("/skakel/info").await.expect(404);
-    ui.get("/api/remote/devices").await.expect(404);
+    #[tokio::test]
+    async fn the_ui_turns_away_an_address_allow_from_does_not_take_and_the_network_port_is_its_own()
+    {
+        let guarded = Single::start(
+            Options::default()
+                .setting("KOPPEL_UI_ALLOW_FROM", "local")
+                .network_port(),
+        )
+        .await;
+        // Ui:AllowFrom=local turns away any caller that is not loopback, so the test reaches the UI at
+        // this machine's own address, which a connection from here comes from too.
+        let own =
+            own_address().expect("this machine has an address on a network, for Ui:AllowFrom");
+        let host = match own {
+            std::net::IpAddr::V4(address) => address.to_string(),
+            std::net::IpAddr::V6(address) => format!("[{address}]"),
+        };
+        let ui = Target::new(&format!("https://{host}:{}", guarded.instance.port())).anonymous();
+        let network_port = guarded.instance.network_port().expect("a network port");
+        let network = Target::new(&format!("https://localhost:{network_port}")).anonymous();
 
-    // The network port: other machines get the network surface, whatever Ui:AllowFrom says, and nothing of the UI.
-    if needs_skakel("/skakel/info on the network port") {
+        // The UI port: every UI path is refused for this address, and the network surface is not here.
+        for path in ["/api/auth/state", "/api/settings", "/healthz", "/"] {
+            let answer = ui.get(path).await.expect(403);
+            assert!(
+                answer.text().contains("Ui:AllowFrom"),
+                "{path} says which setting decides: {}",
+                answer.text()
+            );
+            security_headers(&answer, path);
+        }
+        ui.post(
+            "/api/auth/setup",
+            json!({ "password": "contract-password-1" }),
+        )
+        .await
+        .expect(403);
+        ui.get("/skakel/info").await.expect(404);
+        ui.get("/api/remote/devices").await.expect(404);
+
+        // The network port: other machines get the network surface, whatever Ui:AllowFrom says, and nothing of the UI.
         let info = network.get("/skakel/info").await.expect(200).json();
         assert_eq!(info["app"]["id"], json!("koppel"));
+        network.get("/api/remote/devices").await.expect(401);
+        network.get("/api/auth/state").await.expect(404);
+        network.get("/healthz").await.expect(404);
     }
-    network.get("/api/remote/devices").await.expect(401);
-    network.get("/api/auth/state").await.expect(404);
-    network.get("/healthz").await.expect(404);
 }

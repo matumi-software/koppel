@@ -50,14 +50,13 @@ To release, by hand and from this machine. Work from a clean checkout of `main`:
 Koppel 0.2.0 is a rewrite in Rust (milestone v0.2.0, #82 to #92) of the C# Koppel 0.1.x, whose source
 stays at tag `v0.1.2`. `src/` is the Cargo workspace: `src/Cargo.toml`, the committed `src/Cargo.lock`,
 and the build output in `src/target/`. It follows Skakel's: edition 2024, Rust 1.99, and every
-third-party crate pinned in `[workspace.dependencies]` with a note on its licence. `[workspace.lints]` forbids `unsafe_code`; `koppel` and `koppel-contract` take it with `[lints] workspace = true`, and the crates that call the operating system (`koppel-config`, `koppel-usb`, `koppel-web`, `koppel-windows`) do not yet, because each has unsafe blocks.
+third-party crate pinned in `[workspace.dependencies]` with a note on its licence. `[workspace.lints]` forbids `unsafe_code`; `koppel` takes it with `[lints] workspace = true`, and the crates that call the operating system (`koppel-config`, `koppel-usb`, `koppel-web`, `koppel-windows`) do not yet, because each has unsafe blocks.
 
 | Crate | What |
 |---|---|
 | `koppel` | The program |
 | `koppel-config` | The files on disk: the config files with 0.1.x's JSON and write rules, the secret files, the server certificate, the folder hardening, and the conversion of a 0.1.x install (see ["Config files in Rust"](config.md#config-files-in-rust)) |
 | `koppel-web` | The web server: axum on tokio, TLS wired by hand through tokio-rustls, HTTP/1.1 and HTTP/2 by ALPN, the plain HTTP redirect, `/healthz`, the UI, and the UI's server side: sign-in, the REST API and the live push (see ["The UI's server side in Rust"](ui.md#the-uis-server-side-in-rust)) |
-| `koppel-contract` | Contract tests that drive a running Koppel over HTTPS (see ["Contract tests"](#contract-tests) below). Not shipped |
 | `koppel-usb` | The USB layer: USB/IP, the Linux kernel's drivers through sysfs, usbip-win2, usbipd-win, and the server and client roles over a stream to the other machine (see ["USB in Rust"](usb.md#usb-in-rust)) |
 | `koppel-windows` | The Windows app: the service, the event log, the tray launcher, and `koppel-desktop` (installed as `KoppelDesktop.exe`), the tray icon and the Start menu entry (see ["Installer and Windows service"](installers.md#installer-and-windows-service)). Windows only; elsewhere it builds to an empty library and a program that does nothing. `koppel` calls it in three places: `--restart-service`, connecting to the service manager, and the event log layer |
 
@@ -82,7 +81,7 @@ The same on Linux, in a container. The image has no clippy or rustfmt; add them 
 
 ```sh
 docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c \
-  "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
+  "mkdir /work && tar -C /repo --exclude=./target --exclude=./src/target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work/src && cargo test --workspace --locked"
 ```
 
 ### Release profile and sizes
@@ -251,42 +250,29 @@ sharing and attaching through the hardened unit) and a desktop's applications me
 
 ### Contract tests
 
-`koppel-contract` checks that the Rust build answers like 0.1.x (#91). Its tests drive a running Koppel
-from the outside, over HTTPS, the way the browser and other Koppel machines do: every REST endpoint with
-its errors, sign-in with its cookie, lockout and limits, the guards on each port and role, and pairing
-between two Koppels. They check status codes, field names and shapes and behaviour, not times or ids. The
-crate talks HTTP only and never links Koppel's own crates.
-
-- **Targets:** environment variables name the Koppels to test, one for most tests and a few more for states only one test may touch (a fresh machine, a closed setup window, `KOPPEL_UI_ALLOW_FROM=local`, the rate limit). The crate's docs list them. Without them every test says it was skipped and passes, so `cargo test --workspace` needs no Koppel running.
-- **Never an install someone uses:** the tests change settings, the password, clients and the certificate.
-- **Certificate:** the first certificate a target presents is pinned for the run, and every later connection must present it or one a test pinned before switching. The name in it is not checked, since the tests reach the target as `localhost`.
-- **The live push:** `koppel_contract::push` lists the ten events with their payloads, and `tests/push.rs` checks each against the Rust build's Server-Sent Events, with the stream ending on a sign-out and on a password change elsewhere. Against 0.1.x, whose push was SignalR, those tests say they were skipped.
-- **Skakel:** 0.1.x speaks Skakel protocol version 1 and the Rust build version 3; the tests take the version a target lists in `/skakel/info`. The pairing window, the eight-digit code and the keys view without a signing key are the Rust build's, so the pairing and keys tests are written for it. Pairing between two Koppels, the connection test outcomes, discovery and the token steps run against both. `KOPPEL_CONTRACT_SKAKEL=0` skips them for a build without Skakel, and `KOPPEL_CONTRACT_DISCOVERY=0` skips the tests that need the client to find the main target by broadcast. `DevicesChanged` is checked only on a target that can share a device.
-- **Gaps:** what needs USB hardware (sharing, attaching), a second network, or a server older than Koppel kept secrets in is not covered; the crate's tests say so where it applies.
-
-Against the Rust build, from the repo root (Git Bash on Windows):
+`koppel/tests/contract/` checks what the program answers, from the outside. Each test starts the real
+`koppel` (the binary cargo builds for the package) on a free port with a temporary config and keys
+folder, and drives it over HTTPS the way the browser and other Koppel machines do: every REST endpoint
+with its errors, sign-in with its cookie, lockout and limits, the guards on each port and role, pairing
+between two Koppels, the live push, and what the files on disk do across a restart. They check status
+codes, field names and types and behaviour, not times or ids. The harness (`support/`) talks HTTP only
+and never links Koppel's own crates, so no crate depends on `koppel`.
 
 ```sh
-bash src/koppel-contract/run-against-rust.sh              # all of them
-bash src/koppel-contract/run-against-rust.sh --test push  # one file
+cargo test -p koppel --test contract                  # all of them, from src/
+cargo test -p koppel --test contract push::           # one module
 ```
 
-The script builds `koppel`, starts the same six targets as processes, each on a fresh temporary data
-folder, on seven ports, 16240 to 16246 (the guarded target takes two; `KOPPEL_CONTRACT_PORT` moves them), runs the tests and stops them. The
-client target looks for servers on the main target's port, as the two 0.1.2 containers share one. On
-Windows the targets listen on 127.0.0.1 only, with discovery and the USB/IP gateway off, so no firewall
-prompt comes up and none takes port 3242 from an installed Koppel: the discovery tests and the
-`KOPPEL_UI_ALLOW_FROM` test are skipped there, since every caller is loopback. Elsewhere the client finds the
-main target by broadcast and the script reaches the `KOPPEL_UI_ALLOW_FROM` target at the machine's own address. `KOPPEL_CONTRACT_RELEASE=1` tests a release build.
+They are part of `cargo test --workspace`, run for real: there are no environment variables to set, no
+Docker and no scripts, and a test that cannot run fails instead of passing. The tests do not share
+anything, so they run in parallel like any other. A guard stops each program and removes its folders when
+the test ends, also when it failed.
 
-Against Koppel 0.1.2, from the repo root with Docker running (Git Bash on Windows):
-
-```sh
-bash src/koppel-contract/run-against-0.1.2.sh            # all of them
-bash src/koppel-contract/run-against-0.1.2.sh --test auth   # one file
-```
-
-The script starts six containers from `matumisoftware/koppel:0.1.2` on fresh volumes and a network of
-their own, publishes them on 127.0.0.1 ports 15240 to 15246 (never 5240, where an installed Koppel
-listens), runs the tests one at a time and removes everything it started, also when a test fails.
-`KOPPEL_IMAGE` runs another image and `KOPPEL_CONTRACT_PORT` moves the ports.
+- **Instances:** `Main` is a server signed in, `Pair` a server and a second instance as its client, `Single` an instance started with its own settings (a closed setup window, `KOPPEL_UI_ALLOW_FROM=local`, the default rate limit). A start picks a free port, so a lost race for it is tried again. The USB/IP gateway is off and `KOPPEL_USB_SYS_ROOT` points into the test's folder, never the machine's own `/sys`; `Options::usb_device` puts a fake sysfs with one device there, enough to share it and to see a client list it.
+- **Shapes:** a shape lists the required fields and their types. Extra fields are allowed, and an optional field may be missing or `null`.
+- **Certificate:** the first certificate an instance presents is pinned for that instance, and every later connection must present it or one a test pinned before switching. The name in it is not checked, since the tests reach the instance as `localhost`.
+- **The live push:** `support/push.rs` lists the ten events with their payloads, and `push.rs` checks each against the Server-Sent Events, with the stream ending on a sign-out and on a password change elsewhere.
+- **Skakel:** the program speaks Skakel protocol version 3; the tests take the version it lists in `/skakel/info`. Pairing needs the window the server role opens on the admin's action, so the pairing tests open it first.
+- **Files:** `files.rs` covers settings, clients, the certificate, the password and a client's connection across a restart, a hand edit of `settings.json` (applied, pushed, and a bad one kept out and reported), the refusal to start without the keys (naming the file, changing nothing), and on Unix the folder and file modes.
+- **Linux only:** the discovery tests (broadcast between two instances, which the Windows runs turn off so no firewall prompt comes up), the `KOPPEL_UI_ALLOW_FROM` test (it needs a caller that is not loopback, reached at the machine's own address), the tests that use the fake sysfs, and the permission tests. On Windows an instance listens on `127.0.0.1` only, with discovery off. Run the whole set in the Linux container (see "The Rust workspace" above).
+- **Gaps:** real USB hardware (sharing and attaching through the kernel) and a second network are not covered.

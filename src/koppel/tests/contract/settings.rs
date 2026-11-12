@@ -1,8 +1,8 @@
 //! Settings, the activity log and what the side panel shows about the machine: `/api/settings`,
 //! `/api/activity` and `/api/system/*`.
 
-use koppel_contract::shape::{self, Kind};
-use koppel_contract::{Body, Main, activity_with, json};
+use crate::support::shape::{self, Kind};
+use crate::support::{Body, Main, activity_with, json};
 use reqwest::Method;
 use serde_json::Value;
 
@@ -14,9 +14,7 @@ async fn settings(main: &Main) -> Value {
 
 #[tokio::test]
 async fn a_patch_answers_202_and_the_settings_read_back_changed() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let before = settings(&main).await;
     assert_eq!(before["role"], json!("server"));
 
@@ -67,9 +65,7 @@ async fn a_patch_answers_202_and_the_settings_read_back_changed() {
 
 #[tokio::test]
 async fn a_bad_patch_is_refused_and_changes_nothing() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let before = settings(&main).await;
     for body in [
         json!({ "role": "nope" }),
@@ -95,9 +91,7 @@ async fn a_bad_patch_is_refused_and_changes_nothing() {
 
 #[tokio::test]
 async fn a_change_is_one_activity_entry_and_no_change_is_none() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     main.admin
         .patch("/api/settings", json!({ "shareOnStartup": false }))
         .await
@@ -137,9 +131,7 @@ fn sortable(time: &str) -> String {
 
 #[tokio::test]
 async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     // At least two entries.
     for share in [false, true] {
         main.admin
@@ -220,9 +212,7 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
 
 #[tokio::test]
 async fn system_info_describes_this_machine_and_its_certificate() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let info = main.admin.get("/api/system/info").await.expect(200).json();
     shape::fields(
         &info,
@@ -257,9 +247,7 @@ async fn system_info_describes_this_machine_and_its_certificate() {
 
 #[tokio::test]
 async fn system_checks_say_whether_this_machine_can_share_and_attach() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let checks = main
         .admin
         .get("/api/system/checks")

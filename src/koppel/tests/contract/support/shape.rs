@@ -1,12 +1,12 @@
-//! JSON shapes: which fields an object has and what kind of value each holds.
+//! JSON shapes: which fields an object must have and what kind of value each holds.
 //!
-//! 0.1.x writes every field of its records, `null` included, and the UI reads them that way, so a
-//! shape is the exact set of field names. Values are checked by kind only: times, ids and names
-//! differ from run to run.
+//! A shape lists the required fields. Extra fields are allowed, so the program can add one without
+//! breaking a test, and a field of an `Opt` kind may be missing or `null`. Values are checked by kind
+//! only: times, ids and names differ from run to run.
 
 use serde_json::Value;
 
-/// What a field holds. The `Opt` kinds also take `null`.
+/// What a field holds. The `Opt` kinds may also be `null`, or missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Str,
@@ -19,12 +19,15 @@ pub enum Kind {
     OptTime,
     Array,
     Object,
-    OptObject,
     /// Anything, `null` included. For a field whose own test checks it.
     Any,
 }
 
 impl Kind {
+    fn optional(self) -> bool {
+        matches!(self, Kind::OptStr | Kind::OptInt | Kind::OptTime)
+    }
+
     fn admits(self, value: &Value) -> bool {
         match self {
             Kind::Str => value.is_string(),
@@ -36,29 +39,27 @@ impl Kind {
             Kind::OptTime => value.is_null() || value.as_str().is_some_and(is_time),
             Kind::Array => value.is_array(),
             Kind::Object => value.is_object(),
-            Kind::OptObject => value.is_object() || value.is_null(),
             Kind::Any => true,
         }
     }
 }
 
-/// Fails the test unless `value` is an object with exactly these fields, each of its kind.
+/// Fails the test unless `value` is an object with these fields, each of its kind. Other fields are
+/// fine, and an `Opt` field may be missing.
 #[track_caller]
 pub fn fields(value: &Value, fields: &[(&str, Kind)], context: &str) {
     let object = value
         .as_object()
         .unwrap_or_else(|| panic!("{context}: not an object: {value}"));
-    let mut have: Vec<&str> = object.keys().map(String::as_str).collect();
-    have.sort_unstable();
-    let mut want: Vec<&str> = fields.iter().map(|(name, _)| *name).collect();
-    want.sort_unstable();
-    assert_eq!(have, want, "{context}: the field names differ in {value}");
     for (name, kind) in fields {
-        assert!(
-            kind.admits(&object[*name]),
-            "{context}: {name} should be {kind:?}, is {}",
-            object[*name]
-        );
+        match object.get(*name) {
+            None if kind.optional() => {}
+            None => panic!("{context}: {name} is missing in {value}"),
+            Some(field) => assert!(
+                kind.admits(field),
+                "{context}: {name} should be {kind:?}, is {field}"
+            ),
+        }
     }
 }
 
@@ -254,6 +255,22 @@ pub const CONNECTION_TEST: &[(&str, Kind)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shape_wants_its_fields_and_allows_more() {
+        let shape = &[("a", Kind::Str), ("b", Kind::OptInt)];
+        fields(&serde_json::json!({ "a": "x", "b": null }), shape, "null");
+        fields(&serde_json::json!({ "a": "x" }), shape, "missing");
+        fields(&serde_json::json!({ "a": "x", "c": 1 }), shape, "extra");
+        let missing = std::panic::catch_unwind(|| {
+            fields(&serde_json::json!({ "b": 1 }), shape, "required");
+        });
+        assert!(missing.is_err());
+        let wrong = std::panic::catch_unwind(|| {
+            fields(&serde_json::json!({ "a": 1 }), shape, "kind");
+        });
+        assert!(wrong.is_err());
+    }
 
     #[test]
     fn times_need_seconds_and_an_offset() {

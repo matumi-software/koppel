@@ -1,15 +1,12 @@
 //! The client role, against a real server: pairing through the code (approve, a wrong code, refuse,
 //! cancel, and the confirm step when it would replace a connection), the stored connection and its
 //! test, servers found on the network, and the client's devices. The client target reaches the main
-//! one at `KOPPEL_CONTRACT_PEER_URL`.
+//! one at its own address.
 
 use std::time::Duration;
 
-use koppel_contract::shape::{self, Kind};
-use koppel_contract::{
-    Body, Pair, Session, activity_with, eventually, json, needs_discovery, needs_skakel, tls,
-    unique,
-};
+use crate::support::shape::{self, Kind};
+use crate::support::{Body, Pair, Session, activity_with, eventually, json, tls, unique};
 use reqwest::Method;
 use serde_json::Value;
 
@@ -88,7 +85,8 @@ async fn start_pairing(client: &Session, url: &str, fingerprint: &str, name: &st
         let status = pairing(client).await;
         match status["state"].as_str() {
             Some("waiting") => Some(status),
-            Some("requesting") => None,
+            // The 202 comes before the first state change, so idle is still the old state.
+            Some("idle" | "requesting") => None,
             other => panic!("pairing went to {other:?}: {status}"),
         }
     })
@@ -155,14 +153,9 @@ async fn save_connection(client: &Session, url: &str, fingerprint: &str, id: &st
 
 #[tokio::test]
 async fn a_client_that_was_never_set_up_is_unconfigured() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
+    let pair = Pair::get().await;
     let stored = connection(&pair.client_admin).await;
-    if !stored["serverUrl"].is_null() {
-        eprintln!("not checked: the client target has a connection from an earlier test");
-        return;
-    }
+    assert!(stored["serverUrl"].is_null(), "{stored}");
     assert_eq!(stored["hasSecret"], json!(false));
     let test = connection_test(&pair.client_admin).await;
     assert_eq!(test["ok"], json!(false));
@@ -179,12 +172,7 @@ async fn a_client_that_was_never_set_up_is_unconfigured() {
 
 #[tokio::test]
 async fn pairing_with_the_code_registers_the_client_and_links_it() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !needs_skakel("pairing through the code") {
-        return;
-    }
+    let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let server_name = machine_name(server).await;
@@ -241,7 +229,7 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     assert!(waiting["expiresAt"].is_string());
     assert_eq!(waiting["serverName"], json!(server_name));
     assert_eq!(waiting["serverUrl"], json!(pair.peer_url));
-    // The status carries the fingerprint as typed (0.1.2) or normalized; the digits are what count.
+    // The status carries the fingerprint as typed or normalized; the digits are what count.
     assert_eq!(
         tls::normalize(waiting["serverFingerprint"].as_str().unwrap_or_default()),
         server_fingerprint
@@ -346,12 +334,7 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
 
 #[tokio::test]
 async fn a_server_with_its_pairing_closed_tells_the_client_how_to_open_it() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !needs_skakel("pairing through the code") {
-        return;
-    }
+    let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     server
@@ -396,12 +379,7 @@ async fn a_server_with_its_pairing_closed_tells_the_client_how_to_open_it() {
 
 #[tokio::test]
 async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_server() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !needs_skakel("pairing through the code") {
-        return;
-    }
+    let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let client_name = machine_name(client).await;
@@ -459,12 +437,7 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
 
 #[tokio::test]
 async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !needs_skakel("pairing through the code") {
-        return;
-    }
+    let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let client_name = machine_name(client).await;
@@ -502,12 +475,7 @@ async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
 
 #[tokio::test]
 async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !needs_skakel("pairing through the code") {
-        return;
-    }
+    let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     client
         .post_empty("/api/client/pairing/confirm")
@@ -603,9 +571,7 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
 
 #[tokio::test]
 async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
+    let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let (id, secret) = new_client(server).await;
@@ -679,10 +645,7 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
             .text()
             .contains(&secret)
     );
-    let link = needs_skakel("testing the saved connection");
-    if link {
-        assert_eq!(connection_test(client).await["outcome"], json!("ok"));
-    }
+    assert_eq!(connection_test(client).await["outcome"], json!("ok"));
 
     // An empty secret keeps the stored one while the server stays the same, and only then.
     client
@@ -690,9 +653,7 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
         .await
         .expect(202);
     assert_eq!(connection(client).await["hasSecret"], json!(true));
-    if link {
-        assert_eq!(connection_test(client).await["outcome"], json!("ok"));
-    }
+    assert_eq!(connection_test(client).await["outcome"], json!("ok"));
     let other = tls::normalize(&"ab".repeat(32));
     client
         .put(
@@ -722,12 +683,7 @@ async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
 
 #[tokio::test]
 async fn the_connection_test_names_what_is_wrong_in_fixed_words() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !needs_skakel("the connection test") {
-        return;
-    }
+    let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
     let (id, secret) = new_client(server).await;
@@ -811,14 +767,12 @@ async fn the_connection_test_names_what_is_wrong_in_fixed_words() {
         .expect(202);
 }
 
+// Broadcast reaches the other instance on Linux, in a container too; the Windows runs turn
+// discovery off so no firewall prompt comes up.
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn the_client_finds_the_server_on_its_network() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
-    if !needs_discovery("discovery") {
-        return;
-    }
+    let pair = Pair::get().await;
     let server_fingerprint = fingerprint(&pair.server_admin).await;
     let server_name = machine_name(&pair.server_admin).await;
     let version = pair
@@ -840,7 +794,7 @@ async fn the_client_finds_the_server_on_its_network() {
                 .expect(200)
                 .json();
             let mut fields = shape::DISCOVERED_SERVER.to_vec();
-            // 0.1.x also writes the address as a URL.
+            // The address as a URL, for the UI.
             fields.push(("url", Kind::Str));
             shape::each(&servers, "GET /api/client/discovery", |server| {
                 shape::fields(server, &fields, "a discovered server");
@@ -865,30 +819,11 @@ async fn the_client_finds_the_server_on_its_network() {
             found["httpsPort"]
         ))
     );
-    // Two targets on one machine share its name, and then the name cannot tell them apart.
-    let own = machine_name(&pair.client_admin).await;
-    if own == server_name {
-        return;
-    }
-    let servers = pair
-        .client_admin
-        .get("/api/client/discovery")
-        .await
-        .expect(200)
-        .json();
-    assert!(
-        !servers
-            .as_array()
-            .is_some_and(|l| l.iter().any(|s| s["name"] == json!(own))),
-        "a machine leaves itself out"
-    );
 }
 
 #[tokio::test]
 async fn the_client_lists_its_devices_and_takes_attach_and_detach() {
-    let Some(pair) = Pair::get().await else {
-        return;
-    };
+    let pair = Pair::get().await;
     let client = &pair.client_admin;
     let devices = client.get("/api/client/devices").await.expect(200).json();
     shape::fields(&devices, shape::CLIENT_DEVICES, "GET /api/client/devices");

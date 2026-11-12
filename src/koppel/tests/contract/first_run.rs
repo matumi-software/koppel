@@ -3,13 +3,13 @@
 
 use std::time::Duration;
 
-use koppel_contract::shape::{self, Kind};
-use koppel_contract::{Body, Session, Single, activity_with, eventually, json, password};
+use crate::support::shape::{self, Kind};
+use crate::support::{Body, Options, Session, Single, activity_with, eventually, json, password};
 use reqwest::Method;
 
 const OTHER_PASSWORD: &str = "contract-password-2";
 
-/// Koppel's default for `RateLimits:AuthPerMinute`, which the limits target runs with.
+/// Koppel's default for `RateLimits:AuthPerMinute`, which the limits instance runs with.
 const AUTH_PER_MINUTE: usize = 30;
 
 /// Wrong passwords a caller gets before the lock.
@@ -33,9 +33,7 @@ async fn state(session: &Session) -> serde_json::Value {
 
 #[tokio::test]
 async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out() {
-    let Some(fresh) = Single::get("KOPPEL_CONTRACT_FRESH_URL").await else {
-        return;
-    };
+    let fresh = Single::start(Options::default()).await;
     let anonymous = fresh.target.anonymous();
 
     // Before the password: setup is open until a time, and there is nothing to sign in to.
@@ -165,9 +163,8 @@ async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out
 
 #[tokio::test]
 async fn setup_is_refused_once_its_window_has_closed() {
-    let Some(expired) = Single::get("KOPPEL_CONTRACT_EXPIRED_URL").await else {
-        return;
-    };
+    let expired =
+        Single::start(Options::default().setting("KOPPEL_UI_SETUP_WINDOW_MINUTES", "1")).await;
     let anonymous = expired.target.anonymous();
     assert_eq!(
         state(&anonymous).await["passwordSet"],
@@ -210,9 +207,9 @@ async fn setup_is_refused_once_its_window_has_closed() {
 
 #[tokio::test]
 async fn setup_login_and_password_change_share_a_rate_limit_per_address() {
-    let Some(limits) = Single::get("KOPPEL_CONTRACT_LIMITS_URL").await else {
-        return;
-    };
+    // The default of 30 a minute, which the other instances raise.
+    let limits =
+        Single::start(Options::default().setting("KOPPEL_RATE_AUTH_PER_MINUTE", "30")).await;
     let anonymous = limits.target.anonymous();
 
     for i in 0..AUTH_PER_MINUTE {

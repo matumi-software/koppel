@@ -3,10 +3,8 @@
 //! cap on password hashes running at once. The first password, the lockout and the rate limit need
 //! targets of their own and are in `first_run.rs`.
 
-use koppel_contract::shape::{self, Kind};
-use koppel_contract::{
-    Body, EVENTS_PATH, Main, Push, Session, activity_with, json, password, push_kind,
-};
+use crate::support::shape::{self, Kind};
+use crate::support::{Body, EVENTS_PATH, Main, Session, activity_with, json, password};
 use reqwest::Method;
 
 const OTHER_PASSWORD: &str = "contract-password-2";
@@ -68,9 +66,7 @@ async fn call(session: &Session, method: &str, path: &str) -> u16 {
 
 #[tokio::test]
 async fn every_ui_route_answers_401_without_a_session_and_the_role_comes_first() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let anonymous = main.target.anonymous();
 
     for (method, path) in SERVER_ROUTES {
@@ -109,9 +105,7 @@ async fn every_ui_route_answers_401_without_a_session_and_the_role_comes_first()
 
 #[tokio::test]
 async fn state_and_health_answer_without_a_session() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let anonymous = main.target.anonymous();
 
     let state = anonymous.get("/api/auth/state").await.expect(200).json();
@@ -146,9 +140,7 @@ async fn state_and_health_answer_without_a_session() {
 
 #[tokio::test]
 async fn signing_in_sets_a_strict_http_only_session_cookie() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let answer = main
         .target
         .anonymous()
@@ -177,9 +169,7 @@ async fn signing_in_sets_a_strict_http_only_session_cookie() {
 
 #[tokio::test]
 async fn a_wrong_password_is_refused_without_a_cookie() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let anonymous = main.target.anonymous();
 
     let wrong = anonymous
@@ -208,9 +198,7 @@ async fn a_wrong_password_is_refused_without_a_cookie() {
 
 #[tokio::test]
 async fn signing_out_ends_the_session_and_a_copy_of_its_cookie() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let session = main.target.sign_in().await;
     let copy = main.target.with_cookie(session.cookie().expect("a cookie"));
 
@@ -241,9 +229,7 @@ async fn signing_out_ends_the_session_and_a_copy_of_its_cookie() {
 
 #[tokio::test]
 async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let this = main.admin.clone();
     let other = main.target.sign_in().await;
 
@@ -320,9 +306,7 @@ async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
 
 #[tokio::test]
 async fn password_hashes_beyond_two_at_once_are_turned_away_at_once() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let mut tasks = tokio::task::JoinSet::new();
     for _ in 0..12 {
         let anonymous = main.target.anonymous();
@@ -354,52 +338,24 @@ async fn password_hashes_beyond_two_at_once_are_turned_away_at_once() {
 
 #[tokio::test]
 async fn the_live_push_needs_a_session() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    match push_kind() {
-        Push::SignalR => {
-            let path = "/api/hubs/ui/negotiate?negotiateVersion=1";
-            let anonymous = main.target.anonymous();
-            anonymous
-                .send(Method::POST, path, Body::None, &[])
-                .await
-                .expect(401);
-            // The hub is exempt from X-Koppel-UI, since an upgrade cannot carry it, but not from the Origin check.
-            main.admin
-                .send(Method::POST, path, Body::None, &[])
-                .await
-                .expect(200);
-            main.admin
-                .send(
-                    Method::POST,
-                    path,
-                    Body::None,
-                    &[("Origin", "https://elsewhere.example")],
-                )
-                .await
-                .expect(403);
-        }
-        Push::Sse => {
-            let anonymous = main.target.anonymous();
-            anonymous.get(EVENTS_PATH).await.expect(401);
-            // A GET, so no X-Koppel-UI, which an EventSource cannot send, but the Origin check holds.
-            let events = main.admin.events().await;
-            assert_eq!(events.status, 200);
-            assert!(
-                events.content_type.starts_with("text/event-stream"),
-                "{}",
-                events.content_type
-            );
-            main.admin
-                .send(
-                    Method::GET,
-                    EVENTS_PATH,
-                    Body::None,
-                    &[("Origin", "https://elsewhere.example")],
-                )
-                .await
-                .expect(403);
-        }
-    }
+    let main = Main::get().await;
+    let anonymous = main.target.anonymous();
+    anonymous.get(EVENTS_PATH).await.expect(401);
+    // A GET, so no X-Koppel-UI, which an EventSource cannot send, but the Origin check holds.
+    let events = main.admin.events().await;
+    assert_eq!(events.status, 200);
+    assert!(
+        events.content_type.starts_with("text/event-stream"),
+        "{}",
+        events.content_type
+    );
+    main.admin
+        .send(
+            Method::GET,
+            EVENTS_PATH,
+            Body::None,
+            &[("Origin", "https://elsewhere.example")],
+        )
+        .await
+        .expect(403);
 }

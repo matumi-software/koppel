@@ -4,9 +4,9 @@
 
 use std::time::Duration;
 
-use koppel_contract::shape::{self, Kind};
-use koppel_contract::{
-    Body, Main, Session, Target, activity_with, eventually, json, needs_skakel, skakel_path, unique,
+use crate::support::shape::{self, Kind};
+use crate::support::{
+    Body, Main, Session, Target, activity_with, eventually, json, skakel_path, unique,
 };
 use reqwest::Method;
 use serde_json::Value;
@@ -101,9 +101,7 @@ fn has_entry(entries: &[Value], id: &str) -> bool {
 
 #[tokio::test]
 async fn identity_keys_and_info_name_the_certificate_the_port_presents() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let identity = main
         .admin
         .get("/api/server/identity")
@@ -132,9 +130,6 @@ async fn identity_keys_and_info_name_the_certificate_the_port_presents() {
     assert_eq!(identity["name"], info["name"]);
     assert_eq!(identity["httpsPort"], info["httpsPort"]);
 
-    if !needs_skakel("/skakel/info") {
-        return;
-    }
     let skakel = main
         .target
         .anonymous()
@@ -148,9 +143,7 @@ async fn identity_keys_and_info_name_the_certificate_the_port_presents() {
 
 #[tokio::test]
 async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let admin = &main.admin;
     let name = unique("contract");
     let created = create_client(admin, &format!("  {name}  ")).await;
@@ -179,16 +172,10 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
     assert_eq!(secret["clientSecret"], json!(first_secret));
 
     // The credentials work for the remote API.
-    let tokens = needs_skakel("using the client's credentials for a token");
-    let first_token = if tokens {
-        let first_token = token(&main.target, &id, &first_secret)
-            .await
-            .expect("a token for the new client");
-        assert_eq!(remote_devices(&main.target, &first_token).await, 200);
-        first_token
-    } else {
-        String::new()
-    };
+    let first_token = token(&main.target, &id, &first_secret)
+        .await
+        .expect("a token for the new client");
+    assert_eq!(remote_devices(&main.target, &first_token).await, 200);
 
     let rotated = admin
         .post_empty(&format!("/api/server/clients/{id}/rotate"))
@@ -209,21 +196,16 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
             .json()["clientSecret"],
         json!(second_secret)
     );
-    let second_token = if tokens {
-        assert_eq!(
-            remote_devices(&main.target, &first_token).await,
-            401,
-            "rotating blocks the client's tokens at once"
-        );
-        assert_eq!(token(&main.target, &id, &first_secret).await, Err(401));
-        let second_token = token(&main.target, &id, &second_secret)
-            .await
-            .expect("a token with the new secret");
-        assert_eq!(remote_devices(&main.target, &second_token).await, 200);
-        second_token
-    } else {
-        String::new()
-    };
+    assert_eq!(
+        remote_devices(&main.target, &first_token).await,
+        401,
+        "rotating blocks the client's tokens at once"
+    );
+    assert_eq!(token(&main.target, &id, &first_secret).await, Err(401));
+    let second_token = token(&main.target, &id, &second_secret)
+        .await
+        .expect("a token with the new secret");
+    assert_eq!(remote_devices(&main.target, &second_token).await, 200);
 
     let revoked = admin
         .delete(&format!("/api/server/clients/{id}"))
@@ -231,13 +213,11 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
         .expect(202);
     revoked.empty();
     assert!(!clients(admin).await.iter().any(|c| c["id"] == json!(id)));
-    if tokens {
-        assert_eq!(
-            remote_devices(&main.target, &second_token).await,
-            401,
-            "revoking blocks the client's tokens at once"
-        );
-    }
+    assert_eq!(
+        remote_devices(&main.target, &second_token).await,
+        401,
+        "revoking blocks the client's tokens at once"
+    );
     admin
         .get(&format!("/api/server/clients/{id}/secret"))
         .await
@@ -265,9 +245,7 @@ async fn a_client_is_added_its_secret_copied_and_rotated_and_it_is_revoked() {
 
 #[tokio::test]
 async fn a_client_needs_a_name_of_up_to_80_visible_characters() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let admin = &main.admin;
     for name in [
         json!(""),
@@ -306,9 +284,7 @@ async fn a_client_needs_a_name_of_up_to_80_visible_characters() {
 
 #[tokio::test]
 async fn unknown_clients_are_not_found() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let admin = &main.admin;
     admin
         .get("/api/server/clients/client-nobody/secret")
@@ -326,12 +302,7 @@ async fn unknown_clients_are_not_found() {
 
 #[tokio::test]
 async fn the_pairing_window_opens_and_closes_and_is_closed_to_start_with() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
-    if !needs_skakel("the pairing window") {
-        return;
-    }
+    let main = Main::get().await;
     let admin = &main.admin;
     let window = || async {
         let overview = admin.get("/api/server/pairing").await.expect(200).json();
@@ -385,9 +356,7 @@ async fn the_pairing_window_opens_and_closes_and_is_closed_to_start_with() {
 
 #[tokio::test]
 async fn a_new_certificate_is_prepared_cancelled_and_switched_to_in_turn() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let admin = &main.admin;
     let first = admin.get("/api/server/keys").await.expect(200).json();
     assert!(first["nextFingerprint"].is_null());
@@ -467,9 +436,7 @@ async fn a_new_certificate_is_prepared_cancelled_and_switched_to_in_turn() {
 
 #[tokio::test]
 async fn the_server_lists_its_devices_and_refuses_a_share_it_cannot_make() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let admin = &main.admin;
     let devices = admin.get("/api/server/devices").await.expect(200).json();
     shape::fields(&devices, shape::SERVER_DEVICES, "GET /api/server/devices");
@@ -497,22 +464,17 @@ async fn the_server_lists_its_devices_and_refuses_a_share_it_cannot_make() {
         .await
         .expect(400);
 
-    if devices["unavailable"].is_string() {
-        // A machine without usbip-host, such as a container without the module.
-        admin
-            .put("/api/server/devices/1-1/shared", json!({ "shared": true }))
-            .await
-            .problem(&["device"]);
-    } else {
-        eprintln!("not checked: this target can share, so a refused share cannot be shown");
-    }
+    // The instance has no usbip-host, as a machine without the module: nothing can be shared.
+    assert!(devices["unavailable"].is_string(), "{devices}");
+    admin
+        .put("/api/server/devices/1-1/shared", json!({ "shared": true }))
+        .await
+        .problem(&["device"]);
 }
 
 #[tokio::test]
 async fn pairing_requests_that_do_not_exist_cannot_be_decided() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let admin = &main.admin;
     let overview = admin.get("/api/server/pairing").await.expect(200).json();
     shape::fields(
@@ -543,18 +505,14 @@ async fn pairing_requests_that_do_not_exist_cannot_be_decided() {
 
 #[tokio::test]
 async fn the_remote_api_needs_a_token_and_ignores_the_ui_session() {
-    let Some(main) = Main::get().await else {
-        return;
-    };
+    let main = Main::get().await;
     let anonymous = main.target.anonymous();
     let answer = anonymous.get("/api/remote/devices").await.expect(401);
     assert_eq!(answer.header("www-authenticate").as_deref(), Some("Bearer"));
     assert_eq!(remote_devices(&main.target, "not-a-token").await, 401);
     main.admin.get("/api/remote/devices").await.expect(401);
-    if needs_skakel("Skakel's token endpoint") {
-        assert_eq!(
-            token(&main.target, "client-nobody", "wrong").await,
-            Err(401)
-        );
-    }
+    assert_eq!(
+        token(&main.target, "client-nobody", "wrong").await,
+        Err(401)
+    );
 }

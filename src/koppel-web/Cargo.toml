@@ -20,6 +20,7 @@ tonic = { workspace = true, features = ["codegen"] }
 tonic-prost.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tokio-util.workspace = true
+bytes.workspace = true
 axum.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true

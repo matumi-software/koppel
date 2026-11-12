@@ -37,6 +37,10 @@ tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "t
 # CancellationToken, which cancels a whole tree of tasks (an attach, its relay, a link's epoch).
 tokio-util = { version = "0.7.20", features = ["rt"] }
 
+# `Bytes`, which is what Skakel's streams carry in their data frames: koppel-web passes the frames
+# through without copying them. Already in the build through tonic and Skakel, MIT.
+bytes = "1.12.1"
+
 # The web stack. Every crate here, and what it pulls in, is MIT, Apache-2.0, BSD, ISC or Unicode-3.0
 # (checked with `cargo metadata`). rustls runs on ring rather than aws-lc-rs, which needs a C toolchain
 # with NASM on Windows, as in Skakel.

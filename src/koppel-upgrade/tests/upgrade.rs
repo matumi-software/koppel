@@ -319,7 +319,9 @@ async fn a_0_1_2_install_is_upgraded_and_keeps_its_certificate_clients_connectio
 }
 
 /// What Koppel 0.2.0 left on disk: the files are sealed already, so only `secrets.json` has to be
-/// rewritten, and the daemon cannot read it before that.
+/// rewritten, and the daemon cannot read it before that. The fixture is a Linux install (sealed with
+/// a key file), which a Windows build would not open: it uses DPAPI there.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_0_2_0_install_is_read_and_rewritten_with_everything_it_had() {
     let (dir, paths) = install("from-0-2-0", "linux-0.2.0");

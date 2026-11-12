@@ -1,4 +1,4 @@
-//! The write and read rules of a config file, as docs/architecture.md's "Config on disk" lists them.
+//! The write and read rules of a config file, as docs/config.md's "Config on disk" lists them.
 
 use std::fs;
 use std::path::{Path, PathBuf};

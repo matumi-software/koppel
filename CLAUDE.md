@@ -66,3 +66,7 @@ Linux. Run the workspace's tests in a Linux container as well (see "The Rust wor
 ```sh
 docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c   "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"
 ```
+
+## Pull requests
+
+Open them from a short-lived branch into `main`. `.github/pull_request_template.md` asks what changed and why, the issue it closes, how it was tested (the commands above) and whether `docs/` or `CHANGELOG.md` changed. `.github/CODEOWNERS` names the maintainers who review every pull request; add a collaborator there when one joins.

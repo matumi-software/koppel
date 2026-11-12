@@ -47,6 +47,27 @@ use crate::sync::Unpoisoned;
 pub(crate) const UI_HEADER: &str = "x-koppel-ui";
 const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
 
+/// The Content-Security-Policy of every answer. The UI is one embedded page that loads its script,
+/// stylesheet and fonts from its own origin and talks to its own `/api` (the live push included, an
+/// `EventSource` under `connect-src 'self'`). Nothing else is allowed: no inline script, no other
+/// origin, no plug-ins, no `<base>`.
+///
+/// `style-src` keeps `'unsafe-inline'` because react-aria adds `<style>` elements at run time (for
+/// the text selection while a press is held and for drag and drop). A nonce would need a fresh
+/// index.html per request, which would end the ETag and the 304. Scripts get no such leave.
+const CONTENT_POLICY: &str = concat!(
+    "default-src 'self'; ",
+    "script-src 'self'; ",
+    "style-src 'self' 'unsafe-inline'; ",
+    "img-src 'self'; ",
+    "font-src 'self'; ",
+    "connect-src 'self'; ",
+    "object-src 'none'; ",
+    "base-uri 'none'; ",
+    "form-action 'self'; ",
+    "frame-ancestors 'none'"
+);
+
 /// The four security headers on every answer. Outermost, so they go on whatever answers: a route, a
 /// guard's refusal, a panic's 500.
 pub(crate) fn security_headers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
@@ -59,10 +80,9 @@ pub(crate) fn security_headers<S: Clone + Send + Sync + 'static>(router: Router<
             X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
         ))
-        // Only frame-ancestors, so it cannot break the app or the Vite dev proxy.
         .layer(SetResponseHeaderLayer::overriding(
             CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("frame-ancestors 'none'"),
+            HeaderValue::from_static(CONTENT_POLICY),
         ))
         .layer(SetResponseHeaderLayer::overriding(
             X_FRAME_OPTIONS,

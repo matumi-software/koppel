@@ -14,7 +14,7 @@ import { SetupPage } from '@/setup/setup-page';
 import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
 import { usePending } from '@/pending/pending-context';
 import { setupKey } from '@/pending/domains';
-import { FrameContext, pageTitles, usePage, type Page } from '@/shell/frame-context';
+import { FrameContext, pageTitles, useHasNavigated, usePage, type Page } from '@/shell/frame-context';
 import { reasonOf } from '@/errors';
 import { formatVersion, serverLine } from '@/client/server-link';
 import { useActivity } from '@/activity/activity-context';
@@ -110,7 +110,8 @@ export function App() {
     />
   );
 
-  const frame = useMemo(() => ({ locked, asideSlot }), [locked, asideSlot]);
+  const hasNavigated = useHasNavigated();
+  const frame = useMemo(() => ({ locked, asideSlot, hasNavigated }), [locked, asideSlot, hasNavigated]);
 
   if (!settings.data) {
     return <Note isPadded>{settings.isError ? 'Could not reach Koppel. Check that it is running, then reload.' : 'Loading…'}</Note>;

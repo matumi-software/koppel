@@ -6,7 +6,7 @@ Every change goes to the server over REST and is only shown as done when the ser
 
 - A control the user just changed moves to **pending**: the stripe pattern in `pending` over `pending-subtle`, plus a word ("Saving…"). It never jumps straight to its new confirmed look.
 - When the confirmation arrives, the control settles into its confirmed state and the caption reads "Saved". When the server rejects or times out, the control returns to its last confirmed state, turns `fault` and says why ("Not saved: device is in use").
-- When the live link drops, show `LinkBanner` in its reconnecting or down state and disable every control that would send a change. Nothing can be confirmed without the link, so nothing may look editable.
+- When the live link drops, show the link as reconnecting or down in `StatusCard` (and say so once, through the Announcer) and disable every control that would send a change. Nothing can be confirmed without the link, so nothing may look editable.
 - The stripe means "waiting for the server" and nothing else. Never use it for decoration, progress bars or loading skeletons.
 
 ## Content fundamentals
@@ -30,7 +30,7 @@ Every change goes to the server over REST and is only shown as done when the ser
 
 ## Type
 
-- Interface text is set in Instrument Sans (`--font-sans`), loaded from Google Fonts with a Segoe UI and system-ui fallback.
+- Interface text is set in Instrument Sans (`--font-sans`), self-hosted by the UI library (Latin and Latin Extended, woff2 only), with a Segoe UI and system-ui fallback that also draws the scripts it does not carry.
 - Identifiers are set in JetBrains Mono (`--font-mono`): VID:PID, bus IDs, ports, client IDs, file paths. Use `font-variant-numeric: tabular-nums` wherever IDs line up in columns.
 - Use the scale as written: `display` for the one page title, `title` for sections and dialogs, `heading` for device names, `body` for default text, `label` for buttons, tabs, labels and badges, `caption` for timestamps and help, `mono` and `mono-sm` for identifiers.
 
@@ -68,8 +68,12 @@ Components here are the reference look, written as CSS classes with a `kp-` pref
 - `Switch`: on, off, pending-on, pending-off and failed. The core of the confirm-on-push rule.
 - `StatusBadge`: the five device states.
 - `DeviceCard`: one USB device with its identity, where it is and the action for this role.
-- `LinkBanner`: the live link to the server: live, reconnecting or down.
 - `StatusCard`: the foot of the sidebar: the live link, this machine and the Koppel version it runs, what a client is linked to, and Sign out.
 - `Field`: text, ID and secret inputs for auth and settings, with pending and invalid states.
-- `SegmentedControl`: the role, as a stored setting that waits for the server.
+- `Card`, `Stack`, `Row`: the containers pages are built from, so no page sets its own flex, gap or padding.
+- `Form`, `FieldGroup`, `LabeledValue`: a form with react-aria validation, fields that belong together, and a value that is not an input, with a label like a field's.
+- `Drawer`: the selected device's or client's details in the aside, with its sections.
+- `FirstRunShell`: the plain page that sign-in and first run sit on.
+- `Announcer`: the one live region.
+- `ErrorBoundary`: what a page that cannot be drawn shows in its place.
 - `AppShell`, `DeviceGroup`, `ActivityFeed`, `DeviceDrawer`, `Panel`, `Setup`, `ModalDialog`: the app frame and pages, built on react-aria-components.

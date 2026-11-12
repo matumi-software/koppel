@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { PageHead } from '@koppel/react-ui';
 import { SideInfo } from '@/shared/side-info';
-import { hasNavigated, useFrame } from './frame-context';
+import { useFrame } from './frame-context';
 
 export interface FrameProps {
   /** The page's heading. It is also the browser tab's title. */
@@ -22,11 +22,14 @@ export interface FrameProps {
  * page and not in the navigation it came from; the first page of a visit leaves focus alone.
  */
 export function Frame({ title, lede, aside, asideKey, children }: FrameProps) {
-  const { asideSlot } = useFrame();
-  // A stable callback, so it runs when the heading mounts and not on every render after it.
-  const focusOnOpen = useCallback((element: HTMLHeadingElement | null) => {
-    if (element && hasNavigated()) element.focus({ preventScroll: true });
-  }, []);
+  const { asideSlot, hasNavigated } = useFrame();
+  // Stable while the page stays open, so it runs when the heading mounts and not on every render after it.
+  const focusOnOpen = useCallback(
+    (element: HTMLHeadingElement | null) => {
+      if (element && hasNavigated) element.focus({ preventScroll: true });
+    },
+    [hasNavigated],
+  );
   useLayoutEffect(() => {
     asideSlot?.scrollTo({ top: 0 });
   }, [asideSlot, asideKey]);

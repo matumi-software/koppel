@@ -25,7 +25,7 @@ export const baseRoutes = {
   'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
 };
 
-export const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({ locked: false, asideSlot: null, ...overrides });
+export const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({ locked: false, asideSlot: null, hasNavigated: false, ...overrides });
 
 export const configuration = (locked = false) => (
   <FrameContext.Provider value={frame({ locked })}>

@@ -1,4 +1,4 @@
-import { createContext, useContext, useSyncExternalStore } from 'react';
+import { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 
 export type Page = 'overview' | 'devices' | 'clients' | 'attach' | 'configuration';
 
@@ -30,13 +30,19 @@ export function usePage(fallback: Page = 'overview'): Page {
   return isPage(value) ? value : fallback;
 }
 
-let navigated = false;
-window.addEventListener('hashchange', () => {
-  navigated = true;
-});
-
-/** True once the person has gone to another page, as opposed to the page the visit opened on. */
-export const hasNavigated = () => navigated;
+/**
+ * True once the person has gone to another page since this was first used, as opposed to the page
+ * the visit opened on.
+ */
+export function useHasNavigated(): boolean {
+  const [navigated, setNavigated] = useState(false);
+  useEffect(() => {
+    const onChange = () => setNavigated(true);
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+  }, []);
+  return navigated;
+}
 
 /** Opens a page. */
 export const goTo = (page: Page) => {
@@ -44,6 +50,8 @@ export const goTo = (page: Page) => {
 };
 
 export interface FrameApi {
+  /** True once the person has gone to another page, so a page that opens now takes focus on its heading. */
+  hasNavigated: boolean;
   /** True while the UI's own link to its server is not live, so nothing may send a change. */
   locked: boolean;
   /** The one side panel. A page renders its content there through Frame's aside. */

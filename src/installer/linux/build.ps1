@@ -37,7 +37,11 @@ function Invoke-Docker([string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "docker $($Arguments[0..1] -join ' ') failed with exit code $LASTEXITCODE." }
 }
 
-Invoke-Docker @('buildx', 'build', '-f', $dockerfile, '--target', 'linux-packages', '--output', "type=local,dest=$out", $src)
+# The build has no .git, so the commit that `koppel --version` names goes in as a build argument.
+$commit = (git -C $src rev-parse --short=9 HEAD 2>$null)
+if ($LASTEXITCODE -ne 0) { $commit = '' }
+
+Invoke-Docker @('buildx', 'build', '-f', $dockerfile, '--build-arg', "KOPPEL_GIT_COMMIT=$commit", '--target', 'linux-packages', '--output', "type=local,dest=$out", $src)
 $debs = Get-ChildItem $out -Filter 'koppel_*.deb'
 $debs | ForEach-Object { Write-Host "Built $($_.FullName)" }
 
@@ -48,6 +52,6 @@ if ($Image) {
         if (-not $version) { throw 'No version = "..." found in src\Cargo.toml.' }
         $Tag = "matumisoftware/koppel:$version"
     }
-    Invoke-Docker @('buildx', 'build', '-f', $dockerfile, '--platform', 'linux/amd64,linux/arm64,linux/arm/v6', '-t', $Tag, '--load', $src)
+    Invoke-Docker @('buildx', 'build', '-f', $dockerfile, '--build-arg', "KOPPEL_GIT_COMMIT=$commit", '--platform', 'linux/amd64,linux/arm64,linux/arm/v6', '-t', $Tag, '--load', $src)
     Write-Host "Built $Tag for linux/amd64, linux/arm64 and linux/arm/v6 (loaded here, not pushed)"
 }

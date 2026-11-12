@@ -15,8 +15,8 @@ User=root
 # Config and keys go to /var/lib/koppel, Koppel's default on Linux. Koppel locks both folders to root itself.
 StateDirectory=koppel
 StateDirectoryMode=0700
-# Settings as environment variables, e.g. Ports__Ui=5250 or Ui__AllowFrom=lan. Optional file. A config
-# folder moved out of /var/lib/koppel (Paths__Config, Paths__Keys) also needs a ReadWritePaths= for it in a
+# Settings as environment variables, e.g. KOPPEL_UI_PORT=5250 or KOPPEL_UI_ALLOW_FROM=lan (0.1.x's Ports__Ui and Ui__AllowFrom still work). Optional file. A config
+# folder moved out of /var/lib/koppel (KOPPEL_CONFIG_DIR, KOPPEL_KEYS_DIR) also needs a ReadWritePaths= for it in a
 # drop-in (systemctl edit koppel), since ProtectSystem=strict below makes the rest of the disk read-only.
 EnvironmentFile=-/etc/default/koppel
 Restart=always

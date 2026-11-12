@@ -13,6 +13,7 @@
 //! icons and the event log (`koppel-windows`).
 
 mod config;
+mod diagnostics;
 mod healthcheck;
 mod systemd;
 mod usb;
@@ -40,6 +41,12 @@ use koppel_windows::service::Service;
 #[cfg(not(windows))]
 enum Service {}
 
+/// What keeps the service's log file flowing; nothing on the systems that have no such file.
+#[cfg(windows)]
+type LogGuard = koppel_windows::log_file::LogGuard;
+#[cfg(not(windows))]
+type LogGuard = ();
+
 /// The UI's port unless `--ui-port` says otherwise.
 const UI_PORT: u16 = 5240;
 
@@ -54,8 +61,9 @@ fn main() -> ExitCode {
         // A one-off for the image's health check: ask the UI port whether Koppel answers, and exit.
         // It stays quiet about how the settings were spelt, as it runs every 30 seconds.
         Command::Healthcheck => healthcheck::run(&loaded.settings),
+        Command::Diagnostics { ref file } => diagnostics::run(&loaded.settings, file.as_deref()),
         Command::ResetPassword => {
-            init_logging(false);
+            let _log = init_logging(false);
             loaded.log_notes();
             finish(block_on(reset_password(&loaded.settings)))
         }
@@ -65,7 +73,8 @@ fn main() -> ExitCode {
                 let for_service = loaded.clone();
                 let as_service = koppel_windows::service::dispatch(move |service| {
                     let mut loaded = for_service;
-                    init_logging(true);
+                    // Held until the service ends, which flushes the log file.
+                    let _log = init_logging(true);
                     loaded.log_notes();
                     u32::from(
                         finish(block_on(run(&loaded.settings, Some(service)))) != ExitCode::SUCCESS,
@@ -75,7 +84,7 @@ fn main() -> ExitCode {
                     return code;
                 }
             }
-            init_logging(false);
+            let _log = init_logging(false);
             loaded.log_notes();
             finish(block_on(run(&loaded.settings, None)))
         }
@@ -264,8 +273,10 @@ async fn reset_password(settings: &Settings) -> Result<(), Box<dyn Error>> {
 
 /// Logs to standard output at Info, or as RUST_LOG says (`debug`, or `warn,koppel_web=debug`), in
 /// colour only on a terminal, so a service log or `docker logs` gets plain text. The Windows service
-/// also logs to the event log (`koppel_windows::event_log`).
-fn init_logging(service: bool) {
+/// also logs to the event log (`koppel_windows::event_log`) and to a rolling file under
+/// `%ProgramData%\Koppel\logs` (`koppel_windows::log_file`), at the same levels as the console.
+/// The result keeps the file's writer thread alive: hold it until the program ends.
+fn init_logging(service: bool) -> Option<LogGuard> {
     let asked = std::env::var("RUST_LOG").ok();
     let parsed = asked.as_deref().map(str::parse::<Targets>);
     let filter = match &parsed {
@@ -275,16 +286,37 @@ fn init_logging(service: bool) {
     let registry = tracing_subscriber::registry().with(
         tracing_subscriber::fmt::layer()
             .with_ansi(std::io::stdout().is_terminal())
-            .with_filter(filter),
+            .with_filter(filter.clone()),
     );
     #[cfg(windows)]
     let registry = registry.with(service.then(koppel_windows::event_log::layer).flatten());
+    #[cfg(windows)]
+    let (registry, guard, file_error) = {
+        let file = service.then(|| {
+            koppel_config::prepare_log_folder()
+                .and_then(|folder| koppel_windows::log_file::start(&folder, filter.clone()))
+        });
+        match file {
+            Some(Ok((layer, guard))) => (registry.with(Some(layer)), Some(guard), None),
+            Some(Err(e)) => (registry.with(None), None, Some(e)),
+            None => (registry.with(None), None, None),
+        }
+    };
     #[cfg(not(windows))]
-    let _ = service;
+    let (guard, file_error): (Option<LogGuard>, Option<std::io::Error>) = {
+        let _ = service;
+        (None, None)
+    };
     registry.init();
     if let Some(Err(e)) = parsed {
         tracing::warn!("RUST_LOG is not understood ({e}), so logging stays at Info");
     }
+    if let Some(e) = file_error {
+        tracing::warn!(
+            "The log file could not be opened, so the service logs only to the event log: {e}"
+        );
+    }
+    guard
 }
 
 /// Ctrl+C, and on Linux also SIGTERM, which is how a container or systemd stops a program.

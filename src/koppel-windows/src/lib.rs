@@ -4,19 +4,21 @@
 //! - [`service`]: Koppel.exe as the LocalSystem service, with the tray's controls to shut it down
 //!   (200) and restart it (201), and `--restart-service`, the helper that starts it again.
 //! - [`event_log`]: what `tracing` logs, written to the Application event log.
+//! - [`log_file`]: the service's rolling log file under `%ProgramData%\Koppel\logs`.
 //! - [`launcher`]: the service starts a tray in each signed-in session, as the user, and writes it
 //!   what to show over its standard input ([`wire`]).
 //! - [`tray`]: the icon in the notification area, in KoppelDesktop.exe (`--tray <url>`).
 //! - [`opener`]: Koppel in the Start menu (`KoppelDesktop.exe --open`), which starts the service
 //!   when it is stopped and opens the UI.
 //!
-//! Everything here is Windows only except [`wire`], which is plain data, so its tests run on Linux
-//! too; on other systems the rest of the crate is empty.
+//! Everything here is Windows only except [`wire`] and the writer in [`log_file`], which have no Windows calls, so their tests run
+//! on Linux too; on other systems the rest of the crate is empty.
 
 // Unsafe code is allowed only in the modules that call the Windows API directly; `service`,
 // `ui_url` and `wire` have none.
 #![deny(unsafe_code)]
 
+pub mod log_file;
 pub mod wire;
 
 #[cfg(windows)]

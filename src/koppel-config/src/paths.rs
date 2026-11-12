@@ -113,6 +113,24 @@ impl KoppelPaths {
     }
 }
 
+/// Where the Windows service's log file goes: `logs` under [`default_root`]. Made and restricted to
+/// administrators (the root above it too) before the first line is written; the log can name
+/// devices and addresses. Linux logs to the journal, so nothing makes the folder there.
+pub fn prepare_log_folder() -> io::Result<PathBuf> {
+    let root = default_root();
+    let logs = root.join("logs");
+    for directory in [&root, &logs] {
+        std::fs::create_dir_all(directory)?;
+        harden_directory(directory)?;
+    }
+    Ok(logs)
+}
+
+/// The log folder's path, without making it.
+pub fn log_folder() -> PathBuf {
+    default_root().join("logs")
+}
+
 /// `%ProgramData%\Koppel` on Windows, `/var/lib/koppel` elsewhere.
 pub fn default_root() -> PathBuf {
     #[cfg(windows)]

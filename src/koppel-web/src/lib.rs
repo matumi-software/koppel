@@ -24,6 +24,7 @@ mod routes;
 mod server;
 mod state;
 mod surface;
+mod tasks;
 pub mod tls;
 pub mod tray;
 mod ui;
@@ -38,6 +39,7 @@ pub use auth::reset_password;
 pub use host::{Host, machine_name, os_label};
 pub use routes::Routers;
 pub use server::{bind, serve};
+pub use tasks::Tasks;
 pub use tls::CertificateSlot;
 
 /// The routes that need nothing of the app: `/healthz` for health checks, and the UI for everything

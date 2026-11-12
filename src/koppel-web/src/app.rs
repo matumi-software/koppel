@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use koppel_config::files::{ClientConnection, KoppelSettings, Role};
+use koppel_config::files::{
+    AttachedDevices, ClientConnection, KoppelSettings, Role, ServerSecrets, SharedDevices,
+    UiCredentials,
+};
 use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox, open};
 use koppel_usb::{ActivitySink, GatewayOptions, Platform, SystemClock, UsbDataPlane, UsbIpGateway};
 use skakel_client::{Browser, BrowserOptions};
@@ -25,6 +28,7 @@ use crate::roles::skakel::announcer::{Announcement, Announcer};
 use crate::roles::skakel::{APP_ID, SecretsStore, ServerParts, ServerStartError, SkakelLinks};
 use crate::roles::{SkakelClientRole, SkakelServerRole, UsbActivity, UsbClientRole, UsbServerRole};
 use crate::routes::Routers;
+use crate::tasks::{STOP_WAIT, Tasks};
 use crate::tls::{self, Acceptors, CertificateSlot};
 
 /// What the app is started with.
@@ -113,6 +117,27 @@ pub enum StartError {
     Skakel(#[from] ServerStartError),
 }
 
+/// The config files the app opened, which stop watching their folders when Koppel stops.
+struct Files {
+    settings: ConfigFile<KoppelSettings>,
+    ui_auth: ConfigFile<UiCredentials>,
+    server_secrets: ConfigFile<ServerSecrets>,
+    connection: ConfigFile<ClientConnection>,
+    devices: ConfigFile<SharedDevices>,
+    attached: ConfigFile<AttachedDevices>,
+}
+
+impl Files {
+    fn stop(&self) {
+        self.settings.stop();
+        self.ui_auth.stop();
+        self.server_secrets.stop();
+        self.connection.stop();
+        self.devices.stop();
+        self.attached.stop();
+    }
+}
+
 /// What runs behind the roles, stopped in order when Koppel stops.
 struct Running {
     skakel: Arc<SkakelServerRole>,
@@ -142,7 +167,9 @@ pub struct App {
     /// The web ports' acceptor while Skakel's server does not present the certificate.
     own_acceptor: tokio_rustls::TlsAcceptor,
     running: Running,
-    stoppers: Vec<Box<dyn Fn() + Send + Sync>>,
+    /// The config files, stopped last.
+    files: Files,
+    tasks: Tasks,
 }
 
 impl App {
@@ -161,6 +188,7 @@ impl App {
             usb,
         } = options;
         let push = Push::new();
+        let tasks = Tasks::new();
 
         let settings = open::settings(&paths);
         settings.start().await?;
@@ -229,6 +257,7 @@ impl App {
             ),
             token_per_minute: network.token_per_minute,
             pair_per_minute: network.pair_per_minute,
+            tasks: tasks.clone(),
         })
         .await?;
         skakel.follow(&settings);
@@ -265,7 +294,12 @@ impl App {
             }
             Browser::new(options)
         });
-        let links = SkakelLinks::new(connection.clone(), browser.clone(), activity.clone());
+        let links = SkakelLinks::new(
+            connection.clone(),
+            browser.clone(),
+            activity.clone(),
+            tasks.clone(),
+        );
         let usb_client = koppel_usb::UsbClient::new(koppel_usb::Deps {
             settings: settings.clone(),
             connection: connection.clone(),
@@ -283,6 +317,7 @@ impl App {
             browser.clone(),
             own_fingerprint,
             host.name.clone(),
+            tasks.clone(),
         );
         client.follow(&settings).await;
 
@@ -302,20 +337,14 @@ impl App {
         let setup_token_required = !cfg!(windows) && reach != UiReach::Local;
         let auth = UiAuth::new(ui_auth.clone(), setup_window, address, setup_token_required);
 
-        let stoppers: Vec<Box<dyn Fn() + Send + Sync>> = vec![
-            Box::new({
-                let f = settings.clone();
-                move || f.stop()
-            }),
-            Box::new(move || ui_auth.stop()),
-            Box::new(move || server_secrets.stop()),
-            Box::new({
-                let f = connection.clone();
-                move || f.stop()
-            }),
-            Box::new(move || devices.stop()),
-            Box::new(move || attached.stop()),
-        ];
+        let files = Files {
+            settings: settings.clone(),
+            ui_auth,
+            server_secrets,
+            connection: connection.clone(),
+            devices,
+            attached,
+        };
 
         Ok(Arc::new(Self {
             host,
@@ -341,7 +370,8 @@ impl App {
                 usb_client,
                 gateway,
             },
-            stoppers,
+            files,
+            tasks,
         }))
     }
 
@@ -401,9 +431,9 @@ impl App {
             browser.stop();
         }
         running.skakel.stop().await;
-        for stop in &self.stoppers {
-            stop();
-        }
+        // Whatever Koppel's own tasks still hold ends here, within a limit.
+        self.tasks.shutdown(STOP_WAIT).await;
+        self.files.stop();
     }
 }
 

@@ -28,6 +28,7 @@ use super::remote::proto::WatchDevicesRequest;
 use super::remote::proto::remote_devices_client::RemoteDevicesClient;
 use super::streams::open_usb;
 use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
+use crate::tasks::Tasks;
 
 /// How long a remote device list that ended waits before it is asked for again, while the link
 /// stays up.
@@ -38,6 +39,7 @@ pub(crate) struct SkakelLinks {
     connection: ConfigFile<ClientConnection>,
     browser: Option<Browser>,
     activity: Arc<ActivityLog>,
+    tasks: Tasks,
 }
 
 impl SkakelLinks {
@@ -45,11 +47,13 @@ impl SkakelLinks {
         connection: ConfigFile<ClientConnection>,
         browser: Option<Browser>,
         activity: Arc<ActivityLog>,
+        tasks: Tasks,
     ) -> Arc<Self> {
         Arc::new(Self {
             connection,
             browser,
             activity,
+            tasks,
         })
     }
 }
@@ -60,6 +64,7 @@ impl Links for SkakelLinks {
         let shared = Arc::new(Shared {
             saved: self.connection.clone(),
             activity: self.activity.clone(),
+            tasks: self.tasks.clone(),
             events,
             learned: Mutex::new(connection.clone()),
             watching: Mutex::new(None),
@@ -120,6 +125,7 @@ fn make(
 struct Shared {
     saved: ConfigFile<ClientConnection>,
     activity: Arc<ActivityLog>,
+    tasks: Tasks,
     events: LinkEvents,
     /// The connection the link is for, moved on as it learns new certificates and addresses.
     learned: Mutex<ClientConnection>,
@@ -139,8 +145,9 @@ fn wire(link: &Arc<skakel_client::Link>, shared: &Arc<Shared>) {
     }
     let mut events = link.events();
     let shared = shared.clone();
+    let tasks = shared.tasks.clone();
     let weak = Arc::downgrade(link);
-    tokio::spawn(async move {
+    tasks.spawn(async move {
         loop {
             match events.recv().await {
                 Ok(LinkEvent::Status(status)) => shared.status_changed(&status, &weak).await,
@@ -295,7 +302,7 @@ impl Shared {
             previous.cancel();
         }
         let shared = Arc::downgrade(self);
-        tokio::spawn(async move {
+        self.tasks.spawn(async move {
             loop {
                 let Some(channel) = link.upgrade().map(|l| l.channel()) else {
                     return;
@@ -389,7 +396,9 @@ impl Link for SkakelLink {
             Err(message) => {
                 let events = self.shared.events.clone();
                 let message = message.clone();
-                tokio::spawn(async move { events.status(UsbLinkStatus::Down(message)).await });
+                self.shared
+                    .tasks
+                    .spawn(async move { events.status(UsbLinkStatus::Down(message)).await });
             }
         }
     }
@@ -416,7 +425,7 @@ impl StreamOpener for SkakelLink {
     fn open(&self) -> BoxFuture<'_, Result<Box<dyn DeviceStream>, OpenError>> {
         Box::pin(async move {
             match &self.link {
-                Ok(link) => open_usb(link).await,
+                Ok(link) => open_usb(link, &self.shared.tasks).await,
                 Err(message) => Err(OpenError::Failed(message.clone())),
             }
         })

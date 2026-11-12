@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 use crate::api::client::ConnectionUpdate;
 use crate::push::{self, Push};
 use crate::roles::{ConnectionTest, DiscoveredServer, Outcome, PairingState, PairingStatus};
+use crate::tasks::Tasks;
 
 /// How long the connection test may take, the token request and the hello together.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -34,6 +35,7 @@ pub struct SkakelClientRole {
     own: Arc<dyn Fn() -> String + Send + Sync>,
     /// The name the server's people see this machine as.
     machine: String,
+    tasks: Tasks,
     /// The pairing, with one owner: every change goes through this watch.
     pairing: watch::Sender<Pairings>,
     me: Weak<Self>,
@@ -88,6 +90,7 @@ impl SkakelClientRole {
         browser: Option<Browser>,
         own: Arc<dyn Fn() -> String + Send + Sync>,
         machine: String,
+        tasks: Tasks,
     ) -> Arc<Self> {
         let role = Arc::new_cyclic(|me| Self {
             connection: connection.clone(),
@@ -95,6 +98,7 @@ impl SkakelClientRole {
             browser,
             own,
             machine,
+            tasks,
             pairing: watch::channel(Pairings::default()).0,
             me: me.clone(),
         });
@@ -125,7 +129,7 @@ impl SkakelClientRole {
         }
         let mut changes = browser.watch();
         let weak: Weak<Self> = Arc::downgrade(self);
-        tokio::spawn(async move {
+        self.tasks.spawn(async move {
             while changes.changed().await.is_ok() {
                 let Some(role) = weak.upgrade() else {
                     return;
@@ -541,7 +545,7 @@ impl SkakelClientRole {
             push::PAIRING_STATUS_CHANGED,
             &Self::status(&run, PairingState::Requesting),
         );
-        tokio::spawn(me.run(run));
+        self.tasks.spawn(me.run(run));
     }
 
     pub async fn confirm_pairing(&self) -> bool {

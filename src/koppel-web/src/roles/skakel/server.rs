@@ -42,6 +42,7 @@ use crate::roles::{
     PairingWindowView, RegisterError, RequestState, RoleError, Switched,
 };
 use crate::surface::is_grpc_path;
+use crate::tasks::Tasks;
 
 /// Skakel's app id for Koppel.
 pub(crate) const APP_ID: &str = "koppel";
@@ -66,6 +67,8 @@ pub(crate) struct ServerParts {
     pub token_per_minute: u32,
     /// `RateLimits:PairPerMinute`, per caller's address.
     pub pair_per_minute: u32,
+    /// Where the server's own tasks run.
+    pub tasks: Tasks,
 }
 
 /// What the server's events need.
@@ -216,25 +219,23 @@ impl SkakelServerRole {
         }
     }
 
-    fn with<T>(&self, use_it: impl FnOnce(&SkakelServer) -> T) -> T {
+    /// Runs `use_it` on the running server, or returns `None` once Skakel's server has stopped with
+    /// Koppel, which a request still in flight can outlast.
+    fn with<T>(&self, use_it: impl FnOnce(&SkakelServer) -> T) -> Option<T> {
         let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
-        use_it(
-            &running
-                .as_ref()
-                .expect("Skakel's server runs until Koppel stops")
-                .server,
-        )
+        running.as_ref().map(|running| use_it(&running.server))
     }
 
-    fn clients_handle(&self) -> Clients {
+    fn clients_handle(&self) -> Option<Clients> {
         self.with(SkakelServer::clients)
     }
 
-    fn certificates_handle(&self) -> Certificates {
+    fn certificates_handle(&self) -> Result<Certificates, RoleError> {
         self.with(SkakelServer::certificates)
+            .ok_or(RoleError::NotRunning)
     }
 
-    fn pairing_handle(&self) -> Pairing {
+    fn pairing_handle(&self) -> Option<Pairing> {
         self.with(SkakelServer::pairing)
     }
 
@@ -242,6 +243,7 @@ impl SkakelServerRole {
     #[doc(hidden)]
     pub fn open_sessions(&self, client_id: &str) -> usize {
         self.with(|server| server.open_sessions(client_id))
+            .unwrap_or(0)
     }
 
     fn push_clients(&self) {
@@ -262,12 +264,17 @@ async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<Running, Ser
         .token_requests_per_minute(parts.token_per_minute)
         .pair_requests_per_minute(parts.pair_per_minute)
         .grpc_service(remote::Service::server(parts.devices.clone()))
-        .stream(USB_STREAM, usb_handler(parts.data_plane.clone()))
+        .stream(
+            USB_STREAM,
+            usb_handler(parts.data_plane.clone(), parts.tasks.clone()),
+        )
         .routes(remote::routes(parts.devices.clone()))
         .start_mounted(parts.listen)
         .await
         .map_err(ServerStartError)?;
-    let events = tokio::spawn(read_events(server.subscribe(), Arc::downgrade(wiring)));
+    let events = parts
+        .tasks
+        .spawn(read_events(server.subscribe(), Arc::downgrade(wiring)));
     Ok(Running { server, events })
 }
 
@@ -426,18 +433,16 @@ impl SkakelServerRole {
 
     pub fn clients(&self) -> Vec<ClientView> {
         self.clients_handle()
-            .all()
-            .iter()
-            .map(client_view)
-            .collect()
+            .map(|clients| clients.all().iter().map(client_view).collect())
+            .unwrap_or_default()
     }
 
     pub fn name_of(&self, id: &str) -> Option<String> {
-        self.clients_handle().name_of(id)
+        self.clients_handle()?.name_of(id)
     }
 
     pub fn secret_of(&self, id: &str) -> Option<Option<String>> {
-        let clients = self.clients_handle();
+        let clients = self.clients_handle()?;
         clients.name_of(id)?;
         Some(clients.secret_of(id))
     }
@@ -446,8 +451,10 @@ impl SkakelServerRole {
         if skakel_wire::pairing::clean_client_name(name).is_empty() {
             return Err(RegisterError::EmptyName);
         }
-        let client = self
+        let clients = self
             .clients_handle()
+            .ok_or(RegisterError::Failed(RoleError::NotRunning))?;
+        let client = clients
             .register(name)
             .await
             .map_err(|e| RegisterError::Failed(e.into()))?;
@@ -460,6 +467,7 @@ impl SkakelServerRole {
 
     pub async fn revoke(&self, id: &str) -> Result<bool, RoleError> {
         self.clients_handle()
+            .ok_or(RoleError::NotRunning)?
             .revoke(id)
             .await
             .map_err(RoleError::from)
@@ -468,6 +476,7 @@ impl SkakelServerRole {
     pub async fn rotate_secret(&self, id: &str) -> Result<Option<String>, RoleError> {
         let secret = self
             .clients_handle()
+            .ok_or(RoleError::NotRunning)?
             .rotate_secret(id)
             .await
             .map_err(RoleError::from)?;
@@ -479,18 +488,26 @@ impl SkakelServerRole {
     }
 
     pub fn keys(&self) -> KeysView {
-        keys_view(&self.certificates_handle().view())
+        match self.certificates_handle() {
+            Ok(certificates) => keys_view(&certificates.view()),
+            // Stopped: the certificate the web ports present is still the store's.
+            Err(_) => KeysView {
+                fingerprint: self.fingerprint(),
+                next_fingerprint: None,
+                next_prepared_at: None,
+            },
+        }
     }
 
     pub async fn prepare_next_certificate(&self) -> Result<Option<String>, RoleError> {
-        self.certificates_handle()
+        self.certificates_handle()?
             .prepare_next_certificate()
             .await
             .map_err(RoleError::from)
     }
 
     pub async fn cancel_next_certificate(&self) -> Result<Option<String>, RoleError> {
-        let certificates = self.certificates_handle();
+        let certificates = self.certificates_handle()?;
         let Some(next) = certificates.next_fingerprint() else {
             return Ok(None);
         };
@@ -503,7 +520,7 @@ impl SkakelServerRole {
 
     pub async fn switch_certificate(&self) -> Result<Option<Switched>, RoleError> {
         let switched = self
-            .certificates_handle()
+            .certificates_handle()?
             .switch_certificate()
             .await
             .map_err(RoleError::from)?;
@@ -530,7 +547,10 @@ impl SkakelServerRole {
     }
 
     pub async fn approve(&self, id: &str, code: &str) -> Approval {
-        match self.pairing_handle().approve(id, code).await {
+        let Some(pairing) = self.pairing_handle() else {
+            return Approval::Failed;
+        };
+        match pairing.approve(id, code).await {
             Ok(skakel_server::Approval::Approved) => Approval::Approved,
             Ok(skakel_server::Approval::WrongCode) => Approval::WrongCode,
             Ok(_) => Approval::NotFound,
@@ -548,7 +568,10 @@ impl SkakelServerRole {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id.to_owned());
-        let denied = self.pairing_handle().deny(id).await;
+        let denied = match self.pairing_handle() {
+            Some(pairing) => pairing.deny(id).await,
+            None => false,
+        };
         if !denied {
             self.wiring
                 .refused

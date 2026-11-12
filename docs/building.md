@@ -10,7 +10,7 @@ package versions are in `src/installer/windows/Directory.Packages.props`, and af
 ["Installer and Windows service"](installers.md#installer-and-windows-service), and the Linux binaries, packages and image in "Linux packages and
 the image in Rust" below.
 
-Every pull request runs `.github/workflows/ci.yml`, and its checks must pass before a merge: Rust (format, build, test and clippy with `--locked`) on Linux and Windows, the UI (typecheck, lint, tests) and `cargo deny check` against `src/deny.toml`, which allows the licences `src/installer/notices/about.toml` accepts and fails on an advisory or an unknown source. `.github/dependabot.yml` proposes grouped Cargo, pnpm and GitHub Actions updates weekly.
+Every pull request runs `.github/workflows/ci.yml`, and its checks must pass before a merge: Rust (format, build, test and clippy with `--locked`) on Linux and Windows, the UI (typecheck, lint, tests) and `cargo deny check` against `src/deny.toml`, which allows the licences `src/installer/notices/about.toml` accepts and fails on an advisory or an unknown source. Dependencies are updated by hand; no bot proposes updates.
 
 To release:
 

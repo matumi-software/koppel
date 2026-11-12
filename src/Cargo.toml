@@ -48,6 +48,9 @@ http-body-util = "0.1.5"
 # authority with its `Uri`.
 http = "1.5.0"
 tower-service = "0.3.3"
+# URL parsing (MIT OR Apache-2.0), already here through Skakel's client. koppel-windows reads the UI's
+# address with it.
+url = "2.5.8"
 # tower (MIT, already in the tree through axum): its `ServiceExt::oneshot` drives the router in the guard tests, one
 # request at a time with the extensions the accept loop would add.
 tower = { version = "0.5.3", default-features = false, features = ["util"] }

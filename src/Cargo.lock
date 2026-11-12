@@ -1189,6 +1189,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "url",
  "windows",
  "windows-service",
  "winreg",

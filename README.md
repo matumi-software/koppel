@@ -115,7 +115,7 @@ address under Configuration instead.
 | 5240 UDP | Finding servers on the local network |
 
 Koppel needs only 5240, TCP and UDP. `Ports:Network` puts what other machines do on a port of its own,
-and `Discovery:Port` moves discovery; see [docs/architecture.md](docs/architecture.md).
+and `Discovery:Port` moves discovery; see [docs/ports.md](docs/ports.md).
 
 A Windows client also has a port that never leaves the machine: a gateway on 127.0.0.1:3242 for
 usbip-win2's driver. The driver speaks plain USB/IP and cannot sign in, so it connects there and Koppel
@@ -152,8 +152,8 @@ Security problems go privately through [SECURITY.md](SECURITY.md), not into an i
 
 See the commands in [CLAUDE.md](CLAUDE.md) and the design in
 [docs/architecture.md](docs/architecture.md). To build the Windows installer, the Linux packages or the
-image yourself, see "Building and releasing" there; to run your own build on another machine, see
-"Running on another machine".
+image yourself, see "Building and releasing" in [docs/building.md](docs/building.md); to run your own build on another machine, see
+"Running on another machine" in [docs/installers.md](docs/installers.md).
 
 ## License
 

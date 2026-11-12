@@ -1,6 +1,6 @@
 //! Signing in to the UI: the one password in `ui-auth.json`, the first-run setup window, the session
 //! cookie and how a session ends, as 0.1.x's `Login/*` does it. See "UI sign-in" in
-//! docs/architecture.md.
+//! docs/security.md.
 
 pub(crate) mod endpoints;
 pub(crate) mod password;

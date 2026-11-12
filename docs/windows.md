@@ -153,7 +153,7 @@ The installer is not code signed.
 ## Finding servers
 
 Koppel finds servers on the local network and pairs with a code typed on the server (see
-"Finding servers and pairing" in `docs/architecture.md`). In a container on Windows that does not
+"Finding servers and pairing" in `docs/skakel.md`). In a container on Windows that does not
 work: Docker Desktop's network does not pass broadcasts to or from the LAN. Enter the server's
 address by hand there, or use the native install, which finds servers.
 

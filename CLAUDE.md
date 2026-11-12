@@ -11,7 +11,7 @@ folder per crate, the UI and the installers.
 |---|---|
 | `docs/` | Architecture and decisions |
 | `resources/design-system/` | The design system: brand book, `tokens.json`, component specs and previews, logos. The source of every colour, size and component style |
-| `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/architecture.md`) |
+| `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/building.md`) |
 | `src/koppel/` | The program (package `koppel`) |
 | `src/koppel-*/` | The library crates: `koppel-config`, `koppel-web`, `koppel-usb`, `koppel-windows`, and `koppel-contract`, the contract tests |
 | `src/ui/` | The UI, one pnpm workspace (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`): the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
@@ -20,10 +20,10 @@ folder per crate, the UI and the installers.
 
 ## Rules
 
-- **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the live push (Server-Sent Events at `/api/events`) brings the value back after the server wrote its config file. Pushes are applied in `HubPushes` and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/architecture.md`.
+- **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the live push (Server-Sent Events at `/api/events`) brings the value back after the server wrote its config file. Pushes are applied in `HubPushes` and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/ui.md`.
 - **Design values come from `resources/design-system/`.** Do not hand-edit `ui/react-ui/src/styles/tokens.css` or `components.css`; change the design system and run `pnpm design:sync`.
 - **No new UI primitives in the app.** Add them to `@koppel/react-ui` and to the design system.
-- **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (`requires_sign_in` in `koppel-web/src/surface.rs`); list it among the anonymous paths only when it must work signed out. A route for remote clients goes in the listed surfaces on the network port. See "Ports and what they serve" in `docs/architecture.md`.
+- **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (`requires_sign_in` in `koppel-web/src/surface.rs`); list it among the anonymous paths only when it must work signed out. A route for remote clients goes in the listed surfaces on the network port. See "Ports and what they serve" in `docs/ports.md`.
 - **Program wiring goes in `koppel`**, everything else in the library crates. No crate depends on `koppel`.
 - **GPL-3.0-or-later.** Code from projects under GPL-3.0, GPL-3.0-or-later, GPL-2.0-or-later, LGPL or a permissive licence may come in: keep its copyright and licence notice in the file and list it in `THIRD-PARTY-NOTICES.txt`. Never copy code from GPL-2.0-only projects (the Linux kernel, for one) or from projects without a licence.
 
@@ -61,7 +61,7 @@ lock files.
 
 The sysfs tests create folders with `:` in their names, which Windows cannot, so they only run on
 Linux. Run the workspace's tests in a Linux container as well (see "The Rust workspace" in
-`docs/architecture.md` for clippy and rustfmt there):
+`docs/building.md` for clippy and rustfmt there):
 
 ```sh
 docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c   "mkdir /work && tar -C /repo --exclude=./target --exclude=node_modules -cf - . | tar -C /work -xf - && cd /work && cargo test --workspace"

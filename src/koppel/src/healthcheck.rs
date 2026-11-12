@@ -1,9 +1,9 @@
-//! `koppel --healthcheck`: the image's health check, as 0.1.x's `HealthProbe`. It sends
+//! `koppel healthcheck`: the image's health check, as 0.1.x's `HealthProbe`. It sends
 //! `GET /healthz` to the UI port and exits 0 on 200, 1 otherwise, without starting the server. The
 //! port is HTTPS and the image has no shell or curl, so Koppel asks itself.
 //!
-//! It asks where the UI is set to listen (`Ports:Address` and `Ports:Ui`, read as the server reads
-//! them), then 127.0.0.1, so a container bound to one LAN address is not unhealthy forever just
+//! It asks where the UI is set to listen (`KOPPEL_LISTEN_ADDRESS` and `KOPPEL_UI_PORT`, read as the
+//! server reads them), then 127.0.0.1, so a container bound to one LAN address is not unhealthy forever just
 //! because nothing listens on loopback. An any-address is reached through loopback. The certificate
 //! is not checked, as 0.1.x did not: Koppel's is its own, self-signed, the probe sends nothing
 //! secret, and the answer only says whether Koppel is up.
@@ -14,44 +14,21 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use http_body_util::Empty;
-use hyper::body::Bytes;
-use hyper::header::HOST;
-use hyper::{Request, StatusCode};
-use hyper_util::rt::TokioIo;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{ClientConfig, DigitallySignedStruct, SignatureScheme};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
-use crate::UI_PORT;
-use crate::config::Config;
-
-/// The command line flag.
-pub const FLAG: &str = "--healthcheck";
+use crate::config::Settings;
 
 /// How long one address gets to connect, shake hands and answer, as 0.1.x's client timeout.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Whether the command line asks for the health check.
-pub fn requested(args: &[String]) -> bool {
-    args.iter().any(|arg| arg.eq_ignore_ascii_case(FLAG))
-}
-
-/// Runs the health check with `config`'s settings, prints what it found and returns the exit code.
-pub fn run(config: &Config) -> ExitCode {
-    let settings = config
-        .port("Ports:Ui", UI_PORT)
-        .and_then(|port| Ok((config.listen_address()?, port)));
-    let (address, port) = match settings {
-        Ok(settings) => settings,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::FAILURE;
-        }
-    };
+/// Runs the health check with `settings`, prints what it found and returns the exit code.
+pub fn run(settings: &Settings) -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -62,7 +39,8 @@ pub fn run(config: &Config) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(check(&targets(address, port), TIMEOUT)) {
+    let targets = targets(settings.listen_address(), settings.ui_port());
+    match runtime.block_on(check(&targets, TIMEOUT)) {
         Ok(target) => {
             println!("Koppel answers at https://{target}/healthz");
             ExitCode::SUCCESS
@@ -97,7 +75,7 @@ async fn check(targets: &[SocketAddr], timeout: Duration) -> Result<SocketAddr, 
     for target in targets {
         let url = format!("https://{target}/healthz");
         match tokio::time::timeout(timeout, ask(*target)).await {
-            Ok(Ok(StatusCode::OK)) => return Ok(*target),
+            Ok(Ok(200)) => return Ok(*target),
             Ok(Ok(status)) => return Err(format!("{url} answered {status}")),
             Ok(Err(e)) => unreachable.push(format!("{url}: {e}")),
             Err(_) => {
@@ -114,18 +92,31 @@ async fn check(targets: &[SocketAddr], timeout: Duration) -> Result<SocketAddr, 
     ))
 }
 
-/// One `GET /healthz` over HTTPS and HTTP/1.1, its status.
-async fn ask(target: SocketAddr) -> Result<StatusCode, Box<dyn Error + Send + Sync>> {
+/// One `GET /healthz` over HTTPS and HTTP/1.1, the status from the answer's first line. The request is
+/// fixed and the answer is read only as far as its status line, so there is no HTTP client in this.
+async fn ask(target: SocketAddr) -> Result<u16, Box<dyn Error + Send + Sync>> {
     let tcp = TcpStream::connect(target).await?;
-    let tls = TlsConnector::from(client_config())
+    let mut tls = TlsConnector::from(client_config())
         .connect(ServerName::IpAddress(target.ip().into()), tcp)
         .await?;
-    let (mut sender, connection) = hyper::client::conn::http1::handshake(TokioIo::new(tls)).await?;
-    tokio::spawn(connection);
-    let request = Request::get("/healthz")
-        .header(HOST, target.to_string())
-        .body(Empty::<Bytes>::new())?;
-    Ok(sender.send_request(request).await?.status())
+    let request = format!("GET /healthz HTTP/1.1\r\nHost: {target}\r\nConnection: close\r\n\r\n");
+    tls.write_all(request.as_bytes()).await?;
+    tls.flush().await?;
+    let mut head = Vec::with_capacity(64);
+    let mut chunk = [0u8; 64];
+    while !head.contains(&b'\n') && head.len() < 256 {
+        let read = tls.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        head.extend_from_slice(&chunk[..read]);
+    }
+    let line = String::from_utf8_lossy(&head);
+    let line = line.lines().next().unwrap_or_default();
+    line.strip_prefix("HTTP/1.1 ")
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|code| code.parse().ok())
+        .ok_or_else(|| format!("answered something that is not HTTP/1.1: \"{line}\"").into())
 }
 
 fn client_config() -> Arc<ClientConfig> {
@@ -217,12 +208,6 @@ mod tests {
     async fn closed_port() -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         listener.local_addr().unwrap()
-    }
-
-    #[test]
-    fn the_flag_is_found_in_any_case() {
-        assert!(requested(&["--HealthCheck".to_owned()]));
-        assert!(!requested(&["--reset-password".to_owned()]));
     }
 
     #[test]

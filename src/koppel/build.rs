@@ -1,9 +1,22 @@
+//! Writes `KOPPEL_LONG_VERSION`, what `koppel --version` prints: the version, the git commit and the
+//! build date. The commit is `KOPPEL_GIT_COMMIT` when set (the image build has no `.git`, so it passes
+//! it in), else `git rev-parse`, else `unknown`. The date is UTC, from `SOURCE_DATE_EPOCH` when set so a
+//! build can be repeated.
+//!
 //! On Windows, gives Koppel.exe Koppel's icon, its version, and the message table the event log
 //! reads its entries with (see koppel-windows' `event_log`): the installer names Koppel.exe as the
 //! event source's message file.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=KOPPEL_GIT_COMMIT");
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    let version = std::env::var("CARGO_PKG_VERSION").expect("cargo sets CARGO_PKG_VERSION");
+    println!(
+        "cargo:rustc-env=KOPPEL_LONG_VERSION={version} (commit {}, built {})",
+        git_commit(),
+        build_date()
+    );
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let icon = "../../resources/design-system/assets/Logos/koppel-app-icon.ico";
@@ -49,4 +62,56 @@ fn message_table() -> Vec<u8> {
         table.resize(table.len() + length - 4 - text.len(), 0);
     }
     table
+}
+
+/// The short commit the build is of.
+fn git_commit() -> String {
+    if let Ok(commit) = std::env::var("KOPPEL_GIT_COMMIT") {
+        let commit = commit.trim();
+        if !commit.is_empty() {
+            return commit.chars().take(9).collect();
+        }
+    }
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+            .filter(|text| !text.is_empty())
+    };
+    // The reflog changes on every commit and checkout, so a new commit rebuilds this.
+    if let Some(log) = git(&["rev-parse", "--git-path", "logs/HEAD"]) {
+        println!("cargo:rerun-if-changed={log}");
+    }
+    git(&["rev-parse", "--short=9", "HEAD"]).unwrap_or_else(|| "unknown".to_owned())
+}
+
+/// Today's date in UTC, `2026-11-12`.
+fn build_date() -> String {
+    let seconds = std::env::var("SOURCE_DATE_EPOCH")
+        .ok()
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs() as i64)
+        });
+    // Days since 1970-01-01 to a calendar date, as Howard Hinnant's civil_from_days.
+    let days = seconds.div_euclid(86_400) + 719_468;
+    let era = days.div_euclid(146_097);
+    let day_of_era = days.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
 }

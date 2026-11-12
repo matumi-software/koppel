@@ -72,6 +72,11 @@ futures-util = { version = "0.3.34", default-features = false, features = ["std"
 socket2 = "0.6.5"
 if-addrs = "0.15.0"
 
+# The command line and the settings (koppel): clap (MIT OR Apache-2.0) with derive and env. Without
+# its default features, so no colour, suggestions or wrapping crates beyond what `help` and `usage`
+# need.
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "env", "help", "usage", "error-context"] }
+
 # Logging (MIT). The subscriber goes without `env-filter`, which pulls in a regex engine: the
 # `Targets` filter reads the usual RUST_LOG form of `level` and `target=level` without one.
 tracing = "0.1.44"

@@ -22,9 +22,9 @@ To release, by hand and from this machine. Work from a clean checkout of `main`:
    three composes in `src/installer/docker`, in `docs/windows.md` and in `docs/installers.md`, and the
    README's status line, image tag and `.deb` names, then checks them. Run `src/installer/release-versions.sh check`
    again at the end: it fails on any place that names another version than `Cargo.toml`, on a missing
-   `## <version>` heading in `CHANGELOG.md`, and on a local `v<version>` tag that is not annotated.
+   `## <version>` heading in `CHANGELOG.md`, on a first entry of `src/installer/linux/changelog` for another version, and on a local `v<version>` tag that is not annotated.
 3. For a new usbip-win2 version, run `src/installer/windows/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `src/installer/windows/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from.
-4. Add the version to `CHANGELOG.md` as `## <version> (<date>)`.
+4. Add the version to `CHANGELOG.md` as `## <version> (<date>)`, and a `koppel (<version>) unstable; urgency=medium` entry on top of `src/installer/linux/changelog` (the `.deb`'s changelog; `release-versions.sh check` looks for it). If the command line changed, update `src/installer/linux/koppel.1` too.
 5. Check the pins and the licence lists agree: `.github/scripts/check-pins.sh` (Rust, Node and pnpm versions across `src/rust-toolchain.toml`, `src/ui/.nvmrc`, `package.json`, the Dockerfile and the docs; `deny.toml` against `about.toml`).
 6. Build and test what ships. From `src/ui/`: `pnpm install --frozen-lockfile`, then `pnpm --filter koppel.ui build`. From `src/`: `cargo build --release --locked -p koppel` (the release profile with the built UI embedded), `cargo test --workspace --locked` in a Linux container (see "The Rust workspace"), `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo fmt --all --check` and `cargo deny check`.
 7. Merge to `main`, then build the artifacts from the merge commit:
@@ -199,9 +199,12 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   three architectures. `/usr/share/doc/koppel/copyright` (`src/installer/linux/copyright`) is in Debian's
   machine-readable format: Koppel under GPL-3.0-or-later, and a pointer to the notices for the third-party
   code inside the binary. `/usr/bin/koppel` is a relative link, and a lintian override says the binary is
-  static on purpose. The maintainer is the GitHub noreply address. Debian 13's lintian still reports no
-  `changelog.gz`, `systemctl` called straight from the scripts rather than through `deb-systemd-helper`, and
-  no man page.
+  static on purpose. The maintainer is the GitHub noreply address. The package ships `changelog.gz` (Debian format, `src/installer/linux/changelog`) and a man page (`koppel.1`, gzipped by the
+  Dockerfile). Debian 13's lintian reports nothing for the package built from these files (checked with a stub binary).
+  The maintainer scripts follow debhelper's `dh_installsystemd`: the first install enables and starts the unit; an upgrade
+  leaves a disabled unit disabled and restarts the service only if it is running (`try-restart`), through
+  `deb-systemd-helper` and `deb-systemd-invoke`, which respect `policy-rc.d`. `src/installer/linux/test-maintainer-scripts.sh`
+  runs them against Debian's own helpers in a container (command in its header).
 - **Applications menu (#68):** `/usr/share/applications/koppel.desktop` with Koppel's icon in
   `/usr/share/icons/hicolor` (16 to 256 px and the SVG, rendered by `pnpm design:icons` into
   `src/installer/linux/icons`). It runs `/usr/lib/koppel/koppel-open`, which opens

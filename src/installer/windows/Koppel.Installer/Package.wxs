@@ -97,6 +97,14 @@
                  Value="&quot;[System64Folder]sc.exe&quot; failureflag Koppel 1" />
     <CustomAction Id="SetServiceFailureFlag" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
 
+    <!-- Gives the service its own security identifier, NT SERVICE\Koppel, in its token. "unrestricted" only adds the SID: nothing the
+         service may do changes, and it can be named in an ACL (a folder that only this service writes, say). It is not "restricted":
+         that makes every access check also pass for the SID, which would lock the service out of %ProgramData%\Koppel until every
+         ACL names it. Not vital, so Return="ignore": if it fails, the service runs as before, and WixQuietExec logs why. -->
+    <SetProperty Id="SetServiceSid" Sequence="execute" Before="SetServiceSid"
+                 Value="&quot;[System64Folder]sc.exe&quot; sidtype Koppel unrestricted" />
+    <CustomAction Id="SetServiceSid" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+
     <!-- pnputil can answer 3010 (a restart finishes the driver install or removal). WixQuietExec reads that as a failure, so
          driver.ps1 leaves a registry value and restart-flag.js (kept to one line, the Target column is short)
          turns it into the DRIVER_RESTART property, which ScheduleReboot acts on. Return="ignore": it is after InstallFinalize,
@@ -109,6 +117,7 @@
       <Custom Action="InstallUsbDriver" After="PrepareDataFolder" Condition="NOT REMOVE" />
       <Custom Action="RemoveUsbDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="SetServiceFailureFlag" After="InstallServices" Condition="NOT REMOVE" />
+      <Custom Action="SetServiceSid" After="SetServiceFailureFlag" Condition="NOT REMOVE" />
       <Custom Action="ReadDriverRestart" After="InstallFinalize" />
       <ScheduleReboot After="ReadDriverRestart" Condition="DRIVER_RESTART" />
     </InstallExecuteSequence>

@@ -1,7 +1,13 @@
-//! The REST API, with 0.1.x's paths, JSON and errors. A change answers 202 with no body (or 201 or
-//! 200 where 0.1.x gave something back), and the confirmed state follows over the live push.
+//! The REST API of the UI, under `/api/v1/v1`. A change answers 202 with no body (or 201 or 200 where it
+//! gives something back), and the confirmed state follows over the live push. A refusal is problem
+//! JSON (see [`ApiError`]).
 //!
-//! [`router`] is the whole `/api` tree, nested at `/api` by the UI router, in four kinds of routes:
+//! Paths name resources, and the verb is the method: a secret is replaced with `POST` on the
+//! client's `secret`, a device is attached with `PUT` and detached with `DELETE` on its
+//! `attachment`, the pairing window is opened with `PUT` and closed with `DELETE`, and the server
+//! switches to its prepared certificate with `PUT` on `current-certificate`.
+//!
+//! [`router`] is the whole `/api/v1/v1` tree, nested there by the UI router, in four kinds of routes:
 //!
 //! - **anonymous:** `/auth/state`, the first password and login, which work signed out (the state
 //!   says whether the caller is signed in). Setup and login sit behind the sign-in rate limit.
@@ -15,14 +21,18 @@
 //! Every route of the tree is behind the origin check and carries the session when there is one.
 
 pub(crate) mod client;
+mod error;
 pub(crate) mod server;
 pub(crate) mod settings;
+
+#[cfg(test)]
+pub(crate) use error::Problem;
+pub(crate) use error::{ApiError, ApiResult, Created, accepted};
 
 use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::FromRef;
-use axum::http::StatusCode;
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::routing::{delete, get, post, put};
 
@@ -86,7 +96,7 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
                 .route("/system/info", get(settings::info))
                 .with_state(SettingsApi::from_ref(app)),
         )
-        .fallback(|| async { StatusCode::NOT_FOUND })
+        .fallback(|| async { ApiError::not_found("There is no such API path.") })
         .layer(signed_in());
 
     // The roles' routes. The role gate is outside the session check: a route the role does not have
@@ -98,24 +108,29 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
             get(server::clients).post(server::create_client),
         )
         .route("/server/clients/{id}", delete(server::revoke_client))
-        .route("/server/clients/{id}/secret", get(server::client_secret))
-        .route("/server/clients/{id}/rotate", post(server::rotate_secret))
+        .route(
+            "/server/clients/{id}/secret",
+            get(server::client_secret).post(server::rotate_secret),
+        )
         .route("/server/keys", get(server::keys))
         .route(
             "/server/keys/next-certificate",
             post(server::prepare_certificate).delete(server::cancel_certificate),
         )
         .route(
-            "/server/keys/next-certificate/switch",
-            post(server::switch_certificate),
+            "/server/keys/current-certificate",
+            put(server::switch_certificate),
         )
         .route("/server/pairing", get(server::pairing))
         .route(
             "/server/pairing/window",
-            post(server::open_pairing).delete(server::close_pairing),
+            put(server::open_pairing).delete(server::close_pairing),
         )
-        .route("/server/pairing/{id}/approve", post(server::approve))
-        .route("/server/pairing/{id}/deny", post(server::deny))
+        .route("/server/pairing/requests/{id}", delete(server::deny))
+        .route(
+            "/server/pairing/requests/{id}/approval",
+            post(server::approve),
+        )
         .route("/server/devices", get(server::devices))
         .route("/server/devices/{bus_id}/shared", put(server::share))
         .with_state(ServerApi::from_ref(app))
@@ -135,10 +150,15 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
                 .post(client::begin_pairing)
                 .delete(client::cancel_pairing),
         )
-        .route("/client/pairing/confirm", post(client::confirm_pairing))
+        .route(
+            "/client/pairing/confirmation",
+            post(client::confirm_pairing),
+        )
         .route("/client/devices", get(client::devices))
-        .route("/client/devices/{bus_id}/attach", post(client::attach))
-        .route("/client/devices/{bus_id}/detach", post(client::detach))
+        .route(
+            "/client/devices/{bus_id}/attachment",
+            put(client::attach).delete(client::detach),
+        )
         .with_state(ClientApi::from_ref(app))
         .route_layer(signed_in())
         .route_layer(role(RoleScope::Client));

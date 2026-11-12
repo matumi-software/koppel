@@ -119,7 +119,7 @@ async fn set_role(node: &Node, role: &str) {
     let (status, body) = node
         .call(
             Method::PATCH,
-            "/api/settings",
+            "/api/v1/settings",
             Some(json!({ "role": role })),
         )
         .await;
@@ -132,7 +132,7 @@ async fn each_surface_is_its_routers_and_a_path_of_the_other_is_not_found() {
     let routers = node.app.routers();
 
     // The UI router, from this machine: its own paths, and nothing of the network surface.
-    for path in ["/healthz", "/", "/some/spa/route", "/api/auth/state"] {
+    for path in ["/healthz", "/", "/some/spa/route", "/api/v1/auth/state"] {
         assert_eq!(
             Call::get(path, LOCAL).status(&routers.ui).await,
             StatusCode::OK,
@@ -169,8 +169,8 @@ async fn each_surface_is_its_routers_and_a_path_of_the_other_is_not_found() {
     for path in [
         "/healthz",
         "/",
-        "/api/auth/state",
-        "/api/settings",
+        "/api/v1/auth/state",
+        "/api/v1/settings",
         "/skakel.v3.Other",
     ] {
         assert_eq!(
@@ -214,8 +214,8 @@ async fn allow_from_turns_an_address_away_from_everything_of_the_ui() {
     for path in [
         "/",
         "/healthz",
-        "/api/auth/state",
-        "/api/settings",
+        "/api/v1/auth/state",
+        "/api/v1/settings",
         "/no/such/path",
     ] {
         let response = Call::get(path, STRANGER).through(&routers.ui).await;
@@ -227,7 +227,7 @@ async fn allow_from_turns_an_address_away_from_everything_of_the_ui() {
         );
     }
     assert_eq!(
-        Call::post("/api/auth/login", STRANGER)
+        Call::post("/api/v1/auth/login", STRANGER)
             .with_the_ui_header()
             .json(&json!({ "password": "x" }))
             .status(&routers.ui)
@@ -266,7 +266,11 @@ async fn the_origin_and_the_ui_header_guard_the_api_and_nothing_else() {
         "http://127.0.0.1",
         &format!("https://127.0.0.1:{}", node.port.wrapping_add(1)),
     ] {
-        for path in ["/api/auth/state", "/api/settings", "/api/server/identity"] {
+        for path in [
+            "/api/v1/auth/state",
+            "/api/v1/settings",
+            "/api/v1/server/identity",
+        ] {
             assert_eq!(
                 get(path, Some(origin)).status(&ui).await,
                 StatusCode::FORBIDDEN,
@@ -275,11 +279,11 @@ async fn the_origin_and_the_ui_header_guard_the_api_and_nothing_else() {
         }
     }
     assert_eq!(
-        get("/api/auth/state", Some(&own)).status(&ui).await,
+        get("/api/v1/auth/state", Some(&own)).status(&ui).await,
         StatusCode::OK
     );
     assert_eq!(
-        get("/api/auth/state", None).status(&ui).await,
+        get("/api/v1/auth/state", None).status(&ui).await,
         StatusCode::OK
     );
     // Not the API: the UI's files and /healthz take any origin.
@@ -291,7 +295,11 @@ async fn the_origin_and_the_ui_header_guard_the_api_and_nothing_else() {
     );
 
     // A change needs the UI header, whoever it is from, and a read does not.
-    for path in ["/api/auth/login", "/api/auth/setup", "/api/settings"] {
+    for path in [
+        "/api/v1/auth/login",
+        "/api/v1/auth/setup",
+        "/api/v1/settings",
+    ] {
         for method in [Method::POST, Method::PATCH] {
             assert_eq!(
                 Call::new(method.clone(), path, LOCAL)
@@ -315,7 +323,7 @@ async fn the_origin_and_the_ui_header_guard_the_api_and_nothing_else() {
         }
     }
     // With it, the request reaches what answers: a wrong password, not a refusal of the request.
-    let response = Call::post("/api/auth/login", LOCAL)
+    let response = Call::post("/api/v1/auth/login", LOCAL)
         .header(HOST, &authority)
         .with_the_ui_header()
         .json(&json!({ "password": "not the password" }))
@@ -332,7 +340,7 @@ async fn sec_fetch_site_decides_before_the_origin_is_compared() {
     let ui = node.app.routers().ui;
     let authority = format!("127.0.0.1:{}", node.port);
     let get = |site: &str| {
-        Call::get("/api/auth/state", LOCAL)
+        Call::get("/api/v1/auth/state", LOCAL)
             .header(HOST, &authority)
             .header("sec-fetch-site", site)
     };
@@ -357,7 +365,7 @@ async fn sec_fetch_site_decides_before_the_origin_is_compared() {
     }
     // A change that is same-origin still needs the UI header.
     assert_eq!(
-        Call::post("/api/auth/login", LOCAL)
+        Call::post("/api/v1/auth/login", LOCAL)
             .header(HOST, &authority)
             .header("sec-fetch-site", "same-origin")
             .json(&json!({}))
@@ -376,7 +384,7 @@ async fn sec_fetch_site_decides_before_the_origin_is_compared() {
         "https://elsewhere.example".to_owned(),
     ] {
         assert_eq!(
-            Call::get("/api/auth/state", LOCAL)
+            Call::get("/api/v1/auth/state", LOCAL)
                 .header(HOST, &authority)
                 .header(ORIGIN, &origin)
                 .header("x-forwarded-proto", "https")
@@ -404,13 +412,13 @@ async fn every_answer_of_the_api_says_no_store_and_the_ui_files_keep_their_own_c
     };
 
     for (path, signed_in, origin) in [
-        ("/api/auth/state", false, None),
-        ("/api/settings", true, None),
-        ("/api/settings", false, None),
-        ("/api/server/identity", true, None),
-        ("/api/nothing/here", true, None),
-        ("/api/events", true, None),
-        ("/api/settings", true, Some("https://elsewhere.example")),
+        ("/api/v1/auth/state", false, None),
+        ("/api/v1/settings", true, None),
+        ("/api/v1/settings", false, None),
+        ("/api/v1/server/identity", true, None),
+        ("/api/v1/nothing/here", true, None),
+        ("/api/v1/events", true, None),
+        ("/api/v1/settings", true, Some("https://elsewhere.example")),
     ] {
         let mut call = Call::get(path, LOCAL).header(HOST, &authority);
         if signed_in {
@@ -427,7 +435,7 @@ async fn every_answer_of_the_api_says_no_store_and_the_ui_files_keep_their_own_c
             response.status()
         );
     }
-    let secret = Call::get("/api/server/clients/none/secret", LOCAL)
+    let secret = Call::get("/api/v1/server/clients/none/secret", LOCAL)
         .header(HOST, &authority)
         .cookie(node.cookie())
         .through(&ui)
@@ -449,16 +457,16 @@ async fn the_session_guards_every_api_route_that_is_not_anonymous() {
 
     // Signed out: 401 on the protected routes, and on a path no route has.
     for (method, path) in [
-        (Method::GET, "/api/settings"),
-        (Method::GET, "/api/activity"),
-        (Method::GET, "/api/events"),
-        (Method::GET, "/api/system/info"),
-        (Method::POST, "/api/auth/logout"),
-        (Method::POST, "/api/auth/password"),
-        (Method::GET, "/api/server/identity"),
-        (Method::GET, "/api/client/connection"),
-        (Method::GET, "/api/not-a-route-yet"),
-        (Method::DELETE, "/api/not/a/route/either"),
+        (Method::GET, "/api/v1/settings"),
+        (Method::GET, "/api/v1/activity"),
+        (Method::GET, "/api/v1/events"),
+        (Method::GET, "/api/v1/system/info"),
+        (Method::POST, "/api/v1/auth/logout"),
+        (Method::POST, "/api/v1/auth/password"),
+        (Method::GET, "/api/v1/server/identity"),
+        (Method::GET, "/api/v1/client/connection"),
+        (Method::GET, "/api/v1/not-a-route-yet"),
+        (Method::DELETE, "/api/v1/not/a/route/either"),
     ] {
         assert_eq!(
             Call::new(method.clone(), path, LOCAL)
@@ -473,7 +481,7 @@ async fn the_session_guards_every_api_route_that_is_not_anonymous() {
     // A cookie that is not a session is none.
     for forged in ["koppel.ui=nope", "koppel.ui=", "other=1"] {
         assert_eq!(
-            Call::get("/api/settings", LOCAL)
+            Call::get("/api/v1/settings", LOCAL)
                 .cookie(forged)
                 .status(&ui)
                 .await,
@@ -489,16 +497,20 @@ async fn the_session_guards_every_api_route_that_is_not_anonymous() {
         serde_json::from_str::<Value>(&text(response).await).unwrap()
     };
     assert_eq!(
-        state(Call::get("/api/auth/state", LOCAL)).await["signedIn"],
+        state(Call::get("/api/v1/auth/state", LOCAL)).await["signedIn"],
         json!(false)
     );
     assert_eq!(
-        state(Call::get("/api/auth/state", LOCAL).cookie(&cookie)).await["signedIn"],
+        state(Call::get("/api/v1/auth/state", LOCAL).cookie(&cookie)).await["signedIn"],
         json!(true)
     );
 
     // Signed in: the routes answer, and a path no route has is 404, not 401.
-    for path in ["/api/settings", "/api/activity", "/api/system/info"] {
+    for path in [
+        "/api/v1/settings",
+        "/api/v1/activity",
+        "/api/v1/system/info",
+    ] {
         assert_eq!(
             Call::get(path, LOCAL).cookie(&cookie).status(&ui).await,
             StatusCode::OK,
@@ -506,7 +518,7 @@ async fn the_session_guards_every_api_route_that_is_not_anonymous() {
         );
     }
     assert_eq!(
-        Call::get("/api/not-a-route-yet", LOCAL)
+        Call::get("/api/v1/not-a-route-yet", LOCAL)
             .cookie(&cookie)
             .status(&ui)
             .await,
@@ -517,9 +529,9 @@ async fn the_session_guards_every_api_route_that_is_not_anonymous() {
     // no way round the session. Signed out, each is refused or is the UI's page, never the data.
     for path in [
         "/API/settings",
-        "/api/%73ettings",
-        "/api/settings/",
-        "//api/settings",
+        "/api/v1/%73ettings",
+        "/api/v1/settings/",
+        "//api/v1/settings",
     ] {
         let response = Call::get(path, LOCAL).through(&ui).await;
         let status = response.status();
@@ -531,7 +543,7 @@ async fn the_session_guards_every_api_route_that_is_not_anonymous() {
     }
 
     // A session that ended loses its cookie: here one that is not ours is left alone.
-    let response = Call::get("/api/auth/state", LOCAL)
+    let response = Call::get("/api/v1/auth/state", LOCAL)
         .cookie("koppel.ui=nope")
         .through(&ui)
         .await;
@@ -548,8 +560,8 @@ async fn the_role_gate_answers_before_the_session_and_follows_the_role() {
     let cookie = node.cookie().to_owned();
 
     // A server: its own routes need the session, the client's are not found, signed in or not.
-    let identity = "/api/server/identity";
-    let connection = "/api/client/connection";
+    let identity = "/api/v1/server/identity";
+    let connection = "/api/v1/client/connection";
     assert_eq!(
         Call::get(identity, LOCAL).status(&ui).await,
         StatusCode::UNAUTHORIZED
@@ -629,7 +641,7 @@ async fn a_request_without_the_callers_address_is_refused() {
 
     for (router, path) in [
         (&ui, "/healthz"),
-        (&ui, "/api/auth/state"),
+        (&ui, "/api/v1/auth/state"),
         (&network, "/skakel/info"),
         (&merged, "/healthz"),
         (&merged, "/skakel/info"),
@@ -658,12 +670,12 @@ async fn every_answer_carries_the_security_headers() {
     for (router, call) in [
         (&routers.ui, Call::get("/healthz", LOCAL)),
         (&routers.ui, Call::get("/", LOCAL)),
-        (&routers.ui, Call::get("/api/settings", LOCAL)),
+        (&routers.ui, Call::get("/api/v1/settings", LOCAL)),
         (
             &routers.ui,
-            Call::get("/api/settings", LOCAL).cookie(&cookie),
+            Call::get("/api/v1/settings", LOCAL).cookie(&cookie),
         ),
-        (&routers.ui, Call::get("/api/client/connection", LOCAL)),
+        (&routers.ui, Call::get("/api/v1/client/connection", LOCAL)),
         (&routers.ui, Call::get("/healthz", STRANGER)),
         (&routers.ui, Call::get("/skakel/info", LOCAL)),
         (&routers.network, Call::get("/skakel/info", STRANGER)),
@@ -691,7 +703,11 @@ async fn a_grpc_content_type_does_not_skip_the_ui_guards() {
         "application/grpc+proto",
         "Application/GRPC+JSON; charset=utf-8",
     ] {
-        for path in ["/api/auth/login", "/api/auth/setup", "/api/settings"] {
+        for path in [
+            "/api/v1/auth/login",
+            "/api/v1/auth/setup",
+            "/api/v1/settings",
+        ] {
             assert_eq!(
                 Call::post(path, STRANGER)
                     .header(CONTENT_TYPE, content_type)
@@ -705,7 +721,7 @@ async fn a_grpc_content_type_does_not_skip_the_ui_guards() {
 
     // From this machine, a change still needs the header the UI adds.
     for content_type in ["application/grpc+json", "application/grpc"] {
-        for path in ["/api/auth/login", "/api/auth/setup"] {
+        for path in ["/api/v1/auth/login", "/api/v1/auth/setup"] {
             assert_eq!(
                 Call::post(path, LOCAL)
                     .header(CONTENT_TYPE, content_type)

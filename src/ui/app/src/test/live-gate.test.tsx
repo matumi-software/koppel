@@ -18,7 +18,7 @@ describe('the live push under the sign-in gate', () => {
 
   it('starts when the browser signs in, and not before', async () => {
     let signedIn = false;
-    mockFetch({ 'GET /api/auth/state': () => json(inState({ signedIn })), 'POST /api/auth/login': noContent });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(inState({ signedIn })), 'POST /api/v1/auth/login': noContent });
     renderGate();
     await userEvent.type(await screen.findByLabelText('Password'), 'correct horse battery');
     expect(FakeEventSource.instances.length).toBe(0);
@@ -34,8 +34,8 @@ describe('the live push under the sign-in gate', () => {
   it('stops on sign-out and shows the login screen', async () => {
     let signedIn = true;
     const { calls } = mockFetch({
-      'GET /api/auth/state': () => json(inState({ signedIn })),
-      'POST /api/auth/logout': () => {
+      'GET /api/v1/auth/state': () => json(inState({ signedIn })),
+      'POST /api/v1/auth/logout': () => {
         signedIn = false;
         return noContent();
       },
@@ -48,16 +48,16 @@ describe('the live push under the sign-in gate', () => {
 
     await loginHeading();
     expect(live().length).toBe(0);
-    expect(calls.some((c) => c.key === 'POST /api/auth/logout')).toBe(true);
+    expect(calls.some((c) => c.key === 'POST /api/v1/auth/logout')).toBe(true);
   });
 
   it('stops when an API call is answered 401', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(inState()), 'GET /api/settings': () => new Response(null, { status: 401 }) });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(inState()), 'GET /api/v1/settings': () => new Response(null, { status: 401 }) });
     renderGate();
     await screen.findByText('The app');
     await waitFor(() => expect(live().length).toBe(1));
 
-    await expect(getJson('/api/settings')).rejects.toThrow();
+    await expect(getJson('/api/v1/settings')).rejects.toThrow();
 
     await loginHeading();
     expect(live().length).toBe(0);
@@ -65,12 +65,12 @@ describe('the live push under the sign-in gate', () => {
 
   it('asks the server whether the session is still good when the stream closes', async () => {
     let signedIn = true;
-    const { count } = mockFetch({ 'GET /api/auth/state': () => json(inState({ signedIn })) });
+    const { count } = mockFetch({ 'GET /api/v1/auth/state': () => json(inState({ signedIn })) });
     renderGate();
     await screen.findByText('The app');
     await waitFor(() => expect(live().length).toBe(1));
     // The initial load alone: the first open needs no refetch.
-    expect(count('GET /api/auth/state')).toBe(1);
+    expect(count('GET /api/v1/auth/state')).toBe(1);
 
     // The server ends the stream when the session ends, and refuses a new one.
     signedIn = false;
@@ -78,12 +78,12 @@ describe('the live push under the sign-in gate', () => {
     act(() => FakeEventSource.instances[0].fail());
 
     await loginHeading();
-    expect(count('GET /api/auth/state')).toBeGreaterThanOrEqual(2);
+    expect(count('GET /api/v1/auth/state')).toBeGreaterThanOrEqual(2);
   });
 
   it('shows the login screen when the session ended during a long outage, on a later retry', async () => {
     let signedIn = true;
-    const { count } = mockFetch({ 'GET /api/auth/state': () => json(inState({ signedIn })) });
+    const { count } = mockFetch({ 'GET /api/v1/auth/state': () => json(inState({ signedIn })) });
     renderGate();
     await screen.findByText('The app');
     await waitFor(() => expect(live().length).toBe(1));
@@ -92,7 +92,7 @@ describe('the live push under the sign-in gate', () => {
     FakeEventSource.answering = false;
     act(() => FakeEventSource.instances[0].fail());
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(2));
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(3));
+    await waitFor(() => expect(count('GET /api/v1/auth/state')).toBe(3));
     expect(screen.getByText('The app')).toBeTruthy();
 
     // The session ends meanwhile; the next try, two seconds on, finds out.
@@ -102,7 +102,7 @@ describe('the live push under the sign-in gate', () => {
   });
 
   it('opens a new stream and fetches everything again once the server is back', async () => {
-    const { count } = mockFetch({ 'GET /api/auth/state': () => json(inState()) });
+    const { count } = mockFetch({ 'GET /api/v1/auth/state': () => json(inState()) });
     renderGate();
     await screen.findByText('The app');
     await waitFor(() => expect(live().length).toBe(1));
@@ -112,7 +112,7 @@ describe('the live push under the sign-in gate', () => {
     await waitFor(() => expect(live().length).toBe(1));
     expect(live()[0]).toBe(FakeEventSource.instances[1]);
     // The initial load, the recheck, and the refetch after the new stream opened.
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(3));
+    await waitFor(() => expect(count('GET /api/v1/auth/state')).toBe(3));
   });
 
   it('does not bring the app back when a recheck or a late auth answer lands during sign-out', async () => {
@@ -122,8 +122,8 @@ describe('the live push under the sign-in gate', () => {
     mockFetch({
       // The first answer is the initial load; the second is a
       // recheck still in flight when sign-out starts.
-      'GET /api/auth/state': () => (++stateCalls <= 1 ? json(inState()) : lateState.promise),
-      'POST /api/auth/logout': () => logout.promise,
+      'GET /api/v1/auth/state': () => (++stateCalls <= 1 ? json(inState()) : lateState.promise),
+      'POST /api/v1/auth/logout': () => logout.promise,
     });
     renderGate();
     await screen.findByText('The app');

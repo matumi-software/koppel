@@ -1,6 +1,6 @@
 //! The push contract: what the server pushes to the UI after it wrote a change.
 //!
-//! The program pushes these over Server-Sent Events at `/api/events`, with the names and payloads
+//! The program pushes these over Server-Sent Events at `/api/v1/events`, with the names and payloads
 //! below. Each test in `push.rs` makes a REST change and checks that its event follows, carrying the
 //! shape the REST read of the same thing has.
 //!
@@ -33,7 +33,7 @@ pub enum Payload {
 pub const EVENTS: &[Event] = &[
     Event {
         name: "SettingsChanged",
-        when: "settings.json was written, by a PATCH /api/settings or a valid hand edit",
+        when: "settings.json was written, by a PATCH /api/v1/settings or a valid hand edit",
         payload: Payload::Object(shape::SETTINGS),
     },
     Event {

@@ -17,8 +17,9 @@ use std::path::PathBuf;
 use ts_rs::{Config, TS};
 
 use crate::activity::ActivityEvent;
+use crate::api::Problem;
 use crate::api::client::{ConnectionUpdate, ConnectionView, PairStart};
-use crate::api::server::{Approve, CreateClient, OpenPairing, ServerIdentity};
+use crate::api::server::{Approve, ClientSecret, CreateClient, OpenPairing, ServerIdentity};
 use crate::api::settings::{SettingsPatch, SystemInfo};
 use crate::auth::endpoints::{AuthState, ChangeRequest, PasswordRequest};
 use crate::roles::{
@@ -57,6 +58,7 @@ fn decls() -> String {
         AuthState,
         ClientDeviceView,
         ClientDevices,
+        ClientSecret,
         ClientView,
         ConnectionTest,
         ConnectionView,
@@ -75,12 +77,13 @@ fn decls() -> String {
         PairingState,
         PairingStatus,
         PairingWindowView,
+        Problem,
         RequestState,
         Role,
         ServerDevices,
-        ServerIdentity<'static>,
+        ServerIdentity,
         SystemCheck,
-        SystemInfo<'static>,
+        SystemInfo,
         // Request bodies.
         Approve,
         ChangeRequest,
@@ -122,12 +125,10 @@ fn generated_types_are_current() {
 /// generated types.
 mod fixtures {
     use serde::Serialize;
-    use serde::de::Deserialize;
+    use serde::de::DeserializeOwned;
     use serde_json::Value;
 
     use super::*;
-    use crate::api::server::ServerIdentity;
-    use crate::api::settings::SystemInfo;
 
     fn fixture(name: &str) -> String {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -136,7 +137,7 @@ mod fixtures {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
     }
 
-    fn round_trips<'a, T: Serialize + Deserialize<'a>>(text: &'a str, name: &str) {
+    fn round_trips<T: Serialize + DeserializeOwned>(text: &str, name: &str) {
         let want: Value = serde_json::from_str(text).expect("the fixture is JSON");
         let value: T = serde_json::from_str(text)
             .unwrap_or_else(|e| panic!("{name} does not read as the Rust type: {e}"));
@@ -160,6 +161,7 @@ mod fixtures {
         "activity-event.json" => ActivityEvent,
         "auth-state.json" => AuthState,
         "client-devices.json" => ClientDevices,
+        "client-secret.json" => ClientSecret,
         "clients.json" => Vec<ClientView>,
         "connection-test.json" => ConnectionTest,
         "connection-view.json" => ConnectionView,
@@ -168,10 +170,12 @@ mod fixtures {
         "new-client.json" => NewClient,
         "pairing-overview.json" => PairingOverview,
         "pairing-status.json" => PairingStatus,
+        "problem.json" => Problem,
+        "problem-validation.json" => Problem,
         "server-devices.json" => ServerDevices,
-        "server-identity.json" => ServerIdentity<'_>,
+        "server-identity.json" => ServerIdentity,
         "settings.json" => KoppelSettings,
         "system-checks.json" => Vec<SystemCheck>,
-        "system-info.json" => SystemInfo<'_>,
+        "system-info.json" => SystemInfo,
     );
 }

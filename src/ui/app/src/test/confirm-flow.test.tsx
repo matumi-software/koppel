@@ -41,9 +41,9 @@ function Watcher() {
 const text = (id: string) => screen.getByTestId(id).textContent;
 
 const routes = (current: () => KoppelSettings = () => settings) => ({
-  'GET /api/settings': () => json(current()),
-  'GET /api/activity?max=200': () => json([]),
-  'PATCH /api/settings': () => accepted(),
+  'GET /api/v1/settings': () => json(current()),
+  'GET /api/v1/activity?max=200': () => json([]),
+  'PATCH /api/v1/settings': () => accepted(),
 });
 
 afterEach(() => {
@@ -101,7 +101,7 @@ describe('the confirm rule', () => {
   });
 
   it('fails at once when the server refuses the request', async () => {
-    mockFetch({ ...routes(), 'PATCH /api/settings': () => new Response(null, { status: 500 }) });
+    mockFetch({ ...routes(), 'PATCH /api/v1/settings': () => new Response(null, { status: 500 }) });
     renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
 
@@ -147,7 +147,7 @@ describe('the confirm rule', () => {
       await queryClient.invalidateQueries();
     });
 
-    expect(count('GET /api/settings')).toBe(2);
+    expect(count('GET /api/v1/settings')).toBe(2);
     expect(text('pending')).toBe('no');
     expect(text('confirmed')).toBe('true');
     expect(text('saved')).toBe('true');
@@ -158,7 +158,7 @@ describe('the confirm rule', () => {
     let calls = 0;
     mockFetch({
       ...routes(),
-      'GET /api/settings': () => (++calls === 1 ? json(settings) : slow.promise),
+      'GET /api/v1/settings': () => (++calls === 1 ? json(settings) : slow.promise),
     });
     const { live, queryClient } = renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
@@ -191,7 +191,7 @@ describe('pushes and answers that arrive out of order', () => {
   it('keeps an activity event pushed while the activity fetch is in flight', async () => {
     const slow = deferred<Response>();
     let fetches = 0;
-    mockFetch({ ...routes(), 'GET /api/activity?max=200': () => (++fetches === 1 ? json([]) : slow.promise) });
+    mockFetch({ ...routes(), 'GET /api/v1/activity?max=200': () => (++fetches === 1 ? json([]) : slow.promise) });
     const { live, queryClient } = renderApp(<Watcher />);
     await waitFor(() => expect(fetches).toBe(1));
     await act(async () => {});
@@ -211,7 +211,7 @@ describe('pushes and answers that arrive out of order', () => {
 
   it('ignores a rejection that arrives after the change was confirmed', async () => {
     const late = deferred<Response>();
-    mockFetch({ ...routes(), 'PATCH /api/settings': () => late.promise });
+    mockFetch({ ...routes(), 'PATCH /api/v1/settings': () => late.promise });
     const { live } = renderApp(
       <>
         <SettingsPage />
@@ -238,7 +238,7 @@ describe('pushes and answers that arrive out of order', () => {
   it('does not let a late rejection of an old send fail a newer one', async () => {
     const first = deferred<Response>();
     let sends = 0;
-    mockFetch({ ...routes(), 'PATCH /api/settings': () => (++sends === 1 ? first.promise : accepted()) });
+    mockFetch({ ...routes(), 'PATCH /api/v1/settings': () => (++sends === 1 ? first.promise : accepted()) });
     const { live } = renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
     fireEvent.click(screen.getByText('Turn on'));
@@ -295,7 +295,7 @@ describe('live pushes', () => {
       summary: `event ${id}`,
       detail: null,
     });
-    mockFetch({ ...routes(), 'GET /api/activity?max=200': () => json([entry('a', '2026-01-01T10:00:00Z')]) });
+    mockFetch({ ...routes(), 'GET /api/v1/activity?max=200': () => json([entry('a', '2026-01-01T10:00:00Z')]) });
     const { live } = renderApp(<Watcher />);
     await waitFor(() => expect(text('app-activity')).toBe('event a'));
 

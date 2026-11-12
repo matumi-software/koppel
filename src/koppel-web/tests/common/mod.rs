@@ -415,7 +415,7 @@ impl Node {
     async fn sign_in(&mut self) {
         let setup = self
             .http
-            .post(format!("{}/api/auth/setup", self.url()))
+            .post(format!("{}/api/v1/auth/setup", self.url()))
             .header("X-Koppel-UI", "1")
             .json(&json!({ "password": PASSWORD }))
             .send()
@@ -423,7 +423,7 @@ impl Node {
             .unwrap();
         let answer = if setup.status().as_u16() == 409 {
             self.http
-                .post(format!("{}/api/auth/login", self.url()))
+                .post(format!("{}/api/v1/auth/login", self.url()))
                 .header("X-Koppel-UI", "1")
                 .json(&json!({ "password": PASSWORD }))
                 .send()
@@ -471,6 +471,10 @@ impl Node {
 
     pub async fn post(&self, path: &str, body: Value) -> u16 {
         self.call(Method::POST, path, Some(body)).await.0
+    }
+
+    pub async fn put(&self, path: &str, body: Value) -> u16 {
+        self.call(Method::PUT, path, Some(body)).await.0
     }
 
     pub fn data(&self) -> &Path {
@@ -554,11 +558,11 @@ impl ServerCertVerifier for AnyCertificate {
 /// open. Skakel 0.3.0 takes no pairing request before that.
 pub async fn open_pairing(server: &Node) {
     let status = server
-        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .put("/api/v1/server/pairing/window", json!({ "minutes": 5 }))
         .await;
     assert_eq!(status, 202);
     eventually("the pairing window to open", || async {
-        (server.get("/api/server/pairing").await["window"]["open"] == json!(true)).then_some(())
+        (server.get("/api/v1/server/pairing").await["window"]["open"] == json!(true)).then_some(())
     })
     .await;
 }
@@ -567,41 +571,41 @@ pub async fn open_pairing(server: &Node) {
 /// Returns the client's ID on the server.
 pub async fn pair(server: &Node, client: &Node) -> String {
     open_pairing(server).await;
-    let fingerprint = server.get("/api/server/identity").await["fingerprint"]
+    let fingerprint = server.get("/api/v1/server/identity").await["fingerprint"]
         .as_str()
         .unwrap()
         .to_owned();
     let status = client
         .post(
-            "/api/client/pairing",
+            "/api/v1/client/pairing",
             json!({ "serverUrl": server.url(), "serverFingerprint": fingerprint, "serverName": "bench" }),
         )
         .await;
     assert_eq!(status, 202);
     let code = eventually("the client to show a code", || async {
-        let pairing = client.get("/api/client/pairing").await;
+        let pairing = client.get("/api/v1/client/pairing").await;
         assert_ne!(pairing["state"], json!("failed"), "{pairing}");
         pairing["code"].as_str().map(str::to_owned)
     })
     .await;
     let request = eventually("the server to list the request", || async {
-        server.get("/api/server/pairing").await["requests"][0]["id"]
+        server.get("/api/v1/server/pairing").await["requests"][0]["id"]
             .as_str()
             .map(str::to_owned)
     })
     .await;
     let approved = server
         .post(
-            &format!("/api/server/pairing/{request}/approve"),
+            &format!("/api/v1/server/pairing/requests/{request}/approval"),
             json!({ "code": code }),
         )
         .await;
     assert_eq!(approved, 202);
     eventually("the client to be paired", || async {
-        (client.get("/api/client/pairing").await["state"] == json!("paired")).then_some(())
+        (client.get("/api/v1/client/pairing").await["state"] == json!("paired")).then_some(())
     })
     .await;
-    let id = client.get("/api/client/connection").await["clientId"]
+    let id = client.get("/api/v1/client/connection").await["clientId"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -612,7 +616,7 @@ pub async fn pair(server: &Node, client: &Node) -> String {
 /// Waits for the client's link to be up, and gives its devices.
 pub async fn linked(client: &Node) -> Value {
     eventually("the client to link", || async {
-        let devices = client.get("/api/client/devices").await;
+        let devices = client.get("/api/v1/client/devices").await;
         (devices["link"] == json!("connected")).then_some(devices)
     })
     .await
@@ -621,7 +625,7 @@ pub async fn linked(client: &Node) -> Value {
 /// Waits for the client's link to be down with a reason, and gives it.
 pub async fn down(client: &Node) -> String {
     eventually("the client's link to go down", || async {
-        let devices = client.get("/api/client/devices").await;
+        let devices = client.get("/api/v1/client/devices").await;
         (devices["link"] == json!("error")).then(|| {
             devices["linkMessage"]
                 .as_str()

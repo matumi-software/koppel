@@ -40,7 +40,7 @@ impl UsbServerRole {
         }
     }
 
-    /// Whether this machine can share, for `/api/system/checks`.
+    /// Whether this machine can share, for `/api/v1/system/checks`.
     pub fn check(&self) -> SystemCheck {
         share_check(&self.platform)
     }
@@ -83,7 +83,7 @@ impl UsbClientRole {
         self.client.detach(bus_id).await;
     }
 
-    /// Whether this machine can attach, for `/api/system/checks`.
+    /// Whether this machine can attach, for `/api/v1/system/checks`.
     pub fn check(&self) -> SystemCheck {
         attach_check(&self.platform)
     }

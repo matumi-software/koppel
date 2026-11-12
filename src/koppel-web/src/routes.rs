@@ -97,7 +97,7 @@ fn wrapped(router: Router) -> Router {
 pub(crate) fn ui(app: &Arc<App>) -> Router {
     let router = Router::new()
         .route("/healthz", get(crate::healthz))
-        .nest("/api", api::router(app))
+        .nest("/api/v1", api::router(app))
         .fallback(files)
         .layer(from_fn_with_state(app.access.clone(), guard::allow_from))
         .layer(from_fn(guard::network_paths_are_not_here));

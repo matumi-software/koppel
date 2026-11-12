@@ -15,20 +15,20 @@ describe('change password', () => {
   };
 
   it('completes on the REST response, with the UI header, and clears the fields', async () => {
-    const { fetchMock, calls } = mockFetch({ 'POST /api/auth/password': () => noContent() });
+    const { fetchMock, calls } = mockFetch({ 'POST /api/v1/auth/password': () => noContent() });
     renderApp(<ChangePassword locked={false} />);
     await fill('correct horse battery', 'another long password');
 
     await userEvent.click(screen.getByRole('button', { name: 'Change password' }));
 
     await screen.findByText('Saved. Other browsers are signed out.');
-    expect(calls.find((c) => c.key === 'POST /api/auth/password')?.body).toEqual({ current: 'correct horse battery', next: 'another long password' });
-    expect(new Headers(fetchMock.mock.calls.find(([url]) => url === '/api/auth/password')![1]?.headers).get('X-Koppel-UI')).toBe('1');
+    expect(calls.find((c) => c.key === 'POST /api/v1/auth/password')?.body).toEqual({ current: 'correct horse battery', next: 'another long password' });
+    expect(new Headers(fetchMock.mock.calls.find(([url]) => url === '/api/v1/auth/password')![1]?.headers).get('X-Koppel-UI')).toBe('1');
     expect((screen.getByLabelText('Current password') as HTMLInputElement).value).toBe('');
   });
 
   it('shows the server\'s refusal and keeps what was typed', async () => {
-    mockFetch({ 'POST /api/auth/password': () => problem('The current password is not right.', 400) });
+    mockFetch({ 'POST /api/v1/auth/password': () => problem('The current password is not right.', 400) });
     renderApp(<ChangePassword locked={false} />);
     await fill('not the password', 'another long password');
 
@@ -39,7 +39,7 @@ describe('change password', () => {
   });
 
   it('shows the busy answer and keeps what was typed', async () => {
-    mockFetch({ 'POST /api/auth/password': () => problem(busy, 429) });
+    mockFetch({ 'POST /api/v1/auth/password': () => problem(busy, 429) });
     renderApp(<ChangePassword locked={false} />);
     await fill('correct horse battery', 'another long password');
 
@@ -81,7 +81,7 @@ describe('change password', () => {
   });
 
   it('puts a refusal of the current password under that field, and tells the live region', async () => {
-    mockFetch({ 'POST /api/auth/password': () => problem('The current password is not right.', 400) });
+    mockFetch({ 'POST /api/v1/auth/password': () => problem('The current password is not right.', 400) });
     renderApp(<ChangePassword locked={false} />);
     await fill('not the password', 'another long password');
 

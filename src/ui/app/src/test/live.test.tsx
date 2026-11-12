@@ -37,7 +37,7 @@ describe('the live link', () => {
   });
 
   it('listens once for each event in the push table, on one stream', async () => {
-    mockFetch({ 'GET /api/settings': () => json(settings) });
+    mockFetch({ 'GET /api/v1/settings': () => json(settings) });
     renderApp(<Probe />);
     await waitFor(() => expect(state()).toBe('live'));
 
@@ -46,18 +46,18 @@ describe('the live link', () => {
   });
 
   it('does not fetch again when the first stream opens', async () => {
-    const { count } = mockFetch({ 'GET /api/settings': () => json(settings) });
+    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(settings) });
     renderApp(<Probe />);
     await waitFor(() => expect(state()).toBe('live'));
     await screen.findByText('server');
 
-    expect(count('GET /api/settings')).toBe(1);
+    expect(count('GET /api/v1/settings')).toBe(1);
   });
 
   it('keeps trying after a first connect that failed, and fetches everything once it is back', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     FakeEventSource.answering = false;
-    const { count } = mockFetch({ 'GET /api/settings': () => json(settings) });
+    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(settings) });
     renderApp(<Probe />);
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
     expect(state()).toBe('reconnecting');
@@ -71,13 +71,13 @@ describe('the live link', () => {
     await act(() => vi.advanceTimersByTimeAsync(retryDelay(2)));
 
     await waitFor(() => expect(state()).toBe('live'));
-    await waitFor(() => expect(count('GET /api/settings')).toBe(2));
+    await waitFor(() => expect(count('GET /api/v1/settings')).toBe(2));
   });
 
   it('calls the link down once it has been away through every step, and goes on trying', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     FakeEventSource.answering = false;
-    mockFetch({ 'GET /api/settings': () => json(settings) });
+    mockFetch({ 'GET /api/v1/settings': () => json(settings) });
     renderApp(<Probe />);
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
 
@@ -95,7 +95,7 @@ describe('the live link', () => {
 
 describe('a push', () => {
   it('lands in the cache, and the later of two back to back pushes wins', async () => {
-    mockFetch({ 'GET /api/settings': () => json(settings) });
+    mockFetch({ 'GET /api/v1/settings': () => json(settings) });
     const { queryClient, live } = renderApp(<Probe />);
     await screen.findByText('server');
 
@@ -110,7 +110,7 @@ describe('a push', () => {
   it('that is malformed is logged and its data fetched again', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     let current = settings;
-    const { count } = mockFetch({ 'GET /api/settings': () => json(current) });
+    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(current) });
     const { live } = renderApp(<Probe />);
     await screen.findByText('server');
 
@@ -118,19 +118,19 @@ describe('a push', () => {
     await act(async () => live.emitRaw('SettingsChanged', '{not json'));
 
     await screen.findByText('client');
-    expect(count('GET /api/settings')).toBe(2);
+    expect(count('GET /api/v1/settings')).toBe(2);
     expect(error).toHaveBeenCalledOnce();
   });
 
   it('that the cache entry cannot take is logged and its data fetched again', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { count } = mockFetch({ 'GET /api/settings': () => json(settings), 'GET /api/activity?max=200': () => json([]) });
+    const { count } = mockFetch({ 'GET /api/v1/settings': () => json(settings), 'GET /api/v1/activity?max=200': () => json([]) });
     const { live } = renderApp(<Probe />);
     await screen.findByText('server');
 
     await act(async () => live.emitRaw('ActivityRecorded', 'null'));
 
-    await waitFor(() => expect(count('GET /api/activity?max=200')).toBe(2));
+    await waitFor(() => expect(count('GET /api/v1/activity?max=200')).toBe(2));
     expect(error).toHaveBeenCalledOnce();
   });
 });

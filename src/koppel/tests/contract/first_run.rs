@@ -27,8 +27,8 @@ fn state_fields() -> &'static [(&'static str, Kind)] {
 }
 
 async fn state(session: &Session) -> serde_json::Value {
-    let state = session.get("/api/auth/state").await.expect(200).json();
-    shape::fields(&state, state_fields(), "GET /api/auth/state");
+    let state = session.get("/api/v1/auth/state").await.expect(200).json();
+    shape::fields(&state, state_fields(), "GET /api/v1/auth/state");
     state
 }
 
@@ -48,13 +48,19 @@ async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out
     assert_eq!(before["setupOpen"], json!(true));
     assert!(before["setupUntil"].is_string(), "when setup closes");
     let login = anonymous
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(409);
     assert!(!login.error().is_empty());
-    anonymous.post_empty("/api/auth/logout").await.expect(401);
     anonymous
-        .post("/api/auth/password", json!({ "current": "x", "next": "y" }))
+        .post_empty("/api/v1/auth/logout")
+        .await
+        .expect(401);
+    anonymous
+        .post(
+            "/api/v1/auth/password",
+            json!({ "current": "x", "next": "y" }),
+        )
         .await
         .expect(401);
 
@@ -64,13 +70,16 @@ async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out
         json!({ "password": "x".repeat(129) }),
         json!({}),
     ] {
-        let answer = anonymous.post("/api/auth/setup", refused).await.expect(400);
+        let answer = anonymous
+            .post("/api/v1/auth/setup", refused)
+            .await
+            .expect(400);
         assert!(!answer.error().is_empty());
     }
     anonymous
         .change(
             Method::POST,
-            "/api/auth/setup",
+            "/api/v1/auth/setup",
             Body::Raw("application/json", "not json".to_owned()),
         )
         .await
@@ -79,7 +88,7 @@ async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out
     anonymous
         .send(
             Method::POST,
-            "/api/auth/setup",
+            "/api/v1/auth/setup",
             Body::Json(json!({ "password": password() })),
             &[],
         )
@@ -89,14 +98,14 @@ async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out
 
     // Setup takes the password and signs that browser in.
     let setup = anonymous
-        .post("/api/auth/setup", json!({ "password": password() }))
+        .post("/api/v1/auth/setup", json!({ "password": password() }))
         .await
         .expect(204);
     setup.empty();
     let session = fresh
         .target
         .with_cookie(&setup.session_cookie().expect("setup signs in"));
-    session.get("/api/settings").await.expect(200);
+    session.get("/api/v1/settings").await.expect(200);
     assert_eq!(state(&session).await["signedIn"], json!(true));
 
     let after = state(&anonymous).await;
@@ -105,31 +114,31 @@ async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out
     assert!(after["setupUntil"].is_null());
 
     let again = anonymous
-        .post("/api/auth/setup", json!({ "password": OTHER_PASSWORD }))
+        .post("/api/v1/auth/setup", json!({ "password": OTHER_PASSWORD }))
         .await
         .expect(409);
     assert!(!again.error().is_empty());
     anonymous
-        .post("/api/auth/login", json!({ "password": OTHER_PASSWORD }))
+        .post("/api/v1/auth/login", json!({ "password": OTHER_PASSWORD }))
         .await
         .expect(401);
 
     // The lockout: a right password clears the count, then five wrong ones lock the caller.
     anonymous
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(204);
     for i in 0..FREE_FAILURES {
         anonymous
             .post(
-                "/api/auth/login",
+                "/api/v1/auth/login",
                 json!({ "password": format!("wrong-{i}") }),
             )
             .await
             .expect(401);
     }
     let locked = anonymous
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(429);
     let retry: u64 = locked
@@ -141,12 +150,13 @@ async fn the_first_password_is_set_once_then_wrong_passwords_lock_the_caller_out
         "a lock of a minute, Retry-After {retry}"
     );
     assert!(locked.error().contains("Wait"), "{}", locked.text());
+    assert_eq!(locked.code(), "locked");
     assert!(locked.session_set_cookie().is_none());
 
     // The password change counts against the same caller.
     session
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": password(), "next": OTHER_PASSWORD }),
         )
         .await
@@ -190,17 +200,17 @@ async fn setup_is_refused_once_its_window_has_closed() {
     );
 
     let refused = anonymous
-        .post("/api/auth/setup", json!({ "password": password() }))
+        .post("/api/v1/auth/setup", json!({ "password": password() }))
         .await
         .expect(403);
     assert!(!refused.error().is_empty());
     // The window is checked before the password.
     anonymous
-        .post("/api/auth/setup", json!({ "password": "short" }))
+        .post("/api/v1/auth/setup", json!({ "password": "short" }))
         .await
         .expect(403);
     let login = anonymous
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(409);
     assert!(!login.error().is_empty());
@@ -215,7 +225,7 @@ async fn setup_login_and_password_change_share_a_rate_limit_per_address() {
 
     for i in 0..AUTH_PER_MINUTE {
         let answer = anonymous
-            .post("/api/auth/setup", json!({ "password": "short" }))
+            .post("/api/v1/auth/setup", json!({ "password": "short" }))
             .await;
         assert_eq!(
             answer.status,
@@ -226,15 +236,15 @@ async fn setup_login_and_password_change_share_a_rate_limit_per_address() {
         );
     }
     anonymous
-        .post("/api/auth/setup", json!({ "password": "short" }))
+        .post("/api/v1/auth/setup", json!({ "password": "short" }))
         .await
         .expect(429);
     anonymous
-        .post("/api/auth/login", json!({ "password": password() }))
+        .post("/api/v1/auth/login", json!({ "password": password() }))
         .await
         .expect(429);
     // The UI polls the state, which is not limited.
-    anonymous.get("/api/auth/state").await.expect(200);
+    anonymous.get("/api/v1/auth/state").await.expect(200);
 }
 
 /// On Linux and in Docker a UI that is open beyond this machine asks for the one-time token the log
@@ -267,7 +277,10 @@ async fn setup_needs_the_token_from_the_log_when_the_ui_is_open_beyond_this_mach
         json!({ "password": password(), "setupToken": token.to_uppercase() }),
         json!({ "password": "short" }),
     ] {
-        let answer = anonymous.post("/api/auth/setup", refused).await.expect(403);
+        let answer = anonymous
+            .post("/api/v1/auth/setup", refused)
+            .await
+            .expect(403);
         assert!(answer.error().contains("setup token"), "{}", answer.text());
     }
     assert_eq!(state(&anonymous).await["passwordSet"], json!(false));
@@ -275,14 +288,14 @@ async fn setup_needs_the_token_from_the_log_when_the_ui_is_open_beyond_this_mach
     // With it, the password rules still apply, and the right one sets the password.
     anonymous
         .post(
-            "/api/auth/setup",
+            "/api/v1/auth/setup",
             json!({ "password": "short", "setupToken": token }),
         )
         .await
         .expect(400);
     anonymous
         .post(
-            "/api/auth/setup",
+            "/api/v1/auth/setup",
             json!({ "password": password(), "setupToken": token }),
         )
         .await
@@ -292,7 +305,7 @@ async fn setup_needs_the_token_from_the_log_when_the_ui_is_open_beyond_this_mach
     // Spent: setup is over, so a second try meets the password that is set.
     anonymous
         .post(
-            "/api/auth/setup",
+            "/api/v1/auth/setup",
             json!({ "password": OTHER_PASSWORD, "setupToken": token }),
         )
         .await
@@ -307,7 +320,7 @@ async fn setup_with_the_ui_local_only_asks_for_no_token() {
     assert_eq!(state(&anonymous).await["setupTokenRequired"], json!(false));
     assert!(!fresh.instance.log().contains("The setup token is"));
     anonymous
-        .post("/api/auth/setup", json!({ "password": password() }))
+        .post("/api/v1/auth/setup", json!({ "password": password() }))
         .await
         .expect(204);
 }

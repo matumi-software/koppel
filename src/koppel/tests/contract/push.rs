@@ -48,7 +48,7 @@ fn payload(name: &str, value: &Value) {
         Payload::List(fields) => {
             let mut fields = fields.to_vec();
             if name == "ServersDiscovered" {
-                // The address as a URL too, as GET /api/client/discovery has it.
+                // The address as a URL too, as GET /api/v1/client/discovery has it.
                 fields.push(("url", Kind::Str));
             }
             shape::each(value, name, |item| shape::fields(item, &fields, name));
@@ -59,7 +59,7 @@ fn payload(name: &str, value: &Value) {
 /// The live push for `session`, open and answering as an event stream.
 async fn open(session: &Session) -> Events {
     let events = session.events().await;
-    assert_eq!(events.status, 200, "GET /api/events");
+    assert_eq!(events.status, 200, "GET /api/v1/events");
     assert!(
         events.content_type.starts_with("text/event-stream"),
         "{}",
@@ -80,14 +80,14 @@ async fn settings_changed_carries_the_settings_as_written() {
     let main = Main::get().await;
     let mut events = open(&main.admin).await;
     main.admin
-        .patch("/api/settings", json!({ "shareOnStartup": false }))
+        .patch("/api/v1/settings", json!({ "shareOnStartup": false }))
         .await
         .expect(202);
     let pushed = expect(&mut events, "SettingsChanged", |s| {
         s["shareOnStartup"] == json!(false)
     })
     .await;
-    let read = main.admin.get("/api/settings").await.expect(200).json();
+    let read = main.admin.get("/api/v1/settings").await.expect(200).json();
     assert_eq!(pushed, read, "the push carries what a read gives");
 }
 
@@ -95,12 +95,12 @@ async fn settings_changed_carries_the_settings_as_written() {
 async fn activity_recorded_carries_the_entry_the_log_has() {
     let main = Main::get().await;
     main.admin
-        .patch("/api/settings", json!({ "notifyLink": true }))
+        .patch("/api/v1/settings", json!({ "notifyLink": true }))
         .await
         .expect(202);
     let mut events = open(&main.admin).await;
     main.admin
-        .patch("/api/settings", json!({ "notifyLink": false }))
+        .patch("/api/v1/settings", json!({ "notifyLink": false }))
         .await
         .expect(202);
     let pushed = expect(&mut events, "ActivityRecorded", |e| {
@@ -110,7 +110,7 @@ async fn activity_recorded_carries_the_entry_the_log_has() {
     shape::fields(&pushed["entity"], shape::ENTITY, "ActivityRecorded.entity");
     let log = main
         .admin
-        .get("/api/activity?max=500")
+        .get("/api/v1/activity?max=500")
         .await
         .expect(200)
         .json();
@@ -128,7 +128,7 @@ async fn clients_changed_carries_the_list_after_an_add_and_a_revoke() {
     let created = main
         .admin
         .post(
-            "/api/server/clients",
+            "/api/v1/server/clients",
             json!({ "name": unique("contract-push") }),
         )
         .await
@@ -142,7 +142,7 @@ async fn clients_changed_carries_the_list_after_an_add_and_a_revoke() {
     .await;
     main.admin
         .delete(&format!(
-            "/api/server/clients/{}",
+            "/api/v1/server/clients/{}",
             id.as_str().unwrap_or_default()
         ))
         .await
@@ -159,17 +159,22 @@ async fn server_keys_changed_carries_the_keys_after_a_certificate_is_prepared() 
     let main = Main::get().await;
     let mut events = open(&main.admin).await;
     main.admin
-        .post_empty("/api/server/keys/next-certificate")
+        .post_empty("/api/v1/server/keys/next-certificate")
         .await
         .expect(202);
     let pushed = expect(&mut events, "ServerKeysChanged", |k| {
         k["nextFingerprint"].is_string()
     })
     .await;
-    let read = main.admin.get("/api/server/keys").await.expect(200).json();
+    let read = main
+        .admin
+        .get("/api/v1/server/keys")
+        .await
+        .expect(200)
+        .json();
     assert_eq!(pushed, read);
     main.admin
-        .delete("/api/server/keys/next-certificate")
+        .delete("/api/v1/server/keys/next-certificate")
         .await
         .expect(202);
 }
@@ -179,17 +184,21 @@ async fn connection_changed_carries_the_connection_without_its_secret() {
     let main = Main::get().await;
     let admin = &main.admin;
     admin
-        .patch("/api/settings", json!({ "role": "both" }))
+        .patch("/api/v1/settings", json!({ "role": "both" }))
         .await
         .expect(202);
     let mut events = open(admin).await;
-    let fingerprint =
-        admin.get("/api/server/identity").await.expect(200).json()["fingerprint"].clone();
+    let fingerprint = admin
+        .get("/api/v1/server/identity")
+        .await
+        .expect(200)
+        .json()["fingerprint"]
+        .clone();
     let id = unique("client-push");
     let secret = unique("secret");
     admin
         .put(
-            "/api/client/connection",
+            "/api/v1/client/connection",
             json!({
                 "serverUrl": "https://koppel-contract-elsewhere:5240",
                 "serverFingerprint": fingerprint,
@@ -205,7 +214,11 @@ async fn connection_changed_carries_the_connection_without_its_secret() {
     .await;
     assert_eq!(pushed["hasSecret"], json!(true));
     assert!(!pushed.to_string().contains(&secret), "never the secret");
-    let read = admin.get("/api/client/connection").await.expect(200).json();
+    let read = admin
+        .get("/api/v1/client/connection")
+        .await
+        .expect(200)
+        .json();
     assert_eq!(pushed, read);
 }
 
@@ -217,24 +230,27 @@ async fn client_devices_changed_follows_an_attach_and_a_detach() {
     // no virtual host controller, and the failure is what the client shows and pushes.
     let pair = Pair::with(crate::support::Options::default().usb_device()).await;
     pair.server_admin
-        .put("/api/server/devices/1-1/shared", json!({ "shared": true }))
+        .put(
+            "/api/v1/server/devices/1-1/shared",
+            json!({ "shared": true }),
+        )
         .await
         .expect(202);
     pair.connect().await;
     let admin = &pair.client_admin;
     crate::support::eventually("the client to list the server's device", WAIT, || async {
-        let devices = admin.get("/api/client/devices").await.expect(200).json();
+        let devices = admin.get("/api/v1/client/devices").await.expect(200).json();
         (devices["devices"].as_array().is_some_and(|l| !l.is_empty())).then_some(())
     })
     .await;
     let mut events = open(admin).await;
     admin
-        .post_empty("/api/client/devices/1-1/attach")
+        .put_empty("/api/v1/client/devices/1-1/attachment")
         .await
         .expect(202);
     expect(&mut events, "ClientDevicesChanged", |_| true).await;
     admin
-        .post_empty("/api/client/devices/1-1/detach")
+        .delete("/api/v1/client/devices/1-1/attachment")
         .await
         .expect(202);
     expect(&mut events, "ClientDevicesChanged", |_| true).await;
@@ -245,16 +261,16 @@ async fn pairing_status_changed_follows_a_cancel() {
     let main = Main::get().await;
     let admin = &main.admin;
     admin
-        .patch("/api/settings", json!({ "role": "both" }))
+        .patch("/api/v1/settings", json!({ "role": "both" }))
         .await
         .expect(202);
     let mut events = open(admin).await;
-    admin.delete("/api/client/pairing").await.expect(202);
+    admin.delete("/api/v1/client/pairing").await.expect(202);
     let pushed = expect(&mut events, "PairingStatusChanged", |s| {
         s["state"] == json!("idle")
     })
     .await;
-    let read = admin.get("/api/client/pairing").await.expect(200).json();
+    let read = admin.get("/api/v1/client/pairing").await.expect(200).json();
     assert_eq!(pushed, read);
 }
 
@@ -265,7 +281,7 @@ async fn devices_changed_follows_a_share_on_a_machine_that_can_share() {
     let main = Main::with(crate::support::Options::default().usb_device()).await;
     let devices = main
         .admin
-        .get("/api/server/devices")
+        .get("/api/v1/server/devices")
         .await
         .expect(200)
         .json();
@@ -281,7 +297,7 @@ async fn devices_changed_follows_a_share_on_a_machine_that_can_share() {
     let mut events = open(&main.admin).await;
     main.admin
         .put(
-            &format!("/api/server/devices/{bus_id}/shared"),
+            &format!("/api/v1/server/devices/{bus_id}/shared"),
             json!({ "shared": !shared }),
         )
         .await
@@ -289,7 +305,7 @@ async fn devices_changed_follows_a_share_on_a_machine_that_can_share() {
     expect(&mut events, "DevicesChanged", |_| true).await;
     main.admin
         .put(
-            &format!("/api/server/devices/{bus_id}/shared"),
+            &format!("/api/v1/server/devices/{bus_id}/shared"),
             json!({ "shared": shared }),
         )
         .await
@@ -301,7 +317,7 @@ async fn pairing_requests_changed_follows_the_window_opening_and_closing() {
     let main = Main::get().await;
     let mut events = open(&main.admin).await;
     main.admin
-        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .put("/api/v1/server/pairing/window", json!({ "minutes": 5 }))
         .await
         .expect(202)
         .empty();
@@ -312,14 +328,14 @@ async fn pairing_requests_changed_follows_the_window_opening_and_closing() {
     assert!(opened["window"]["until"].is_string(), "{opened}");
     let read = main
         .admin
-        .get("/api/server/pairing")
+        .get("/api/v1/server/pairing")
         .await
         .expect(200)
         .json();
     assert_eq!(read["window"]["open"], json!(true));
 
     main.admin
-        .delete("/api/server/pairing/window")
+        .delete("/api/v1/server/pairing/window")
         .await
         .expect(202)
         .empty();
@@ -335,18 +351,18 @@ async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
     let pair = Pair::get().await;
     let identity = pair
         .server_admin
-        .get("/api/server/identity")
+        .get("/api/v1/server/identity")
         .await
         .expect(200)
         .json();
     pair.server_admin
-        .post("/api/server/pairing/window", json!({}))
+        .put("/api/v1/server/pairing/window", json!({}))
         .await
         .expect(202);
     let mut events = open(&pair.server_admin).await;
     pair.client_admin
         .post(
-            "/api/client/pairing",
+            "/api/v1/client/pairing",
             json!({ "serverUrl": pair.peer_url, "serverFingerprint": identity["fingerprint"], "serverName": identity["name"] }),
         )
         .await
@@ -356,11 +372,11 @@ async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
     })
     .await;
     pair.client_admin
-        .delete("/api/client/pairing")
+        .delete("/api/v1/client/pairing")
         .await
         .expect(202);
     pair.server_admin
-        .delete("/api/server/pairing/window")
+        .delete("/api/v1/server/pairing/window")
         .await
         .expect(202);
 }
@@ -372,19 +388,19 @@ async fn servers_discovered_follows_the_client_finding_the_server() {
     let pair = Pair::get().await;
     let fingerprint = pair
         .server_admin
-        .get("/api/server/identity")
+        .get("/api/v1/server/identity")
         .await
         .expect(200)
         .json()["fingerprint"]
         .clone();
     // Discovery stops outside the client role and starts again in it, which finds the server anew.
     pair.client_admin
-        .patch("/api/settings", json!({ "role": "server" }))
+        .patch("/api/v1/settings", json!({ "role": "server" }))
         .await
         .expect(202);
     let mut events = open(&pair.client_admin).await;
     pair.client_admin
-        .patch("/api/settings", json!({ "role": "client" }))
+        .patch("/api/v1/settings", json!({ "role": "client" }))
         .await
         .expect(202);
     let found = events
@@ -402,13 +418,13 @@ async fn signing_out_ends_that_sessions_stream_only() {
     let leaving = main.target.sign_in().await;
     let mut ended = open(&leaving).await;
     let mut staying = open(&main.admin).await;
-    leaving.post_empty("/api/auth/logout").await.expect(204);
+    leaving.post_empty("/api/v1/auth/logout").await.expect(204);
     assert!(
         ended.ends_within(WAIT).await,
         "signing out ends the session's stream"
     );
     main.admin
-        .patch("/api/settings", json!({ "notifyPairing": false }))
+        .patch("/api/v1/settings", json!({ "notifyPairing": false }))
         .await
         .expect(202);
     expect(&mut staying, "SettingsChanged", |s| {
@@ -426,7 +442,7 @@ async fn a_password_change_ends_the_other_sessions_streams_and_keeps_its_own() {
     let mut ended = open(&other).await;
     changer
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": password(), "next": OTHER_PASSWORD }),
         )
         .await
@@ -436,7 +452,7 @@ async fn a_password_change_ends_the_other_sessions_streams_and_keeps_its_own() {
         "the other session's stream ends"
     );
     changer
-        .patch("/api/settings", json!({ "notifyPairing": true }))
+        .patch("/api/v1/settings", json!({ "notifyPairing": true }))
         .await
         .expect(202);
     match kept.next(WAIT).await {
@@ -445,7 +461,7 @@ async fn a_password_change_ends_the_other_sessions_streams_and_keeps_its_own() {
     }
     changer
         .post(
-            "/api/auth/password",
+            "/api/v1/auth/password",
             json!({ "current": OTHER_PASSWORD, "next": password() }),
         )
         .await

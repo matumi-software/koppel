@@ -6,7 +6,7 @@
 //!   [`App::routers`], one router for each surface (the UI and the network), each with its guards.
 //! - [`serve`]: the accept loop for one listener, and [`bind`] to make one.
 //! - [`roles`]: the server and client roles on Skakel, and the USB layer behind the UI.
-//! - [`push`]: the live push, Server-Sent Events at `/api/events`.
+//! - [`push`]: the live push, Server-Sent Events at `/api/v1/events`.
 //! - [`tray`]: what the Windows service tells its tray icons.
 
 mod access;

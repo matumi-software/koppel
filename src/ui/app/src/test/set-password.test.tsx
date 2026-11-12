@@ -8,7 +8,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('first-run password', () => {
   it('asks only for a password and says until when setup is open', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(openSetup()) });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(openSetup()) });
     renderGate();
 
     await screen.findByRole('heading', { name: 'Set up bench-pc' });
@@ -22,8 +22,8 @@ describe('first-run password', () => {
   it('checks the rules when the form is sent, and sends only the password once they hold', async () => {
     let passwordSet = false;
     const { calls } = mockFetch({
-      'GET /api/auth/state': () => json(passwordSet ? state({ signedIn: true }) : openSetup()),
-      'POST /api/auth/setup': () => {
+      'GET /api/v1/auth/state': () => json(passwordSet ? state({ signedIn: true }) : openSetup()),
+      'POST /api/v1/auth/setup': () => {
         passwordSet = true;
         return noContent();
       },
@@ -37,7 +37,7 @@ describe('first-run password', () => {
 
     expect(await screen.findByText('Use at least 10 characters.')).toBeTruthy();
     expect(screen.getByText('The two passwords differ.')).toBeTruthy();
-    expect(calls.some((c) => c.key === 'POST /api/auth/setup')).toBe(false);
+    expect(calls.some((c) => c.key === 'POST /api/v1/auth/setup')).toBe(false);
 
     await userEvent.clear(screen.getByLabelText('New password'));
     await userEvent.clear(screen.getByLabelText('Repeat the password'));
@@ -46,14 +46,14 @@ describe('first-run password', () => {
     await userEvent.click(button);
 
     await screen.findByText('The app');
-    expect(calls.find((c) => c.key === 'POST /api/auth/setup')?.body).toEqual({ password: 'correct horse battery' });
+    expect(calls.find((c) => c.key === 'POST /api/v1/auth/setup')?.body).toEqual({ password: 'correct horse battery' });
   });
 
   it('asks for the setup token the log shows where the server requires one, and sends it with the password', async () => {
     let passwordSet = false;
     const { calls } = mockFetch({
-      'GET /api/auth/state': () => json(passwordSet ? state({ signedIn: true }) : openSetup({ setupTokenRequired: true })),
-      'POST /api/auth/setup': () => {
+      'GET /api/v1/auth/state': () => json(passwordSet ? state({ signedIn: true }) : openSetup({ setupTokenRequired: true })),
+      'POST /api/v1/auth/setup': () => {
         passwordSet = true;
         return noContent();
       },
@@ -66,14 +66,14 @@ describe('first-run password', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Set password and continue' }));
 
     await screen.findByText('The app');
-    expect(calls.find((c) => c.key === 'POST /api/auth/setup')?.body).toEqual({ password: 'correct horse battery', setupToken: '0123abcd' });
+    expect(calls.find((c) => c.key === 'POST /api/v1/auth/setup')?.body).toEqual({ password: 'correct horse battery', setupToken: '0123abcd' });
   });
 
   it('shows a refused token under its own field and stays', async () => {
     const refusal = "The setup token is missing or not right. Copy it from Koppel's log.";
     mockFetch({
-      'GET /api/auth/state': () => json(openSetup({ setupTokenRequired: true })),
-      'POST /api/auth/setup': () => problem(refusal, 403),
+      'GET /api/v1/auth/state': () => json(openSetup({ setupTokenRequired: true })),
+      'POST /api/v1/auth/setup': () => problem(refusal, 403),
     });
     renderGate();
     await userEvent.type(await screen.findByLabelText('Setup token'), 'wrong');
@@ -87,14 +87,14 @@ describe('first-run password', () => {
   });
 
   it('asks for no token where the server does not', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(openSetup()) });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(openSetup()) });
     renderGate();
     await screen.findByLabelText('New password');
     expect(screen.queryByLabelText('Setup token')).toBeNull();
   });
 
   it('shows the server\'s refusal and stays while setup is still open', async () => {
-    mockFetch({ 'GET /api/auth/state': () => json(openSetup()), 'POST /api/auth/setup': () => problem('Do not use "koppel" or "password" as the password.', 400) });
+    mockFetch({ 'GET /api/v1/auth/state': () => json(openSetup()), 'POST /api/v1/auth/setup': () => problem('Do not use "koppel" or "password" as the password.', 400) });
     renderGate();
     await userEvent.type(await screen.findByLabelText('New password'), 'koppel1234');
     await userEvent.type(screen.getByLabelText('Repeat the password'), 'koppel1234');
@@ -106,7 +106,7 @@ describe('first-run password', () => {
   });
 
   it('explains the timeout and how to restart once setup has closed', async () => {
-    const { count } = mockFetch({ 'GET /api/auth/state': () => json(state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' })) });
+    const { count } = mockFetch({ 'GET /api/v1/auth/state': () => json(state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' })) });
     renderGate();
 
     await screen.findByRole('heading', { name: 'Setup has timed out' });
@@ -116,14 +116,14 @@ describe('first-run password', () => {
     expect(screen.getByText('Restart Koppel', { selector: 'strong' })).toBeTruthy();
     expect(screen.queryByLabelText('New password')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }));
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
+    await waitFor(() => expect(count('GET /api/v1/auth/state')).toBe(2));
   });
 
   it('shows the timeout screen when a password comes too late', async () => {
     let closed = false;
     mockFetch({
-      'GET /api/auth/state': () => json(closed ? state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' }) : openSetup()),
-      'POST /api/auth/setup': () => {
+      'GET /api/v1/auth/state': () => json(closed ? state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' }) : openSetup()),
+      'POST /api/v1/auth/setup': () => {
         closed = true;
         return problem('Setup has timed out. Restart Koppel, then set it.', 403);
       },

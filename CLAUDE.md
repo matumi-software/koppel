@@ -20,7 +20,7 @@ folder per crate, the UI and the installers.
 
 ## Rules
 
-- **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the live push (Server-Sent Events at `/api/events`) brings the value back after the server wrote its config file. Pushes are applied in `LiveProvider` (`live/push-table.ts`) and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/ui.md`.
+- **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the live push (Server-Sent Events at `/api/v1/events`) brings the value back after the server wrote its config file. Pushes are applied in `LiveProvider` (`live/push-table.ts`) and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/ui.md`.
 - **Design values come from `resources/design-system/`.** Do not hand-edit `ui/react-ui/src/styles/tokens.css` or `components.css`; change the design system and run `pnpm design:sync`.
 - **No new UI primitives in the app.** Add them to `@koppel/react-ui` and to the design system.
 - **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (the protected group of `koppel-web/src/api/mod.rs`); put it in the anonymous group only when it must work signed out. A route for remote clients belongs to the network router (`koppel-web/src/routes.rs`). See "Ports and what they serve" in `docs/ports.md`.

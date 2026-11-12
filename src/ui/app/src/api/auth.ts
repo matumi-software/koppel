@@ -1,10 +1,10 @@
 import type { AuthState, ChangeRequest, PasswordRequest } from './generated/wire';
-import { readJson, RejectedError } from './http';
+import { readJson, rejection } from './http';
 
 export type { AuthState } from './generated/wire';
 
 export async function getAuthState(): Promise<AuthState> {
-  const response = await fetch('/api/auth/state');
+  const response = await fetch('/api/v1/auth/state');
   if (!response.ok) throw new Error(`Could not check the sign-in (${response.status}).`);
   return readJson<AuthState>(response);
 }
@@ -21,22 +21,15 @@ async function post(url: string, body?: PasswordRequest | ChangeRequest): Promis
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (response.status === 204) return;
-  let message = `the server answered ${response.status}.`;
-  try {
-    const problem = await readJson<{ error?: string }>(response);
-    if (problem.error) message = problem.error;
-  } catch {
-    // Not our JSON; keep the generic message.
-  }
-  throw new RejectedError(message);
+  throw await rejection(response);
 }
 
 /** `setupToken` is sent only where the state says it is required. */
 export const setupPassword = ({ password, setupToken }: { password: string; setupToken?: string }) =>
-  post('/api/auth/setup', setupToken === undefined ? { password } : { password, setupToken });
+  post('/api/v1/auth/setup', setupToken === undefined ? { password } : { password, setupToken });
 
-export const login = (password: string) => post('/api/auth/login', { password });
+export const login = (password: string) => post('/api/v1/auth/login', { password });
 
-export const logout = () => post('/api/auth/logout');
+export const logout = () => post('/api/v1/auth/logout');
 
-export const changePassword = (current: string, next: string) => post('/api/auth/password', { current, next });
+export const changePassword = (current: string, next: string) => post('/api/v1/auth/password', { current, next });

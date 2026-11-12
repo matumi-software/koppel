@@ -1,5 +1,5 @@
-//! Settings, the activity log and what the side panel shows about the machine: `/api/settings`,
-//! `/api/activity` and `/api/system/*`.
+//! Settings, the activity log and what the side panel shows about the machine: `/api/v1/settings`,
+//! `/api/v1/activity` and `/api/v1/system/*`.
 
 use crate::support::shape::{self, Kind};
 use crate::support::{Body, Main, activity_with, json};
@@ -7,8 +7,8 @@ use reqwest::Method;
 use serde_json::Value;
 
 async fn settings(main: &Main) -> Value {
-    let value = main.admin.get("/api/settings").await.expect(200).json();
-    shape::fields(&value, shape::SETTINGS, "GET /api/settings");
+    let value = main.admin.get("/api/v1/settings").await.expect(200).json();
+    shape::fields(&value, shape::SETTINGS, "GET /api/v1/settings");
     value
 }
 
@@ -20,7 +20,7 @@ async fn a_patch_answers_202_and_the_settings_read_back_changed() {
 
     let answer = main
         .admin
-        .patch("/api/settings", json!({ "shareOnStartup": false }))
+        .patch("/api/v1/settings", json!({ "shareOnStartup": false }))
         .await
         .expect(202);
     answer.empty();
@@ -43,14 +43,14 @@ async fn a_patch_answers_202_and_the_settings_read_back_changed() {
         ("setupComplete", true),
     ] {
         main.admin
-            .patch("/api/settings", json!({ field: value }))
+            .patch("/api/v1/settings", json!({ field: value }))
             .await
             .expect(202);
         assert_eq!(settings(&main).await[field], json!(value), "{field}");
     }
     for role in ["client", "both", "server"] {
         main.admin
-            .patch("/api/settings", json!({ "role": role }))
+            .patch("/api/v1/settings", json!({ "role": role }))
             .await
             .expect(202);
         assert_eq!(settings(&main).await["role"], json!(role));
@@ -58,7 +58,7 @@ async fn a_patch_answers_202_and_the_settings_read_back_changed() {
 
     // Nothing to change is still accepted.
     main.admin
-        .patch("/api/settings", json!({}))
+        .patch("/api/v1/settings", json!({}))
         .await
         .expect(202);
 }
@@ -74,14 +74,14 @@ async fn a_bad_patch_is_refused_and_changes_nothing() {
         json!({ "shareOnStartup": "yes" }),
     ] {
         main.admin
-            .patch("/api/settings", body.clone())
+            .patch("/api/v1/settings", body.clone())
             .await
             .expect(400);
     }
     main.admin
         .change(
             Method::PATCH,
-            "/api/settings",
+            "/api/v1/settings",
             Body::Raw("application/json", "{ not json".to_owned()),
         )
         .await
@@ -93,7 +93,7 @@ async fn a_bad_patch_is_refused_and_changes_nothing() {
 async fn a_change_is_one_activity_entry_and_no_change_is_none() {
     let main = Main::get().await;
     main.admin
-        .patch("/api/settings", json!({ "shareOnStartup": false }))
+        .patch("/api/v1/settings", json!({ "shareOnStartup": false }))
         .await
         .expect(202);
     let entries = activity_with(&main.admin, "reconfigured").await;
@@ -105,7 +105,7 @@ async fn a_change_is_one_activity_entry_and_no_change_is_none() {
 
     let count = entries.len();
     main.admin
-        .patch("/api/settings", json!({ "shareOnStartup": false }))
+        .patch("/api/v1/settings", json!({ "shareOnStartup": false }))
         .await
         .expect(202);
     assert_eq!(
@@ -135,13 +135,13 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
     // At least two entries.
     for share in [false, true] {
         main.admin
-            .patch("/api/settings", json!({ "shareOnStartup": share }))
+            .patch("/api/v1/settings", json!({ "shareOnStartup": share }))
             .await
             .expect(202);
     }
 
-    let all = main.admin.get("/api/activity").await.expect(200).json();
-    shape::each(&all, "GET /api/activity", |entry| {
+    let all = main.admin.get("/api/v1/activity").await.expect(200).json();
+    shape::each(&all, "GET /api/v1/activity", |entry| {
         shape::fields(entry, shape::ACTIVITY, "an activity entry");
         shape::fields(&entry["entity"], shape::ENTITY, "an activity entity");
         assert!(
@@ -162,7 +162,7 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
 
     let one = main
         .admin
-        .get("/api/activity?max=1")
+        .get("/api/v1/activity?max=1")
         .await
         .expect(200)
         .json();
@@ -170,7 +170,7 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
     assert_eq!(one[0], entries[0]);
     let clamped = main
         .admin
-        .get("/api/activity?max=0")
+        .get("/api/v1/activity?max=0")
         .await
         .expect(200)
         .json();
@@ -181,12 +181,15 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
     );
     let most = main
         .admin
-        .get("/api/activity?max=100000")
+        .get("/api/v1/activity?max=100000")
         .await
         .expect(200)
         .json();
     assert!(most.as_array().map(Vec::len).unwrap_or_default() <= 500);
-    main.admin.get("/api/activity?max=many").await.expect(400);
+    main.admin
+        .get("/api/v1/activity?max=many")
+        .await
+        .expect(400);
 
     let id = entries[0]["entity"]["id"]
         .as_str()
@@ -194,7 +197,7 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
         .to_owned();
     let only = main
         .admin
-        .get(&format!("/api/activity?entity={id}&max=500"))
+        .get(&format!("/api/v1/activity?entity={id}&max=500"))
         .await
         .expect(200)
         .json();
@@ -203,7 +206,7 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
     assert!(only.iter().all(|e| e["entity"]["id"] == json!(id)));
     let none = main
         .admin
-        .get("/api/activity?entity=no-such-thing")
+        .get("/api/v1/activity?entity=no-such-thing")
         .await
         .expect(200)
         .json();
@@ -213,7 +216,12 @@ async fn activity_is_newest_first_and_takes_a_max_and_an_entity() {
 #[tokio::test]
 async fn system_info_describes_this_machine_and_its_certificate() {
     let main = Main::get().await;
-    let info = main.admin.get("/api/system/info").await.expect(200).json();
+    let info = main
+        .admin
+        .get("/api/v1/system/info")
+        .await
+        .expect(200)
+        .json();
     shape::fields(
         &info,
         &[
@@ -227,7 +235,7 @@ async fn system_info_describes_this_machine_and_its_certificate() {
             ("os", Kind::Str),
             ("tray", Kind::Bool),
         ],
-        "GET /api/system/info",
+        "GET /api/v1/system/info",
     );
     assert_eq!(info["role"], json!("server"));
     assert_eq!(
@@ -237,10 +245,15 @@ async fn system_info_describes_this_machine_and_its_certificate() {
     );
 
     main.admin
-        .patch("/api/settings", json!({ "role": "client" }))
+        .patch("/api/v1/settings", json!({ "role": "client" }))
         .await
         .expect(202);
-    let as_client = main.admin.get("/api/system/info").await.expect(200).json();
+    let as_client = main
+        .admin
+        .get("/api/v1/system/info")
+        .await
+        .expect(200)
+        .json();
     assert_eq!(as_client["role"], json!("client"));
     assert_eq!(as_client["startedAt"], info["startedAt"]);
 }
@@ -250,12 +263,12 @@ async fn system_checks_say_whether_this_machine_can_share_and_attach() {
     let main = Main::get().await;
     let checks = main
         .admin
-        .get("/api/system/checks")
+        .get("/api/v1/system/checks")
         .await
         .expect(200)
         .json();
     let mut ids = Vec::new();
-    shape::each(&checks, "GET /api/system/checks", |check| {
+    shape::each(&checks, "GET /api/v1/system/checks", |check| {
         shape::fields(
             check,
             &[

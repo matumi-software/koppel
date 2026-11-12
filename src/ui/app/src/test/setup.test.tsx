@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/app';
 import { SetupPage } from '@/setup/setup-page';
-import { accepted, json, mockFetch, renderApp } from './harness';
+import { accepted, invalid, json, mockFetch, renderApp } from './harness';
 import { baseRoutes, settings } from './fixtures';
 
 afterEach(() => {
@@ -13,20 +13,20 @@ afterEach(() => {
 
 describe('setup', () => {
   it('sends the role and setupComplete in one PATCH', async () => {
-    const { calls } = mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => accepted() });
+    const { calls } = mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/v1/settings': () => accepted() });
     renderApp(<SetupPage locked={false} />);
     await screen.findByRole('button', { name: 'Continue' });
 
     await userEvent.click(screen.getByRole('radio', { name: /Client/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
-    const patches = calls.filter((c) => c.key === 'PATCH /api/settings');
+    const patches = calls.filter((c) => c.key === 'PATCH /api/v1/settings');
     expect(patches).toHaveLength(1);
     expect(patches[0].body).toEqual({ role: 'client', setupComplete: true });
   });
 
   it('stays pending until the settings show both the role and setupComplete', async () => {
-    mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => accepted() });
+    mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/v1/settings': () => accepted() });
     const { live } = renderApp(<SetupPage locked={false} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
     await screen.findByRole('button', { name: 'Saving' });
@@ -40,7 +40,7 @@ describe('setup', () => {
 });
 
 describe('first run in the app', () => {
-  const unconfigured = () => mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => accepted() });
+  const unconfigured = () => mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/v1/settings': () => accepted() });
 
   it('stays on the setup page, address untouched, until the server confirms, then lands on the page the role needs', async () => {
     unconfigured();
@@ -69,7 +69,7 @@ describe('first run in the app', () => {
   });
 
   it('does not leave the setup page when the server refuses', async () => {
-    mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => json({ errors: { role: ['No.'] } }, 400) });
+    mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/v1/settings': () => invalid('role', 'No.') });
     renderApp(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
 

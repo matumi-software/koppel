@@ -52,14 +52,14 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
     let mut main = Main::get().await;
     main.admin
         .patch(
-            "/api/settings",
+            "/api/v1/settings",
             json!({ "role": "both", "shareOnStartup": false, "notifyLink": false }),
         )
         .await
         .expect(202);
     let created = main
         .admin
-        .post("/api/server/clients", json!({ "name": "survivor" }))
+        .post("/api/v1/server/clients", json!({ "name": "survivor" }))
         .await
         .expect(201)
         .json();
@@ -68,16 +68,16 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
         .as_str()
         .expect("a secret")
         .to_owned();
-    let settings = main.admin.get("/api/settings").await.expect(200).json();
+    let settings = main.admin.get("/api/v1/settings").await.expect(200).json();
     let identity = main
         .admin
-        .get("/api/server/identity")
+        .get("/api/v1/server/identity")
         .await
         .expect(200)
         .json();
     let clients = main
         .admin
-        .get("/api/server/clients")
+        .get("/api/v1/server/clients")
         .await
         .expect(200)
         .json();
@@ -86,9 +86,9 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
 
     // Sessions are in memory, so a restart signs everyone out; the password is on disk, so signing
     // in again works.
-    main.admin.get("/api/settings").await.expect(401);
+    main.admin.get("/api/v1/settings").await.expect(401);
     let signed_in = main.target.sign_in().await;
-    let settings_after = signed_in.get("/api/settings").await.expect(200).json();
+    let settings_after = signed_in.get("/api/v1/settings").await.expect(200).json();
     assert_eq!(settings_after, settings);
     // The pinned certificate is the one the restarted instance presents.
     assert_eq!(
@@ -97,7 +97,7 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
     );
     assert_eq!(
         signed_in
-            .get("/api/server/identity")
+            .get("/api/v1/server/identity")
             .await
             .expect(200)
             .json(),
@@ -105,7 +105,7 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
     );
     assert_eq!(
         signed_in
-            .get("/api/server/clients")
+            .get("/api/v1/server/clients")
             .await
             .expect(200)
             .json(),
@@ -113,7 +113,7 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
     );
     assert_eq!(
         signed_in
-            .get(&format!("/api/server/clients/{id}/secret"))
+            .get(&format!("/api/v1/server/clients/{id}/secret"))
             .await
             .expect(200)
             .json()["clientSecret"],
@@ -122,7 +122,7 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
     let state = main
         .target
         .anonymous()
-        .get("/api/auth/state")
+        .get("/api/v1/auth/state")
         .await
         .expect(200)
         .json();
@@ -142,7 +142,7 @@ async fn a_clients_connection_survives_a_restart_without_showing_its_secret() {
     let (_, secret) = pair.connect().await;
     let before = pair
         .client_admin
-        .get("/api/client/connection")
+        .get("/api/v1/client/connection")
         .await
         .expect(200)
         .json();
@@ -152,7 +152,7 @@ async fn a_clients_connection_survives_a_restart_without_showing_its_secret() {
 
     let client = pair.client.sign_in().await;
     let after = client
-        .get("/api/client/connection")
+        .get("/api/v1/client/connection")
         .await
         .expect(200)
         .json();
@@ -160,11 +160,15 @@ async fn a_clients_connection_survives_a_restart_without_showing_its_secret() {
     assert!(!after.to_string().contains(&secret), "never the secret");
     // The stored credentials still link the client to the server.
     let linked = eventually("the restarted client to link", WAIT, || async {
-        let devices = client.get("/api/client/devices").await.expect(200).json();
+        let devices = client
+            .get("/api/v1/client/devices")
+            .await
+            .expect(200)
+            .json();
         (devices["link"] == json!("connected")).then_some(devices)
     })
     .await;
-    shape::fields(&linked, shape::CLIENT_DEVICES, "GET /api/client/devices");
+    shape::fields(&linked, shape::CLIENT_DEVICES, "GET /api/v1/client/devices");
 }
 
 #[tokio::test]
@@ -180,7 +184,7 @@ async fn a_hand_edit_of_settings_json_is_applied_pushed_and_a_bad_one_is_kept_ou
     edited["notifyLink"] = json!(false);
     write_json(&path, &edited);
     let applied = eventually("the hand edit to be applied", WAIT, || async {
-        let settings = main.admin.get("/api/settings").await.expect(200).json();
+        let settings = main.admin.get("/api/v1/settings").await.expect(200).json();
         (settings["shareOnStartup"] == json!(false)).then_some(settings)
     })
     .await;
@@ -194,10 +198,10 @@ async fn a_hand_edit_of_settings_json_is_applied_pushed_and_a_bad_one_is_kept_ou
 
     // A change from the UI does not undo it.
     main.admin
-        .patch("/api/settings", json!({ "notifyPairing": false }))
+        .patch("/api/v1/settings", json!({ "notifyPairing": false }))
         .await
         .expect(202);
-    let settings = main.admin.get("/api/settings").await.expect(200).json();
+    let settings = main.admin.get("/api/v1/settings").await.expect(200).json();
     assert_eq!(settings["shareOnStartup"], json!(false));
     assert_eq!(settings["notifyPairing"], json!(false));
 
@@ -206,7 +210,7 @@ async fn a_hand_edit_of_settings_json_is_applied_pushed_and_a_bad_one_is_kept_ou
     let problem = eventually("the bad edit to be reported", WAIT, || async {
         let checks = main
             .admin
-            .get("/api/system/checks")
+            .get("/api/v1/system/checks")
             .await
             .expect(200)
             .json();
@@ -221,7 +225,7 @@ async fn a_hand_edit_of_settings_json_is_applied_pushed_and_a_bad_one_is_kept_ou
         !problem["detail"].as_str().unwrap_or_default().is_empty(),
         "a reason: {problem}"
     );
-    let kept = main.admin.get("/api/settings").await.expect(200).json();
+    let kept = main.admin.get("/api/v1/settings").await.expect(200).json();
     assert_eq!(kept, settings, "the last good value stays");
 
     // Fixing it clears the report.
@@ -232,7 +236,7 @@ async fn a_hand_edit_of_settings_json_is_applied_pushed_and_a_bad_one_is_kept_ou
     eventually("the report to clear", WAIT, || async {
         let checks = main
             .admin
-            .get("/api/system/checks")
+            .get("/api/v1/system/checks")
             .await
             .expect(200)
             .json();
@@ -250,7 +254,7 @@ async fn a_hand_edit_of_settings_json_is_applied_pushed_and_a_bad_one_is_kept_ou
 async fn without_its_keys_koppel_says_which_file_it_cannot_read_and_changes_nothing() {
     let mut main = Main::get().await;
     main.admin
-        .patch("/api/settings", json!({ "shareOnStartup": false }))
+        .patch("/api/v1/settings", json!({ "shareOnStartup": false }))
         .await
         .expect(202);
     main.instance.stop();
@@ -291,7 +295,7 @@ async fn without_its_keys_koppel_says_which_file_it_cannot_read_and_changes_noth
         .await
         .unwrap_or_else(|f| panic!("Koppel did not start with its keys back:\n{}", f.log));
     let admin = main.target.sign_in().await;
-    let settings = admin.get("/api/settings").await.expect(200).json();
+    let settings = admin.get("/api/v1/settings").await.expect(200).json();
     assert_eq!(settings["shareOnStartup"], json!(false));
 }
 
@@ -301,7 +305,7 @@ async fn a_new_install_makes_its_files_and_a_new_password_is_set_within_the_wind
     let state = instance
         .target
         .anonymous()
-        .get("/api/auth/state")
+        .get("/api/v1/auth/state")
         .await
         .expect(200)
         .json();
@@ -347,7 +351,7 @@ mod permissions {
         let main = Main::get().await;
         // Change something so every file has been written at least once while running.
         main.admin
-            .patch("/api/settings", json!({ "shareOnStartup": false }))
+            .patch("/api/v1/settings", json!({ "shareOnStartup": false }))
             .await
             .expect(202);
         let config = main.instance.config_dir();
@@ -435,7 +439,7 @@ async fn the_session_key_an_older_version_wrote_is_deleted_at_start() {
     main.target
         .sign_in()
         .await
-        .get("/api/settings")
+        .get("/api/v1/settings")
         .await
         .expect(200);
     assert!(!key.exists());

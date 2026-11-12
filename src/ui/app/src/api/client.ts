@@ -3,13 +3,13 @@ import type { ConnectionTest, ConnectionUpdate, ConnectionView } from './generat
 
 export type { ConnectionTest, ConnectionUpdate, ConnectionView, Outcome } from './generated/wire';
 
-export const getConnection = () => getJson<ConnectionView>('/api/client/connection');
+export const getConnection = () => getJson<ConnectionView>('/api/v1/client/connection');
 
 /** `clientSecret` empty keeps the stored secret. */
-export const putConnection = (update: ConnectionUpdate) => sendChange('/api/client/connection', 'PUT', update);
+export const putConnection = (update: ConnectionUpdate) => sendChange('/api/v1/client/connection', 'PUT', update);
 
 export async function testConnection(): Promise<ConnectionTest> {
-  const response = await uiFetch('/api/client/connection/test', { method: 'POST' });
+  const response = await uiFetch('/api/v1/client/connection/test', { method: 'POST' });
   if (!response.ok) {
     return { ok: false, outcome: 'unexpectedAnswer', message: `The test failed (${response.status}).` };
   }

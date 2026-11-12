@@ -1,0 +1,7 @@
+{
+  "type": "about:blank",
+  "title": "Conflict",
+  "status": 409,
+  "code": "secret_not_kept",
+  "detail": "This client was added before secrets were kept. Rotate the secret to get one you can copy."
+}

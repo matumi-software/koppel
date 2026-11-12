@@ -15,7 +15,7 @@ use crate::host::Host;
 use crate::push::Push;
 use crate::roles::{SkakelClientRole, SkakelServerRole, UsbClientRole, UsbServerRole};
 
-/// `/api/auth/*`: sign-in and the password.
+/// `/api/v1/auth/*`: sign-in and the password.
 #[derive(Clone)]
 pub(crate) struct AuthApi {
     pub auth: Arc<UiAuth>,
@@ -23,7 +23,7 @@ pub(crate) struct AuthApi {
     pub host: Host,
 }
 
-/// `/api/settings`, `/api/activity` and `/api/system/*`.
+/// `/api/v1/settings`, `/api/v1/activity` and `/api/v1/system/*`.
 #[derive(Clone)]
 pub(crate) struct SettingsApi {
     pub settings: ConfigFile<KoppelSettings>,
@@ -34,7 +34,7 @@ pub(crate) struct SettingsApi {
     pub usb_client: Arc<UsbClientRole>,
 }
 
-/// `/api/server/*`.
+/// `/api/v1/server/*`.
 #[derive(Clone)]
 pub(crate) struct ServerApi {
     pub server: Arc<SkakelServerRole>,
@@ -43,7 +43,7 @@ pub(crate) struct ServerApi {
     pub host: Host,
 }
 
-/// `/api/client/*`.
+/// `/api/v1/client/*`.
 #[derive(Clone)]
 pub(crate) struct ClientApi {
     pub client: Arc<SkakelClientRole>,
@@ -51,7 +51,7 @@ pub(crate) struct ClientApi {
     pub usb_client: Arc<UsbClientRole>,
 }
 
-/// `/api/events`.
+/// `/api/v1/events`.
 #[derive(Clone)]
 pub(crate) struct PushApi {
     pub push: Push,

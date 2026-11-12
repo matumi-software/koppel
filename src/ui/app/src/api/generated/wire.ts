@@ -34,6 +34,8 @@ gateway: boolean,
  */
 gatewayFault: string | null, };
 
+export type ClientSecret = { clientSecret: string, };
+
 export type ClientView = { id: string, name: string, createdAt: string, lastSeen: string | null, 
 /**
  * It has the fingerprint of the certificate prepared for a handover.
@@ -118,6 +120,24 @@ alwaysOpen: boolean,
  * When the window closes by itself. `None` when it is closed.
  */
 until: string | null, };
+
+export type Problem = { 
+/**
+ * `about:blank`: the status says it all.
+ */
+type: string, title: string, status: number, 
+/**
+ * A stable word to branch on, such as `validation` or `wrong_password`.
+ */
+code: string, 
+/**
+ * A sentence the UI shows as it is.
+ */
+detail: string, 
+/**
+ * A validation problem: each field with its messages.
+ */
+errors?: Record<string, Array<string>>, };
 
 export type RequestState = "waiting" | "denied";
 

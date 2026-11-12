@@ -19,7 +19,7 @@ describe('the open page', () => {
 
   it('is not redirected before the settings have loaded', async () => {
     const pending = deferred<Response>();
-    mockFetch({ ...baseRoutes, 'GET /api/settings': () => pending.promise });
+    mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => pending.promise });
     renderApp(<App />);
     await act(async () => {});
 
@@ -78,7 +78,7 @@ describe('the status card', () => {
     await waitFor(() => expect(within(card()).getByText('v1.0.0')).toBeTruthy());
     expect(within(card()).getByText('bench-pc')).toBeTruthy();
     expect(within(card()).getByText('Live')).toBeTruthy();
-    expect(count('GET /api/system/info')).toBe(1);
+    expect(count('GET /api/v1/system/info')).toBe(1);
   });
 
   it('says changes are paused while the link reconnects', async () => {
@@ -111,8 +111,8 @@ describe('the status card', () => {
   ] as const)('tells a client whose server link is %s what it is linked to', async (link, text) => {
     mockFetch({
       ...baseRoutes,
-      'GET /api/settings': () => json({ ...settings, role: 'client' }),
-      'GET /api/client/devices': () => json({ link, linkMessage: null, devices: [], unavailable: null, gateway: false }),
+      'GET /api/v1/settings': () => json({ ...settings, role: 'client' }),
+      'GET /api/v1/client/devices': () => json({ link, linkMessage: null, devices: [], unavailable: null, gateway: false }),
     });
     renderApp(<App />);
 

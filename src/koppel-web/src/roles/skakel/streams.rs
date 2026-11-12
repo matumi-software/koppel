@@ -4,7 +4,9 @@
 //! followed by the device's traffic. It takes no target and has no control messages.
 //!
 //! Each end is a byte pipe in memory with a task that moves the bytes to and from the stream's
-//! frames, so the USB layer reads and writes with tokio's traits and needs nothing of Skakel.
+//! frames, so the USB layer reads and writes with tokio's traits and needs nothing of Skakel. A
+//! frame is `Bytes` from the pipe to Skakel and from Skakel to the pipe, and the only copy left is
+//! the one into and out of the pipe itself.
 
 use std::io;
 use std::pin::Pin;
@@ -12,6 +14,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
+use bytes::{Bytes, BytesMut};
 use koppel_usb::{BoxFuture, CloseReason, DeviceStream, OpenError, RemoteClient, UsbDataPlane};
 use skakel_client::{Frame, Link, OpenResult, StreamConnection};
 use skakel_server::{
@@ -77,9 +80,9 @@ pub(crate) async fn open_usb(
 /// One end of a stream, as frames.
 trait Frames: Send + Sync + 'static {
     /// Sends data. False once the stream is over.
-    fn send(&self, data: Vec<u8>) -> BoxFuture<'_, bool>;
+    fn send(&self, data: Bytes) -> BoxFuture<'_, bool>;
     /// The next data, or `None` once the other end closed or the stream is over.
-    fn next(&self) -> BoxFuture<'_, Option<Vec<u8>>>;
+    fn next(&self) -> BoxFuture<'_, Option<Bytes>>;
     /// Ends the stream, after what was sent before.
     fn finish(&self, reason: CloseReason) -> BoxFuture<'_, ()>;
 }
@@ -99,16 +102,16 @@ impl ServerEnd {
 }
 
 impl Frames for ServerEnd {
-    fn send(&self, data: Vec<u8>) -> BoxFuture<'_, bool> {
+    fn send(&self, data: Bytes) -> BoxFuture<'_, bool> {
         Box::pin(async move { self.writer.send_data(data).await.is_ok() })
     }
 
-    fn next(&self) -> BoxFuture<'_, Option<Vec<u8>>> {
+    fn next(&self) -> BoxFuture<'_, Option<Bytes>> {
         Box::pin(async move {
             let mut session = self.session.lock().await;
             loop {
                 match session.recv().await? {
-                    StreamMessage::Data(data) => return Some(data.to_vec()),
+                    StreamMessage::Data(data) => return Some(data),
                     StreamMessage::Control(_) => {}
                 }
             }
@@ -133,17 +136,17 @@ impl Frames for ServerEnd {
 struct ClientEnd(Arc<StreamConnection>);
 
 impl Frames for ClientEnd {
-    fn send(&self, data: Vec<u8>) -> BoxFuture<'_, bool> {
+    fn send(&self, data: Bytes) -> BoxFuture<'_, bool> {
         Box::pin(async move { self.0.send_data(data).await.is_ok() })
     }
 
-    fn next(&self) -> BoxFuture<'_, Option<Vec<u8>>> {
+    fn next(&self) -> BoxFuture<'_, Option<Bytes>> {
         Box::pin(async move {
             loop {
                 // Koppel's stream has no control messages, and a frame a later Skakel adds is not
                 // for it either.
                 if let Frame::Data(data) = self.0.recv().await? {
-                    return Some(data.to_vec());
+                    return Some(data);
                 }
             }
         })
@@ -202,12 +205,20 @@ async fn pump(
             let _ = to_usb.shutdown().await;
         })
     };
-    let mut buffer = vec![0u8; CHUNK];
+    // Each frame is a slice of this buffer handed on as it is: nothing is copied between the read
+    // and the send. `reserve` starts a new allocation only when the frames sent so far, which share
+    // the old one, leave less than a chunk of room, so small reads (USB/IP headers) share one too.
+    let mut buffer = BytesMut::new();
     loop {
-        match from_usb.read(&mut buffer).await {
+        buffer.reserve(CHUNK);
+        match (&mut from_usb)
+            .take(CHUNK as u64)
+            .read_buf(&mut buffer)
+            .await
+        {
             Ok(0) | Err(_) => break,
-            Ok(read) => {
-                if !frames.send(buffer[..read].to_vec()).await {
+            Ok(_) => {
+                if !frames.send(buffer.split().freeze()).await {
                     break;
                 }
             }
@@ -261,5 +272,94 @@ impl AsyncWrite for Bridged {
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(self.io()).poll_shutdown(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    /// Two ends of a stream joined by channels, each end's `send` arriving at the other's `next`.
+    struct Wire {
+        out: mpsc::UnboundedSender<Bytes>,
+        incoming: Mutex<mpsc::UnboundedReceiver<Bytes>>,
+    }
+
+    fn wire() -> (Wire, Wire) {
+        let (a_out, b_in) = mpsc::unbounded_channel();
+        let (b_out, a_in) = mpsc::unbounded_channel();
+        (
+            Wire {
+                out: a_out,
+                incoming: Mutex::new(a_in),
+            },
+            Wire {
+                out: b_out,
+                incoming: Mutex::new(b_in),
+            },
+        )
+    }
+
+    impl Frames for Wire {
+        fn send(&self, data: Bytes) -> BoxFuture<'_, bool> {
+            Box::pin(async move {
+                assert!(data.len() <= CHUNK, "a frame of {} bytes", data.len());
+                self.out.send(data).is_ok()
+            })
+        }
+
+        fn next(&self) -> BoxFuture<'_, Option<Bytes>> {
+            Box::pin(async move { self.incoming.lock().await.recv().await })
+        }
+
+        fn finish(&self, _reason: CloseReason) -> BoxFuture<'_, ()> {
+            Box::pin(async {})
+        }
+    }
+
+    /// Bytes written at one end come out of the other unchanged and in order, whether they were
+    /// written a few at a time or many chunks at once.
+    #[tokio::test]
+    async fn bytes_cross_a_stream_intact_in_frames_no_larger_than_a_chunk() {
+        let tasks = Tasks::new();
+        let (left, right) = wire();
+        let mut a = Bridged::start(left, &tasks);
+        let mut b = Bridged::start(right, &tasks);
+
+        let mut sent = Vec::new();
+        for size in [
+            1usize,
+            48,
+            300,
+            CHUNK - 1,
+            CHUNK,
+            CHUNK + 1,
+            3 * CHUNK + 7,
+            5,
+        ] {
+            let piece: Vec<u8> = (0..size).map(|i| (i * 31 + size) as u8).collect();
+            sent.extend_from_slice(&piece);
+            a.write_all(&piece).await.unwrap();
+        }
+        a.flush().await.unwrap();
+
+        let mut got = vec![0u8; sent.len()];
+        b.read_exact(&mut got).await.unwrap();
+        assert!(
+            got == sent,
+            "the bytes that came out differ from the bytes that went in"
+        );
+
+        // And the other way, then the close reaches the far end as the end of the stream.
+        b.write_all(b"back again").await.unwrap();
+        let mut back = [0u8; 10];
+        a.read_exact(&mut back).await.unwrap();
+        assert_eq!(&back, b"back again");
+        Box::new(a).close(CloseReason::Done).await;
+        let mut rest = Vec::new();
+        b.read_to_end(&mut rest).await.unwrap();
+        assert!(rest.is_empty());
+        Box::new(b).close(CloseReason::Done).await;
     }
 }

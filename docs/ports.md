@@ -28,7 +28,7 @@ window on the server's Clients page (`PUT /api/v1/server/pairing/window` on the 
 
 | Port | Surface | Serves | Role |
 |---|---|---|---|
-| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | The UI (single page app), `/api/v1/auth/*`, `/api/v1/settings`, `/api/v1/system/*`, `/api/v1/activity`, the live push (`/api/v1/events`), `/healthz`, `/readyz` | Any |
+| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | The UI (single page app), `/api/v1/auth/*`, `/api/v1/settings`, `/api/v1/system/*`, `/api/v1/activity`, the live push (`/api/v1/events`, which opens with the current state of each resource the role has), `/healthz`, `/readyz` | Any |
 | 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/v1/server/*` | Server or both |
 | 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/v1/client/*` | Client or both |
 | 5240 HTTPS (`KOPPEL_NETWORK_PORT`) | Network | Skakel under `/skakel`: info, pairing, tokens and hello. Skakel's and Koppel's gRPC calls: the control call, the remote device list and USB traffic. Koppel's own `/api/remote/*` behind a client's token | Server or both |

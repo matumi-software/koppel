@@ -36,7 +36,7 @@ use crate::state::PushApi;
 /// one payload type and a call cannot send a payload under the wrong name.
 #[derive(Serialize)]
 #[serde(untagged)]
-pub enum Event<'a> {
+pub(crate) enum Event<'a> {
     /// `settings.json` was written: the settings.
     SettingsChanged(&'a KoppelSettings),
     /// Server: the registered clients changed.
@@ -61,7 +61,7 @@ pub enum Event<'a> {
 
 impl Event<'_> {
     /// The name the event goes out under, as 0.1.x's SignalR hub called it.
-    pub fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::SettingsChanged(_) => "SettingsChanged",
             Self::ClientsChanged(_) => "ClientsChanged",
@@ -112,7 +112,7 @@ impl Push {
 
     /// Sends `event` to every open stream. Call it after the change is written. Nothing is written
     /// as JSON while no stream is open.
-    pub fn send(&self, event: Event<'_>) {
+    pub(crate) fn send(&self, event: Event<'_>) {
         if self.events.receiver_count() == 0 {
             return;
         }

@@ -22,7 +22,14 @@ services:
     volumes:
       - koppel:/koppel
     user: "0"
+    # Always, not unless-stopped: Koppel comes back after a crash and after the machine restarts.
     restart: always
+    # Docker's default json-file log has no size limit, so a busy or looping Koppel fills the disk. 30 MB at most.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   koppel:

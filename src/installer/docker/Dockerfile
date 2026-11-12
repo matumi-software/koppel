@@ -209,8 +209,8 @@ ENV KOPPEL_KEYS_DIR=/koppel/keys
 
 # GET /healthz on the UI port, asked at KOPPEL_LISTEN_ADDRESS and KOPPEL_UI_PORT and then at 127.0.0.1 (koppel/src/
 # healthcheck.rs), as 0.1.x's image did. It is Koppel itself because the image has no shell or curl. Plain
-# Docker only reports "unhealthy": it does not restart the container (restart: unless-stopped acts on exits, not
-# on health). Swarm and Kubernetes act on it; with plain Docker, something has to watch it, for example an
+# Docker only reports "unhealthy": it does not restart the container (the composes' restart: always acts on exits,
+# not on health). Swarm and Kubernetes act on it; with plain Docker, something has to watch it, for example an
 # autoheal container, or `docker ps --filter health=unhealthy`.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD ["/usr/local/bin/koppel", "healthcheck"]

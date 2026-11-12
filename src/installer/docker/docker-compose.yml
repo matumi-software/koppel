@@ -24,7 +24,14 @@ services:
     # in a privileged container. Attached devices appear on this machine's kernel.
     user: "0"
     privileged: true
+    # Always, not unless-stopped: Koppel comes back after a crash and after the machine restarts.
     restart: always
+    # Docker's default json-file log has no size limit, so a busy or looping Koppel fills the disk. 30 MB at most.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Deprecated: Koppel 0.2.0 drops Paths__KeyCertificate, and an install that uses it pairs again after that
     # upgrade. Do not start using it.
     # To encrypt the key ring at rest, keep a PFX (no password) outside the koppel volume, mode 0600, and

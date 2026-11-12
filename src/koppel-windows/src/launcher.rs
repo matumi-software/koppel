@@ -15,6 +15,7 @@ use std::fs::File;
 use std::io::Write;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use koppel_web::tray::TrayFeed;
@@ -48,6 +49,10 @@ const BACKOFF: Duration = Duration::from_secs(60);
 const EXIT_WAIT: Duration = Duration::from_secs(3);
 /// Room for many messages, so a tray that is slow to read rarely holds up the launcher.
 const PIPE_BUFFER: u32 = 64 * 1024;
+/// Lines waiting for a tray's writer thread. A tray that is stuck reading fills it, and further
+/// lines are dropped (a state is sent again on the next round, and a notice for a stuck tray is of
+/// no use) instead of holding up the launcher.
+const QUEUE: usize = 32;
 
 /// The tray program's names next to Koppel.exe: as installed, and as Cargo builds it.
 const DESKTOP_NAMES: [&str; 2] = ["KoppelDesktop.exe", "koppel-desktop.exe"];
@@ -245,7 +250,9 @@ fn user_token(session: u32) -> windows::core::Result<OwnedHandle> {
 /// One running tray and the write end of its pipe.
 pub struct TrayProcess {
     process: OwnedHandle,
-    pipe: Option<File>,
+    /// Lines for the writer thread, which owns the write end of the pipe. Dropping this ends the
+    /// thread, which closes the pipe.
+    lines: Option<SyncSender<String>>,
     started: Instant,
     /// The state line this tray was last sent, so a state is sent once and not every round.
     sent: Option<String>,
@@ -298,7 +305,7 @@ impl TrayProcess {
                 if token.is_some() {
                     startup.StartupInfo.lpDesktop = PWSTR(desktop.as_mut_ptr());
                 }
-                let mut command: Vec<u16> = format!("\"{}\" --tray {ui_url}\0", exe.display())
+                let mut command: Vec<u16> = format!("\"{}\" --tray \"{ui_url}\"\0", exe.display())
                     .encode_utf16()
                     .collect();
                 let application: Vec<u16> = wide(exe.as_os_str());
@@ -340,7 +347,7 @@ impl TrayProcess {
                 let _ = CloseHandle(process.hThread);
                 Ok(Self {
                     process: OwnedHandle::from_raw_handle(process.hProcess.0),
-                    pipe: Some(File::from(write)),
+                    lines: Some(spawn_writer(File::from(write))),
                     started: Instant::now(),
                     sent: None,
                 })
@@ -360,28 +367,35 @@ impl TrayProcess {
         result
     }
 
-    /// Sends a line. A state is skipped when it is the one last sent; a notice (`always`) never is.
-    /// A tray that has gone is noticed on the next round.
+    /// Queues a line for the tray. A state is skipped when it is the one last sent; a notice
+    /// (`always`) never is. The pipe is written on a thread of its own, so a tray that does not read
+    /// cannot block the launcher; when its queue is full the line is dropped. A tray that has gone is
+    /// noticed on the next round.
     pub fn send(&mut self, line: &str, always: bool) {
         if !always && self.sent.as_deref() == Some(line) {
             return;
         }
-        let Some(pipe) = self.pipe.as_mut() else {
+        let Some(lines) = self.lines.as_ref() else {
             return;
         };
-        if pipe
-            .write_all(format!("{line}\n").as_bytes())
-            .and_then(|()| pipe.flush())
-            .is_ok()
-            && !always
-        {
-            self.sent = Some(line.to_owned());
+        match lines.try_send(format!("{line}
+")) {
+            Ok(()) => {
+                if !always {
+                    self.sent = Some(line.to_owned());
+                }
+            }
+            Err(TrySendError::Full(_)) => {
+                tracing::debug!("A tray icon is not reading its pipe; a line was dropped");
+            }
+            Err(TrySendError::Disconnected(_)) => self.lines = None,
         }
     }
 
-    /// Closes the pipe, which tells the tray to remove its icon and exit.
+    /// Closes the pipe, which tells the tray to remove its icon and exit. Lines already queued are
+    /// written first.
     pub fn close_pipe(&mut self) {
-        self.pipe = None;
+        self.lines = None;
     }
 
     pub fn has_exited(&self) -> bool {
@@ -406,6 +420,25 @@ impl TrayProcess {
         // SAFETY: the handle is ours.
         let _ = unsafe { TerminateProcess(HANDLE(self.process.as_raw_handle()), 1) };
     }
+}
+
+/// Starts the thread that writes queued lines to a tray's pipe, and ends, closing the pipe, when the
+/// last sender is dropped or a write fails (the tray has gone).
+fn spawn_writer(mut pipe: File) -> SyncSender<String> {
+    let (lines, queue) = mpsc::sync_channel::<String>(QUEUE);
+    let spawned = std::thread::Builder::new()
+        .name("Koppel tray pipe".into())
+        .spawn(move || {
+            for line in queue {
+                if pipe.write_all(line.as_bytes()).is_err() {
+                    break;
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!("Could not start the thread that writes to a tray icon: {e}");
+    }
+    lines
 }
 
 /// An anonymous pipe: the read end inheritable, for the tray, the write end not.

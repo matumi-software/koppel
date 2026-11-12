@@ -7,8 +7,9 @@
 //!   would land on its target. A process that is not elevated cannot give the owner away and would
 //!   lock itself out, so it also gets full control and the owner is left alone: that is a developer
 //!   at a console, while the service runs as LocalSystem.
-//! - **Elsewhere:** `chmod 700`. A directory that cannot be changed, such as a bind mount owned by
-//!   someone else, is an error.
+//! - **Elsewhere:** a symbolic link is refused as on Windows, and so is a directory owned by
+//!   anyone but the user Koppel runs as, since its owner could swap what is in it. Then `chmod 700`.
+//!   A directory that cannot be changed, such as a bind mount owned by someone else, is an error.
 
 use std::io;
 use std::path::Path;
@@ -21,9 +22,30 @@ pub fn harden_directory(directory: &Path) -> io::Result<()> {
     }
     #[cfg(not(windows))]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
+        harden_unix(directory)
     }
+}
+
+#[cfg(not(windows))]
+fn harden_unix(directory: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let metadata = std::fs::symlink_metadata(directory)?;
+    if metadata.file_type().is_symlink() {
+        return Err(io::Error::other(format!(
+            "{} is a symbolic link. Koppel will not keep its files behind a link: point Paths:Config and Paths:Keys at a real directory.",
+            directory.display()
+        )));
+    }
+    // SAFETY: geteuid takes no arguments and cannot fail.
+    let user = unsafe { libc::geteuid() };
+    if metadata.uid() != user {
+        return Err(io::Error::other(format!(
+            "{} belongs to user {}, not to user {user}, which Koppel runs as. Its owner could swap what is in it: give it to the user Koppel runs as.",
+            directory.display(),
+            metadata.uid()
+        )));
+    }
+    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
 }
 
 #[cfg(windows)]
@@ -227,6 +249,39 @@ mod tests {
             std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
             0o700
         );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_is_refused() {
+        let dir = temp_dir("symlink");
+        let target = dir.join("target");
+        std::fs::create_dir(&target).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let refused = harden_directory(&link).unwrap_err();
+        assert!(refused.to_string().contains("symbolic link"), "{refused}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Needs root to give a directory away, which the test container is.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_owned_by_someone_else_is_refused() {
+        // SAFETY: geteuid takes no arguments and cannot fail.
+        if unsafe { libc::geteuid() } != 0 {
+            return;
+        }
+        let dir = temp_dir("owner");
+        std::os::unix::fs::chown(&dir, Some(12345), None).unwrap();
+        let refused = harden_directory(&dir).unwrap_err();
+        assert!(
+            refused.to_string().contains("belongs to user 12345"),
+            "{refused}"
+        );
+        std::os::unix::fs::chown(&dir, Some(0), None).unwrap();
+        harden_directory(&dir).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 

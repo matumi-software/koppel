@@ -119,7 +119,8 @@ windows-service = "0.8.1"
 winresource = "0.1.34"
 
 # The USB layer (koppel-usb). libc (MIT OR Apache-2.0), already here through tokio, for the one
-# ioctl sysfs cannot do: resetting a USB device through its usbfs node on Linux.
+# ioctl sysfs cannot do: resetting a USB device through its usbfs node on Linux. koppel-config takes
+# it too, for `geteuid`, to check who owns the config and keys directories.
 libc = "0.2.191"
 
 # The transport between Koppel machines: Skakel 0.2.1 (MIT), protocol version 2 over gRPC, from its

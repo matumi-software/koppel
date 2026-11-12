@@ -17,8 +17,12 @@ How a file is read and written:
 - **Two plain files start with defaults instead.** `devices.json` and `attached.json` are not critical and their defaults are safe (nothing shared, nothing remembered), so a corrupt one does not stop Koppel. It starts empty in memory, the file is left untouched, and `GET /api/system/checks` shows a `devices` or `attached` entry ("devices.json was not used.") with the reason. The first change made while the file is bad (sharing a device, attaching one) moves it aside as `<name>.unreadable-<UTC timestamp>`, logs a warning, and writes a fresh file; fixing the file by hand instead clears the entry. `settings.json` and the encrypted files still refuse to start: defaults would put a machine back in the Server role, or lose keys and credentials.
 - **Hand edits are validated** the same way a REST change is, including the port rules. While Koppel runs, a bad edit is ignored: the last good value stays, a warning is logged, and `GET /api/system/checks` shows a `settings` entry, "settings.json was not applied", with the reason. A later valid edit clears it. A REST change made over a bad hand edit replaces the bad file with the last good value plus the change.
 - **A valid hand edit** is loaded before the next change, so a change from the UI never overwrites it.
-- **Pushes are ordered.** A change reaches subscribers in write order, one change at a time, even when several writes are in flight. A handler may update the same file: the nested change is written and applied at once, its delivery is queued behind the running one and anything already waiting, so every subscriber sees the same order, and the nested call returns without waiting for that delivery (it would wait for itself).
-- **Writes** go to a random temp name, are flushed, and replace the file; a failed write removes its temp file, the replace is retried on a sharing error, and stale temp files are swept at start.
+- **Pushes are ordered.** A change reaches subscribers in write order, one change at a time, even when several writes are in flight. A handler may update the same file: the nested change is written and applied at once, its delivery is queued behind the running one and anything already waiting, so every subscriber sees the same order, and the nested call returns without waiting for that delivery (it would wait for itself). A handler that changes the file from another task and waits for it is not seen as nested, so that call gives up waiting for the delivery after 15 seconds and returns; its change is on disk by then.
+- **Writes** go to a random temp name (mode `0600` on Linux), are flushed, and replace the file, and then the directory is flushed too, so a power cut cannot bring the old file back after the change was acknowledged. A failed write removes its temp file, the replace is retried on a sharing error, and stale temp files are swept at start. Windows has no directory flush; NTFS journals its metadata.
+- **Own writes are told from edits by content.** After a write the file's size and time are taken from the temp file before it is moved, and a SHA-256 of the bytes is kept. A file whose size or time differs is read and hashed, and one with the same hash is our own write. A file written in the last three seconds is hashed on every poll, so an edit that keeps the size and a coarse file system time (`"server"` and `"client"` are both six letters) is still seen. No plaintext copy of a file is kept to compare with.
+- **Limits and versions:** a config file over 8 MiB is refused without being read whole. Every file carries `"version": 1` after its fields, which 0.1.x ignores. A file with a newer version stops start-up (or is not applied, for a hand edit) and is left as it was, as a secret file with a newer format is. Names in a hand-edited file that Koppel does not know are logged at start and on each edit: they are ignored and are gone after the next change Koppel writes. A file without `version` is read as version 1.
+- **Errors have kinds** (`ConfigErrorKind`: `Io`, `Decrypt`, `Parse`, `Invalid`, `Newer`), and the advice is composed from the kind: only a file that did not decrypt is told to restore the keys directory, and a full disk is not.
+- **`shareOnStartup` has one default, true,** for a new install and for a hand-edited `settings.json` that leaves it out. 0.1.x read a missing one as false.
 - **Enums are names only:** a number where a name is expected (`"role": 1`) is refused.
 
 The encrypted files are sealed with a key in a separate keys directory (`Paths:Keys`): machine DPAPI on
@@ -30,7 +34,7 @@ and goes in 0.2.0, which cannot read a key ring protected with it.
 Data folder hardening. Before anything is written, Koppel restricts the config and keys directories:
 
 - **Windows:** the owner becomes Administrators and the ACL is protected (no inherited access) with full control for SYSTEM and Administrators only. A directory that is a junction or a symbolic link is refused. A process that is not elevated, such as a developer running from a console, cannot take ownership, so it also keeps its own access.
-- **Linux:** `chmod 700`. A bind-mounted config directory that the process cannot chmod makes start-up fail.
+- **Linux:** a symbolic link is refused, as on Windows, and so is a directory owned by anyone but the user Koppel runs as (its owner could swap what is in it). Then `chmod 700`. A bind-mounted config directory that the process cannot chmod makes start-up fail.
 
 Where the config directory is:
 
@@ -65,12 +69,15 @@ with the same rules.
   through Docker bind mounts, where file change events may not arrive.
 - **Hardening:** as 0.1.x on Windows (owner Administrators, a protected ACL for SYSTEM and
   Administrators, an unelevated process keeping its own access, links refused, `%ProgramData%\Koppel`
-  itself when the folders are in it) and `chmod 700` on Linux.
+  itself when the folders are in it), and on Linux a link refused, the owner checked and `chmod 700`.
 - **Session key:** `ui-session.key` in the keys directory, sealed the same way, signs the UI's session cookies (see ["The UI's server side in Rust"](ui.md#the-uis-server-side-in-rust)).
 - **Secret files:** a six byte header, `KPSF`, a format version (1) and a scheme. Scheme 1, on Windows,
   is machine DPAPI over the JSON. Scheme 2, elsewhere, is AES-256-GCM with a random key in
   `koppel-secrets.key` in the keys directory, mode `0600`; the file then holds that key's id and a
-  nonce before the ciphertext. Data Protection's key ring is no longer used. As before, anyone who can
+  nonce before the ciphertext. The key file is made through a temp file and a hard link, so it never
+  exists half written; on a file system without hard links (some network, FUSE and Docker bind
+  mounts) it is made in place with `create_new`, and a start that meets it mid-write waits for it.
+  Two Koppels starting together end up with one key either way. Data Protection's key ring is no longer used. As before, anyone who can
   read the keys directory on Linux can decrypt the files.
 - **The upgrade from 0.1.x:** at the first start, each of `secrets.json`, `connection.json` and
   `ui-auth.json` that is still a Data Protection payload is decrypted with the 0.1.x key ring (machine

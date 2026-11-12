@@ -83,8 +83,9 @@ pub struct KoppelSettings {
     /// A missing role is the enum's first value, as .NET reads it.
     #[serde(default)]
     pub role: Role,
-    /// Share the devices that were shared before a restart. Missing reads as false, as in .NET.
-    #[serde(default)]
+    /// Share the devices that were shared before a restart. Missing reads as true, the same as a
+    /// new install writes. 0.1.x read a missing value as false.
+    #[serde(default = "yes")]
     pub share_on_startup: bool,
     /// False until the first-run setup in the UI is finished.
     #[serde(default)]
@@ -526,13 +527,14 @@ mod tests {
             empty,
             KoppelSettings {
                 role: Role::Server,
-                share_on_startup: false,
+                share_on_startup: true,
                 setup_complete: false,
                 notify_pairing: true,
                 notify_link: true,
                 notify_attach_failures: true
             }
         );
+        assert_eq!(empty, KoppelSettings::default());
     }
 
     #[test]

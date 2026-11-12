@@ -9,7 +9,7 @@ connection arrived on, never the `Host` header. A request for a surface that is 
 that this machine's current role does not have, gets 404. Plain HTTP on a web port gets a 301 to the
 same host, port and path over HTTPS, answered before TLS from the first byte of the connection
 (`koppel-web/src/redirect.rs`); it never reaches the app. The role is read from the settings on every request, so a role change takes effect at once.
-The table is `LISTED` in `koppel-web/src/surface.rs`; a path not listed counts as the UI's,
+A request's surface comes from its path and the port it came in on, never from a header: a request that says it is gRPC (any `application/grpc+...` content type) is the UI's when its path is, and gets the UI's guards. A gRPC call is told by its path, `/<package>.<Service>/<Method>` with a package under `skakel.` or Koppel's `koppel.remote.v1.RemoteDevices` (`is_grpc_path`). The table is `LISTED` in `koppel-web/src/surface.rs`; a path not listed counts as the UI's,
 so a new route is never exposed to remote clients by accident. Everything Skakel maps is under `/skakel`,
 which is on the network surface. Pairing there works only while a person has opened the pairing
 window on the server's Clients page (`POST /api/server/pairing/window` on the UI surface, see

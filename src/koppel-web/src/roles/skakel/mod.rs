@@ -18,20 +18,8 @@ mod server;
 mod store;
 mod streams;
 
-use axum::extract::Request;
-use axum::http::header::CONTENT_TYPE;
-
 pub use client::SkakelClientRole;
 pub(crate) use links::SkakelLinks;
 pub use server::SkakelServerRole;
 pub(crate) use server::{APP_ID, ServerParts};
 pub(crate) use store::SecretsStore;
-
-/// True for a request that is Skakel's: a gRPC call, by its content type.
-pub(crate) fn is_grpc(request: &Request) -> bool {
-    request
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(skakel_wire::is_grpc_content_type)
-}

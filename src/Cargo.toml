@@ -47,6 +47,9 @@ http-body-util = "0.1.5"
 # authority with its `Uri`.
 http = "1.5.0"
 tower-service = "0.3.3"
+# tower (MIT, already in the tree through axum): its `ServiceExt::oneshot` drives the router in the guard tests, one
+# request at a time with the extensions the accept loop would add.
+tower = { version = "0.5.3", default-features = false, features = ["util"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
 # The server certificate Koppel makes on its first start, and the next one for a handover.

@@ -1079,6 +1079,7 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+ "tower",
  "tower-service",
  "tracing",
  "windows",

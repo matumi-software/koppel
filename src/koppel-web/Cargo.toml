@@ -49,5 +49,7 @@ tonic-prost-build.workspace = true
 
 [dev-dependencies]
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
+# The guard tests call the router with `ServiceExt::oneshot`.
+tower.workspace = true
 # The role tests drive two Koppels over HTTPS as the UI does.
 reqwest.workspace = true

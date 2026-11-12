@@ -61,7 +61,7 @@ sections describe the behaviour; this one says where it lives in Rust and what d
 | Module | What |
 |---|---|
 | `protocol`, `bus_id` | The USB/IP device list and import messages, byte for byte, and `BusId`, a bus ID that can only be made from valid text |
-| `host.rs` | `UsbHost`, `UsbAttacher` and `UsbIpDriver`: what a platform can do, and `Unsupported` |
+| `host.rs` | `UsbHost`, `UsbAttacher` and `UsbIpDriver`: what a platform can do; `Capabilities`, the value that says what a host can do; and `Platform`, the bundle of the three that Koppel is started with (a part the machine lacks is `None`, and the platform gives one reason). The kernel attach and detach write to sysfs, so `Platform` runs them on `spawn_blocking` |
 | `linux` (Linux only) | `SysfsUsbHost` (usbip-host) and `SysfsVhci` (vhci-hcd) through sysfs, and the usbfs reset |
 | `windows` (Windows only) | `UsbipWin2Driver`, which runs `usbip.exe`, and `WindowsTcpTable` |
 | `upstream` | `UsbIpUpstreamHost` for usbipd-win, and `UpstreamAddress` (`KOPPEL_USB_UPSTREAM`) |

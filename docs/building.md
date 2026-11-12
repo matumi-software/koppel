@@ -14,24 +14,36 @@ Every pull request runs `.github/workflows/ci.yml`. The four checks the ruleset 
 
 The Rust version lives in `src/rust-toolchain.toml` and Node in `src/ui/.nvmrc`; change them there, and then in the places `check-pins.sh` names. `.github/workflows/advisories.yml` runs every Monday: `cargo deny check advisories`, `pnpm audit --prod`, and a check for a newer Skakel tag, which opens an issue. A failed run emails the repository's Actions watchers. Dependencies are updated by hand; no bot proposes updates.
 
-To release:
+To release, by hand and from this machine (Koppel runs no release jobs on a CI runner). Work from a clean checkout of `main`:
 
 1. Set the version under `[workspace.package]` in `src/Cargo.toml`. The Windows installer, the `.deb`
    files and the image all take it from there.
-2. Set the image tag in the three composes in `src/installer/docker` (`docker-compose.yml`,
-   `docker-compose.windows-client.yml`, `docker-compose.windows-server.yml`), in the build command in
-   `docs/windows.md` and in the README. They name the released version.
+2. Move the other version strings: `src/installer/release-versions.sh write` rewrites the image tag in the
+   three composes in `src/installer/docker`, in `docs/windows.md` and in `docs/installers.md`, and the
+   README's status line, image tag and `.deb` names, then checks them. Run `src/installer/release-versions.sh check`
+   again at the end: it fails on any place that names another version than `Cargo.toml`, on a missing
+   `## <version>` heading in `CHANGELOG.md`, and on a local `v<version>` tag that is not annotated.
 3. For a new usbip-win2 version, run `src/installer/windows/export-usbip-win2.ps1` (it rewrites `SHA256SUMS`; `-SumsOnly` regenerates only that), then add the new version to `$usbipWin2Pins` in `src/installer/windows/build.ps1` (signer thumbprints and the hashes of the two unsigned DLLs, taken from a copy you checked by hand: `SHA256SUMS` alone could be regenerated to match a swapped file) and check which CLI11 tag its licence comes from.
-4. Add the version to `CHANGELOG.md`.
-5. Build and push the image for all three platforms, from `src/`, with the version and `latest`:
+4. Add the version to `CHANGELOG.md` as `## <version> (<date>)`.
+5. Check the pins and the licence lists agree: `.github/scripts/check-pins.sh` (Rust, Node and pnpm versions across `src/rust-toolchain.toml`, `src/ui/.nvmrc`, `package.json`, the Dockerfile and the docs; `deny.toml` against `about.toml`).
+6. Build and test what ships. From `src/ui/`: `pnpm install --frozen-lockfile`, then `pnpm --filter koppel.ui build`. From `src/`: `cargo build --release --locked -p koppel` (the release profile with the built UI embedded), `cargo test --workspace --locked` in a Linux container (see "The Rust workspace"), `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo fmt --all --check` and `cargo deny check`.
+7. Merge to `main`, then build the artifacts from the merge commit:
+   - The `.deb` files: `src/installer/linux/build.ps1` (the Dockerfile's `linux-packages` target; it writes `src/installer/linux/bin/koppel_<version>_{amd64,arm64,armhf}.deb`).
+   - The image, from `src/`, pushed with the version and `latest`:
+
+     ```sh
+     docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 \
+       -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
+     ```
+   - `Koppel-Setup.exe`: `src/installer/windows/build.ps1`.
+8. Checksums, from the folder holding the files: `sha256sum koppel_*.deb Koppel-Setup.exe > SHA256SUMS`.
+9. Tag the merge commit with an annotated tag that equals the workspace version, and push it (a tag is never moved, the release tags ruleset forbids it):
 
    ```sh
-   docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 \
-     -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
+   git tag -a v<version> -m "Koppel <version>"
+   git push origin v<version>
    ```
-6. Build the three `.deb` files with `src/installer/linux/build.ps1` and `Koppel-Setup.exe` with
-   `src/installer/windows/build.ps1`, and publish them. Record the image size per platform in the release
-   notes.
+10. Publish the release on GitHub with the `CHANGELOG.md` section as its notes and the `.deb` files, `Koppel-Setup.exe` (not code signed, say so) and `SHA256SUMS` attached, and record the image size per platform in the notes.
 
 ## The Rust workspace
 

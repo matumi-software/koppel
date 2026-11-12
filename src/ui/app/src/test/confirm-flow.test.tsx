@@ -54,14 +54,14 @@ afterEach(() => {
 describe('the confirm rule', () => {
   it('stays pending until the push brings the value back, then confirms', async () => {
     mockFetch(routes());
-    const { hub } = renderApp(<SettingsPage />);
+    const { live } = renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
 
     fireEvent.click(screen.getByText('Turn on'));
     await waitFor(() => expect(text('pending')).toBe('true'));
     expect(text('confirmed')).toBe('false');
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
 
     expect(text('pending')).toBe('no');
     expect(text('confirmed')).toBe('true');
@@ -70,12 +70,12 @@ describe('the confirm rule', () => {
 
   it('keeps waiting when a push is about something else', async () => {
     mockFetch(routes());
-    const { hub } = renderApp(<SettingsPage />);
+    const { live } = renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
     fireEvent.click(screen.getByText('Turn on'));
     await waitFor(() => expect(text('pending')).toBe('true'));
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, role: 'both' }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, role: 'both' }));
 
     expect(text('pending')).toBe('true');
     expect(text('confirmed')).toBe('false');
@@ -83,7 +83,7 @@ describe('the confirm rule', () => {
 
   it('fails after the timeout, and a late push with the value clears the failure', async () => {
     mockFetch(routes());
-    const { hub } = renderApp(<SettingsPage />);
+    const { live } = renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
     vi.useFakeTimers();
 
@@ -94,7 +94,7 @@ describe('the confirm rule', () => {
     expect(text('failure')).toBe('no confirmation from the server.');
     expect(text('pending')).toBe('no');
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
 
     expect(text('failure')).toBe('none');
     expect(text('confirmed')).toBe('true');
@@ -113,7 +113,7 @@ describe('the confirm rule', () => {
 
   it('still tracks, logs and settles a change after the page that sent it is gone', async () => {
     mockFetch(routes());
-    const { hub, rerenderApp } = renderApp(
+    const { live, rerenderApp } = renderApp(
       <>
         <SettingsPage />
         <Watcher />
@@ -127,7 +127,7 @@ describe('the confirm rule', () => {
     rerenderApp(<Watcher />);
     expect(text('app-pending')).toBe('shareOnStartup');
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
 
     expect(text('app-pending')).toBe('none');
     expect(text('app-activity')).toBe('none');
@@ -141,7 +141,7 @@ describe('the confirm rule', () => {
     fireEvent.click(screen.getByText('Turn on'));
     await waitFor(() => expect(text('pending')).toBe('true'));
 
-    // The server applied it while the link was down, so no push arrived. HubProvider invalidates on reconnect.
+    // The server applied it while the link was down, so no push arrived. LiveProvider invalidates on reconnect.
     current = { ...settings, shareOnStartup: true };
     await act(async () => {
       await queryClient.invalidateQueries();
@@ -160,13 +160,13 @@ describe('the confirm rule', () => {
       ...routes(),
       'GET /api/settings': () => (++calls === 1 ? json(settings) : slow.promise),
     });
-    const { hub, queryClient } = renderApp(<SettingsPage />);
+    const { live, queryClient } = renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
 
     // A refetch starts with the old value, then the push arrives, then the old fetch lands.
     void queryClient.invalidateQueries({ queryKey: settingsKey });
     await waitFor(() => expect(calls).toBe(2));
-    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
     await act(async () => {
       slow.resolve(json(settings));
       await slow.promise;
@@ -192,14 +192,14 @@ describe('pushes and answers that arrive out of order', () => {
     const slow = deferred<Response>();
     let fetches = 0;
     mockFetch({ ...routes(), 'GET /api/activity?max=200': () => (++fetches === 1 ? json([]) : slow.promise) });
-    const { hub, queryClient } = renderApp(<Watcher />);
+    const { live, queryClient } = renderApp(<Watcher />);
     await waitFor(() => expect(fetches).toBe(1));
     await act(async () => {});
 
     // The refetch after a reconnect is under way when the push lands, then it answers without it.
     void queryClient.invalidateQueries({ queryKey: ['activity'] });
     await waitFor(() => expect(fetches).toBe(2));
-    act(() => hub.emit('ActivityRecorded', event('new', '2026-01-01T00:00:02Z')));
+    act(() => live.emit('ActivityRecorded', event('new', '2026-01-01T00:00:02Z')));
     await act(async () => {
       slow.resolve(json([event('old', '2026-01-01T00:00:01Z')]));
       await slow.promise;
@@ -212,7 +212,7 @@ describe('pushes and answers that arrive out of order', () => {
   it('ignores a rejection that arrives after the change was confirmed', async () => {
     const late = deferred<Response>();
     mockFetch({ ...routes(), 'PATCH /api/settings': () => late.promise });
-    const { hub } = renderApp(
+    const { live } = renderApp(
       <>
         <SettingsPage />
         <Watcher />
@@ -222,13 +222,13 @@ describe('pushes and answers that arrive out of order', () => {
     fireEvent.click(screen.getByText('Turn on'));
     await waitFor(() => expect(text('pending')).toBe('true'));
 
-    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
     await act(async () => {
       late.resolve(new Response(null, { status: 500 }));
       await late.promise;
     });
     // A later push must not trip over a failure that was never recorded.
-    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: false }));
+    await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: false }));
 
     expect(text('failure')).toBe('none');
     expect(text('saved')).toBe('true');
@@ -239,12 +239,12 @@ describe('pushes and answers that arrive out of order', () => {
     const first = deferred<Response>();
     let sends = 0;
     mockFetch({ ...routes(), 'PATCH /api/settings': () => (++sends === 1 ? first.promise : accepted()) });
-    const { hub } = renderApp(<SettingsPage />);
+    const { live } = renderApp(<SettingsPage />);
     await screen.findByText('Turn on');
     fireEvent.click(screen.getByText('Turn on'));
     await waitFor(() => expect(text('pending')).toBe('true'));
-    await act(async () => hub.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
-    await act(async () => hub.emit('SettingsChanged', settings));
+    await act(async () => live.emit('SettingsChanged', { ...settings, shareOnStartup: true }));
+    await act(async () => live.emit('SettingsChanged', settings));
     fireEvent.click(screen.getByText('Turn on'));
     await waitFor(() => expect(text('pending')).toBe('true'));
 
@@ -258,10 +258,10 @@ describe('pushes and answers that arrive out of order', () => {
   });
 });
 
-describe('hub pushes', () => {
+describe('live pushes', () => {
   it('registers one handler per event, however many pages read the cache', async () => {
     mockFetch(routes());
-    const { hub } = renderApp(
+    const { live } = renderApp(
       <>
         <SettingsPage />
         <SettingsPage />
@@ -281,7 +281,7 @@ describe('hub pushes', () => {
       'PairingStatusChanged',
       'ServersDiscovered',
     ]) {
-      expect(hub.count(name), name).toBe(1);
+      expect(live.count(name), name).toBe(1);
     }
   });
 
@@ -296,11 +296,11 @@ describe('hub pushes', () => {
       detail: null,
     });
     mockFetch({ ...routes(), 'GET /api/activity?max=200': () => json([entry('a', '2026-01-01T10:00:00Z')]) });
-    const { hub } = renderApp(<Watcher />);
+    const { live } = renderApp(<Watcher />);
     await waitFor(() => expect(text('app-activity')).toBe('event a'));
 
-    await act(async () => hub.emit('ActivityRecorded', entry('b', '2026-01-01T11:00:00Z')));
-    await act(async () => hub.emit('ActivityRecorded', entry('b', '2026-01-01T11:00:00Z')));
+    await act(async () => live.emit('ActivityRecorded', entry('b', '2026-01-01T11:00:00Z')));
+    await act(async () => live.emit('ActivityRecorded', entry('b', '2026-01-01T11:00:00Z')));
 
     await waitFor(() => expect(text('app-activity')).toBe('event b|event a'));
   });

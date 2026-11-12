@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getClientDevices, getServerDevices } from '@/api/usb';
 import { clientDevicesKey, serverDevicesKey } from '@/query-keys';
 
-/** This machine's devices (server role). DevicesChanged keeps them current, see HubPushes. */
+/** This machine's devices (server role). DevicesChanged keeps them current, see live/push-table.ts. */
 export function useServerDevices(enabled = true) {
   return useQuery({ queryKey: serverDevicesKey, queryFn: getServerDevices, enabled });
 }

@@ -77,11 +77,11 @@ describe('nearby servers', () => {
       ...routes([], noConnection, { ...idle, state: 'confirm', serverName: 'lab', serverUrl: 'https://lab:5241', serverFingerprint: fp('c'), message: 'Saving replaces your connection to https://old:5241.' }),
       'POST /api/client/pairing/confirm': () => accepted(),
     });
-    const { hub } = renderApp(<NearbyServers locked={false} />);
+    const { live } = renderApp(<NearbyServers locked={false} />);
 
     fireEvent.click(await screen.findByText('Replace connection'));
     await vi.waitFor(() => expect(count('POST /api/client/pairing/confirm')).toBe(1));
-    act(() => hub.emit('PairingStatusChanged', { ...idle, state: 'paired', serverName: 'lab', serverUrl: 'https://lab:5241', serverFingerprint: fp('c') }));
+    act(() => live.emit('PairingStatusChanged', { ...idle, state: 'paired', serverName: 'lab', serverUrl: 'https://lab:5241', serverFingerprint: fp('c') }));
 
     await vi.waitFor(() => expect(screen.queryByText('Replace connection')).toBeNull());
   });
@@ -126,13 +126,13 @@ describe('pairing requests', () => {
       'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [] }),
       'GET /api/activity?max=200': () => json([]),
     });
-    const { hub } = renderApp(<PairingRequests locked={false} />);
+    const { live } = renderApp(<PairingRequests locked={false} />);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    await act(async () => hub.emit('PairingRequestsChanged', { budgetExhausted: true, requests: [] }));
+    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: true, requests: [] }));
     expect(await screen.findByText(/turning new ones away/)).toBeTruthy();
 
-    await act(async () => hub.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
+    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
     await vi.waitFor(() => expect(screen.queryByText(/turning new ones away/)).toBeNull());
   });
 
@@ -166,7 +166,7 @@ describe('approving and refusing a request', () => {
       'GET /api/activity?max=200': () => json([]),
       'POST /api/server/pairing/r1/approve': () => accepted(),
     });
-    const { hub } = open();
+    const { live } = open();
     fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '123456' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
@@ -175,7 +175,7 @@ describe('approving and refusing a request', () => {
     expect(activityText()).toContain('Waiting. Approve pairing with bench-2');
     expect((screen.getByRole('button', { name: 'Refuse' }) as HTMLButtonElement).disabled).toBe(true);
 
-    await act(async () => hub.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
+    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
 
     await vi.waitFor(() => expect(screen.queryByText(/bench-2 from/)).toBeNull());
     expect(activityText()).toBe('');
@@ -214,7 +214,7 @@ describe('approving and refusing a request', () => {
 describe('pairing with a nearby server', () => {
   it('counts the pairing as under way when the server spells the address its own way', async () => {
     const { count } = mockFetch({ ...routes([server('lab', 'a')]), 'POST /api/client/pairing': () => accepted() });
-    const { hub } = renderApp(
+    const { live } = renderApp(
       <>
         <NearbyServers locked={false} />
         <ActivityLines />
@@ -224,7 +224,7 @@ describe('pairing with a nearby server', () => {
     await vi.waitFor(() => expect(count('POST /api/client/pairing')).toBe(1));
     expect(screen.getByTestId('activity').textContent).toContain('Pair with lab');
 
-    act(() => hub.emit('PairingStatusChanged', { ...idle, state: 'waiting', serverName: 'lab', serverUrl: 'HTTPS://10.0.0.5:5241', code: '123456' }));
+    act(() => live.emit('PairingStatusChanged', { ...idle, state: 'waiting', serverName: 'lab', serverUrl: 'HTTPS://10.0.0.5:5241', code: '123456' }));
 
     await vi.waitFor(() => expect(screen.getByTestId('activity').textContent).toBe(''));
   });

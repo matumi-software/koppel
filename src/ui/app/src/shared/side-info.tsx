@@ -20,7 +20,7 @@ const roles: Record<string, string> = { server: 'Server', client: 'Client', both
  */
 export function SideInfo() {
   const { items } = useActivity();
-  // The role and USB port come from the settings, so HubPushes refetches this on SettingsChanged.
+  // The role and USB port come from the settings, so the live push refetches this on SettingsChanged.
   const info = useQuery({ queryKey: systemInfoKey, queryFn: getSystemInfo, refetchInterval: 60_000 });
   const data = info.data;
 

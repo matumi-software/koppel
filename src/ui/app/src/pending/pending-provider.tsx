@@ -9,7 +9,7 @@ const names = Object.keys(pendingDomains) as PendingDomainName[];
 
 /**
  * Owns the pending changes of the whole app and judges them whenever confirmed data lands in the
- * query cache: a hub push, or a refetch after the link came back. It must sit under ActivityProvider.
+ * query cache: a live push, or a refetch after the link came back. It must sit under ActivityProvider.
  */
 export function PendingProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();

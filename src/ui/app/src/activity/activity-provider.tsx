@@ -5,7 +5,7 @@ import { activityKey } from '@/query-keys';
 import { ActivityContext, fromServer, maxActivity, mergeActivity, type ActivityItem } from './activity-context';
 
 /**
- * The activity log: the server's log (loaded once, then followed over the hub by HubPushes, so it
+ * The activity log: the server's log (loaded once, then followed over the live push, so it
  * survives a reload and matches on every device), plus our own changes that the server has not
  * answered yet.
  */

@@ -1,52 +1,16 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AuthState } from '@/api/auth';
 import { getJson } from '@/api/http';
 import { AuthGate } from '@/auth/auth-gate';
 import { useAuth } from '@/auth/auth-context';
-import { HubProvider } from '@/hub/hub-provider';
-import { eventsUrl, retryDelay } from '@/hub/push-events';
+import { LiveProvider } from '@/live/live-provider';
+import { eventsUrl } from '@/live/push-table';
 import { ChangePassword } from '@/settings/change-password';
+import { FakeEventSource } from './fake-event-source';
 import { deferred, json, mockFetch, newQueryClient, renderApp } from './harness';
-
-/** A stand-in for the browser's EventSource that a test can fail by hand. It answers at once unless the server is away. */
-class FakeEventSource {
-  static instances: FakeEventSource[] = [];
-  /** False while the server is away: a new stream fails instead of opening. */
-  static answering = true;
-  readonly url: string;
-  opened = false;
-  closed = false;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-    queueMicrotask(() => {
-      if (this.closed) return;
-      if (FakeEventSource.answering) {
-        this.opened = true;
-        this.onopen?.();
-      } else {
-        this.fail();
-      }
-    });
-  }
-
-  addEventListener() {}
-
-  close() {
-    this.closed = true;
-  }
-
-  /** The stream broke, or the server ended it, as it does when the session ends. */
-  fail() {
-    this.onerror?.();
-  }
-}
 
 const noContent = () => new Response(null, { status: 204 });
 const problem = (error: string, status: number) => json({ error }, status);
@@ -73,24 +37,19 @@ function renderGate() {
   render(
     <QueryClientProvider client={queryClient}>
       <AuthGate>
-        <HubProvider>
+        <LiveProvider>
           <p>The app</p>
           <SignOutButton />
           <RecheckButton />
-        </HubProvider>
+        </LiveProvider>
       </AuthGate>
     </QueryClientProvider>,
   );
 }
 
-const live = () => FakeEventSource.instances.filter((s) => s.opened && !s.closed);
+const live = () => FakeEventSource.live;
 const loginHeading = () => screen.findByRole('heading', { name: 'Sign in to bench-pc' });
 
-beforeEach(() => {
-  FakeEventSource.instances.length = 0;
-  FakeEventSource.answering = true;
-  vi.stubGlobal('EventSource', FakeEventSource);
-});
 afterEach(() => vi.unstubAllGlobals());
 
 describe('login', () => {
@@ -388,8 +347,8 @@ describe('the live push under the sign-in gate', () => {
     renderGate();
     await screen.findByText('The app');
     await waitFor(() => expect(live().length).toBe(1));
-    // The initial load, and the refetch of everything that follows a connect.
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
+    // The initial load alone: the first open needs no refetch.
+    expect(count('GET /api/auth/state')).toBe(1);
 
     // The server ends the stream when the session ends, and refuses a new one.
     signedIn = false;
@@ -397,12 +356,7 @@ describe('the live push under the sign-in gate', () => {
     act(() => FakeEventSource.instances[0].fail());
 
     await loginHeading();
-    expect(count('GET /api/auth/state')).toBeGreaterThanOrEqual(3);
-  });
-
-  it('reconnects on the same steps as before, for as long as it takes', () => {
-    expect([0, 1, 2, 3, 4].map(retryDelay)).toEqual([0, 2000, 5000, 10000, 30000]);
-    expect(retryDelay(9)).toBe(30000);
+    expect(count('GET /api/auth/state')).toBeGreaterThanOrEqual(2);
   });
 
   it('shows the login screen when the session ended during a long outage, on a later retry', async () => {
@@ -410,13 +364,13 @@ describe('the live push under the sign-in gate', () => {
     const { count } = mockFetch({ 'GET /api/auth/state': () => json(inState({ signedIn })) });
     renderGate();
     await screen.findByText('The app');
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
+    await waitFor(() => expect(live().length).toBe(1));
 
     // The server goes away: each try asks whether the session is still good, and retries go on.
     FakeEventSource.answering = false;
     act(() => FakeEventSource.instances[0].fail());
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(2));
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(4));
+    await waitFor(() => expect(count('GET /api/auth/state')).toBe(3));
     expect(screen.getByText('The app')).toBeTruthy();
 
     // The session ends meanwhile; the next try, two seconds on, finds out.
@@ -429,14 +383,14 @@ describe('the live push under the sign-in gate', () => {
     const { count } = mockFetch({ 'GET /api/auth/state': () => json(inState()) });
     renderGate();
     await screen.findByText('The app');
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
+    await waitFor(() => expect(live().length).toBe(1));
 
     act(() => FakeEventSource.instances[0].fail());
 
     await waitFor(() => expect(live().length).toBe(1));
     expect(live()[0]).toBe(FakeEventSource.instances[1]);
-    // The recheck, and the refetch after the new stream opened.
-    await waitFor(() => expect(count('GET /api/auth/state')).toBe(4));
+    // The initial load, the recheck, and the refetch after the new stream opened.
+    await waitFor(() => expect(count('GET /api/auth/state')).toBe(3));
   });
 
   it('does not bring the app back when a recheck or a late auth answer lands during sign-out', async () => {
@@ -444,23 +398,23 @@ describe('the live push under the sign-in gate', () => {
     const lateState = deferred<Response>();
     let stateCalls = 0;
     mockFetch({
-      // The first two answers are the initial load and the refetch after the connect; the third is a
+      // The first answer is the initial load; the second is a
       // recheck still in flight when sign-out starts.
-      'GET /api/auth/state': () => (++stateCalls <= 2 ? json(inState()) : lateState.promise),
+      'GET /api/auth/state': () => (++stateCalls <= 1 ? json(inState()) : lateState.promise),
       'POST /api/auth/logout': () => logout.promise,
     });
     renderGate();
     await screen.findByText('The app');
-    await waitFor(() => expect(stateCalls).toBe(2));
+    await waitFor(() => expect(stateCalls).toBe(1));
     await userEvent.click(screen.getByRole('button', { name: 'Recheck' }));
-    await waitFor(() => expect(stateCalls).toBe(3));
+    await waitFor(() => expect(stateCalls).toBe(2));
 
     FakeEventSource.answering = false;
     await userEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     // The server ends the stream as the session ends, and the retry fails: those rechecks are ignored.
     act(() => FakeEventSource.instances[0].fail());
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(2));
-    expect(stateCalls).toBe(3);
+    expect(stateCalls).toBe(2);
     await act(async () => {
       logout.resolve(noContent());
       lateState.resolve(json(inState()));

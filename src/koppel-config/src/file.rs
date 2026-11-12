@@ -2,7 +2,7 @@
 //! Koppel 0.1.x. A change is written to disk first (temp file, flush, replace) and only a write
 //! that landed reaches the subscribers. Edits made by hand are picked up while it runs.
 //!
-//! The rules, from docs/architecture.md:
+//! The rules, from docs/config.md:
 //!
 //! - Start-up never replaces a file. Only a missing file is seeded with the defaults. A file that
 //!   exists but cannot be used stops [`ConfigFile::start`] with a [`ConfigFileError`] and is left

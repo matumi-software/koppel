@@ -222,6 +222,11 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
         }
         let health = anonymous.get("/healthz").await.expect(200);
         assert_eq!(health.text(), "ok", "/healthz as {role}");
+        let ready = anonymous.get("/readyz").await.expect(200);
+        let ready = ready.json();
+        assert_eq!(ready["ready"], json!(true), "/readyz as {role}");
+        assert_eq!(ready["certificate"], json!("loaded"), "/readyz as {role}");
+        assert!(ready.get("message").is_none(), "states only, as {role}");
     }
 }
 
@@ -310,7 +315,13 @@ mod allow_from {
         let network = Target::new(&format!("https://localhost:{network_port}")).anonymous();
 
         // The UI port: every UI path is refused for this address, and the network surface is not here.
-        for path in ["/api/v1/auth/state", "/api/v1/settings", "/healthz", "/"] {
+        for path in [
+            "/api/v1/auth/state",
+            "/api/v1/settings",
+            "/healthz",
+            "/readyz",
+            "/",
+        ] {
             let answer = ui.get(path).await.expect(403);
             assert!(
                 answer.text().contains("Ui:AllowFrom"),
@@ -334,5 +345,6 @@ mod allow_from {
         network.get("/api/remote/devices").await.expect(401);
         network.get("/api/v1/auth/state").await.expect(404);
         network.get("/healthz").await.expect(404);
+        network.get("/readyz").await.expect(404);
     }
 }

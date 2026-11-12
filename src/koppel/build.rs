@@ -1,5 +1,5 @@
 //! Writes `KOPPEL_LONG_VERSION`, what `koppel --version` prints: the version, the git commit and the
-//! build date. The commit is `KOPPEL_GIT_COMMIT` when set (the image build has no `.git`, so it passes
+//! build date, and `KOPPEL_COMMIT` and `KOPPEL_BUILT` for the system info. The commit is `KOPPEL_GIT_COMMIT` when set (the image build has no `.git`, so it passes
 //! it in), else `git rev-parse`, else `unknown`. The date is UTC, from `SOURCE_DATE_EPOCH` when set so a
 //! build can be repeated.
 //!
@@ -12,11 +12,11 @@ fn main() {
     println!("cargo:rerun-if-env-changed=KOPPEL_GIT_COMMIT");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
     let version = std::env::var("CARGO_PKG_VERSION").expect("cargo sets CARGO_PKG_VERSION");
-    println!(
-        "cargo:rustc-env=KOPPEL_LONG_VERSION={version} (commit {}, built {})",
-        git_commit(),
-        build_date()
-    );
+    let (commit, built) = (git_commit(), build_date());
+    println!("cargo:rustc-env=KOPPEL_LONG_VERSION={version} (commit {commit}, built {built})");
+    // The same two facts alone, for the UI's system info.
+    println!("cargo:rustc-env=KOPPEL_COMMIT={commit}");
+    println!("cargo:rustc-env=KOPPEL_BUILT={built}");
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let icon = "../../resources/design-system/assets/Logos/koppel-app-icon.ico";

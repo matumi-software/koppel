@@ -219,6 +219,8 @@ pub(crate) async fn checks(State(app): State<SettingsApi>) -> Json<Vec<koppel_us
 pub(crate) struct SystemInfo {
     name: String,
     version: String,
+    commit: String,
+    built: String,
     #[serde(with = "time::serde::rfc3339")]
     #[ts(type = "string")]
     started_at: OffsetDateTime,
@@ -236,6 +238,8 @@ pub(crate) async fn info(State(app): State<SettingsApi>) -> Json<SystemInfo> {
     Json(SystemInfo {
         name: host.name.clone(),
         version: host.version.clone(),
+        commit: host.commit.clone(),
+        built: host.built.clone(),
         started_at: host.started_at,
         role: app.settings.current().role,
         ui_port: host.ui_port,

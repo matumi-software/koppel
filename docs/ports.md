@@ -28,7 +28,7 @@ window on the server's Clients page (`PUT /api/v1/server/pairing/window` on the 
 
 | Port | Surface | Serves | Role |
 |---|---|---|---|
-| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | The UI (single page app), `/api/v1/auth/*`, `/api/v1/settings`, `/api/v1/system/*`, `/api/v1/activity`, the live push (`/api/v1/events`), `/healthz` | Any |
+| 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | The UI (single page app), `/api/v1/auth/*`, `/api/v1/settings`, `/api/v1/system/*`, `/api/v1/activity`, the live push (`/api/v1/events`), `/healthz`, `/readyz` | Any |
 | 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/v1/server/*` | Server or both |
 | 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/v1/client/*` | Client or both |
 | 5240 HTTPS (`KOPPEL_NETWORK_PORT`) | Network | Skakel under `/skakel`: info, pairing, tokens and hello. Skakel's and Koppel's gRPC calls: the control call, the remote device list and USB traffic. Koppel's own `/api/remote/*` behind a client's token | Server or both |
@@ -50,5 +50,5 @@ Settings that move them:
 | `KOPPEL_RATE_TOKEN_PER_MINUTE`, `KOPPEL_RATE_PAIR_PER_MINUTE` | 60, 120 | Skakel's limits on its token and pairing endpoints, per address. In the Rust build Skakel counts them behind the network router and its role gate, so a call to the wrong port or role does not count |
 | `KOPPEL_RATE_AUTH_PER_MINUTE` | 30 | Per whole address, on setup, login and password change. The sign-in lock itself counts an IPv6 /64 as one caller, and a global budget stops a flood. See ["Guards on the web surface"](security.md#guards-on-the-web-surface) |
 
-`GET /healthz` is on the UI port, anonymous, answers `ok` in any role and needs no header. The Docker
+`GET /healthz` is on the UI port, anonymous, answers `ok` in any role and needs no header. `GET /readyz` follows the same rules and answers a small JSON object, 200 when Koppel is ready and 503 when it is not: `{"ready":true,"gateway":"off","certificate":"loaded","link":"unconfigured"}`. `gateway` is `off`, `listening` or `faulted` (the port is taken), `certificate` is `loaded` or `missing`, `link` is the client's link (`unconfigured`, `connecting`, `connected`, `error`). It is not ready when the gateway is faulted or no certificate is loaded; a link that is down is reported but does not decide it, since a client whose server is away is working. It names states only, never a message, address or fingerprint, because anyone `Ui:AllowFrom` lets in can read it; the reason is on the devices page and in the log. `/healthz` stays the liveness check for Docker and the systemd watchdog. The Docker
 image's health check is Koppel itself (`koppel healthcheck`, `koppel/src/healthcheck.rs`), because the port is HTTPS and the image has no curl or openssl. It calls `/healthz` on `KOPPEL_LISTEN_ADDRESS` and `KOPPEL_UI_PORT` (any-address and unset mean loopback), then on 127.0.0.1, and accepts any certificate, since it sends nothing secret. Plain Docker only marks the container unhealthy and does not restart it; `restart:` acts on exits. Swarm and Kubernetes act on it, and with plain Docker something such as an autoheal container has to.

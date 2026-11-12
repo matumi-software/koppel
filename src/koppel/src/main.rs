@@ -131,6 +131,8 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
     let host = Host {
         name: koppel_web::machine_name(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
+        commit: env!("KOPPEL_COMMIT").to_owned(),
+        built: env!("KOPPEL_BUILT").to_owned(),
         started_at: OffsetDateTime::now_utc(),
         ui_port,
         network_port,

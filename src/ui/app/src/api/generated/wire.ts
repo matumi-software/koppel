@@ -149,7 +149,7 @@ export type ServerIdentity = { name: string, fingerprint: string, httpsPort: num
 
 export type SystemCheck = { id: string, ok: boolean, title: string, detail: string, };
 
-export type SystemInfo = { name: string, version: string, startedAt: string, role: Role, uiPort: number, httpsPort: number, fingerprint: string, os: string, tray: boolean, };
+export type SystemInfo = { name: string, version: string, commit: string, built: string, startedAt: string, role: Role, uiPort: number, httpsPort: number, fingerprint: string, os: string, tray: boolean, };
 
 export type Approve = { code?: string, };
 

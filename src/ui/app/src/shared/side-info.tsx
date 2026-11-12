@@ -34,6 +34,7 @@ export function SideInfo() {
             { label: 'Role', value: roles[data.role] ?? 'Unknown' },
             { label: 'Up for', value: uptime(data.startedAt, now) },
             { label: 'Version', value: data.version, mono: true },
+            { label: 'Build', value: `${data.commit}, ${data.built}`, mono: true },
             { label: 'Ports', value: data.uiPort === data.httpsPort ? `${data.uiPort}` : `UI ${data.uiPort} · Network ${data.httpsPort}`, mono: true },
             { label: 'Fingerprint', value: `${data.fingerprint.slice(0, 23)}…`, mono: true },
             { label: 'System', value: data.os },

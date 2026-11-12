@@ -8,7 +8,7 @@
 - Printers are untried, and the arm64 image and `.deb` are untested on a Raspberry Pi.
 - Webcams do not stream from a Linux server to a Windows client (#22); a Windows server through usbipd-win to a Linux client does.
 - The attach deadline on its own was not exercised on real hardware; it is covered by tests with fakes.
-- The UI does not show `gatewayFault` or the live `listen` status yet.
+- The UI shows `gatewayFault` on the client devices page; the gateway's live `listen` status is used only to offer the attach command.
 
 ## USB layer decisions (from the feasibility study, 2026-11-02)
 
@@ -172,3 +172,10 @@
 - **No old paths answer.** The UI is embedded in the program, so it always matches the server it came from, and no other client of `/api` is known. `/api/remote/*` is the network surface's protocol with other Koppels, not this API, and does not move. Case against: a script someone wrote against 0.2.0's REST paths breaks at the upgrade, and the changelog says so. What would change it: a report of one, and then the old paths would answer for one release.
 - **Dates needed no change.** Every date the API sends is `time::serde::rfc3339` (`Z` form since #144); the contract tests accept any RFC 3339 offset, and the fixtures round trip pins the form.
 - **`Json<T>` answers `application/json` without a charset,** where the old helper wrote `; charset=utf-8`. JSON is UTF-8 by definition (RFC 8259), so nothing reads the difference.
+
+## `/readyz` and build info (2026-11-13, #154)
+
+- **`/readyz` is a second endpoint, `/healthz` stays as it is.** The watchdog and the Docker check ask whether the process serves requests, and a USB gateway whose port is taken must not get Koppel restarted, because a restart does not free the port and drops every attached device. `/readyz` is for a person or a monitor. It answers 503 when the gateway is faulted or no certificate is loaded, 200 otherwise, with the states as JSON.
+- **The link state is reported and does not decide `ready`.** A client whose server is switched off is working, and a readiness check that fails for it would wake someone for a thing Koppel cannot fix. A monitor that cares reads `link`. Case against: a stuck link (connecting for hours) looks ready. The field is there for that, and a rule on its duration needs a clock the server does not keep yet.
+- **It names states and no messages.** Anyone `Ui:AllowFrom` lets in can read it without signing in, so it carries no fault text, address, fingerprint or file name. The reason for a gateway fault is on the devices page and in the log.
+- **Build info is `commit` and `built` in `/api/system/info`,** from the same build script as `koppel --version` (`KOPPEL_COMMIT`, `KOPPEL_BUILT`). The UI shows it as a Build fact in the side panel with the version. The status card at the foot of the sidebar is a `@koppel/react-ui` component with one version slot, and a second line there is a primitive change for the design system, not for this issue.

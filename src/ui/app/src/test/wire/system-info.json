@@ -1,6 +1,8 @@
 {
   "name": "bench-pc",
   "version": "1.0.0",
+  "commit": "abc123def",
+  "built": "2026-01-01",
   "startedAt": "2026-01-01T00:00:00Z",
   "role": "server",
   "uiPort": 5240,

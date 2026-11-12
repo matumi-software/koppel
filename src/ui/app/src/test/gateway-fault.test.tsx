@@ -16,8 +16,8 @@ afterEach(() => {
 
 const clientRoutes = (gatewayFault: string | null) => ({
   ...baseRoutes,
-  'GET /api/settings': () => json({ ...settings, role: 'client' }),
-  'GET /api/client/devices': () => json({ ...clientDevices, link: 'connected', linkMessage: null, devices: [], gateway: false, gatewayFault }),
+  'GET /api/v1/settings': () => json({ ...settings, role: 'client' }),
+  'GET /api/v1/client/devices': () => json({ ...clientDevices, link: 'connected', linkMessage: null, devices: [], gateway: false, gatewayFault }),
 });
 
 describe('the USB/IP gateway', () => {

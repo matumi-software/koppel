@@ -11,7 +11,7 @@ instead of about 100. On real hardware, a Debian 13 server in Docker shares two 
 drive to a native Windows 11 client, through an upgrade from 0.1.x, a 75 second network drop, and detaching
 and attaching by hand. A 0.2.0 machine and a 0.1.x machine cannot link, so update both ends. Not yet run on real hardware with 0.2.0: a Linux client, a Windows server through usbipd-win, and a
 Raspberry Pi (the Pi Zero build has only run under emulation). Printers are untried, and webcams do not
-stream from a Linux server to a Windows client yet. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests; releases are tags on `main`.
+stream from a Linux server to a Windows client yet. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests, which use the template in `.github/pull_request_template.md` and are reviewed by the owners in `.github/CODEOWNERS`; releases are tags on `main`.
 
 | Platform | Server | Client |
 |---|---|---|

@@ -276,6 +276,8 @@ pub(crate) enum Command {
     Attach {
         bus_id: BusId,
         automatic: bool,
+        /// Told once the request was acted on, so a caller that asks twice can rely on the count.
+        reply: Option<oneshot::Sender<()>>,
     },
     Detach {
         bus_id: BusId,
@@ -285,6 +287,7 @@ pub(crate) enum Command {
     Forgotten {
         bus_id: BusId,
         fault: Option<String>,
+        reply: oneshot::Sender<()>,
     },
     Link {
         id: u64,
@@ -631,10 +634,13 @@ impl UsbClient {
             .remember(&bus_id, true)
             .await
             .map_err(BeginAttachError::Save)?;
+        let (reply, started) = oneshot::channel();
         self.shared.send(Command::Attach {
             bus_id,
             automatic: false,
+            reply: Some(reply),
         });
+        let _ = started.await;
         Ok(())
     }
 
@@ -661,7 +667,14 @@ impl UsbClient {
                 ))
             }
         };
-        shared.send(Command::Forgotten { bus_id, fault });
+        // Back only once the UI can see the fault.
+        let (reply, shown) = oneshot::channel();
+        shared.send(Command::Forgotten {
+            bus_id,
+            fault,
+            reply,
+        });
+        let _ = shown.await;
     }
 
     /// Serves one plain USB/IP connection from a USB/IP driver on this machine, such as

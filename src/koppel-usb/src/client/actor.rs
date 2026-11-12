@@ -241,22 +241,34 @@ impl Actor {
 
     fn handle(&mut self, command: Command) {
         match command {
-            Command::Attach { bus_id, automatic } => {
+            Command::Attach {
+                bus_id,
+                automatic,
+                reply,
+            } => {
                 if !automatic {
                     let key = self.key_of(&bus_id);
                     self.slots.clear_fault(&key);
                     self.reported.remove(&key);
                 }
                 self.start_attach(&bus_id, automatic);
+                if let Some(reply) = reply {
+                    let _ = reply.send(());
+                }
             }
             Command::Detach { bus_id, reply } => self.detach(bus_id, reply),
-            Command::Forgotten { bus_id, fault } => {
+            Command::Forgotten {
+                bus_id,
+                fault,
+                reply,
+            } => {
                 self.detaching.remove(&bus_id);
                 if let Some(fault) = fault {
                     let key = self.key_of(&bus_id);
                     self.slots.record_fault(&key, fault);
                 }
                 self.publish();
+                let _ = reply.send(());
             }
             Command::Link { id, event } => self.on_link_event(id, event),
             Command::SettingsChanged { reply } => {

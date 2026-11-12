@@ -11,9 +11,9 @@ use tokio_util::sync::CancellationToken;
 use super::actor::LOOPBACK;
 use super::slots::{AttachKey, Attachment, DriverHold, Kind, Mode, Outcome, Plan};
 use super::{AttachError, Command, Failure, Shared, check_import};
+use crate::relay::kernel_pair;
 use crate::{
-    ActivityOutcome, ActivityReason, BusId, CloseReason, DeviceStream, DeviceView, loopback_pair,
-    protocol, relay,
+    ActivityOutcome, ActivityReason, BusId, CloseReason, DeviceStream, DeviceView, protocol, relay,
 };
 
 /// The stream to the server for one imported device, and the device record it sent.
@@ -180,7 +180,9 @@ async fn hand_to_kernel(
         return Err(AttachError::ConnectionChanged.into());
     }
 
-    let (kernel_end, relay_end) = loopback_pair().await.map_err(AttachError::Loopback)?;
+    let (kernel_end, relay_end) = kernel_pair(shared.platform.attaches_in_memory())
+        .await
+        .map_err(AttachError::Loopback)?;
     let port = shared
         .platform
         .attach_kernel(&kernel_end, device.dev_id(), device.speed)

@@ -75,6 +75,12 @@ pub use {
     tasks::Listener,
 };
 
+// Only Linux's sysfs host makes a loopback pair itself; the client goes through `relay::kernel_pair`.
+#[cfg(feature = "test-util")]
+pub use relay::loopback_pair;
+#[cfg(all(not(feature = "test-util"), target_os = "linux"))]
+pub(crate) use relay::loopback_pair;
+
 test_util!(
     device::ExportStatus,
     device::UsbDevice,
@@ -82,7 +88,6 @@ test_util!(
     device::UsbSpeed,
     device::VhciPort,
     error::UsbError,
-    relay::loopback_pair,
     relay::relay,
     views::interface_class_name,
     views::speed_label,

@@ -32,20 +32,7 @@ const baseRoutes = {
   'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
 };
 
-const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({
-  page: 'configuration',
-  go: () => {},
-  nav: null,
-  navFoot: null,
-  navFootState: 'live',
-  status: null,
-  isMenuOpen: false,
-  setMenuOpen: () => {},
-  locked: false,
-  asideSlot: null,
-  setTitle: () => {},
-  ...overrides,
-});
+const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({ locked: false, asideSlot: null, ...overrides });
 
 const configuration = (locked = false) => (
   <FrameContext.Provider value={frame({ locked })}>
@@ -61,7 +48,7 @@ afterEach(() => {
 describe('setup', () => {
   it('sends the role and setupComplete in one PATCH', async () => {
     const { calls } = mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => accepted() });
-    renderApp(<SetupPage locked={false} onDone={() => {}} />);
+    renderApp(<SetupPage locked={false} />);
     await screen.findByRole('button', { name: 'Continue' });
 
     await userEvent.click(screen.getByRole('radio', { name: /Client/ }));
@@ -74,7 +61,7 @@ describe('setup', () => {
 
   it('stays pending until the settings show both the role and setupComplete', async () => {
     mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => accepted() });
-    const { live } = renderApp(<SetupPage locked={false} onDone={() => {}} />);
+    const { live } = renderApp(<SetupPage locked={false} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
     await screen.findByRole('button', { name: 'Saving' });
 
@@ -83,6 +70,45 @@ describe('setup', () => {
 
     await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'server' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Saving' })).toBeNull());
+  });
+});
+
+describe('first run in the app', () => {
+  const unconfigured = () => mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => accepted() });
+
+  it('stays on the setup page, address untouched, until the server confirms, then lands on the page the role needs', async () => {
+    unconfigured();
+    const { live } = renderApp(<App />);
+    await userEvent.click(await screen.findByRole('radio', { name: /Client/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByRole('button', { name: 'Saving' });
+
+    expect(window.location.hash).toBe('');
+    expect(screen.getByRole('heading', { name: /Set up/ })).toBeTruthy();
+
+    await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'client' }));
+
+    await screen.findByRole('heading', { name: 'Configuration' });
+  });
+
+  it('lands a server on its clients', async () => {
+    unconfigured();
+    const { live } = renderApp(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
+    await screen.findByRole('button', { name: 'Saving' });
+
+    await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'server' }));
+
+    await screen.findByRole('heading', { name: 'Clients' });
+  });
+
+  it('does not leave the setup page when the server refuses', async () => {
+    mockFetch({ ...baseRoutes, 'GET /api/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/settings': () => json({ errors: { role: ['No.'] } }, 400) });
+    renderApp(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
+
+    await screen.findByText('Not saved: No.');
+    expect(window.location.hash).toBe('');
   });
 });
 
@@ -105,11 +131,13 @@ describe('the open page', () => {
     expect(window.location.hash).toBe('#attach');
   });
 
-  it('is redirected to the overview once the loaded role has no such page', async () => {
+  it('shows the overview once the loaded role has no such page, without touching the address', async () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
 
-    await waitFor(() => expect(window.location.hash).toBe('#overview'));
+    await screen.findByRole('heading', { name: 'Overview' });
+    expect(window.location.hash).toBe('#attach');
+    expect(document.querySelector('.kp-shell__top')?.textContent).toContain('Overview');
   });
 });
 

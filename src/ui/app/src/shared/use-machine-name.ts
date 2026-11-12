@@ -1,9 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { getSystemInfo } from '@/api/http';
-import { systemInfoKey } from '@/query-keys';
+import { systemInfoOptions } from '@/queries';
 
 /** The system info the side panel shows. One query, shared by the machine name and the version. */
-const useSystemInfo = () => useQuery({ queryKey: systemInfoKey, queryFn: getSystemInfo, staleTime: Infinity });
+const useSystemInfo = () => useQuery(systemInfoOptions());
 
 /** This machine's name as the server reports it; the browser's host name until that loads. */
 export function useMachineName(): string {

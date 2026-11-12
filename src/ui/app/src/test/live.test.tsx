@@ -1,19 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
 import { act, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getSettings, type KoppelSettings } from '@/api/settings';
+import { type KoppelSettings } from '@/api/settings';
 import { useLive } from '@/live/live-context';
 import { downAfterFailures, pushEvents, retryDelay } from '@/live/push-table';
-import { settingsKey } from '@/query-keys';
 import { FakeEventSource } from './fake-event-source';
 import { json, mockFetch, renderApp } from './harness';
+import { settingsOptions } from '@/queries';
 
 const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
 
 /** Shows the link's state and the settings the cache holds. */
 function Probe() {
   const { state } = useLive();
-  const query = useQuery({ queryKey: settingsKey, queryFn: getSettings });
+  const query = useQuery(settingsOptions());
   return (
     <div>
       <span data-testid="state">{state}</span>
@@ -104,7 +104,7 @@ describe('a push', () => {
       live.emit('SettingsChanged', { ...settings, role: 'both' });
     });
 
-    expect(queryClient.getQueryData<KoppelSettings>(settingsKey)?.role).toBe('both');
+    expect(queryClient.getQueryData<KoppelSettings>(settingsOptions().queryKey)?.role).toBe('both');
   });
 
   it('that is malformed is logged and its data fetched again', async () => {

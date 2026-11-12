@@ -1,14 +1,15 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { getAuthState, logout, type AuthState } from '@/api/auth';
+import { logout, type AuthState } from '@/api/auth';
 import { onUnauthorized } from '@/api/http';
-import { authKey } from '@/query-keys';
 import { AuthContext } from './auth-context';
 import { LoginPage } from './login-page';
 import { SetPasswordPage } from './set-password-page';
 import { SetupClosedPage } from './setup-closed-page';
+import { authOptions } from '@/queries';
 
 const setupRecheckMs = 15_000;
+const authKey = authOptions().queryKey;
 
 /**
  * Shows the app only to a signed-in browser: the login screen when there is a password, the first-run
@@ -19,7 +20,7 @@ const setupRecheckMs = 15_000;
 export function AuthGate({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   // While no password is set, ask again now and then: setup may time out, or someone else may set it first.
-  const state = useQuery({ queryKey: authKey, queryFn: getAuthState, refetchInterval: (query) => (query.state.data?.passwordSet === false ? setupRecheckMs : false) });
+  const state = useQuery({ ...authOptions(), refetchInterval: (query) => (query.state.data?.passwordSet === false ? setupRecheckMs : false) });
   const signedIn = state.data?.signedIn === true;
 
   // A recheck that lands while signing out could bring the signed-in answer back and flash the app.

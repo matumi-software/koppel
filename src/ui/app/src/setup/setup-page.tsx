@@ -1,20 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, KoppelMark, RoleCards, SetupChecks, Steps } from '@koppel/react-ui';
-import { getSystemChecks } from '@/api/http';
 import type { KoppelRole } from '@/api/settings';
 import { roleOptions } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
 import { useMachineName } from '@/shared/use-machine-name';
+import { systemChecksOptions } from '@/queries';
 
 /**
  * First run: pick what this machine does, and see whether its kernel can do it. Continue saves the
  * role and marks setup done; the page leaves only when the server confirms both.
  */
-export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: KoppelRole) => void }) {
+export function SetupPage({ locked }: { locked: boolean }) {
   const host = useMachineName();
   const { query, requestSetup, setup } = useSettings();
-  const checks = useQuery({ queryKey: ['system-checks'], queryFn: getSystemChecks });
+  const checks = useQuery(systemChecksOptions());
   const [role, setRole] = useState<KoppelRole | null>(null);
   const chosen = role ?? query.data?.role ?? 'server';
   const pending = setup.isPending;
@@ -22,11 +22,6 @@ export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: 
 
   const needed = chosen === 'server' ? ['share'] : chosen === 'client' ? ['attach'] : ['share', 'attach'];
   const blocking = (checks.data ?? []).filter((c) => needed.includes(c.id) && !c.ok);
-
-  const finish = () => {
-    requestSetup(chosen);
-    onDone(chosen);
-  };
 
   return (
     <div className="kp-shell" style={{ flexDirection: 'column' }}>
@@ -62,7 +57,7 @@ export function SetupPage({ locked, onDone }: { locked: boolean; onDone: (role: 
             <span className="kp-type-caption" style={{ color: blocking.length ? 'var(--fault-text)' : 'var(--text-tertiary)' }}>
               {blocking.length ? 'Koppel can save this role, but it cannot use USB until the problems above are fixed.' : 'Everything this role needs is here.'}
             </span>
-            <Button variant="primary" isSending={pending} isDisabled={locked} onPress={finish}>
+            <Button variant="primary" isSending={pending} isDisabled={locked} onPress={() => requestSetup(chosen)}>
               {pending ? 'Saving' : 'Continue'}
             </Button>
           </div>

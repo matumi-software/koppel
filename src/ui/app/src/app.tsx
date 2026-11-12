@@ -1,9 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { AppShell, NavGroup, NavItem, StatusCard } from '@koppel/react-ui';
-import { getClients } from '@/api/server';
-import { getConnection } from '@/api/client';
-import { getSettings } from '@/api/settings';
 import { ClientDevicesPage } from '@/devices/client-devices';
 import { ServerDevicesPage } from '@/devices/server-devices';
 import { hostOf, useClientDevices, useServerDevices } from '@/devices/use-devices';
@@ -15,10 +12,12 @@ import { ConfigurationPage } from '@/settings/configuration-page';
 import { isClientRole, isServerRole } from '@/settings/roles';
 import { SetupPage } from '@/setup/setup-page';
 import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
-import { FrameContext, usePageFromHash, type Page } from '@/shell/frame-context';
+import { usePending } from '@/pending/pending-context';
+import { setupKey } from '@/pending/domains';
+import { FrameContext, goTo, pageTitles, usePage, type Page } from '@/shell/frame-context';
 import { useActivity } from '@/activity/activity-context';
-import { clientsKey, connectionKey, settingsKey } from '@/query-keys';
 import { useKoppelVersion, useMachineName } from '@/shared/use-machine-name';
+import { clientsOptions, connectionOptions, settingsOptions } from '@/queries';
 
 export function App() {
   const host = useMachineName();
@@ -26,21 +25,24 @@ export function App() {
   const { state: link, retry } = useLive();
   const { signOut } = useAuth();
   const { items } = useActivity();
-  const [page, go] = usePageFromHash();
   const [isMenuOpen, setMenuOpen] = useState(false);
   const [signOutFailure, setSignOutFailure] = useState<string>();
-  const [title, setTitle] = useState('Koppel');
   const [asideSlot, setAsideSlot] = useState<HTMLDivElement | null>(null);
   const locked = link !== 'live';
 
-  const settings = useQuery({ queryKey: settingsKey, queryFn: getSettings });
+  const settings = useQuery(settingsOptions());
+  // First run lands on the page the new role needs first, once the server has confirmed setup. After
+  // that, an address with no page is the overview.
+  const { completed } = usePending('settings');
+  const justSetUp = (completed[setupKey] ?? 0) > 0;
+  const page = usePage(justSetUp ? (settings.data?.role === 'client' ? 'configuration' : 'clients') : 'overview');
   // Until the settings load, and for a role this UI does not know, the machine is neither.
   const isServer = isServerRole(settings.data?.role);
   const isClient = isClientRole(settings.data?.role);
   const server = useServerDevices(isServer && !!settings.data?.setupComplete);
   const client = useClientDevices(isClient && !!settings.data?.setupComplete);
-  const clients = useQuery({ queryKey: clientsKey, queryFn: getClients, enabled: isServer });
-  const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection, enabled: isClient });
+  const clients = useQuery({ ...clientsOptions(), enabled: isServer });
+  const connection = useQuery({ ...connectionOptions(), enabled: isClient });
   const remote = hostOf(connection.data?.serverUrl);
 
   // A page that does not exist for this role falls back to the overview, once the role is known:
@@ -54,13 +56,9 @@ export function App() {
   const needs = pendingCount + faultCount;
 
   const open = (next: Page) => {
-    go(next);
+    goTo(next);
     setMenuOpen(false);
   };
-
-  useEffect(() => {
-    if (settings.data && page !== shown) go(shown);
-  }, [settings.data, page, shown, go]);
 
   const nav = (
     <>
@@ -115,19 +113,14 @@ export function App() {
     </span>
   );
 
-  const frame = useMemo(
-    () => ({ page: shown, go: open, nav, navFoot, navFootState: link, status, isMenuOpen, setMenuOpen, locked, asideSlot, setTitle }),
-    // The nav and foot are rebuilt every render anyway; memo only keeps the object stable between them.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shown, nav, navFoot, link, status, isMenuOpen, locked, asideSlot],
-  );
+  const frame = useMemo(() => ({ locked, asideSlot }), [locked, asideSlot]);
 
   if (!settings.data) {
     return <p className="kp-note" style={{ padding: 24 }}>{settings.isError ? 'Could not reach Koppel. Check that it is running, then reload.' : 'Loading…'}</p>;
   }
 
   if (!settings.data.setupComplete) {
-    return <SetupPage locked={locked} onDone={(chosen) => go(chosen === 'client' ? 'configuration' : 'clients')} />;
+    return <SetupPage locked={locked} />;
   }
 
   // One shell for every page, so the side panel is one panel too: pages swap its content, never its width.
@@ -139,7 +132,7 @@ export function App() {
         aside={<div ref={setAsideSlot} style={{ display: 'contents' }} />}
         defaultAsideWidth={storedAsideWidth()}
         onAsideWidthChange={storeAsideWidth}
-        title={title}
+        title={pageTitles[shown]}
         status={status}
         isMenuOpen={isMenuOpen}
         onMenuOpenChange={setMenuOpen}

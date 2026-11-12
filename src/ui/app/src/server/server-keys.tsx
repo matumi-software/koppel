@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, CopyValue, ModalDialog } from '@koppel/react-ui';
-import { cancelCertificate, getServerKeys, prepareCertificate, switchCertificate, type ClientView } from '@/api/server';
+import type { ClientView } from '@/api/server';
+import type { ServerKeysAction } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';
-import { serverKeysKey } from '@/query-keys';
+import { serverKeysOptions } from '@/queries';
 
 const names = (clients: ClientView[]) => clients.map((c) => c.name).join(', ');
 
@@ -20,13 +21,14 @@ interface ServerKeysProps {
  * after. Each action is pending until ServerKeysChanged brings the new state (see PendingProvider).
  */
 export function ServerKeys({ host, httpsPort, clients, locked }: ServerKeysProps) {
-  const keys = useQuery({ queryKey: serverKeysKey, queryFn: getServerKeys });
+  const keys = useQuery(serverKeysOptions());
   const { pending, failures, request } = usePending('serverKeys');
   const [confirmSwitch, setConfirmSwitch] = useState(false);
 
   const current = keys.data;
   if (!current) return null;
 
+  const doing = (type: ServerKeysAction['type']) => type in pending;
   const busy = Object.keys(pending).length > 0;
   const missing = clients.filter((c) => !c.hasNextCertificate);
   const failure = Object.values(failures)[0];
@@ -49,11 +51,11 @@ export function ServerKeys({ host, httpsPort, clients, locked }: ServerKeysProps
               : `${clients.length - missing.length} of ${clients.length} clients have its fingerprint. Waiting for ${names(missing)}: a client gets it the next time it connects.`}
           </span>
           <div className="kp-row">
-            <Button variant="primary" isSending={'switch' in pending} isDisabled={locked || busy} onPress={() => setConfirmSwitch(true)}>
-              {'switch' in pending ? 'Switching' : 'Switch to it'}
+            <Button variant="primary" isSending={doing('switch')} isDisabled={locked || busy} onPress={() => setConfirmSwitch(true)}>
+              {doing('switch') ? 'Switching' : 'Switch to it'}
             </Button>
-            <Button variant="secondary" isSending={'cancel' in pending} isDisabled={locked || busy} onPress={() => request('cancel', current.nextFingerprint, cancelCertificate)}>
-              {'cancel' in pending ? 'Cancelling' : 'Cancel it'}
+            <Button variant="secondary" isSending={doing('cancel')} isDisabled={locked || busy} onPress={() => request({ type: 'cancel' })}>
+              {doing('cancel') ? 'Cancelling' : 'Cancel it'}
             </Button>
           </div>
         </>
@@ -61,8 +63,8 @@ export function ServerKeys({ host, httpsPort, clients, locked }: ServerKeysProps
         <>
           <span className="kp-field__help">To replace the certificate, prepare a new one first. Paired clients learn its fingerprint while this one stays in use, then you switch.</span>
           <div className="kp-row">
-            <Button variant="secondary" isSending={'prepare' in pending} isDisabled={locked || busy} onPress={() => request('prepare', null, prepareCertificate)}>
-              {'prepare' in pending ? 'Preparing' : 'Prepare a new certificate'}
+            <Button variant="secondary" isSending={doing('prepare')} isDisabled={locked || busy} onPress={() => request({ type: 'prepare' })}>
+              {doing('prepare') ? 'Preparing' : 'Prepare a new certificate'}
             </Button>
           </div>
         </>
@@ -88,7 +90,7 @@ export function ServerKeys({ host, httpsPort, clients, locked }: ServerKeysProps
             isDisabled={locked}
             onPress={() => {
               setConfirmSwitch(false);
-              request('switch', current.nextFingerprint, switchCertificate);
+              request({ type: 'switch', nextFingerprint: current.nextFingerprint });
             }}
           >
             Switch

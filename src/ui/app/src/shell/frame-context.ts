@@ -1,44 +1,45 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useSyncExternalStore } from 'react';
 
 export type Page = 'overview' | 'devices' | 'clients' | 'attach' | 'configuration';
 
-const pages: readonly Page[] = ['overview', 'devices', 'clients', 'attach', 'configuration'];
-
-const fromHash = (): Page => {
-  const hash = window.location.hash.slice(1);
-  return (pages as readonly string[]).includes(hash) ? (hash as Page) : 'overview';
+/** The phone top bar's title for each page. A page's own heading may say more, such as which server. */
+export const pageTitles: Record<Page, string> = {
+  overview: 'Overview',
+  devices: 'Devices',
+  clients: 'Clients',
+  attach: 'Devices',
+  configuration: 'Configuration',
 };
 
-/** The open page, kept in the address (#devices) so a phone can bookmark a page to check up on. */
-export function usePageFromHash(): [Page, (page: Page) => void] {
-  const [page, setPage] = useState<Page>(fromHash);
-  useEffect(() => {
-    const onHash = () => setPage(fromHash());
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-  const go = (next: Page) => {
-    window.location.hash = next;
-    setPage(next);
-  };
-  return [page, go];
+const isPage = (value: string): value is Page => Object.hasOwn(pageTitles, value);
+
+const subscribe = (onChange: () => void) => {
+  window.addEventListener('hashchange', onChange);
+  return () => window.removeEventListener('hashchange', onChange);
+};
+
+const hash = () => window.location.hash;
+
+/**
+ * The open page, kept in the address (#devices) so a phone can bookmark a page to check up on. The
+ * address is the one place it lives: `goTo` changes it and this reads it back, so nothing is set twice.
+ * With no page in the address (or one that does not exist) it is `fallback`.
+ */
+export function usePage(fallback: Page = 'overview'): Page {
+  const value = useSyncExternalStore(subscribe, hash).slice(1);
+  return isPage(value) ? value : fallback;
 }
 
+/** Opens a page. */
+export const goTo = (page: Page) => {
+  window.location.hash = page;
+};
+
 export interface FrameApi {
-  page: Page;
-  go: (page: Page) => void;
-  nav: ReactNode;
-  navFoot: ReactNode;
-  navFootState: 'live' | 'reconnecting' | 'down';
-  status: ReactNode;
-  isMenuOpen: boolean;
-  setMenuOpen: (open: boolean) => void;
   /** True while the UI's own link to its server is not live, so nothing may send a change. */
   locked: boolean;
   /** The one side panel. A page renders its content there through Frame's aside. */
   asideSlot: HTMLElement | null;
-  /** Sets the phone top bar's title to the open page's. */
-  setTitle: (title: string) => void;
 }
 
 export const FrameContext = createContext<FrameApi | null>(null);

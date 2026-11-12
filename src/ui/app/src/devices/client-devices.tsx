@@ -1,22 +1,21 @@
 import { useState } from 'react';
 import { Button, CopyValue, DeviceCardBody, DeviceCards, DeviceGroup, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
-import { getConnection } from '@/api/client';
-import { attachDevice, detachDevice, type ClientDeviceView } from '@/api/usb';
-import { connectionKey } from '@/query-keys';
+import type { ClientDeviceView } from '@/api/usb';
 import { Frame } from '@/shell/frame';
-import { useFrame } from '@/shell/frame-context';
+import { goTo, useFrame } from '@/shell/frame-context';
 import { usePending } from '@/pending/pending-context';
 import { DeviceDrawer } from './device-drawer';
 import { hostOf, since, useClientDevices } from './use-devices';
+import { connectionOptions } from '@/queries';
 
 /**
  * Client role: the devices the server shares, grouped by what you can do with them. Attach and detach
  * are pending until ClientDevicesChanged shows the device attached here (or not), or why it failed.
  */
 export function ClientDevicesPage() {
-  const { locked, go } = useFrame();
-  const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection });
+  const { locked } = useFrame();
+  const connection = useQuery(connectionOptions());
   const server = hostOf(connection.data?.serverUrl) ?? 'the server';
   const [selected, setSelected] = useState<string | null>(null);
   const { pending, failures, request } = usePending('clientDevices');
@@ -29,7 +28,7 @@ export function ClientDevicesPage() {
   const action = (e: ClientDeviceView) => {
     const busy = e.device.busId in pending;
     return e.attachedHere ? (
-      <Button variant="secondary" isSending={busy} isDisabled={locked} onPress={() => request(e.device.busId, false, () => detachDevice(e.device.busId))}>
+      <Button variant="secondary" isSending={busy} isDisabled={locked} onPress={() => request({ busId: e.device.busId, attach: false })}>
         {busy ? 'Detaching' : 'Detach'}
       </Button>
     ) : (
@@ -37,7 +36,7 @@ export function ClientDevicesPage() {
         variant="primary"
         isSending={busy}
         isDisabled={locked || takenElsewhere(e) || e.device.state === 'offline' || !!data?.unavailable}
-        onPress={() => request(e.device.busId, true, () => attachDevice(e.device.busId))}
+        onPress={() => request({ busId: e.device.busId, attach: true })}
       >
         {busy ? 'Attaching' : 'Attach'}
       </Button>
@@ -104,7 +103,7 @@ export function ClientDevicesPage() {
       {link === 'unconfigured' && (
         <div className="kp-row">
           <p className="kp-note">Set up the server connection to see its devices.</p>
-          <Button variant="secondary" onPress={() => go('configuration')}>
+          <Button variant="secondary" onPress={() => goTo('configuration')}>
             Server connection
           </Button>
         </div>

@@ -1,29 +1,25 @@
 import { useQuery } from '@tanstack/react-query';
 import { Button, MiniList, Panel, StatusBadge, type MiniListItem } from '@koppel/react-ui';
 import { useActivity } from '@/activity/activity-context';
-import { getConnection } from '@/api/client';
-import { getClients } from '@/api/server';
-import { getSettings } from '@/api/settings';
 import { hostOf, since, useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { isClientRole, isServerRole } from '@/settings/roles';
-import { clientsKey, connectionKey, settingsKey } from '@/query-keys';
 import { Frame } from '@/shell/frame';
 import { useMachineName } from '@/shared/use-machine-name';
-import { useFrame } from '@/shell/frame-context';
+import { goTo } from '@/shell/frame-context';
+import { clientsOptions, connectionOptions, settingsOptions } from '@/queries';
 
 /** Everything at a glance: what needs you, what this machine shares, and what it has attached. */
 export function OverviewPage() {
   const host = useMachineName();
-  const { go } = useFrame();
   const { items } = useActivity();
-  const settings = useQuery({ queryKey: settingsKey, queryFn: getSettings });
+  const settings = useQuery(settingsOptions());
   const isServer = isServerRole(settings.data?.role);
   const isClient = isClientRole(settings.data?.role);
   const server = useServerDevices(isServer);
   const client = useClientDevices(isClient);
-  const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection, enabled: isClient });
+  const connection = useQuery({ ...connectionOptions(), enabled: isClient });
   const remote = hostOf(connection.data?.serverUrl) ?? 'the server';
-  const clients = useQuery({ queryKey: clientsKey, queryFn: getClients, enabled: isServer });
+  const clients = useQuery({ ...clientsOptions(), enabled: isServer });
   const clientName = (id: string | null) => clients.data?.find((c) => c.id === id)?.name ?? id ?? 'A client';
 
   const needs: MiniListItem[] = [];
@@ -32,19 +28,19 @@ export function OverviewPage() {
   }
   for (const d of isServer ? (server.data?.devices ?? []) : []) {
     if (d.fault) {
-      needs.push({ id: `s-${d.busId}`, name: `${d.name} was not changed`, end: <Button variant="secondary" onPress={() => go('devices')}>Open</Button>, sub: <span style={{ color: 'var(--fault-text)' }}>{d.fault}</span> });
+      needs.push({ id: `s-${d.busId}`, name: `${d.name} was not changed`, end: <Button variant="secondary" onPress={() => goTo('devices')}>Open</Button>, sub: <span style={{ color: 'var(--fault-text)' }}>{d.fault}</span> });
     }
   }
   for (const e of isClient ? (client.data?.devices ?? []) : []) {
     if (e.fault) {
-      needs.push({ id: `c-${e.device.busId}`, name: `${e.device.name} on ${remote}`, end: <Button variant="secondary" onPress={() => go('attach')}>Open</Button>, sub: <span style={{ color: 'var(--fault-text)' }}>{e.fault}</span> });
+      needs.push({ id: `c-${e.device.busId}`, name: `${e.device.name} on ${remote}`, end: <Button variant="secondary" onPress={() => goTo('attach')}>Open</Button>, sub: <span style={{ color: 'var(--fault-text)' }}>{e.fault}</span> });
     }
   }
   if (isServer && server.data?.unavailable) {
     needs.push({ id: 'share-unavailable', name: 'This machine cannot share devices', sub: <span style={{ color: 'var(--fault-text)' }}>{server.data.unavailable}</span> });
   }
   if (isClient && client.data?.link === 'unconfigured') {
-    needs.push({ id: 'no-connection', name: 'No server connection yet', end: <Button variant="secondary" onPress={() => go('configuration')}>Set up</Button>, sub: 'Add the server and the client ID and secret it gave you.' });
+    needs.push({ id: 'no-connection', name: 'No server connection yet', end: <Button variant="secondary" onPress={() => goTo('configuration')}>Set up</Button>, sub: 'Add the server and the client ID and secret it gave you.' });
   }
   if (isClient && client.data?.link === 'error') {
     needs.push({ id: 'link-error', name: `Cannot reach ${remote}`, sub: <span style={{ color: 'var(--fault-text)' }}>{client.data.linkMessage}</span> });
@@ -94,12 +90,12 @@ export function OverviewPage() {
       )}
       <div className="kp-panels">
         {isServer && (
-          <Panel title={`Sharing from ${host}`} meta={`${shared.length} of ${server.data?.devices.length ?? 0}`} footer={<Button variant="ghost" onPress={() => go('devices')}>All devices</Button>}>
+          <Panel title={`Sharing from ${host}`} meta={`${shared.length} of ${server.data?.devices.length ?? 0}`} footer={<Button variant="ghost" onPress={() => goTo('devices')}>All devices</Button>}>
             <MiniList items={sharing} empty="Nothing shared yet. Open Devices and switch Share on." />
           </Panel>
         )}
         {isClient && (
-          <Panel title={`Attached from ${remote}`} footer={<Button variant="ghost" onPress={() => go('attach')}>All devices on {remote}</Button>}>
+          <Panel title={`Attached from ${remote}`} footer={<Button variant="ghost" onPress={() => goTo('attach')}>All devices on {remote}</Button>}>
             <MiniList items={attached} empty={client.data?.link === 'connected' ? `${remote} is not sharing any devices.` : 'Not connected to a server.'} />
           </Panel>
         )}

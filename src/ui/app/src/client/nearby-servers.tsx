@@ -1,22 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { Button, CopyValue, MiniList, PairingCode, Panel, type MiniListItem } from '@koppel/react-ui';
-import { getConnection } from '@/api/client';
-import {
-  cancelPairing,
-  confirmPairing,
-  getDiscoveredServers,
-  getPairingStatus,
-  startPairing,
-  type DiscoveredServer,
-} from '@/api/pairing';
+import type { DiscoveredServer } from '@/api/pairing';
+import { pairingKeys } from '@/pending/domains';
+import { hexOf, shortFingerprint } from '@/shared/fingerprint';
 import { hostOf } from '@/devices/use-devices';
 import { useMachineName } from '@/shared/use-machine-name';
 import { usePending } from '@/pending/pending-context';
-import { connectionKey, discoveredServersKey, pairingStatusKey } from '@/query-keys';
+import { connectionOptions, discoveredServersOptions, pairingStatusOptions } from '@/queries';
 
-/** Pending keys that are not a server: the two buttons of a pairing under way. */
-const cancelKey = 'cancel';
-const confirmKey = 'confirm';
+const { cancel: cancelKey, confirm: confirmKey } = pairingKeys;
 
 /**
  * Client role: Koppel servers found on this network, and pairing with one. Pair is pending until
@@ -27,12 +19,12 @@ const confirmKey = 'confirm';
  */
 export function NearbyServers({ locked }: { locked: boolean }) {
   const me = useMachineName();
-  const servers = useQuery({ queryKey: discoveredServersKey, queryFn: getDiscoveredServers });
+  const servers = useQuery(discoveredServersOptions());
   // The same cache key ConnectionSection keeps current from ConnectionChanged.
-  const connection = useQuery({ queryKey: connectionKey, queryFn: getConnection });
+  const connection = useQuery(connectionOptions());
   const linkedTo = hex(connection.data?.serverFingerprint);
   const linkedHost = hostOf(connection.data?.serverUrl)?.toLowerCase();
-  const status = useQuery({ queryKey: pairingStatusKey, queryFn: getPairingStatus });
+  const status = useQuery(pairingStatusOptions());
   const { pending, failures, request } = usePending('pairing');
 
   const current = status.data;
@@ -64,7 +56,7 @@ export function NearbyServers({ locked }: { locked: boolean }) {
             variant="secondary"
             isSending={server.fingerprint in pending}
             isDisabled={locked || busy}
-            onPress={() => request(server.fingerprint, server, () => startPairing(server))}
+            onPress={() => request({ type: 'pair', server })}
           >
             Pair
           </Button>
@@ -87,7 +79,7 @@ export function NearbyServers({ locked }: { locked: boolean }) {
               </p>
             )}
             <div className="app-inline">
-              <Button variant="secondary" isSending={cancelKey in pending} isDisabled={locked || cancelKey in pending} onPress={() => request(cancelKey, null, cancelPairing)}>
+              <Button variant="secondary" isSending={cancelKey in pending} isDisabled={locked || cancelKey in pending} onPress={() => request({ type: 'cancel' })}>
                 Cancel
               </Button>
             </div>
@@ -102,10 +94,10 @@ export function NearbyServers({ locked }: { locked: boolean }) {
             {current.serverFingerprint && <CopyValue value={current.serverFingerprint} wrap />}
             <p className="kp-note">Replace your connection only if this is the server you meant to pair with. Discarding leaves the connection as it is.</p>
             <div className="app-inline">
-              <Button variant="primary" isSending={confirmKey in pending} isDisabled={locked || confirmKey in pending || cancelKey in pending} onPress={() => request(confirmKey, null, confirmPairing)}>
+              <Button variant="primary" isSending={confirmKey in pending} isDisabled={locked || confirmKey in pending || cancelKey in pending} onPress={() => request({ type: 'confirm' })}>
                 Replace connection
               </Button>
-              <Button variant="secondary" isSending={cancelKey in pending} isDisabled={locked || confirmKey in pending || cancelKey in pending} onPress={() => request(cancelKey, null, cancelPairing)}>
+              <Button variant="secondary" isSending={cancelKey in pending} isDisabled={locked || confirmKey in pending || cancelKey in pending} onPress={() => request({ type: 'cancel' })}>
                 Discard
               </Button>
             </div>
@@ -156,11 +148,5 @@ function warningFor(server: DiscoveredServer, all: DiscoveredServer[], linkedTo:
   return undefined;
 }
 
-/** Fingerprints compare by their hex digits alone. */
-const hex = (fingerprint: string | null | undefined) => (fingerprint ?? '').replace(/[^0-9a-f]/gi, '').toUpperCase() || undefined;
-
-/** The first eight pairs, in the colon-separated form the server's Clients page shows. */
-const shortFingerprint = (fingerprint: string) => {
-  const pairs = hex(fingerprint)?.match(/.{2}/g) ?? [];
-  return `${pairs.slice(0, 8).join(':')}…`;
-};
+/** Fingerprints compare by their hex digits alone; no digits is no fingerprint. */
+const hex = (fingerprint: string | null | undefined) => hexOf(fingerprint) || undefined;

@@ -2,21 +2,22 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { ActivityFeed, Button, CopyValue, Field, Glyph, ItemList, ModalDialog, SecretValue, StatusBadge } from '@koppel/react-ui';
 import { toEntries, useActivity } from '@/activity/activity-context';
-import { createClient, getClients, getClientSecret, getIdentity, getServerKeys, revokeClient, rotateClientSecret, type ClientView, type CreatedClient } from '@/api/server';
+import { createClient, getClientSecret, rotateClientSecret, type ClientView, type CreatedClient } from '@/api/server';
 import { since, useServerDevices } from '@/devices/use-devices';
 import { useMachineName } from '@/shared/use-machine-name';
+import { useNow } from '@/shared/use-now';
 import { usePending } from '@/pending/pending-context';
-import { clientsKey, serverKeysKey } from '@/query-keys';
 import { Frame } from '@/shell/frame';
 import { useFrame } from '@/shell/frame-context';
 import { PairingRequests } from './pairing-requests';
 import { ServerKeys } from './server-keys';
+import { clientsOptions, identityOptions, serverKeysOptions } from '@/queries';
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
-const seen = (client: ClientView) => {
+const seen = (client: ClientView, now: number) => {
   if (!client.lastSeen) return 'Not seen since the server started';
-  const minutes = Math.round((Date.now() - new Date(client.lastSeen).getTime()) / 60_000);
+  const minutes = Math.round((now - new Date(client.lastSeen).getTime()) / 60_000);
   return minutes < 1 ? 'Seen just now' : minutes < 60 ? `Seen ${minutes} min ago` : `Seen at ${new Date(client.lastSeen).toLocaleTimeString()}`;
 };
 
@@ -27,11 +28,12 @@ const seen = (client: ClientView) => {
  */
 export function ClientsPage() {
   const host = useMachineName();
+  const now = useNow();
   const { locked } = useFrame();
-  const identity = useQuery({ queryKey: ['identity'], queryFn: getIdentity });
-  const clients = useQuery({ queryKey: clientsKey, queryFn: getClients });
+  const identity = useQuery(identityOptions());
+  const clients = useQuery(clientsOptions());
   // While a new certificate is prepared, each client says whether it has its fingerprint.
-  const handover = useQuery({ queryKey: serverKeysKey, queryFn: getServerKeys }).data?.nextFingerprint != null;
+  const handover = useQuery(serverKeysOptions()).data?.nextFingerprint != null;
   const devices = useServerDevices();
   const [selected, setSelected] = useState<string | null>(null);
   const { pending, failures, request } = usePending('clients');
@@ -53,7 +55,7 @@ export function ClientsPage() {
             isRevoking={current.id in pending}
             revokeFailure={failures[current.id]}
             locked={locked}
-            onRevoke={() => request(current.id, true, () => revokeClient(current.id))}
+            onRevoke={() => request({ id: current.id, name: current.name })}
             onClose={() => setSelected(null)}
           />
         ) : undefined
@@ -86,7 +88,7 @@ export function ClientsPage() {
                   <span className="kp-row">
                     <code className="kp-id">{client.id}</code>
                     <span className="kp-type-caption" role="status" style={{ color: busy ? 'var(--pending-text)' : 'var(--text-tertiary)' }}>
-                      {busy ? 'Revoking… waiting for the server' : seen(client)}
+                      {busy ? 'Revoking… waiting for the server' : seen(client, now)}
                       {!busy && handover && (client.hasNextCertificate ? ' · Has the new certificate' : ' · Waiting for the new certificate')}
                     </span>
                   </span>
@@ -117,6 +119,7 @@ interface ClientDrawerProps {
 }
 
 function ClientDrawer({ client, attached, handover, isRevoking, revokeFailure, locked, onRevoke, onClose }: ClientDrawerProps) {
+  const now = useNow();
   const { items } = useActivity();
   const [confirmRotate, setConfirmRotate] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -142,7 +145,7 @@ function ClientDrawer({ client, attached, handover, isRevoking, revokeFailure, l
         <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
           <h2>{client.name}</h2>
           <span className="kp-type-caption" style={{ color: 'var(--text-tertiary)' }}>
-            Added {dateFormat.format(new Date(client.createdAt))} · {seen(client)}
+            Added {dateFormat.format(new Date(client.createdAt))} · {seen(client, now)}
           </span>
         </div>
         <Button variant="ghost" aria-label="Close details" onPress={onClose}>

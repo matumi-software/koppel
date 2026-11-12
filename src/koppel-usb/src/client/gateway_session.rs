@@ -12,7 +12,7 @@ use super::attach::RemoteImport;
 use super::slots::{AttachKey, Attachment, Kind};
 use super::{AttachError, Command, Failure, Shared};
 use crate::upstream::MAX_LIST_BYTES;
-use crate::{ActivityOutcome, ActivityReason, BusId, CloseReason, protocol, relay};
+use crate::{ActivityOutcome, ActivityReason, BusId, CloseReason, protocol};
 
 /// What the driver asked for.
 enum GatewayRequest {
@@ -265,7 +265,7 @@ impl Shared {
                 },
                 None,
             );
-            relay(&mut *session, &mut local, &stop).await;
+            usbip::relay(&mut *session, &mut local, stop.cancelled()).await;
         }
 
         let (reply, answer) = oneshot::channel();

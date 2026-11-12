@@ -9,6 +9,7 @@ members = [
     "koppel-usb",
     "koppel-web",
     "koppel-windows",
+    "usbip",
 ]
 
 [workspace.package]
@@ -32,6 +33,7 @@ koppel-secrets = { path = "koppel-secrets", version = "0.2.0" }
 koppel-upgrade = { path = "koppel-upgrade", version = "0.2.0" }
 koppel-usb = { path = "koppel-usb", version = "0.2.0" }
 koppel-windows = { path = "koppel-windows", version = "0.2.0" }
+usbip = { path = "usbip", version = "0.2.0" }
 
 # The async runtime (MIT).
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }

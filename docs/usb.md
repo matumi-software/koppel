@@ -60,12 +60,12 @@ sections describe the behaviour; this one says where it lives in Rust and what d
 
 | Module | What |
 |---|---|
-| `protocol`, `bus_id` | The USB/IP device list and import messages, byte for byte, and `BusId`, a bus ID that can only be made from valid text |
+| `usbip` (its own crate) | The USB/IP device list and import messages (`protocol`), byte for byte, `BusId`, a bus ID that can only be made from valid text, the device model (`UsbDevice`, the export and virtual port states) and `relay`, which copies both directions with one write and one flush per read. koppel-usb re-exports them. No Koppel crate and no `tokio-util` in it, and the properties of the messages are checked there with proptest |
 | `host.rs` | `UsbHost`, `UsbAttacher` and `UsbIpDriver`: what a platform can do; `Capabilities`, the value that says what a host can do; and `Platform`, the bundle of the three that Koppel is started with (a part the machine lacks is `None`, and the platform gives one reason). The kernel attach and detach write to sysfs, so `Platform` runs them on `spawn_blocking` |
 | `linux` (Linux only) | `SysfsUsbHost` (usbip-host) and `SysfsVhci` (vhci-hcd) through sysfs, and the usbfs reset |
 | `windows` (Windows only) | `UsbipWin2Driver`, which runs `usbip.exe`, and `WindowsTcpTable` |
 | `upstream` | `UsbIpUpstreamHost` for usbipd-win, and `UpstreamAddress` (`KOPPEL_USB_UPSTREAM`) |
-| `stream`, `relay` | The stream to the other machine, an in-memory pair for tests, the relay and the loopback socket pair |
+| `stream`, `relay` | The stream to the other machine, an in-memory pair for tests, and the loopback socket pair |
 | `server`, `data_plane` | `UsbServer` and `UsbDataPlane` |
 | `client/` (`mod`, `actor`, `slots`, `attach`, `gateway_session`), `gateway`, `peer_check` | `UsbClient` (made from a `Deps` struct), its actor, the per-device state machine, the gateway's sessions, `UsbIpGateway`, and which connections the gateway serves |
 | `store` | `Role`, `UsbSettings`, `Connection`, `SharedDevices` and `AttachedDevices`, the values the roles read and save, and the `Observed` and `Store` traits they read and save them through |

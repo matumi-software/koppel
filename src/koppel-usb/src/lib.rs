@@ -14,16 +14,13 @@
 //!   usbip-win2 and the gateway, attaching again after a drop, and `attached.json`.
 
 pub mod activity;
-pub mod bus_id;
 mod checks;
 mod client;
 mod data_plane;
-mod device;
 mod error;
 mod gateway;
 mod host;
 pub mod peer_check;
-pub mod protocol;
 mod relay;
 mod server;
 pub mod store;
@@ -40,7 +37,6 @@ pub mod windows;
 use time::OffsetDateTime;
 
 pub use activity::{ActivityOutcome, ActivityReason, ActivitySink, EntityKind, EntityRef};
-pub use bus_id::BusId;
 pub use checks::{SystemCheck, attach_check, share_check};
 pub use client::{ClientOptions, Deps, Link, LinkEvents, LinkStatus, Links, UsbClient};
 pub use data_plane::{RemoteClient, UsbDataPlane};
@@ -53,6 +49,10 @@ pub use store::{
 };
 pub use stream::{BoxFuture, CloseReason, DeviceStream, OpenError, StreamOpener};
 pub use upstream::{UpstreamAddress, UsbIpUpstreamHost};
+pub use usbip::{
+    BusId, ExportStatus, Hub, PortStatus, UsbDevice, UsbInterface, UsbSpeed, VhciPort, bus_id,
+    protocol,
+};
 pub use views::{
     ClientDeviceView, ClientDevices, DeviceState, DeviceView, LinkState, RemoteDevices,
     ServerDevices,
@@ -74,7 +74,6 @@ macro_rules! test_util {
 pub use {
     activity::NoActivity,
     client::{BeginAttachError, ImportMismatch, check_import},
-    device::{Hub, PortStatus},
     error::Module,
     server::{SetSharedError, shared_expects},
     tasks::Listener,
@@ -87,13 +86,7 @@ pub use relay::loopback_pair;
 pub(crate) use relay::loopback_pair;
 
 test_util!(
-    device::ExportStatus,
-    device::UsbDevice,
-    device::UsbInterface,
-    device::UsbSpeed,
-    device::VhciPort,
     error::UsbError,
-    relay::relay,
     views::interface_class_name,
     views::speed_label,
 );

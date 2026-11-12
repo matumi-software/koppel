@@ -38,29 +38,55 @@ pub mod windows;
 
 use time::OffsetDateTime;
 
-pub use activity::{
-    ActivityOutcome, ActivityReason, ActivitySink, EntityKind, EntityRef, NoActivity,
-};
+pub use activity::{ActivityOutcome, ActivityReason, ActivitySink, EntityKind, EntityRef};
 pub use bus_id::BusId;
 pub use checks::{SystemCheck, attach_check, share_check};
-pub use client::{
-    BeginAttachError, ClientOptions, Deps, ImportMismatch, Link, LinkEvents, LinkStatus, Links,
-    UsbClient, check_import,
-};
+pub use client::{ClientOptions, Deps, Link, LinkEvents, LinkStatus, Links, UsbClient};
 pub use data_plane::{RemoteClient, UsbDataPlane};
-pub use device::{ExportStatus, Hub, PortStatus, UsbDevice, UsbInterface, UsbSpeed, VhciPort};
-pub use error::{Module, UsbError};
 pub use gateway::{GatewayOptions, UsbIpGateway};
 pub use host::{Capabilities, Export, HostKind, Platform, UsbAttacher, UsbHost, UsbIpDriver};
-pub use relay::{loopback_pair, relay};
-pub use server::{ServerDeps, SetSharedError, UsbServer, shared_expects};
+pub use server::{ServerDeps, UsbServer};
 pub use stream::{BoxFuture, CloseReason, DeviceStream, OpenError, StreamOpener};
-pub use tasks::Listener;
 pub use upstream::{UpstreamAddress, UsbIpUpstreamHost};
 pub use views::{
     ClientDeviceView, ClientDevices, DeviceState, DeviceView, LinkState, RemoteDevices,
-    ServerDevices, interface_class_name, speed_label,
+    ServerDevices,
 };
+
+/// Public with the `test-util` feature, for the tests and test doubles; inside the crate always.
+macro_rules! test_util {
+    ($($path:path),* $(,)?) => {
+        $(
+            #[cfg(feature = "test-util")]
+            pub use $path;
+            #[cfg(not(feature = "test-util"))]
+            pub(crate) use $path;
+        )*
+    };
+}
+
+#[cfg(feature = "test-util")]
+pub use {
+    activity::NoActivity,
+    client::{BeginAttachError, ImportMismatch, check_import},
+    device::{Hub, PortStatus},
+    error::Module,
+    server::{SetSharedError, shared_expects},
+    tasks::Listener,
+};
+
+test_util!(
+    device::ExportStatus,
+    device::UsbDevice,
+    device::UsbInterface,
+    device::UsbSpeed,
+    device::VhciPort,
+    error::UsbError,
+    relay::loopback_pair,
+    relay::relay,
+    views::interface_class_name,
+    views::speed_label,
+);
 
 /// Where the time comes from, so a test can move it by hand.
 pub trait Clock: Send + Sync {

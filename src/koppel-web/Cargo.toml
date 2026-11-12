@@ -56,3 +56,5 @@ hyper = { workspace = true, features = ["client", "http1", "http2"] }
 tower.workspace = true
 # The role tests drive two Koppels over HTTPS as the UI does.
 reqwest.workspace = true
+# The role tests put a fake kernel behind koppel-usb's host and attacher traits.
+koppel-usb = { workspace = true, features = ["test-util"] }

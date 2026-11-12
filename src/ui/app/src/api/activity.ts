@@ -20,7 +20,6 @@ export interface ServerActivity {
     | 'linkDown'
     | 'signInFailed'
     | 'passwordChanged'
-    | 'signingKeyRotated'
     | 'certificatePrepared'
     | 'certificateCancelled'
     | 'certificateSwitched'

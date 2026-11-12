@@ -33,5 +33,5 @@ pub(crate) fn is_grpc(request: &Request) -> bool {
         .headers()
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(skakel_protocol::is_grpc_content_type)
+        .is_some_and(skakel_wire::is_grpc_content_type)
 }

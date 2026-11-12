@@ -101,8 +101,9 @@ too, and starts Koppel first if it is not running. See
 ## Pair a client
 
 1. On the client, open Configuration. Servers on your network lists the Koppel servers it hears.
-   Press Pair, and the client shows a six-digit code.
-2. On the server, open Clients. Under Waiting to pair, type that code and press Approve.
+   Press Pair, and the client shows an eight-digit code.
+2. On the server, open Clients and press Allow pairing first: a server takes pairing requests only
+   while you have allowed it. Under Waiting to pair, type the code and press Approve.
 
 The client then has its own credentials and connects. A server on another network is entered by
 address under Configuration instead.

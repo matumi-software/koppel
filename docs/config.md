@@ -5,7 +5,7 @@
 The config directory holds:
 
 - `settings.json`: plain, may be edited by hand.
-- `secrets.json`: Skakel's server state (`SkakelState`): signing key, HTTPS certificate, registered clients, and during a rotation the keys being retired and the prepared next certificate. Encrypted. Created on every machine at first start, whatever the role, because the certificate and the signing key are made then. Skakel reads it once at start and writes it after every change (`koppel-web/src/roles/skakel/store.rs`). A file Koppel 0.1.0 wrote is carried over on the first start: the certificate, the signing key, and the clients whose secret hash Skakel reads (a client added before Koppel kept secrets in their current form is dropped, and logged). A 0.1.0 file that cannot be carried over is copied aside as `secrets.json.0.1.0-<UTC time>` and the server starts with a new certificate, a new key and no clients, which the log says.
+- `secrets.json`: Skakel's server state (`SkakelState`): the HTTPS certificate, the registered clients and the prepared next certificate. Encrypted. Created on every machine at first start, whatever the role, because the certificate is made then. A file from Koppel 0.2.0 still holds a token signing key; Skakel 0.3.0 does not sign tokens, so it is dropped when the server starts. Skakel reads it once at start and writes it after every change (`koppel-web/src/roles/skakel/store.rs`). A file Koppel 0.1.0 wrote is carried over on the first start: the certificate and the clients whose secret hash Skakel reads (a client added before Koppel kept secrets in their current form is dropped, and logged). A 0.1.0 file that cannot be carried over is copied aside as `secrets.json.0.1.0-<UTC time>` and the server starts with a new certificate and no clients, which the log says.
 - `connection.json` (client role): server address, pinned fingerprint, client ID and secret, and during a certificate handover the server's next fingerprint. Encrypted. Its format did not change in 0.1.1, so a client keeps its connection, and once its server runs 0.1.1 too it links as before.
 - `ui-auth.json`: the UI password hash and security stamp. Encrypted.
 - `devices.json` (server role): the bus IDs the user chose to share, with their VID:PID. Plain.
@@ -49,7 +49,7 @@ cannot use ("Koppel cannot use ...secrets.json: ... The file was not changed ...
 directory"). It does not make new secrets over the old ones.
 
 - **What you see:** in Docker the container exits and restarts, over and over (`restart: always`), with that message in `docker logs`, until the keys are back. On Windows the service fails to start and the recovery rule retries it; run `Koppel.exe` from an elevated prompt with the service stopped to read the message.
-- **What to do:** restore the keys directory from a backup (the keys directory and the config directory belong together). If the keys are really gone, the encrypted files cannot be recovered: move the unreadable ones aside (`secrets.json`, `connection.json`, `ui-auth.json`) and start again. A new `secrets.json` means a new signing key and a new certificate, so every client must be paired again. A lost `connection.json` means entering or pairing the connection again. A lost `ui-auth.json` means setting the password again, within the setup window after the start.
+- **What to do:** restore the keys directory from a backup (the keys directory and the config directory belong together). If the keys are really gone, the encrypted files cannot be recovered: move the unreadable ones aside (`secrets.json`, `connection.json`, `ui-auth.json`) and start again. A new `secrets.json` means a new certificate, so every client must be paired again. A lost `connection.json` means entering or pairing the connection again. A lost `ui-auth.json` means setting the password again, within the setup window after the start.
 
 ### Config files in Rust
 
@@ -88,10 +88,9 @@ with the same rules.
   `<name>.0.1-key-certificate-<UTC time>`, unchanged, and Koppel starts as a new install, so every
   client pairs again and the password is set again.
 - **What carries over:** the certificate, so pinned clients keep their pin; the clients and their
-  secrets; the client's connection; the UI password. The token signing key stays in `secrets.json`
-  but does not need to carry over: tokens last 30 minutes and live only in a client's memory, a 0.2
-  client cannot use a 0.1.x server's tokens anyway (Skakel protocol 2), and Skakel's Rust server signs
-  with ECDSA P-256 where 0.1.x used RSA, so 0.2 starts with a new key. UI sessions end once: 0.1.x's
+  secrets; the client's connection; the UI password. The token signing key does not carry over: Skakel 0.3.0's
+  tokens are random strings the server remembers, tokens last 30 minutes and live only in a client's
+  memory, and a 0.2 client cannot use a 0.1.x server's tokens anyway (the protocols differ). UI sessions end once: 0.1.x's
   cookies were protected by keys in `keys/aspnet`, which 0.2 does not read.
 - **Certificate:** 0.1.x kept it as a password-less PKCS#12 (3DES and SHA-1, where "no
   password" is an empty BMPString without its terminator). The PKCS#12 crates refuse that form, so

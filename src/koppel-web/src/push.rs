@@ -27,7 +27,7 @@ use crate::auth::{SessionEnd, SignedIn};
 pub const SETTINGS_CHANGED: &str = "SettingsChanged";
 /// Server: the registered clients changed.
 pub const CLIENTS_CHANGED: &str = "ClientsChanged";
-/// Server: the certificate or the token signing key changed.
+/// Server: the certificate or the prepared next certificate changed.
 pub const SERVER_KEYS_CHANGED: &str = "ServerKeysChanged";
 /// Client: `connection.json` was written: the connection without its secret.
 pub const CONNECTION_CHANGED: &str = "ConnectionChanged";
@@ -41,7 +41,7 @@ pub const ACTIVITY_RECORDED: &str = "ActivityRecorded";
 pub const SERVERS_DISCOVERED: &str = "ServersDiscovered";
 /// Client: pairing moved on.
 pub const PAIRING_STATUS_CHANGED: &str = "PairingStatusChanged";
-/// Server: the pairing requests changed.
+/// Server: the pairing window or the pairing requests changed.
 pub const PAIRING_REQUESTS_CHANGED: &str = "PairingRequestsChanged";
 
 /// How often a quiet stream gets a comment.

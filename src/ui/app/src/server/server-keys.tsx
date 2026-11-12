@@ -1,11 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, CopyValue, ModalDialog } from '@koppel/react-ui';
-import { cancelCertificate, getServerKeys, prepareCertificate, rotateSigningKey, switchCertificate, type ClientView } from '@/api/server';
+import { cancelCertificate, getServerKeys, prepareCertificate, switchCertificate, type ClientView } from '@/api/server';
 import { usePending } from '@/pending/pending-context';
 import { serverKeysKey } from '@/query-keys';
-
-const dateFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
 const names = (clients: ClientView[]) => clients.map((c) => c.name).join(', ');
 
@@ -17,7 +15,7 @@ interface ServerKeysProps {
 }
 
 /**
- * Server role: the certificate clients pin and the key tokens are signed with, and what replaces them.
+ * Server role: the certificate clients pin, and what replaces it.
  * A new certificate is prepared first, so the paired clients learn its fingerprint, and switched to
  * after. Each action is pending until ServerKeysChanged brings the new state (see PendingProvider).
  */
@@ -32,7 +30,6 @@ export function ServerKeys({ host, httpsPort, clients, locked }: ServerKeysProps
   const busy = Object.keys(pending).length > 0;
   const missing = clients.filter((c) => !c.hasNextCertificate);
   const failure = Object.values(failures)[0];
-  const retiredUntil = current.retiredKeysUntil ? new Date(current.retiredKeysUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
 
   return (
     <section className="kp-card" aria-label="Server certificate" style={{ gap: 8 }}>
@@ -71,23 +68,6 @@ export function ServerKeys({ host, httpsPort, clients, locked }: ServerKeysProps
         </>
       )}
 
-      <span className="kp-field__label">Token signing key</span>
-      <span className="kp-row">
-        <code className="kp-id">{current.signingKeyId}</code>
-        <span className="kp-type-caption" style={{ color: 'var(--text-tertiary)' }}>
-          {`Since ${dateFormat.format(new Date(current.signingKeySince))}`}
-        </span>
-      </span>
-      <span className="kp-field__help">
-        {retiredUntil
-          ? `The key it replaced is still accepted until ${retiredUntil}, when the last token it signed has run out.`
-          : 'Rotating it logs no client out: tokens signed with the old key keep working until they run out, within 35 minutes.'}
-      </span>
-      <div className="kp-row">
-        <Button variant="secondary" isSending={'rotate' in pending} isDisabled={locked || busy} onPress={() => request('rotate', current.signingKeyId, rotateSigningKey)}>
-          {'rotate' in pending ? 'Rotating' : 'Rotate signing key'}
-        </Button>
-      </div>
       {failure && <p className="kp-error">Not done: {failure}</p>}
 
       <ModalDialog isOpen={confirmSwitch} onOpenChange={setConfirmSwitch} title="Switch to the new certificate?">

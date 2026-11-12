@@ -59,6 +59,21 @@ async fn machine_name(admin: &Session) -> String {
         .to_owned()
 }
 
+/// Opens `server`'s pairing window, which Skakel 0.3.0 keeps closed until a person opens it, and
+/// waits until it shows as open.
+async fn open_pairing(server: &Session) {
+    server
+        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .await
+        .expect(202)
+        .empty();
+    eventually("the pairing window to open", WAIT, || async {
+        let overview = server.get("/api/server/pairing").await.expect(200).json();
+        (overview["window"]["open"] == json!(true)).then_some(())
+    })
+    .await;
+}
+
 /// Starts pairing on `client` with the server at `url`, and waits for the code.
 async fn start_pairing(client: &Session, url: &str, fingerprint: &str, name: &str) -> Value {
     client
@@ -209,6 +224,7 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
         .problem(&["serverUrl", "serverFingerprint"]);
 
     // The fingerprint may be typed in any spelling.
+    open_pairing(server).await;
     let typed = server_fingerprint.replace(':', "").to_ascii_lowercase();
     let waiting = start_pairing(
         client,
@@ -219,8 +235,8 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     .await;
     let code = waiting["code"].as_str().expect("a code").to_owned();
     assert!(
-        code.len() == 6 && code.chars().all(|c| c.is_ascii_digit()),
-        "six digits: {code}"
+        code.len() == 8 && code.chars().all(|c| c.is_ascii_digit()),
+        "eight digits: {code}"
     );
     assert!(waiting["expiresAt"].is_string());
     assert_eq!(waiting["serverName"], json!(server_name));
@@ -236,7 +252,11 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
     let request_id = request["id"].as_str().expect("an id").to_owned();
     let approve = format!("/api/server/pairing/{request_id}/approve");
 
-    let wrong_code = if code == "000000" { "111111" } else { "000000" };
+    let wrong_code = if code == "00000000" {
+        "11111111"
+    } else {
+        "00000000"
+    };
     server
         .post(&approve, json!({ "code": wrong_code }))
         .await
@@ -325,6 +345,56 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
 }
 
 #[tokio::test]
+async fn a_server_with_its_pairing_closed_tells_the_client_how_to_open_it() {
+    let Some(pair) = Pair::get().await else {
+        return;
+    };
+    if !needs_skakel("pairing through the code") {
+        return;
+    }
+    let (server, client) = (&pair.server_admin, &pair.client_admin);
+    let server_fingerprint = fingerprint(server).await;
+    server
+        .delete("/api/server/pairing/window")
+        .await
+        .expect(202)
+        .empty();
+    eventually("the pairing window to close", WAIT, || async {
+        let overview = server.get("/api/server/pairing").await.expect(200).json();
+        (overview["window"]["open"] == json!(false)).then_some(())
+    })
+    .await;
+
+    client
+        .post(
+            "/api/client/pairing",
+            json!({ "serverUrl": pair.peer_url, "serverFingerprint": server_fingerprint, "serverName": "main" }),
+        )
+        .await
+        .expect(202)
+        .empty();
+    let failed = eventually("the client to hear the server is closed", WAIT, || async {
+        let status = pairing(client).await;
+        match status["state"].as_str() {
+            Some("failed") => Some(status),
+            Some("requesting") => None,
+            other => panic!("pairing went to {other:?}: {status}"),
+        }
+    })
+    .await;
+    let message = failed["message"].as_str().expect("a message");
+    assert!(
+        message.contains("not taking pairing requests") && message.contains("Allow pairing"),
+        "{message}"
+    );
+    client
+        .delete("/api/client/pairing")
+        .await
+        .expect(202)
+        .empty();
+}
+
+#[tokio::test]
 async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_server() {
     let Some(pair) = Pair::get().await else {
         return;
@@ -336,6 +406,7 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
     let server_fingerprint = fingerprint(server).await;
     let client_name = machine_name(client).await;
 
+    open_pairing(server).await;
     start_pairing(client, &pair.peer_url, &server_fingerprint, "main").await;
     let request = request_from(server, &client_name).await;
     let request_id = request["id"].as_str().expect("an id").to_owned();
@@ -364,6 +435,7 @@ async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_serve
         "a refused pairing is a failed clientAdded entry"
     );
 
+    open_pairing(server).await;
     start_pairing(client, &pair.peer_url, &server_fingerprint, "main").await;
     let request = request_from(server, &client_name).await;
     let request_id = request["id"].as_str().expect("an id").to_owned();
@@ -397,6 +469,7 @@ async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
     let server_fingerprint = fingerprint(server).await;
     let client_name = machine_name(client).await;
 
+    open_pairing(server).await;
     let waiting = start_pairing(client, &pair.peer_url, &server_fingerprint, "main").await;
     let code = waiting["code"].as_str().expect("a code").to_owned();
     let request = request_from(server, &client_name).await;
@@ -404,7 +477,11 @@ async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
         "/api/server/pairing/{}/approve",
         request["id"].as_str().unwrap_or_default()
     );
-    let wrong = if code == "000000" { "111111" } else { "000000" };
+    let wrong = if code == "00000000" {
+        "11111111"
+    } else {
+        "00000000"
+    };
     for _ in 0..3 {
         let answer = server.post(&approve, json!({ "code": wrong })).await;
         assert!(
@@ -456,6 +533,7 @@ async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
     let client_name = machine_name(client).await;
 
     let approve_self = || async {
+        open_pairing(client).await;
         let waiting = start_pairing(client, &own_url, &own_fingerprint, "itself").await;
         let request = request_from(client, &client_name).await;
         client

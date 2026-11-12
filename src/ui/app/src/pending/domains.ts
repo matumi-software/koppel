@@ -98,31 +98,17 @@ export const pendingDomains = {
   }),
 
   /**
-   * The certificate and the signing key, by action. The target is what the action replaces: the signing
-   * key's id for `rotate`, the next certificate's fingerprint for `switch`. Settled by ServerKeysChanged.
+   * The certificate, by action. The target is what the action replaces: the next certificate's
+   * fingerprint for `switch`. Settled by ServerKeysChanged.
    */
   serverKeys: domain<string | null, ServerKeysView>({
     queryKey: serverKeysKey,
     timeoutMs: confirmTimeoutMs,
     describe: (action) => ({
-      text:
-        action === 'rotate'
-          ? 'Rotate the token signing key'
-          : action === 'prepare'
-            ? 'Prepare a new certificate'
-            : action === 'cancel'
-              ? 'Cancel the new certificate'
-              : 'Switch to the new certificate',
+      text: action === 'prepare' ? 'Prepare a new certificate' : action === 'cancel' ? 'Cancel the new certificate' : 'Switch to the new certificate',
     }),
     verdict: (action, target, keys) => {
-      const done =
-        action === 'rotate'
-          ? keys.signingKeyId !== target
-          : action === 'prepare'
-            ? keys.nextFingerprint !== null
-            : action === 'cancel'
-              ? keys.nextFingerprint === null
-              : hexOf(keys.fingerprint) === hexOf(target);
+      const done = action === 'prepare' ? keys.nextFingerprint !== null : action === 'cancel' ? keys.nextFingerprint === null : hexOf(keys.fingerprint) === hexOf(target);
       return done ? 'confirmed' : 'waiting';
     },
   }),
@@ -139,6 +125,14 @@ export const pendingDomains = {
       view.clientId === sent.clientId.trim()
         ? 'confirmed'
         : 'waiting',
+  }),
+
+  /** Allow pairing or Close pairing on the server, under the key `window`. Settled once PairingRequestsChanged says the window is open or closed. */
+  pairingWindow: domain<'open' | 'close', PairingOverview>({
+    queryKey: pairingRequestsKey,
+    timeoutMs: confirmTimeoutMs,
+    describe: (_key, action) => ({ text: action === 'open' ? 'Allow pairing' : 'Close pairing' }),
+    verdict: (_key, action, view) => (view.window.open === (action === 'open') ? 'confirmed' : 'waiting'),
   }),
 
   /** Approve or Refuse on a request to pair, by request id. Settled once the request no longer waits in the list. */

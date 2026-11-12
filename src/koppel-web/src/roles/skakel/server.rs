@@ -1,6 +1,6 @@
-//! The server role on skakel-server: registered clients, revoking and rotating, the token signing
-//! key, the certificate and its handover, pairing requests, Koppel's remote device list and the
-//! `usb` streams. Its state is `secrets.json` ([`SecretsStore`]).
+//! The server role on skakel-server: registered clients, revoking and rotating, the certificate and
+//! its handover, the pairing window and its requests, Koppel's remote device list and the `usb`
+//! streams. Its state is `secrets.json` ([`SecretsStore`]).
 //!
 //! Skakel's server is mounted on Koppel's web ports: it binds nothing, and the web ports hand it what
 //! is Skakel's after their port and role check ([`SkakelServerRole::serve`]), with the caller's real
@@ -14,6 +14,7 @@
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use axum::extract::Request;
 use axum::http::StatusCode;
@@ -22,9 +23,12 @@ use koppel_config::ConfigFile;
 use koppel_config::files::{KoppelSettings, Role};
 use koppel_usb::{RemoteDevices, UsbDataPlane};
 use skakel_server::{
-    Clients, Keys, Pairing, PairingDecision, ServerEvent, SkakelServer, SkakelServerBuilder,
+    Certificates, Clients, Pairing, PairingDecision, PairingWindow, ServerEvent, ServerEvents,
+    SkakelServer, SkakelServerBuilder,
 };
+use time::OffsetDateTime;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
@@ -35,7 +39,7 @@ use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityRef};
 use crate::push::{self, Push};
 use crate::roles::{
     Approval, ClientView, Fut, KeysView, NewClient, PairingOverview, PairingRequestView,
-    RegisterError, RoleError, ServerRole, Switched,
+    PairingWindowView, RegisterError, RoleError, ServerRole, Switched,
 };
 
 /// Skakel's app id for Koppel.
@@ -68,11 +72,25 @@ struct Wiring {
     refused: Mutex<HashSet<String>>,
 }
 
+/// A running server and the task that turns its events into pushes.
+struct Running {
+    server: SkakelServer,
+    events: JoinHandle<()>,
+}
+
+impl Running {
+    /// Ends the server and, once it is stopped, the task that read its events.
+    async fn shut_down(self) {
+        self.server.shutdown().await;
+        self.events.abort();
+    }
+}
+
 /// The server role. See the module docs.
 pub struct SkakelServerRole {
     parts: ServerParts,
     wiring: Arc<Wiring>,
-    running: Mutex<Option<SkakelServer>>,
+    running: Mutex<Option<Running>>,
     restarting: tokio::sync::Mutex<()>,
 }
 
@@ -82,17 +100,14 @@ impl SkakelServerRole {
         let wiring = Arc::new(Wiring {
             push: parts.push.clone(),
             activity: parts.activity.clone(),
-            overview: Mutex::new(PairingOverview {
-                requests: Vec::new(),
-                budget_exhausted: false,
-            }),
+            overview: Mutex::new(PairingOverview::empty()),
             refused: Mutex::new(HashSet::new()),
         });
-        let server = build(&parts, &wiring).await?;
+        let running = build(&parts, &wiring).await?;
         Ok(Arc::new(Self {
             parts,
             wiring,
-            running: Mutex::new(Some(server)),
+            running: Mutex::new(Some(running)),
             restarting: tokio::sync::Mutex::new(()),
         }))
     }
@@ -107,7 +122,7 @@ impl SkakelServerRole {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
-            .map(SkakelServer::service);
+            .map(|running| running.server.service());
         let Some(mut service) = service else {
             return not_running(super::is_grpc(&request));
         };
@@ -124,7 +139,7 @@ impl SkakelServerRole {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .as_ref()
-            .map(|server| TlsAcceptor::from(server.tls_config()))
+            .map(|running| TlsAcceptor::from(running.server.tls_config()))
     }
 
     /// Starts Skakel's server again whenever the role leaves the server side, which ends what its
@@ -167,11 +182,8 @@ impl SkakelServerRole {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .replace(next);
-        // The new server has no pairing requests yet.
-        let empty = PairingOverview {
-            requests: Vec::new(),
-            budget_exhausted: false,
-        };
+        // The new server has no pairing requests yet, and its pairing window is closed.
+        let empty = PairingOverview::empty();
         *self
             .wiring
             .overview
@@ -181,7 +193,7 @@ impl SkakelServerRole {
             .push
             .send(push::PAIRING_REQUESTS_CHANGED, &empty);
         if let Some(old) = old {
-            old.shutdown().await;
+            old.shut_down().await;
         }
         tracing::info!("The role left the server side; every client's link and USB stream ended");
     }
@@ -194,16 +206,17 @@ impl SkakelServerRole {
             .unwrap_or_else(PoisonError::into_inner)
             .take();
         if let Some(old) = old {
-            old.shutdown().await;
+            old.shut_down().await;
         }
     }
 
     fn with<T>(&self, use_it: impl FnOnce(&SkakelServer) -> T) -> T {
         let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         use_it(
-            running
+            &running
                 .as_ref()
-                .expect("Skakel's server runs until Koppel stops"),
+                .expect("Skakel's server runs until Koppel stops")
+                .server,
         )
     }
 
@@ -211,8 +224,8 @@ impl SkakelServerRole {
         self.with(SkakelServer::clients)
     }
 
-    fn keys_handle(&self) -> Keys {
-        self.with(SkakelServer::keys)
+    fn certificates_handle(&self) -> Certificates {
+        self.with(SkakelServer::certificates)
     }
 
     fn pairing_handle(&self) -> Pairing {
@@ -234,9 +247,8 @@ impl SkakelServerRole {
 
 /// Builds and starts Skakel's server, mounted: it binds nothing, and the web ports serve it.
 /// Discovery is Koppel's own (see `announcer.rs`).
-async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<SkakelServer, String> {
-    let events = Arc::downgrade(wiring);
-    SkakelServerBuilder::new(APP_ID, &parts.version, parts.store.clone())
+async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<Running, String> {
+    let server = SkakelServerBuilder::new(APP_ID, &parts.version, parts.store.clone())
         .name(&parts.name)
         .certificate_host_name(&parts.name)
         .discovery(false)
@@ -246,14 +258,21 @@ async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<SkakelServer
         .grpc_service(remote::Service::server(parts.devices.clone()))
         .stream(USB_STREAM, usb_handler(parts.data_plane.clone()))
         .routes(remote::routes(parts.devices.clone()))
-        .on_event(move |event| {
-            if let Some(wiring) = events.upgrade() {
-                wiring.on_event(event);
-            }
-        })
         .start_mounted(parts.listen)
         .await
-        .map_err(|e| format!("Skakel's server could not start: {e}"))
+        .map_err(|e| format!("Skakel's server could not start: {e}"))?;
+    let events = tokio::spawn(read_events(server.subscribe(), Arc::downgrade(wiring)));
+    Ok(Running { server, events })
+}
+
+/// Turns what the server tells into pushes, on a task of Koppel's own, until the server is gone.
+async fn read_events(mut events: ServerEvents, wiring: std::sync::Weak<Wiring>) {
+    while let Some(event) = events.recv().await {
+        let Some(wiring) = wiring.upgrade() else {
+            return;
+        };
+        wiring.on_event(&event);
+    }
 }
 
 /// What a caller gets once Skakel's server has stopped with Koppel: gRPC's `UNAVAILABLE` for a
@@ -292,8 +311,17 @@ impl Wiring {
                         })
                         .collect(),
                     budget_exhausted: overview.budget_exhausted,
+                    window: self.current_window(),
                 };
                 *self.overview.lock().unwrap_or_else(PoisonError::into_inner) = view.clone();
+                self.push.send(push::PAIRING_REQUESTS_CHANGED, &view);
+            }
+            ServerEvent::PairingWindow(window) => {
+                let view = {
+                    let mut overview = self.overview.lock().unwrap_or_else(PoisonError::into_inner);
+                    overview.window = window_view(window);
+                    overview.clone()
+                };
                 self.push.send(push::PAIRING_REQUESTS_CHANGED, &view);
             }
             ServerEvent::Decided(decision) => self.record(decision),
@@ -301,10 +329,21 @@ impl Wiring {
                 let list: Vec<ClientView> = clients.iter().map(client_view).collect();
                 self.push.send(push::CLIENTS_CHANGED, &list);
             }
-            ServerEvent::Keys(keys) => {
-                self.push.send(push::SERVER_KEYS_CHANGED, &keys_view(keys));
+            ServerEvent::Certificates(certificates) => {
+                self.push
+                    .send(push::SERVER_KEYS_CHANGED, &keys_view(certificates));
             }
+            // Events a later Skakel adds say nothing the UI shows.
+            _ => {}
         }
+    }
+
+    fn current_window(&self) -> PairingWindowView {
+        self.overview
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .window
+            .clone()
     }
 
     /// Each pairing that was approved or refused goes to the activity log, as 0.1.x's
@@ -345,14 +384,23 @@ fn client_view(client: &skakel_server::ClientView) -> ClientView {
     }
 }
 
-fn keys_view(keys: &skakel_server::KeysView) -> KeysView {
+fn keys_view(keys: &skakel_server::CertificatesView) -> KeysView {
     KeysView {
         fingerprint: keys.fingerprint.clone(),
         next_fingerprint: keys.next_fingerprint.clone(),
         next_prepared_at: keys.next_prepared_at,
-        signing_key_id: keys.signing_key_id.clone(),
-        signing_key_since: keys.signing_key_since,
-        retired_keys_until: keys.retired_keys_until,
+    }
+}
+
+/// The window as the UI shows it: the moment it closes, not the time left, so the UI can count
+/// down without being told again.
+fn window_view(window: &PairingWindow) -> PairingWindowView {
+    PairingWindowView {
+        open: window.open,
+        always_open: window.always_open,
+        until: window
+            .remaining
+            .map(|left| OffsetDateTime::now_utc() + left),
     }
 }
 
@@ -364,7 +412,7 @@ impl ServerRole for SkakelServerRole {
     /// The certificate the web ports present, which is Skakel's: a save that switches it replaces
     /// both. Read from there, so it answers while Skakel's server starts again or stops.
     fn fingerprint(&self) -> String {
-        skakel_protocol::fingerprints::of_der(&self.parts.store.slot().current().cert[0])
+        skakel_wire::fingerprints::of_der(&self.parts.store.slot().current().cert[0])
     }
 
     fn clients(&self) -> Vec<ClientView> {
@@ -387,7 +435,7 @@ impl ServerRole for SkakelServerRole {
 
     fn register<'a>(&'a self, name: &'a str) -> Fut<'a, Result<NewClient, RegisterError>> {
         Box::pin(async move {
-            if skakel_server::clean_client_name(name).is_empty() {
+            if skakel_wire::pairing::clean_client_name(name).is_empty() {
                 return Err(RegisterError::EmptyName);
             }
             let client = self
@@ -423,21 +471,12 @@ impl ServerRole for SkakelServerRole {
     }
 
     fn keys(&self) -> KeysView {
-        keys_view(&self.keys_handle().view())
-    }
-
-    fn rotate_signing_key(&self) -> Fut<'_, Result<String, RoleError>> {
-        Box::pin(async move {
-            self.keys_handle()
-                .rotate_signing_key()
-                .await
-                .map_err(failed)
-        })
+        keys_view(&self.certificates_handle().view())
     }
 
     fn prepare_next_certificate(&self) -> Fut<'_, Result<Option<String>, RoleError>> {
         Box::pin(async move {
-            self.keys_handle()
+            self.certificates_handle()
                 .prepare_next_certificate()
                 .await
                 .map_err(failed)
@@ -446,11 +485,14 @@ impl ServerRole for SkakelServerRole {
 
     fn cancel_next_certificate(&self) -> Fut<'_, Result<Option<String>, RoleError>> {
         Box::pin(async move {
-            let keys = self.keys_handle();
-            let Some(next) = keys.next_fingerprint() else {
+            let certificates = self.certificates_handle();
+            let Some(next) = certificates.next_fingerprint() else {
                 return Ok(None);
             };
-            let cancelled = keys.cancel_next_certificate().await.map_err(failed)?;
+            let cancelled = certificates
+                .cancel_next_certificate()
+                .await
+                .map_err(failed)?;
             Ok(cancelled.then_some(next))
         })
     }
@@ -458,7 +500,7 @@ impl ServerRole for SkakelServerRole {
     fn switch_certificate(&self) -> Fut<'_, Result<Option<Switched>, RoleError>> {
         Box::pin(async move {
             let switched = self
-                .keys_handle()
+                .certificates_handle()
                 .switch_certificate()
                 .await
                 .map_err(failed)?;
@@ -477,12 +519,20 @@ impl ServerRole for SkakelServerRole {
             .clone()
     }
 
+    fn open_pairing(&self, duration: Duration) {
+        self.with(|server| server.open_pairing(duration));
+    }
+
+    fn close_pairing(&self) {
+        self.with(SkakelServer::close_pairing);
+    }
+
     fn approve<'a>(&'a self, id: &'a str, code: &'a str) -> Fut<'a, Approval> {
         Box::pin(async move {
             match self.pairing_handle().approve(id, code).await {
                 Ok(skakel_server::Approval::Approved) => Approval::Approved,
                 Ok(skakel_server::Approval::WrongCode) => Approval::WrongCode,
-                Ok(skakel_server::Approval::NotWaiting) => Approval::NotFound,
+                Ok(_) => Approval::NotFound,
                 Err(e) => {
                     tracing::error!("Approving a pairing request failed: {e}");
                     Approval::NotFound

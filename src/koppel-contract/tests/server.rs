@@ -1,10 +1,12 @@
 //! The server role's UI endpoints: its identity, registered clients and their secrets, the
-//! certificate and signing key, its USB devices and the pairing requests waiting for a code. Also
+//! certificate, its USB devices, the pairing window and the pairing requests waiting for a code. Also
 //! `/api/remote/devices`, which other Koppel machines call with a token from Skakel's token endpoint.
+
+use std::time::Duration;
 
 use koppel_contract::shape::{self, Kind};
 use koppel_contract::{
-    Body, Main, Session, Target, activity_with, json, needs_skakel, skakel_path, unique,
+    Body, Main, Session, Target, activity_with, eventually, json, needs_skakel, skakel_path, unique,
 };
 use reqwest::Method;
 use serde_json::Value;
@@ -323,53 +325,62 @@ async fn unknown_clients_are_not_found() {
 }
 
 #[tokio::test]
-async fn rotating_the_signing_key_keeps_tokens_signed_with_the_old_one() {
+async fn the_pairing_window_opens_and_closes_and_is_closed_to_start_with() {
     let Some(main) = Main::get().await else {
         return;
     };
-    let admin = &main.admin;
-    let created = create_client(admin, &unique("contract-keys")).await;
-    let id = created["clientId"].as_str().expect("an id");
-    let secret = created["clientSecret"].as_str().expect("a secret");
-    let tokens = needs_skakel("tokens across a signing key rotation");
-    let before_token = if tokens {
-        token(&main.target, id, secret).await.expect("a token")
-    } else {
-        String::new()
-    };
-    let before = admin.get("/api/server/keys").await.expect(200).json();
-
-    let answer = admin
-        .post_empty("/api/server/keys/signing-key/rotate")
-        .await
-        .expect(202);
-    answer.empty();
-    let after = admin.get("/api/server/keys").await.expect(200).json();
-    shape::fields(&after, shape::KEYS, "GET /api/server/keys");
-    assert_ne!(after["signingKeyId"], before["signingKeyId"]);
-    assert_eq!(
-        after["fingerprint"], before["fingerprint"],
-        "the certificate stays"
-    );
-    assert!(
-        after["retiredKeysUntil"].is_string(),
-        "the old key is kept until its tokens expire: {after}"
-    );
-
-    if tokens {
-        assert_eq!(remote_devices(&main.target, &before_token).await, 200);
-        let after_token = token(&main.target, id, secret).await.expect("a token");
-        assert_eq!(remote_devices(&main.target, &after_token).await, 200);
+    if !needs_skakel("the pairing window") {
+        return;
     }
-    assert!(has_entry(
-        &activity_with(admin, "signingKeyRotated").await,
-        "machine"
-    ));
+    let admin = &main.admin;
+    let window = || async {
+        let overview = admin.get("/api/server/pairing").await.expect(200).json();
+        shape::fields(
+            &overview,
+            shape::PAIRING_OVERVIEW,
+            "GET /api/server/pairing",
+        );
+        let window = overview["window"].clone();
+        shape::fields(&window, shape::PAIRING_WINDOW, "the pairing window");
+        window
+    };
 
     admin
-        .delete(&format!("/api/server/clients/{id}"))
+        .post("/api/server/pairing/window", json!({ "minutes": 0 }))
         .await
-        .expect(202);
+        .problem(&["minutes"]);
+    admin
+        .post("/api/server/pairing/window", json!({ "minutes": 61 }))
+        .await
+        .problem(&["minutes"]);
+
+    admin
+        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .await
+        .expect(202)
+        .empty();
+    let open = eventually("the window to open", Duration::from_secs(20), || async {
+        let now = window().await;
+        (now["open"] == json!(true)).then_some(now)
+    })
+    .await;
+    assert!(
+        open["until"].is_string(),
+        "an open window has an end: {open}"
+    );
+    assert_eq!(open["alwaysOpen"], json!(false));
+
+    admin
+        .delete("/api/server/pairing/window")
+        .await
+        .expect(202)
+        .empty();
+    let closed = eventually("the window to close", Duration::from_secs(20), || async {
+        let now = window().await;
+        (now["open"] == json!(false)).then_some(now)
+    })
+    .await;
+    assert!(closed["until"].is_null(), "{closed}");
 }
 
 #[tokio::test]

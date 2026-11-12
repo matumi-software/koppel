@@ -1,5 +1,5 @@
 //! The client role on skakel-client: the connection test, the servers found on the local network,
-//! and pairing by the six-digit code, as 0.1.x's `RemoteServer`, `ServerFinder` and
+//! and pairing by the eight-digit code, as 0.1.x's `RemoteServer`, `ServerFinder` and
 //! `PairingClient` did them. The link itself is koppel-usb's client over [`super::links`].
 
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -149,10 +149,7 @@ impl SkakelClientRole {
                 return;
             }
         };
-        let options = ClientOptions {
-            request_timeout: PAIRING_TIMEOUT,
-            ..ClientOptions::default()
-        };
+        let options = ClientOptions::default().request_timeout(PAIRING_TIMEOUT);
         let opened = tokio::select! {
             () = run.stop.cancelled() => return,
             opened = PairingClient::open(&address, &run.fingerprint, &self.machine, &options) => opened,
@@ -168,6 +165,12 @@ impl SkakelClientRole {
                 self.set(&run, status);
                 return;
             }
+            Err(PairingError::Closed) => {
+                status.state = "failed".into();
+                status.message = Some(closed_message(&run.server_name));
+                self.set(&run, status);
+                return;
+            }
             Err(PairingError::Failed(error)) => {
                 tracing::warn!(
                     "Pairing with {} failed: {}",
@@ -175,6 +178,13 @@ impl SkakelClientRole {
                     error.failure().code()
                 );
                 self.set(&run, failed(&run, status, &error));
+                return;
+            }
+            Err(error) => {
+                tracing::warn!("Pairing with {} failed: {error}", run.server_name);
+                status.state = "failed".into();
+                status.message = Some(format!("Could not pair with {}: {error}", run.server_name));
+                self.set(&run, status);
                 return;
             }
         };
@@ -304,6 +314,16 @@ fn failed(run: &Run, mut status: PairingStatus, error: &skakel_client::Error) ->
                 "{name} is taking no more pairing requests for now. Try again in a few minutes."
             ),
         ),
+        FailureKind::PairingClosed => ("failed", closed_message(name)),
+        // Skakel's words name both versions and say which end to update: a Koppel 0.2.0 server
+        // speaks protocol 2, this one protocol 3, and they do not pair.
+        FailureKind::VersionMismatch => (
+            "failed",
+            format!(
+                "Could not pair with {name}: {} Koppel 0.2.0 speaks Skakel 2 and Koppel 0.2.1 speaks Skakel 3, so update both machines to the same release.",
+                error.failure().message()
+            ),
+        ),
         // A machine that is a client only answers 404 to everything a pairing client asks.
         FailureKind::UnexpectedAnswer if answered_404(error) => (
             "failed",
@@ -317,6 +337,13 @@ fn failed(run: &Run, mut status: PairingStatus, error: &skakel_client::Error) ->
     status.state = state.to_owned();
     status.message = Some(message);
     status
+}
+
+/// What a server that is not taking pairing requests is told to do about it.
+fn closed_message(name: &str) -> String {
+    format!(
+        "{name} is not taking pairing requests. On {name}, open the Clients section and choose Allow pairing, then try again."
+    )
 }
 
 /// Whether the server answered 404. skakel-client keeps the status only in its error's cause,
@@ -400,10 +427,7 @@ impl ClientRole for SkakelClientRole {
                 saved.client_id.clone().unwrap_or_default(),
                 saved.client_secret.clone().unwrap_or_default(),
             );
-            let options = ClientOptions {
-                request_timeout: TEST_TIMEOUT,
-                ..ClientOptions::default()
-            };
+            let options = ClientOptions::default().request_timeout(TEST_TIMEOUT);
             let link = match skakel_client::Link::new(&address, pins, credentials, options) {
                 Ok(link) => link,
                 Err(e) => return tested(e.failure()),

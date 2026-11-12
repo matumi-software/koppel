@@ -33,7 +33,7 @@
 //!
 //! # Skakel and discovery
 //!
-//! 0.1.x speaks Skakel protocol version 1 and the Rust build version 2; the tests take the version
+//! 0.1.x speaks Skakel protocol version 1 and the Rust build version 3; the tests take the version
 //! a target lists ([`skakel_path`]). With `KOPPEL_CONTRACT_SKAKEL=0`, for a build without Skakel, the
 //! parts of a test that need its endpoints or a link say they were skipped ([`needs_skakel`]) and
 //! the rest runs. With `KOPPEL_CONTRACT_DISCOVERY=0` the tests that need the client to find the main

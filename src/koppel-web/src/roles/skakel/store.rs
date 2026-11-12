@@ -13,20 +13,14 @@ use std::sync::Arc;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use koppel_config::files::{
-    ServerSecrets, SkakelClientRecord, SkakelKeyRecord, SkakelNextCertificateRecord, SkakelState,
+    ServerSecrets, SkakelClientRecord, SkakelNextCertificateRecord, SkakelState,
 };
 use koppel_config::{ConfigFile, ServerCertificate};
-use ring::rand::SystemRandom;
-use ring::signature::{
-    ECDSA_P256_SHA256_ASN1_SIGNING, ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair,
-};
-use skakel_server::{
-    CertificateRecord, ClientRecord, KeyRecord, NextCertificateRecord, SkakelStore, StoreFuture,
-};
+use serde_json::{Value, json};
+use skakel_server::{CertificateRecord, SkakelStore, StoreFuture};
+use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
-use crate::activity::hex;
-use crate::auth::random_bytes;
 use crate::tls::CertificateSlot;
 
 /// A certificate lasts ten years, as Skakel makes them.
@@ -41,10 +35,9 @@ pub(crate) struct SecretsStore {
 impl SecretsStore {
     /// Takes the started `secrets.json` and makes sure it holds a server state skakel-server can
     /// use, as 0.1.x did on its first start: a file from Koppel 0.1.0 is carried over, and a file
-    /// with nothing in it gets a new certificate and signing key. A 0.1.0 file that cannot be
-    /// carried over is copied aside and the server starts afresh, which the log says. A signing key
-    /// that is not ECDSA P-256 (0.1.x signed with RSA) is replaced: tokens last 30 minutes and live
-    /// only in a client's memory, so nobody notices.
+    /// with nothing in it gets a new certificate. A 0.1.0 file that cannot be
+    /// carried over is copied aside and the server starts afresh, which the log says. A token
+    /// signing key from an earlier Koppel is dropped, since Skakel 0.3.0 no longer signs tokens.
     pub(crate) async fn open(
         file: ConfigFile<ServerSecrets>,
         host_name: &str,
@@ -67,7 +60,7 @@ impl SecretsStore {
             Ok(None) => {
                 let state = new_state(host_name, now)?;
                 tracing::info!(
-                    "Made the server certificate, fingerprint {}, and a token signing key",
+                    "Made the server certificate, fingerprint {}",
                     state
                         .certificate()
                         .map(|c| c.fingerprint())
@@ -88,10 +81,13 @@ impl SecretsStore {
                 new_state(host_name, now)?
             }
         };
-        let replaced = usable_keys(&mut state, now)?;
-        if replaced {
+        // Skakel 0.3.0's tokens are random strings the server remembers, so a signing key an older
+        // file holds is dropped here and does not stay on disk as a private key nobody uses.
+        if state.signing_key.take().is_some()
+            | !std::mem::take(&mut state.retired_signing_keys).is_empty()
+        {
             tracing::info!(
-                "The token signing key was replaced by an ECDSA P-256 one, as Skakel's server signs"
+                "The token signing key of an earlier Koppel was dropped: Skakel 0.3.0 does not sign tokens"
             );
         }
         if current.skakel.as_ref() != Some(&state) {
@@ -172,43 +168,47 @@ impl SkakelStore for SecretsStore {
     }
 }
 
-/// 0.1.x's state as skakel-server's: the same clients and keys, the certificates as DER.
+/// 0.1.x's state as skakel-server's: the same clients, the certificates as DER. Skakel's state
+/// cannot be built field by field (its types are `#[non_exhaustive]`), so it is read from the JSON
+/// it keeps.
 fn to_skakel(state: &SkakelState) -> Result<skakel_server::SkakelState, String> {
     let certificate = state
         .certificate()
         .map_err(|e| format!("the certificate in secrets.json cannot be read: {e}"))?;
     let next_certificate = match &state.next_certificate {
-        Some(next) => Some(NextCertificateRecord {
-            certificate: record_of(&ServerCertificate::from_pfx_base64(&next.pfx).map_err(
-                |e| format!("the prepared certificate in secrets.json cannot be read: {e}"),
-            )?),
-            prepared_at: next.prepared_at,
-            received_by: next.received_by.clone(),
-        }),
-        None => None,
-    };
-    Ok(skakel_server::SkakelState {
-        clients: state
-            .clients
-            .iter()
-            .map(|c| ClientRecord {
-                id: c.id.clone(),
-                name: c.name.clone(),
-                secret_hash: c.secret_hash.clone(),
-                created_at: c.created_at,
-                generation: u32::try_from(c.generation).unwrap_or(0),
-                secret: c.secret.clone(),
+        Some(next) => {
+            let prepared = ServerCertificate::from_pfx_base64(&next.pfx).map_err(|e| {
+                format!("the prepared certificate in secrets.json cannot be read: {e}")
+            })?;
+            json!({
+                "certificate": record_of(&prepared),
+                "preparedAt": rfc3339(next.prepared_at)?,
+                "receivedBy": next.received_by,
             })
-            .collect(),
-        signing_key: key_to_skakel(&state.signing_key),
-        retired_signing_keys: state
-            .retired_signing_keys
-            .iter()
-            .map(key_to_skakel)
-            .collect(),
-        certificate: record_of(&certificate),
-        next_certificate,
-    })
+        }
+        None => Value::Null,
+    };
+    let mut clients = Vec::with_capacity(state.clients.len());
+    for c in &state.clients {
+        clients.push(json!({
+            "id": c.id,
+            "name": c.name,
+            "secretHash": c.secret_hash,
+            "createdAt": rfc3339(c.created_at)?,
+            "generation": u32::try_from(c.generation).unwrap_or(0),
+            "secret": c.secret,
+        }));
+    }
+    serde_json::from_value(json!({
+        "clients": clients,
+        "certificate": record_of(&certificate),
+        "nextCertificate": next_certificate,
+    }))
+    .map_err(|e| format!("the state in secrets.json is not one Skakel's server can read: {e}"))
+}
+
+fn rfc3339(at: OffsetDateTime) -> Result<String, String> {
+    at.format(&Rfc3339).map_err(|e| e.to_string())
 }
 
 /// skakel-server's state in 0.1.x's shape. A certificate that did not change keeps the PKCS#12 the
@@ -261,22 +261,18 @@ fn from_skakel(
                 secret: c.secret.clone(),
             })
             .collect(),
-        signing_key: key_from_skakel(&state.signing_key),
-        retired_signing_keys: state
-            .retired_signing_keys
-            .iter()
-            .map(key_from_skakel)
-            .collect(),
+        signing_key: None,
+        retired_signing_keys: Vec::new(),
         certificate_pfx,
         next_certificate,
     })
 }
 
-fn record_of(certificate: &ServerCertificate) -> CertificateRecord {
-    CertificateRecord {
-        certificate: STANDARD.encode(&certificate.certificate),
-        private_key: STANDARD.encode(&certificate.private_key),
-    }
+fn record_of(certificate: &ServerCertificate) -> Value {
+    json!({
+        "certificate": STANDARD.encode(&certificate.certificate),
+        "privateKey": STANDARD.encode(&certificate.private_key),
+    })
 }
 
 fn certificate_of(record: &CertificateRecord) -> Result<ServerCertificate, String> {
@@ -291,53 +287,12 @@ fn certificate_of(record: &CertificateRecord) -> Result<ServerCertificate, Strin
     })
 }
 
-fn key_to_skakel(key: &SkakelKeyRecord) -> KeyRecord {
-    KeyRecord {
-        key_id: key.key_id.clone(),
-        private_key: key.private_key.clone(),
-        created_at: key.created_at,
-        accept_until: key.accept_until,
-    }
-}
-
-fn key_from_skakel(key: &KeyRecord) -> SkakelKeyRecord {
-    SkakelKeyRecord {
-        key_id: key.key_id.clone(),
-        private_key: key.private_key.clone(),
-        created_at: key.created_at,
-        accept_until: key.accept_until,
-    }
-}
-
-/// Whether a base64 PKCS#8 key is one Skakel's server signs with: ECDSA P-256.
-fn is_es256(private_key: &str) -> bool {
-    STANDARD.decode(private_key).is_ok_and(|der| {
-        EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &der, &SystemRandom::new())
-            .is_ok()
-    })
-}
-
-/// Replaces a signing key Skakel's server cannot use with a new one, and drops replaced keys it
-/// cannot check. True when anything changed.
-fn usable_keys(state: &mut SkakelState, now: OffsetDateTime) -> Result<bool, String> {
-    let before = state.retired_signing_keys.len();
-    state
-        .retired_signing_keys
-        .retain(|k| is_es256(&k.private_key));
-    let mut changed = state.retired_signing_keys.len() != before;
-    if !is_es256(&state.signing_key.private_key) {
-        state.signing_key = new_signing_key(now)?;
-        changed = true;
-    }
-    Ok(changed)
-}
-
-/// A new server state: a certificate, a signing key and no clients.
+/// A new server state: a certificate and no clients.
 fn new_state(host_name: &str, now: OffsetDateTime) -> Result<SkakelState, String> {
     let certificate = new_certificate(host_name, now)?;
     Ok(SkakelState {
         clients: Vec::new(),
-        signing_key: new_signing_key(now)?,
+        signing_key: None,
         retired_signing_keys: Vec::new(),
         certificate_pfx: certificate.to_pfx_base64().map_err(|e| e.0)?,
         next_certificate: None,
@@ -374,18 +329,6 @@ fn new_certificate(host_name: &str, now: OffsetDateTime) -> Result<ServerCertifi
     Ok(ServerCertificate {
         certificate: certificate.der().to_vec(),
         private_key: key.serialize_der(),
-    })
-}
-
-/// A token signing key: ECDSA P-256, as Skakel's server signs.
-fn new_signing_key(now: OffsetDateTime) -> Result<SkakelKeyRecord, String> {
-    let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, &SystemRandom::new())
-        .map_err(|_| "a signing key could not be made".to_owned())?;
-    Ok(SkakelKeyRecord {
-        key_id: format!("skakel-{}", hex(&random_bytes::<5>())),
-        private_key: STANDARD.encode(pkcs8.as_ref()),
-        created_at: now,
-        accept_until: None,
     })
 }
 
@@ -435,24 +378,5 @@ mod tests {
             fresh.certificate().unwrap().certificate,
             state.certificate().unwrap().certificate
         );
-    }
-
-    #[test]
-    fn an_rsa_signing_key_is_replaced_and_ecdsa_ones_stay() {
-        let now = OffsetDateTime::now_utc();
-        let mut state = new_state("bench", now).unwrap();
-        let kept = state.signing_key.clone();
-        assert!(!usable_keys(&mut state, now).unwrap());
-        assert_eq!(state.signing_key, kept);
-
-        state.signing_key.private_key = STANDARD.encode(b"not a key");
-        state.retired_signing_keys.push(kept.clone());
-        state.retired_signing_keys.push(SkakelKeyRecord {
-            private_key: STANDARD.encode(b"rsa"),
-            ..kept.clone()
-        });
-        assert!(usable_keys(&mut state, now).unwrap());
-        assert!(is_es256(&state.signing_key.private_key));
-        assert_eq!(state.retired_signing_keys, vec![kept]);
     }
 }

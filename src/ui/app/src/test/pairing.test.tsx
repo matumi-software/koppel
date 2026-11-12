@@ -103,7 +103,7 @@ describe('pairing requests', () => {
   it('says why a request was refused', async () => {
     mockFetch({
       'GET /api/server/pairing': () =>
-        json({ budgetExhausted: false, requests: [{ id: 'r1', clientName: 'bench-2', from: '10.0.0.9', requestedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:05:00Z', state: 'denied', message: 'The code was wrong three times.' }] }),
+        json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [{ id: 'r1', clientName: 'bench-2', from: '10.0.0.9', requestedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:05:00Z', state: 'denied', message: 'The code was wrong three times.' }] }),
       'GET /api/activity?max=200': () => json([]),
     });
     renderApp(<PairingRequests locked={false} />);
@@ -113,7 +113,7 @@ describe('pairing requests', () => {
 
   it('tells the admin when the server is turning pairing requests away', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: true, requests: [] }),
+      'GET /api/server/pairing': () => json({ budgetExhausted: true, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
       'GET /api/activity?max=200': () => json([]),
     });
     renderApp(<PairingRequests locked={false} />);
@@ -123,28 +123,84 @@ describe('pairing requests', () => {
 
   it('shows the alert when a push says the budget ran out, and drops it when it returns', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [] }),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
       'GET /api/activity?max=200': () => json([]),
     });
     const { live } = renderApp(<PairingRequests locked={false} />);
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: true, requests: [] }));
+    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: true, window: { open: false, alwaysOpen: false, until: null }, requests: [] }));
     expect(await screen.findByText(/turning new ones away/)).toBeTruthy();
 
-    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
+    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }));
     await vi.waitFor(() => expect(screen.queryByText(/turning new ones away/)).toBeNull());
   });
 
-  it('shows nothing when there is nothing to say', async () => {
+  it('lists no requests and no alert when there is nothing to say', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [] }),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }),
       'GET /api/activity?max=200': () => json([]),
     });
-    const { container } = renderApp(<PairingRequests locked={false} />);
+    renderApp(<PairingRequests locked={false} />);
 
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(container.textContent).toBe('');
+    await screen.findByRole('button', { name: /Allow pairing/ });
+    expect(screen.queryByText(/Waiting to pair/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('the pairing window', () => {
+  const closed = { budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] };
+  const opened = { ...closed, window: { open: true, alwaysOpen: false, until: '2026-01-01T00:10:00Z' } };
+
+  it('is closed to start with, says so, and opens only once the push says it did', async () => {
+    const { calls } = mockFetch({
+      'GET /api/server/pairing': () => json(closed),
+      'GET /api/activity?max=200': () => json([]),
+      'POST /api/server/pairing/window': () => accepted(),
+    });
+    const { live } = renderApp(<PairingRequests locked={false} />);
+
+    expect(await screen.findByText(/takes no pairing requests until you allow it/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Allow pairing for 10 minutes' }));
+
+    await screen.findByRole('button', { name: 'Allowing' });
+    const sent = calls.find((c) => c.key === 'POST /api/server/pairing/window');
+    expect(sent?.body).toEqual({ minutes: 10 });
+    // The same closed window again is not the answer.
+    await act(async () => live.emit('PairingRequestsChanged', closed));
+    expect(screen.getByRole('button', { name: 'Allowing' })).toBeTruthy();
+
+    await act(async () => live.emit('PairingRequestsChanged', opened));
+    expect(await screen.findByText(/Pairing is open until/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Close pairing' })).toBeTruthy();
+  });
+
+  it('closes through the same store', async () => {
+    const { count } = mockFetch({
+      'GET /api/server/pairing': () => json(opened),
+      'GET /api/activity?max=200': () => json([]),
+      'DELETE /api/server/pairing/window': () => accepted(),
+    });
+    const { live } = renderApp(<PairingRequests locked={false} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Close pairing' }));
+
+    await vi.waitFor(() => expect(count('DELETE /api/server/pairing/window')).toBe(1));
+    await screen.findByRole('button', { name: 'Closing' });
+    await act(async () => live.emit('PairingRequestsChanged', closed));
+    expect(await screen.findByRole('button', { name: 'Allow pairing for 10 minutes' })).toBeTruthy();
+  });
+
+  it('has nothing to open on a server that takes requests at any time', async () => {
+    mockFetch({
+      'GET /api/server/pairing': () => json({ ...closed, window: { open: true, alwaysOpen: true, until: null } }),
+      'GET /api/activity?max=200': () => json([]),
+    });
+    renderApp(<PairingRequests locked={false} />);
+
+    expect(await screen.findByText(/takes pairing requests at any time/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /pairing/i })).toBeNull();
   });
 });
 
@@ -162,12 +218,12 @@ describe('approving and refusing a request', () => {
 
   it('is pending with an activity line until the request leaves the list', async () => {
     const { count } = mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [waiting] }),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
       'GET /api/activity?max=200': () => json([]),
       'POST /api/server/pairing/r1/approve': () => accepted(),
     });
     const { live } = open();
-    fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '123456' } });
+    fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '12345678' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
 
@@ -175,7 +231,7 @@ describe('approving and refusing a request', () => {
     expect(activityText()).toContain('Waiting. Approve pairing with bench-2');
     expect((screen.getByRole('button', { name: 'Refuse' }) as HTMLButtonElement).disabled).toBe(true);
 
-    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: false, requests: [] }));
+    await act(async () => live.emit('PairingRequestsChanged', { budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [] }));
 
     await vi.waitFor(() => expect(screen.queryByText(/bench-2 from/)).toBeNull());
     expect(activityText()).toBe('');
@@ -183,12 +239,12 @@ describe('approving and refusing a request', () => {
 
   it('shows the refusal of a wrong code, and the activity line says it was not done', async () => {
     mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [waiting] }),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
       'GET /api/activity?max=200': () => json([]),
       'POST /api/server/pairing/r1/approve': () => json({ errors: { code: ['That code is not right.'] } }, 400),
     });
     open();
-    fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '123456' } });
+    fireEvent.change(await screen.findByLabelText(/bench-2 from 10.0.0.9/), { target: { value: '12345678' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
 
@@ -198,7 +254,7 @@ describe('approving and refusing a request', () => {
 
   it('refuses through the same store', async () => {
     const { count } = mockFetch({
-      'GET /api/server/pairing': () => json({ budgetExhausted: false, requests: [waiting] }),
+      'GET /api/server/pairing': () => json({ budgetExhausted: false, window: { open: false, alwaysOpen: false, until: null }, requests: [waiting] }),
       'GET /api/activity?max=200': () => json([]),
       'POST /api/server/pairing/r1/deny': () => accepted(),
     });
@@ -224,7 +280,7 @@ describe('pairing with a nearby server', () => {
     await vi.waitFor(() => expect(count('POST /api/client/pairing')).toBe(1));
     expect(screen.getByTestId('activity').textContent).toContain('Pair with lab');
 
-    act(() => live.emit('PairingStatusChanged', { ...idle, state: 'waiting', serverName: 'lab', serverUrl: 'HTTPS://10.0.0.5:5241', code: '123456' }));
+    act(() => live.emit('PairingStatusChanged', { ...idle, state: 'waiting', serverName: 'lab', serverUrl: 'HTTPS://10.0.0.5:5241', code: '12345678' }));
 
     await vi.waitFor(() => expect(screen.getByTestId('activity').textContent).toBe(''));
   });

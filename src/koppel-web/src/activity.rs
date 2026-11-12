@@ -56,7 +56,6 @@ pub enum ActivityReason {
     LinkDown,
     SignInFailed,
     PasswordChanged,
-    SigningKeyRotated,
     CertificatePrepared,
     CertificateCancelled,
     CertificateSwitched,

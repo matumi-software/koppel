@@ -548,9 +548,23 @@ impl ServerCertVerifier for AnyCertificate {
     }
 }
 
+/// Opens `server`'s pairing window, as a person at the server does, and waits until it shows as
+/// open. Skakel 0.3.0 takes no pairing request before that.
+pub async fn open_pairing(server: &Node) {
+    let status = server
+        .post("/api/server/pairing/window", json!({ "minutes": 5 }))
+        .await;
+    assert_eq!(status, 202);
+    eventually("the pairing window to open", || async {
+        (server.get("/api/server/pairing").await["window"]["open"] == json!(true)).then_some(())
+    })
+    .await;
+}
+
 /// Pairs `client` with `server` through the code, as a person would, and waits for the link.
 /// Returns the client's ID on the server.
 pub async fn pair(server: &Node, client: &Node) -> String {
+    open_pairing(server).await;
     let fingerprint = server.get("/api/server/identity").await["fingerprint"]
         .as_str()
         .unwrap()

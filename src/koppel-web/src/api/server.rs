@@ -1,4 +1,4 @@
-//! The server role's endpoints: its identity, registered clients, certificate and signing key,
+//! The server role's endpoints: its identity, registered clients, certificate, the pairing window,
 //! pairing requests and USB devices. Koppel's own `/api/remote/devices` for other machines is
 //! Skakel's server's (`roles/skakel/remote.rs`).
 
@@ -158,21 +158,6 @@ pub(crate) async fn keys(State(app): State<Arc<App>>) -> Response {
     json::ok(&app.server.keys())
 }
 
-pub(crate) async fn rotate_signing_key(State(app): State<Arc<App>>) -> Response {
-    let id = match app.server.rotate_signing_key().await {
-        Ok(id) => id,
-        Err(e) => return json::failed("Rotating the signing key", e),
-    };
-    app.activity.record(
-        machine(&app),
-        ActivityReason::SigningKeyRotated,
-        ActivityOutcome::Succeeded,
-        format!("The token signing key was rotated, to {id}"),
-        None,
-    );
-    json::accepted()
-}
-
 fn refused(reason: &str) -> Response {
     json::problem(&[("certificate", reason)])
 }
@@ -252,6 +237,41 @@ pub(crate) async fn switch_certificate(State(app): State<Arc<App>>) -> Response 
 
 pub(crate) async fn pairing(State(app): State<Arc<App>>) -> Response {
     json::ok(&app.server.pairing())
+}
+
+/// How long a pairing window stays open when the UI does not say. Skakel holds a window to between
+/// one minute and one hour.
+const DEFAULT_WINDOW_MINUTES: u64 = 10;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OpenPairing {
+    #[serde(default)]
+    minutes: Option<u64>,
+}
+
+/// Opens the pairing window and answers 202; it shows as open in `PairingRequestsChanged` once
+/// Skakel's server says so. Opening it again moves the end.
+pub(crate) async fn open_pairing(
+    State(app): State<Arc<App>>,
+    JsonBody(request): JsonBody<OpenPairing>,
+) -> Response {
+    let minutes = request.minutes.unwrap_or(DEFAULT_WINDOW_MINUTES);
+    if !(1..=60).contains(&minutes) {
+        return json::problem(&[(
+            "minutes",
+            "Pairing can stay open for between 1 and 60 minutes.",
+        )]);
+    }
+    app.server
+        .open_pairing(std::time::Duration::from_secs(minutes * 60));
+    json::accepted()
+}
+
+/// Closes the pairing window and answers 202; requests that are already open carry on.
+pub(crate) async fn close_pairing(State(app): State<Arc<App>>) -> Response {
+    app.server.close_pairing();
+    json::accepted()
 }
 
 /// The right code answers 202; the request leaving `PairingRequestsChanged` and the new client in

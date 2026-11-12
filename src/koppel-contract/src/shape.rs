@@ -150,19 +150,28 @@ pub const CLIENT: &[(&str, Kind)] = &[
     ("hasSecret", Kind::Bool),
 ];
 
-/// The server's certificate and signing key.
+/// The server's certificate and the next one while a handover is under way. 0.1.x also had the token
+/// signing key here; Skakel 0.3.0's tokens are not signed.
 pub const KEYS: &[(&str, Kind)] = &[
     ("fingerprint", Kind::Str),
     ("nextFingerprint", Kind::OptStr),
     ("nextPreparedAt", Kind::OptTime),
-    ("signingKeyId", Kind::Str),
-    ("signingKeySince", Kind::Time),
-    ("retiredKeysUntil", Kind::OptTime),
 ];
 
-/// The pairing requests waiting on the server.
-pub const PAIRING_OVERVIEW: &[(&str, Kind)] =
-    &[("requests", Kind::Array), ("budgetExhausted", Kind::Bool)];
+/// The pairing window and the pairing requests waiting on the server. 0.1.x had no window: it took
+/// requests at any time.
+pub const PAIRING_OVERVIEW: &[(&str, Kind)] = &[
+    ("requests", Kind::Array),
+    ("budgetExhausted", Kind::Bool),
+    ("window", Kind::Object),
+];
+
+/// Whether the server takes new pairing requests, and until when.
+pub const PAIRING_WINDOW: &[(&str, Kind)] = &[
+    ("open", Kind::Bool),
+    ("alwaysOpen", Kind::Bool),
+    ("until", Kind::OptTime),
+];
 
 /// One pairing request on the server.
 pub const PAIRING_REQUEST: &[(&str, Kind)] = &[

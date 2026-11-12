@@ -7,7 +7,7 @@ import { accepted, json, mockFetch, renderApp } from './harness';
 
 const fingerprint = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
 const next = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
-const keys: ServerKeysView = { fingerprint, nextFingerprint: null, nextPreparedAt: null, signingKeyId: 'koppel-1', signingKeySince: '2026-11-03T08:00:00Z', retiredKeysUntil: null };
+const keys: ServerKeysView = { fingerprint, nextFingerprint: null, nextPreparedAt: null };
 const client = (name: string, hasNextCertificate: boolean): ClientView => ({
   id: `client-${name}`,
   name,
@@ -23,25 +23,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('the server certificate and signing key', () => {
-  it('rotates the signing key and waits for the push that carries a new key id', async () => {
-    const { calls } = mockFetch({ 'GET /api/server/keys': () => json(keys), 'POST /api/server/keys/signing-key/rotate': () => accepted() });
-    const { live } = renderApp(card());
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Rotate signing key' }));
-    expect(calls.some((c) => c.key === 'POST /api/server/keys/signing-key/rotate')).toBe(true);
-    await screen.findByRole('button', { name: 'Rotating' });
-
-    // The same key id again is not the rotation.
-    await act(async () => live.emit('ServerKeysChanged', keys));
-    expect(screen.getByRole('button', { name: 'Rotating' })).toBeTruthy();
-
-    await act(async () => live.emit('ServerKeysChanged', { ...keys, signingKeyId: 'koppel-0a1b2c3d4e', retiredKeysUntil: '2026-01-01T00:35:00Z' }));
-    await screen.findByRole('button', { name: 'Rotate signing key' });
-    expect(screen.getByText('koppel-0a1b2c3d4e')).toBeTruthy();
-    expect(screen.getByText(/The key it replaced is still accepted until/)).toBeTruthy();
-  });
-
+describe('the server certificate', () => {
   it('shows the prepared certificate once the push carries it, and who still lacks its fingerprint', async () => {
     mockFetch({ 'GET /api/server/keys': () => json(keys), 'POST /api/server/keys/next-certificate': () => accepted() });
     const { live } = renderApp(card([client('bench-1', true), client('bench-2', false)]));

@@ -16,7 +16,7 @@ a change is disabled, and the UI refetches over REST after reconnecting.
 How the UI applies it:
 
 - `LiveProvider` owns the one `EventSource` and applies every pushed event to the query cache for the whole app, through one table of event names (`live/push-table.ts`) that also gives the names to listen for. Pages register no handlers of their own. A push that is not JSON, or that its cache entry cannot take, is logged and that entry is fetched instead. The state `down` is the link having been away through every retry step; it keeps retrying, and Retry only skips the wait.
-- Pending changes live in `PendingProvider`, above the pages, one store per domain (`pending/domains.ts`: settings, serverDevices, clientDevices, clients, connection, pairingRequests, pairing). Each pending change has an activity line. Approve and Refuse on a pairing request use the pairingRequests store like any other change. Setup is a pending change in the settings domain. Leaving a page orphans nothing.
+- Pending changes live in `PendingProvider`, above the pages, one store per domain (`pending/domains.ts`: settings, serverDevices, clientDevices, clients, connection, pairingWindow, pairingRequests, pairing). Each pending change has an activity line. Allow pairing and Close pairing use the pairingWindow store, settled by `PairingRequestsChanged` carrying the window open or closed; Approve and Refuse on a pairing request use the pairingRequests store like any other change. Setup is a pending change in the settings domain. Leaving a page orphans nothing.
 - The provider watches the query cache and judges a pending change whenever confirmed data lands, from a push or from the refetch after a reconnect. A change that failed clears, and counts as saved, once the confirmed value equals the value that failed.
 - A push cancels the queries in flight for that key before it writes to the cache, so a late fetch cannot overwrite it. The activity list is the exception: a push merges one event in by id and the fetch merges with the cache after it lands, so neither loses the other's events.
 - A rejection or timeout that arrives after a change settled is ignored, and a late answer to an old send cannot settle a newer one.
@@ -33,8 +33,8 @@ against the Rust build (`koppel-contract/tests/push.rs`); the UI has its own tes
 ## Activity
 
 The server keeps an activity log in memory (`koppel-web/src/activity.rs`):
-sharing, plugging and unplugging, attaches and releases, client changes, settings changes, signing key
-and certificate changes, and failed sign-ins, each with an outcome and, when it failed, the reason. The UI loads it from `GET /api/activity`
+sharing, plugging and unplugging, attaches and releases, client changes, settings changes, certificate
+changes, and failed sign-ins, each with an outcome and, when it failed, the reason. The UI loads it from `GET /api/activity`
 and follows `ActivityRecorded` over the live push, so it is the same after a reload and on every device. A subscriber that fails is logged and does not fail the code that recorded the event. It
 starts empty when the process restarts. A change the UI sent shows as Waiting until the server logs
 it. A settings change that changes nothing records nothing.

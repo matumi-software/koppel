@@ -13,8 +13,7 @@ koppel-config.workspace = true
 koppel-usb.workspace = true
 skakel-server.workspace = true
 skakel-client.workspace = true
-skakel-discovery.workspace = true
-skakel-protocol.workspace = true
+skakel-wire.workspace = true
 prost.workspace = true
 tonic = { workspace = true, features = ["codegen"] }
 tonic-prost.workspace = true

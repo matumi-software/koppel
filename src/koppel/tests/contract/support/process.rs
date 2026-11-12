@@ -235,6 +235,9 @@ impl Instance {
             // Never the machine's own /sys: a test must not touch the USB devices of whoever runs it.
             .env("KOPPEL_USB_SYS_ROOT", &sys)
             .env("KOPPEL_RATE_AUTH_PER_MINUTE", "1000")
+            // This machine only, so the first password needs no setup token (Linux asks for one when
+            // the UI is open beyond this machine). A test of the token sets `lan` itself.
+            .env("KOPPEL_UI_ALLOW_FROM", "local")
             // The USB/IP gateway listens on a port of its own, which two instances cannot share.
             .env("KOPPEL_GATEWAY_PORT", "0")
             .stdin(Stdio::null())

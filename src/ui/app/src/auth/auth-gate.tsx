@@ -75,7 +75,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <ErrorBoundary>
         <Suspense fallback={loading}>
           {state.data.setupOpen ? (
-            <SetPasswordPage machineName={state.data.machineName} setupUntil={state.data.setupUntil} recheck={recheck} />
+            <SetPasswordPage machineName={state.data.machineName} setupUntil={state.data.setupUntil} tokenRequired={state.data.setupTokenRequired} recheck={recheck} />
           ) : (
             <SetupClosedPage machineName={state.data.machineName} recheck={recheck} />
           )}

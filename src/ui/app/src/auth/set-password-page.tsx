@@ -10,10 +10,23 @@ import { passwordHelp, passwordProblem, repeatProblem } from './password-rules';
  * Signing in follows at once, so the role step comes next. Any refusal asks the server again, so a
  * setup that timed out, or that someone else finished first, shows as such.
  */
-export default function SetPasswordPage({ machineName, setupUntil, recheck }: { machineName: string; setupUntil: string | null; recheck: () => void }) {
+export default function SetPasswordPage({
+  machineName,
+  setupUntil,
+  tokenRequired,
+  recheck,
+}: {
+  machineName: string;
+  setupUntil: string | null;
+  tokenRequired: boolean;
+  recheck: () => void;
+}) {
   const [password, setPassword] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const setPasswordOnServer = useMutation({ mutationFn: setupPassword, onSettled: recheck });
-  const errors = useServerErrors(setPasswordOnServer.error, 'password', 'Could not set the password.');
+  // A refusal of the token belongs under the token's field, any other under the password's.
+  const aboutToken = tokenRequired && setPasswordOnServer.error instanceof Error && setPasswordOnServer.error.message.startsWith('The setup token');
+  const errors = useServerErrors(setPasswordOnServer.error, aboutToken ? 'setupToken' : 'password', 'Could not set the password.');
   const until = setupUntil ? new Date(setupUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
   const sending = setPasswordOnServer.isPending || setPasswordOnServer.isSuccess;
 
@@ -32,16 +45,30 @@ export default function SetPasswordPage({ machineName, setupUntil, recheck }: { 
         validationErrors={errors}
         onSubmit={(event) => {
           event.preventDefault();
-          if (!sending) setPasswordOnServer.mutate(password);
+          if (!sending) setPasswordOnServer.mutate({ password, setupToken: tokenRequired ? setupToken.trim() : undefined });
         }}
       >
+        {tokenRequired && (
+          <FieldGroup label="Setup access">
+            <Field
+              label="Setup token"
+              name="setupToken"
+              autoComplete="off"
+              autoFocus
+              isRequired
+              value={setupToken}
+              onChange={setSetupToken}
+              help="Koppel's log shows it: docker compose logs koppel, or journalctl -u koppel."
+            />
+          </FieldGroup>
+        )}
         <FieldGroup label="Password">
           <Field
             label="New password"
             name="password"
             type="password"
             autoComplete="new-password"
-            autoFocus
+            autoFocus={!tokenRequired}
             isRequired
             value={password}
             onChange={setPassword}

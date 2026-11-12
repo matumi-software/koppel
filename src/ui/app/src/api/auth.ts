@@ -9,6 +9,8 @@ export interface AuthState {
   passwordSet: boolean;
   machineName: string;
   setupOpen: boolean;
+  /** Setup asks for the one-time token the server logs (Linux and Docker, with the UI open beyond this machine). */
+  setupTokenRequired: boolean;
   setupUntil: string | null;
 }
 
@@ -40,7 +42,9 @@ async function post(url: string, body?: unknown): Promise<void> {
   throw new RejectedError(message);
 }
 
-export const setupPassword = (password: string) => post('/api/auth/setup', { password });
+/** `setupToken` is sent only where the state says it is required. */
+export const setupPassword = ({ password, setupToken }: { password: string; setupToken?: string }) =>
+  post('/api/auth/setup', setupToken === undefined ? { password } : { password, setupToken });
 
 export const login = (password: string) => post('/api/auth/login', { password });
 

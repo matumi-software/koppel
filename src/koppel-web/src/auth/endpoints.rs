@@ -1,5 +1,6 @@
 //! `/api/auth/*`. State, setup and login are anonymous; logout and the password change need the
-//! session. Success is 204 with a cookie, a wrong password 401 or 400 and setup after its window 403,
+//! session. Success is 204 with a cookie, a wrong password 401 or 400 and setup after its window, or without the setup token where one is
+//! required, 403,
 //! each with `{ error }`, and a caller who tried too often, or who arrives while the server is busy
 //! hashing other passwords, gets 429 with `Retry-After`.
 
@@ -16,7 +17,7 @@ use time::OffsetDateTime;
 
 use super::throttle::Reservation;
 use super::{SetupOutcome, SignedIn, password, ticket};
-use crate::access::address_key;
+use crate::access::{address_key, throttle_key};
 use crate::activity::{ActivityOutcome, ActivityReason, EntityRef};
 use crate::json::{self, JsonBody};
 use crate::state::AuthApi;
@@ -28,6 +29,8 @@ struct AuthState {
     password_set: bool,
     machine_name: String,
     setup_open: bool,
+    /// Setup asks for the one-time token the log shows.
+    setup_token_required: bool,
     #[serde(with = "time::serde::rfc3339::option")]
     setup_until: Option<OffsetDateTime>,
 }
@@ -37,6 +40,9 @@ struct AuthState {
 pub(crate) struct PasswordRequest {
     #[serde(default)]
     password: Option<String>,
+    /// Setup only: the token the log shows, where one is required.
+    #[serde(default)]
+    setup_token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -57,12 +63,15 @@ pub(crate) async fn state(
         password_set: app.auth.has_password(),
         machine_name: app.host.name.clone(),
         setup_open: app.auth.setup_open(),
+        setup_token_required: app.auth.setup_token_required(),
         setup_until: app.auth.setup_until(),
     })
 }
 
-/// Sets the first password, for whoever asks first while setup is open. There is no secret to
-/// guess, so no caller is locked out; the rate limit and the hash slots hold back a flood.
+/// Sets the first password, for whoever asks first while setup is open, or whoever holds the token
+/// where one is required (Linux and Docker, with the UI open beyond this machine). The token is 128
+/// random bits, so there is nothing to guess and no caller is locked out; the rate limit and the hash
+/// slots hold back a flood.
 pub(crate) async fn setup(
     State(app): State<AuthApi>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
@@ -74,6 +83,16 @@ pub(crate) async fn setup(
     }
     if !auth.setup_open() {
         return json::error(StatusCode::FORBIDDEN, &auth.closed_reason());
+    }
+    if !auth.setup_token_is(request.setup_token.as_deref()) {
+        tracing::warn!(
+            "Setup from {} was refused: the setup token is missing or wrong",
+            address_key(remote.ip())
+        );
+        return json::error(
+            StatusCode::FORBIDDEN,
+            "The setup token is missing or not right. Copy it from Koppel's log.",
+        );
     }
     if let Some(problem) = password::validate(request.password.as_deref()) {
         return json::error(StatusCode::BAD_REQUEST, &problem);
@@ -110,13 +129,17 @@ pub(crate) async fn login(
             "No password is set yet. Open the UI to set one.",
         );
     }
-    // A slot first, answering at once when none is free, then the try is booked before the
-    // password is looked at, so parallel guesses cannot all get through ahead of the lock.
+    let caller = address_key(remote.ip());
+    let key = format!("login:{}", throttle_key(remote.ip()));
+    // The lock is read before a slot is taken, so a locked caller cannot hold one. Then a slot,
+    // answering at once when none is free, and the try is booked before the password is looked at,
+    // so parallel guesses cannot all get through ahead of the lock.
+    if let Some(wait) = auth.precheck(&key) {
+        return locked(wait);
+    }
     let Some(_slot) = auth.hash_slot() else {
         return busy();
     };
-    let caller = address_key(remote.ip());
-    let key = format!("login:{caller}");
     let attempt = auth.reserve(&key);
     if !attempt.granted {
         return locked(attempt.lock);
@@ -153,11 +176,14 @@ pub(crate) async fn change_password(
     JsonBody(request): JsonBody<ChangeRequest>,
 ) -> Response {
     let auth = &app.auth;
+    let caller = address_key(remote.ip());
+    let key = format!("login:{}", throttle_key(remote.ip()));
+    if let Some(wait) = auth.precheck(&key) {
+        return locked(wait);
+    }
     let Some(_slot) = auth.hash_slot() else {
         return busy();
     };
-    let caller = address_key(remote.ip());
-    let key = format!("login:{caller}");
     let attempt = auth.reserve(&key);
     if !attempt.granted {
         return locked(attempt.lock);

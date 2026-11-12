@@ -122,14 +122,35 @@ async fn a_request_from_another_origin_is_refused_and_the_same_origin_is_not() {
     assert_eq!(get(own.replace("https://", "http://"), None).await, 403);
     assert_eq!(get("null".to_owned(), None).await, 403);
     assert_eq!(get(own.clone(), None).await, 200);
-    // Behind a TLS proxy, such as the Vite dev server, the scheme comes from X-Forwarded-Proto.
+    // A forwarded scheme is not read: the server is HTTPS only, so an http origin is another origin.
     assert_eq!(
         get(
             own.replace("https://", "http://"),
             Some(("X-Forwarded-Proto", "http"))
         )
         .await,
+        403
+    );
+    // A browser's Sec-Fetch-Site decides when it sends one, whatever the Origin says.
+    assert_eq!(
+        get(own.clone(), Some(("Sec-Fetch-Site", "same-origin"))).await,
         200
+    );
+    assert_eq!(
+        get(
+            "https://elsewhere.example".to_owned(),
+            Some(("Sec-Fetch-Site", "same-origin"))
+        )
+        .await,
+        200
+    );
+    assert_eq!(
+        get(own.clone(), Some(("Sec-Fetch-Site", "cross-site"))).await,
+        403
+    );
+    assert_eq!(
+        get(own.clone(), Some(("Sec-Fetch-Site", "same-site"))).await,
+        403
     );
 
     main.admin

@@ -8,6 +8,7 @@
 //! | [`network_paths_are_not_here`] | the UI router | 404 for a path the network surface serves, before anything else looks at it |
 //! | [`allow_from`] | the UI router | 403 from an address `Ui:AllowFrom` does not take |
 //! | [`ui_origin`] | the UI's `/api` | 403 for another origin, and for a change without `X-Koppel-UI: 1` |
+//! | [`no_store`] | the UI's `/api` | adds `Cache-Control: no-store` to every answer |
 //! | [`auth_limit`] | the sign-in routes | 429 over the per-address limit |
 //! | [`session`] | the UI's `/api` | puts the session on the request when the cookie is good, and renews or clears the cookie |
 //! | [`role_gate`] | `/api/server`, `/api/client` and the network router | 404 when this machine's role does not have it |
@@ -24,9 +25,10 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{
-    CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, HeaderName, HeaderValue, ORIGIN, REFERRER_POLICY,
-    SET_COOKIE, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
+    CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, HeaderName, HeaderValue, ORIGIN,
+    REFERRER_POLICY, SET_COOKIE, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS,
 };
+use axum::http::uri::Authority;
 use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -40,7 +42,7 @@ use crate::surface::{RoleScope, is_network_path};
 
 /// The header every change to the UI's API carries.
 pub(crate) const UI_HEADER: &str = "x-koppel-ui";
-const FORWARDED_PROTO: HeaderName = HeaderName::from_static("x-forwarded-proto");
+const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
 
 /// The four security headers on every answer. Outermost, so they go on whatever answers: a route, a
 /// guard's refusal, a panic's 500.
@@ -63,6 +65,15 @@ pub(crate) fn security_headers<S: Clone + Send + Sync + 'static>(router: Router<
             X_FRAME_OPTIONS,
             HeaderValue::from_static("DENY"),
         ))
+}
+
+/// `Cache-Control: no-store` on every answer of the router it wraps, the UI's `/api`: the client
+/// secrets, the settings and the session state must not stay in a browser or proxy cache.
+pub(crate) fn no_store<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    router.layer(SetResponseHeaderLayer::overriding(
+        CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    ))
 }
 
 /// Refuses a request that carries no `ConnectInfo`. Every guard that looks at the caller reads it,
@@ -125,7 +136,8 @@ pub(crate) async fn allow_from(
     next.run(request).await
 }
 
-/// On the UI's `/api`: the Origin, when there is one, is this request's own, and a change carries
+/// On the UI's `/api`: the request comes from this origin (the browser's `Sec-Fetch-Site`, else the
+/// `Origin` against the host), and a change carries
 /// `X-Koppel-UI: 1`, a header a page on another site cannot add without a CORS preflight this server
 /// never grants.
 pub(crate) async fn ui_origin(request: Request, next: Next) -> Response {
@@ -216,84 +228,43 @@ pub(crate) async fn role_gate(
 
 fn from_the_ui(request: &Request) -> bool {
     let headers = request.headers();
-    if let Some(origin) = headers.get(ORIGIN)
-        && !same_origin(request, origin.to_str().unwrap_or_default())
-    {
-        return false;
-    }
+    let here = match headers.get(SEC_FETCH_SITE) {
+        // A browser says where the request comes from, and a page cannot change it. `none` is the
+        // person's own navigation, such as a typed address; a change still needs the header below.
+        Some(site) => matches!(site.as_bytes(), b"same-origin" | b"none"),
+        // A browser or a proxy that sends no Sec-Fetch-Site: the Origin, when there is one, must be
+        // this request's own.
+        None => headers
+            .get(ORIGIN)
+            .is_none_or(|origin| same_origin(request, origin)),
+    };
     let change = request.method() != Method::GET && request.method() != Method::HEAD;
-    !change || headers.get(UI_HEADER).is_some_and(|v| v.as_bytes() == b"1")
+    here && (!change || headers.get(UI_HEADER).is_some_and(|v| v.as_bytes() == b"1"))
 }
 
-/// The origin's scheme, host and port against this request's own. Behind a TLS proxy, such as the
-/// Vite dev server, the scheme comes from `X-Forwarded-Proto`; a browser cannot set that on a
-/// cross-site request without a preflight, so it is no way around the check.
-fn same_origin(request: &Request, origin: &str) -> bool {
-    let Some((origin_scheme, origin_host, origin_port)) = split_origin(origin) else {
+/// The origin's host and port against this request's own. The UI is HTTPS only, so an origin that
+/// is not `https` is another origin; a proxy's `X-Forwarded-Proto` is not read.
+fn same_origin(request: &Request, origin: &HeaderValue) -> bool {
+    let Some(origin) = origin
+        .to_str()
+        .ok()
+        .and_then(|origin| origin.strip_prefix("https://"))
+        .filter(|rest| !rest.contains('@'))
+        .and_then(|rest| rest.parse::<Authority>().ok())
+    else {
         return false;
     };
-    let scheme = request
-        .headers()
-        .get(FORWARDED_PROTO)
-        .and_then(|v| v.to_str().ok())
-        .filter(|v| !v.is_empty())
-        .unwrap_or("https")
-        .to_ascii_lowercase();
-    let authority = request
-        .uri()
-        .authority()
-        .map(|a| a.as_str().to_owned())
-        .or_else(|| {
-            request
-                .headers()
-                .get(HOST)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned)
-        })
-        .unwrap_or_default();
-    let Some((host, port)) = split_host(&authority) else {
-        return false;
-    };
-    let port = port.unwrap_or(if scheme == "https" { 443 } else { 80 });
-    origin_scheme == scheme && origin_host.eq_ignore_ascii_case(&host) && origin_port == port
-}
-
-/// `scheme://host[:port]` as its parts, the port filled in from the scheme. `None` for anything
-/// else, such as `null`.
-fn split_origin(origin: &str) -> Option<(String, String, u16)> {
-    let (scheme, rest) = origin.split_once("://")?;
-    let scheme = scheme.to_ascii_lowercase();
-    if scheme != "http" && scheme != "https" {
-        return None;
-    }
-    let rest = rest.strip_suffix('/').unwrap_or(rest);
-    if rest.contains(['/', '?', '#', '@']) {
-        return None;
-    }
-    let (host, port) = split_host(rest)?;
-    let port = port.unwrap_or(if scheme == "https" { 443 } else { 80 });
-    Some((scheme, host, port))
-}
-
-/// `host[:port]`, with an IPv6 host in brackets.
-fn split_host(authority: &str) -> Option<(String, Option<u16>)> {
-    if authority.is_empty() {
-        return None;
-    }
-    if authority.starts_with('[') {
-        let end = authority.find(']')?;
-        let host = &authority[..=end];
-        let port = match &authority[end + 1..] {
-            "" => None,
-            rest => Some(rest.strip_prefix(':')?.parse().ok()?),
-        };
-        return Some((host.to_owned(), port));
-    }
-    match authority.rsplit_once(':') {
-        Some((host, port)) if !host.is_empty() => Some((host.to_owned(), Some(port.parse().ok()?))),
-        Some(_) => None,
-        None => Some((authority.to_owned(), None)),
-    }
+    let own = request.uri().authority().cloned().or_else(|| {
+        request
+            .headers()
+            .get(HOST)
+            .and_then(|host| host.to_str().ok())
+            .and_then(|host| host.parse::<Authority>().ok())
+    });
+    own.is_some_and(|own| {
+        own.host().eq_ignore_ascii_case(origin.host())
+            && own.port_u16().unwrap_or(443) == origin.port_u16().unwrap_or(443)
+    })
 }
 
 /// A fixed one-minute window per caller, as ASP.NET's fixed window limiter: so many requests, then
@@ -301,10 +272,18 @@ fn split_host(authority: &str) -> Option<(String, Option<u16>)> {
 pub(crate) struct RateLimit {
     permits: u32,
     window: Duration,
-    callers: Mutex<HashMap<String, (Instant, u32)>>,
+    callers: Mutex<Callers>,
 }
 
-/// Callers the limit keeps track of before it forgets the ones whose window is over.
+#[derive(Default)]
+struct Callers {
+    windows: HashMap<String, (Instant, u32)>,
+    /// When the windows that are over were last dropped.
+    swept: Option<Instant>,
+}
+
+/// The most callers the limit keeps. A flood of source addresses cannot grow it past this: the
+/// caller whose window began first is forgotten, and starts a fresh window if it comes back.
 const MAX_CALLERS: usize = 4096;
 
 impl RateLimit {
@@ -312,18 +291,32 @@ impl RateLimit {
         Self {
             permits,
             window: Duration::from_secs(60),
-            callers: Mutex::new(HashMap::new()),
+            callers: Mutex::new(Callers::default()),
         }
     }
 
     pub(crate) fn allow(&self, caller: &str) -> bool {
-        let now = Instant::now();
+        self.allow_at(caller, Instant::now())
+    }
+
+    fn allow_at(&self, caller: &str, now: Instant) -> bool {
         let mut callers = self.callers.lock().unwrap_or_else(PoisonError::into_inner);
-        if callers.len() >= MAX_CALLERS {
-            let window = self.window;
-            callers.retain(|_, (start, _)| now.duration_since(*start) < window);
+        let Callers { windows, swept } = &mut *callers;
+        // Windows that are over go once per window, so the map holds only callers of the last minute.
+        if swept.is_none_or(|at| now.duration_since(at) >= self.window) {
+            windows.retain(|_, (start, _)| now.duration_since(*start) < self.window);
+            *swept = Some(now);
         }
-        let entry = callers.entry(caller.to_owned()).or_insert((now, 0));
+        if windows.len() >= MAX_CALLERS && !windows.contains_key(caller) {
+            let oldest = windows
+                .iter()
+                .min_by_key(|(_, (start, _))| *start)
+                .map(|(caller, _)| caller.clone());
+            if let Some(oldest) = oldest {
+                windows.remove(&oldest);
+            }
+        }
+        let entry = windows.entry(caller.to_owned()).or_insert((now, 0));
         if now.duration_since(entry.0) >= self.window {
             *entry = (now, 0);
         }
@@ -339,22 +332,63 @@ impl RateLimit {
 mod tests {
     use super::*;
 
+    fn request(host: &str, origin: Option<&str>, site: Option<&str>) -> Request {
+        let mut builder = Request::builder().uri("/api/settings").header(HOST, host);
+        if let Some(origin) = origin {
+            builder = builder.header(ORIGIN, origin);
+        }
+        if let Some(site) = site {
+            builder = builder.header(SEC_FETCH_SITE, site);
+        }
+        builder.body(axum::body::Body::empty()).unwrap()
+    }
+
     #[test]
-    fn origins_are_split_into_their_parts() {
-        assert_eq!(
-            split_origin("https://localhost:15240"),
-            Some(("https".into(), "localhost".into(), 15240))
-        );
-        assert_eq!(
-            split_origin("https://elsewhere.example"),
-            Some(("https".into(), "elsewhere.example".into(), 443))
-        );
-        assert_eq!(
-            split_origin("http://[::1]:80/"),
-            Some(("http".into(), "[::1]".into(), 80))
-        );
-        assert_eq!(split_origin("null"), None);
-        assert_eq!(split_origin("https://a/b"), None);
+    fn sec_fetch_site_decides_when_the_browser_sends_it() {
+        for (site, ok) in [
+            ("same-origin", true),
+            ("none", true),
+            ("same-site", false),
+            ("cross-site", false),
+            ("", false),
+        ] {
+            // The Origin is not looked at: the browser's own word is.
+            let call = request(
+                "koppel.lan:5240",
+                Some("https://elsewhere.example"),
+                Some(site),
+            );
+            assert_eq!(from_the_ui(&call), ok, "Sec-Fetch-Site {site:?}");
+        }
+    }
+
+    #[test]
+    fn without_sec_fetch_site_the_origin_is_compared_to_the_host() {
+        let own = |origin: Option<&str>| from_the_ui(&request("koppel.lan:5240", origin, None));
+        assert!(own(None));
+        assert!(own(Some("https://koppel.lan:5240")));
+        assert!(own(Some("https://KOPPEL.lan:5240")));
+        assert!(!own(Some("https://koppel.lan")));
+        assert!(!own(Some("https://koppel.lan:5241")));
+        assert!(!own(Some("http://koppel.lan:5240")));
+        assert!(!own(Some("https://elsewhere.example")));
+        assert!(!own(Some("https://koppel.lan:5240/path")));
+        assert!(!own(Some("https://koppel.lan:5240@elsewhere.example")));
+        assert!(!own(Some("null")));
+        let default_port = |origin| from_the_ui(&request("koppel.lan", Some(origin), None));
+        assert!(default_port("https://koppel.lan"));
+        assert!(default_port("https://koppel.lan:443"));
+        let v6 = |origin| from_the_ui(&request("[::1]:5240", Some(origin), None));
+        assert!(v6("https://[::1]:5240"));
+        assert!(!v6("https://[::2]:5240"));
+    }
+
+    #[test]
+    fn a_forwarded_scheme_is_not_read() {
+        let mut call = request("koppel.lan:5240", Some("http://koppel.lan:5240"), None);
+        call.headers_mut()
+            .insert("x-forwarded-proto", HeaderValue::from_static("http"));
+        assert!(!from_the_ui(&call));
     }
 
     #[test]
@@ -363,5 +397,25 @@ mod tests {
         assert!(limit.allow("a") && limit.allow("a"));
         assert!(!limit.allow("a"));
         assert!(limit.allow("b"));
+    }
+
+    #[test]
+    fn windows_that_are_over_are_dropped_and_the_map_stays_bounded() {
+        let limit = RateLimit::per_minute(1);
+        let start = Instant::now();
+        for i in 0..100 {
+            assert!(limit.allow_at(&format!("old{i}"), start));
+        }
+        let later = start + Duration::from_secs(61);
+        assert!(limit.allow_at("new", later));
+        assert_eq!(
+            limit.callers.lock().unwrap().windows.len(),
+            1,
+            "the finished windows went"
+        );
+        for i in 0..MAX_CALLERS * 2 {
+            limit.allow_at(&format!("flood{i}"), later);
+        }
+        assert!(limit.callers.lock().unwrap().windows.len() <= MAX_CALLERS);
     }
 }

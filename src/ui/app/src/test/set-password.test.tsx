@@ -49,6 +49,50 @@ describe('first-run password', () => {
     expect(calls.find((c) => c.key === 'POST /api/auth/setup')?.body).toEqual({ password: 'correct horse battery' });
   });
 
+  it('asks for the setup token the log shows where the server requires one, and sends it with the password', async () => {
+    let passwordSet = false;
+    const { calls } = mockFetch({
+      'GET /api/auth/state': () => json(passwordSet ? state({ signedIn: true }) : openSetup({ setupTokenRequired: true })),
+      'POST /api/auth/setup': () => {
+        passwordSet = true;
+        return noContent();
+      },
+    });
+    renderGate();
+    await userEvent.type(await screen.findByLabelText('Setup token'), ' 0123abcd ');
+    await userEvent.type(screen.getByLabelText('New password'), 'correct horse battery');
+    await userEvent.type(screen.getByLabelText('Repeat the password'), 'correct horse battery');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set password and continue' }));
+
+    await screen.findByText('The app');
+    expect(calls.find((c) => c.key === 'POST /api/auth/setup')?.body).toEqual({ password: 'correct horse battery', setupToken: '0123abcd' });
+  });
+
+  it('shows a refused token under its own field and stays', async () => {
+    const refusal = "The setup token is missing or not right. Copy it from Koppel's log.";
+    mockFetch({
+      'GET /api/auth/state': () => json(openSetup({ setupTokenRequired: true })),
+      'POST /api/auth/setup': () => problem(refusal, 403),
+    });
+    renderGate();
+    await userEvent.type(await screen.findByLabelText('Setup token'), 'wrong');
+    await userEvent.type(screen.getByLabelText('New password'), 'correct horse battery');
+    await userEvent.type(screen.getByLabelText('Repeat the password'), 'correct horse battery');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set password and continue' }));
+
+    await screen.findByText(refusal);
+    expect(screen.getByRole('heading', { name: 'Set up bench-pc' })).toBeTruthy();
+  });
+
+  it('asks for no token where the server does not', async () => {
+    mockFetch({ 'GET /api/auth/state': () => json(openSetup()) });
+    renderGate();
+    await screen.findByLabelText('New password');
+    expect(screen.queryByLabelText('Setup token')).toBeNull();
+  });
+
   it('shows the server\'s refusal and stays while setup is still open', async () => {
     mockFetch({ 'GET /api/auth/state': () => json(openSetup()), 'POST /api/auth/setup': () => problem('Do not use "koppel" or "password" as the password.', 400) });
     renderGate();

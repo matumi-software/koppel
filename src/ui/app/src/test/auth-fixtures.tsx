@@ -11,7 +11,7 @@ export const problem = (error: string, status: number) => json({ error }, status
 
 export const busy = 'The server is busy checking another password. Try again in a moment.';
 
-export const state = (overrides: Partial<AuthState> = {}): AuthState => ({ signedIn: false, passwordSet: true, machineName: 'bench-pc', setupOpen: false, setupUntil: null, ...overrides });
+export const state = (overrides: Partial<AuthState> = {}): AuthState => ({ signedIn: false, passwordSet: true, machineName: 'bench-pc', setupOpen: false, setupTokenRequired: false, setupUntil: null, ...overrides });
 
 /** A machine without a password, still taking its first one. */
 export const openSetup = (overrides: Partial<AuthState> = {}) => state({ passwordSet: false, setupOpen: true, setupUntil: '2026-11-03T12:40:00Z', ...overrides });

@@ -89,6 +89,10 @@ pub(crate) struct UiAuth {
     window: Duration,
     /// Where the log sends people to set the first password.
     address: String,
+    /// Whether first-run setup needs the token the log shows (Linux and Docker, when the UI is not local only).
+    setup_token_required: bool,
+    /// The token of the open window, made when it opens and gone once the password is set.
+    setup_token: Mutex<Option<String>>,
     key: CookieKey,
     setup_until: Mutex<Option<OffsetDateTime>>,
     seen_stamp: Mutex<String>,
@@ -112,6 +116,7 @@ impl UiAuth {
         file: ConfigFile<UiCredentials>,
         window: Duration,
         address: String,
+        setup_token_required: bool,
         key: CookieKey,
     ) -> Arc<Self> {
         let stamp = stamp_of(&file.current());
@@ -119,6 +124,8 @@ impl UiAuth {
             file: file.clone(),
             window,
             address,
+            setup_token_required,
+            setup_token: Mutex::new(None),
             key,
             setup_until: Mutex::new(None),
             seen_stamp: Mutex::new(stamp),
@@ -169,6 +176,22 @@ impl UiAuth {
         )
     }
 
+    /// True when setup asks for the token the log shows.
+    pub(crate) fn setup_token_required(&self) -> bool {
+        self.setup_token_required
+    }
+
+    /// True when `given` is the open window's token. Always true when none is required.
+    pub(crate) fn setup_token_is(&self, given: Option<&str>) -> bool {
+        if !self.setup_token_required {
+            return true;
+        }
+        let (Some(given), Some(token)) = (given, lock(&self.setup_token).clone()) else {
+            return false;
+        };
+        same_bytes(given.trim().as_bytes(), token.as_bytes())
+    }
+
     pub(crate) fn ends(&self) -> broadcast::Receiver<SessionEnd> {
         self.ends.subscribe()
     }
@@ -176,6 +199,12 @@ impl UiAuth {
     /// A hash slot, or `None` when both are busy. Nothing waits for one.
     pub(crate) fn hash_slot(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
         self.slots.clone().try_acquire_owned().ok()
+    }
+
+    /// How long until `key` may try a password, or `None`: the global budget and the caller's lock,
+    /// read before a hash slot is taken so a locked caller cannot hold one.
+    pub(crate) fn precheck(&self, key: &str) -> Option<Duration> {
+        lock(&self.throttle).check(key, Instant::now())
     }
 
     pub(crate) fn reserve(&self, key: &str) -> Reservation {
@@ -222,6 +251,7 @@ impl UiAuth {
                 revoked_sessions: IndexMap::new(),
             })
             .await?;
+        *lock(&self.setup_token) = None;
         Ok(SetupOutcome::Done)
     }
 
@@ -355,6 +385,7 @@ impl UiAuth {
             let mut until = lock(&self.setup_until);
             if self.has_password() {
                 *until = None;
+                *lock(&self.setup_token) = None;
                 None
             } else if until.is_none() || reopen {
                 let closes = OffsetDateTime::now_utc() + self.window;
@@ -365,15 +396,26 @@ impl UiAuth {
             }
         };
         if let Some(closes) = opened {
-            tracing::warn!(
-                "Koppel is waiting for its first password. Open {} and set it before {} (UTC). Whoever opens the UI first sets it. After that time, restart Koppel to set it.",
-                self.address,
-                closes
-                    .replace_nanosecond(0)
-                    .unwrap_or(closes)
-                    .format(&time::format_description::well_known::Rfc3339)
-                    .unwrap_or_default()
-            );
+            let closes_at = closes
+                .replace_nanosecond(0)
+                .unwrap_or(closes)
+                .format(&time::format_description::well_known::Rfc3339)
+                .unwrap_or_default();
+            if self.setup_token_required {
+                let token = crate::activity::hex(&random_bytes::<16>());
+                *lock(&self.setup_token) = Some(token.clone());
+                tracing::warn!(
+                    "Koppel is waiting for its first password. Open {} and set it before {} (UTC). The setup token is {token}: the page asks for it, and it works once. After that time, restart Koppel to set it.",
+                    self.address,
+                    closes_at
+                );
+            } else {
+                tracing::warn!(
+                    "Koppel is waiting for its first password. Open {} and set it before {} (UTC). Whoever opens the UI first sets it. After that time, restart Koppel to set it.",
+                    self.address,
+                    closes_at
+                );
+            }
         }
     }
 }
@@ -385,6 +427,11 @@ pub(crate) enum Rejected {
     NotOurs,
     /// A session that has ended: the answer clears the cookie.
     Ended,
+}
+
+/// Equal bytes, taking as long for a near miss as for a far one. The length is not secret.
+fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
 fn stamp_of(credentials: &UiCredentials) -> String {
@@ -422,4 +469,110 @@ pub async fn reset_password(
     .await?;
     file.stop();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::access::throttle_key;
+
+    struct Folder(std::path::PathBuf);
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    async fn auth(token_required: bool) -> (Folder, Arc<UiAuth>) {
+        let root =
+            std::env::temp_dir().join(format!("koppel-auth-{}-{}", std::process::id(), new_id()));
+        let (config, keys) = (root.join("config"), root.join("keys"));
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::create_dir_all(&keys).unwrap();
+        let folder = Folder(root);
+        let paths = KoppelPaths::new(&config, &keys);
+        let secrets = Arc::new(SecretBox::open(&keys).unwrap());
+        let file = koppel_config::open::ui_auth(&paths, &secrets);
+        file.start().await.unwrap();
+        let key = CookieKey::load(&keys, &secrets).unwrap();
+        let auth = UiAuth::new(
+            file,
+            Duration::from_secs(600),
+            "https://bench:5240".into(),
+            token_required,
+            key,
+        );
+        (folder, auth)
+    }
+
+    fn window_token(auth: &UiAuth) -> Option<String> {
+        lock(&auth.setup_token).clone()
+    }
+
+    #[tokio::test]
+    async fn a_required_setup_token_is_made_with_the_window_and_works_once() {
+        let (_folder, auth) = auth(true).await;
+        let token = window_token(&auth).expect("the open window made a token");
+        assert_eq!(token.len(), 32);
+        assert!(auth.setup_token_required());
+        assert!(!auth.setup_token_is(None));
+        assert!(!auth.setup_token_is(Some("")));
+        assert!(!auth.setup_token_is(Some(&"0".repeat(32))));
+        assert!(!auth.setup_token_is(Some(&token[..31])));
+        assert!(auth.setup_token_is(Some(&token)));
+        assert!(
+            auth.setup_token_is(Some(&format!(" {token}\n"))),
+            "as pasted"
+        );
+
+        let done = auth
+            .set_first_password("a long enough password".into())
+            .await;
+        assert_eq!(done.unwrap(), SetupOutcome::Done);
+        assert!(window_token(&auth).is_none(), "the token is spent");
+        assert!(!auth.setup_token_is(Some(&token)));
+    }
+
+    #[tokio::test]
+    async fn a_reset_makes_a_new_token_and_without_the_requirement_there_is_none() {
+        let (_folder, auth) = auth(true).await;
+        let first = window_token(&auth).unwrap();
+        auth.sync_window(true);
+        let second = window_token(&auth).unwrap();
+        assert_ne!(first, second, "a reopened window has a token of its own");
+        assert!(!auth.setup_token_is(Some(&first)));
+
+        let (_folder, open) = super::tests::auth(false).await;
+        assert!(!open.setup_token_required());
+        assert!(window_token(&open).is_none());
+        assert!(open.setup_token_is(None), "nothing is asked for");
+    }
+
+    #[tokio::test]
+    async fn a_shared_64_shares_the_lock_and_a_flood_of_addresses_meets_the_budget() {
+        let (_folder, auth) = auth(false).await;
+        let one = format!("login:{}", throttle_key("2001:db8:1:2::1".parse().unwrap()));
+        let other = format!(
+            "login:{}",
+            throttle_key("2001:db8:1:2:dead:beef:0:7".parse().unwrap())
+        );
+        assert_eq!(one, other);
+        for _ in 0..throttle::FREE_FAILURES {
+            assert!(auth.reserve(&one).granted);
+        }
+        assert!(
+            auth.precheck(&other).is_some(),
+            "the neighbour is locked too"
+        );
+        let elsewhere = format!("login:{}", throttle_key("2001:db8:1:3::1".parse().unwrap()));
+        assert!(auth.precheck(&elsewhere).is_none());
+
+        // Each from a /64 of its own, so no caller is locked: only the budget stops them.
+        for i in 0..throttle::GLOBAL_BUDGET {
+            auth.reserve(&format!("login:2001:db8:{i:x}::/64"));
+        }
+        assert!(auth.precheck("login:2001:db8:ffff::/64").is_some());
+        assert!(!auth.reserve("login:2001:db8:ffff::/64").granted);
+    }
 }

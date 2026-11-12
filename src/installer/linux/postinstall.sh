@@ -23,7 +23,7 @@ if [ -d /run/systemd/system ]; then
   # says why.
   if systemctl restart koppel.service; then
     echo "Koppel is running. Open https://$(hostname):5240/"
-    echo "On a new install, set the password there within 10 minutes; whoever opens it first sets it."
+    echo "On a new install, set the password there within 10 minutes. The page asks for a setup token: sudo journalctl -u koppel shows it."
     echo "After that, sudo systemctl restart koppel opens setup again."
     echo "The browser warns about Koppel's own certificate the first time."
   else

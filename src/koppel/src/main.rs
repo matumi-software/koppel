@@ -1,12 +1,12 @@
 //! Koppel: USB devices shared over the network.
 //!
-//! Reads its settings as 0.1.x did, converts a 0.1.x install's secret files once, opens the config
+//! Reads its settings (`config.rs`: options and `KOPPEL_` variables, with 0.1.x's names as aliases), converts a 0.1.x install's secret files once, opens the config
 //! files, and serves the UI with its sign-in, REST API and live push over HTTPS on the UI port (and
-//! the network port, when `Ports:Network` sets one apart), with the server certificate kept in
+//! the network port, when `--network-port` sets one apart), with the server certificate kept in
 //! `secrets.json`. The server and client roles run on Skakel, with the USB layer behind them.
 //!
-//! `koppel --reset-password` clears the UI password and ends every session, then exits.
-//! `koppel --healthcheck` asks a running Koppel's `/healthz` and exits 0 when it answers, 1 when it
+//! `koppel reset-password` clears the UI password and ends every session, then exits.
+//! `koppel healthcheck` asks a running Koppel's `/healthz` and exits 0 when it answers, 1 when it
 //! does not: the image's health check.
 //!
 //! On Windows, when the service manager starts it, it runs as the Koppel service, with the tray
@@ -23,7 +23,7 @@ use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use config::Config;
+use config::{Command, Loaded, Settings};
 use koppel_config::{SecretBox, convert_0_1_secrets};
 use koppel_web::{App, AppOptions, Host, NetworkOptions};
 use time::OffsetDateTime;
@@ -40,50 +40,45 @@ use koppel_windows::service::Service;
 #[cfg(not(windows))]
 enum Service {}
 
-/// The UI's port unless `Ports:Ui` says otherwise.
+/// The UI's port unless `--ui-port` says otherwise.
 const UI_PORT: u16 = 5240;
-/// Setup, login and password change a minute per address, unless `RateLimits:AuthPerMinute` says
-/// otherwise.
-const AUTH_PER_MINUTE: u32 = 30;
-/// Skakel's token requests a minute per address, unless `RateLimits:TokenPerMinute` says otherwise.
-const TOKEN_PER_MINUTE: u32 = 60;
-/// Skakel's pairing calls a minute per address, unless `RateLimits:PairPerMinute` says otherwise.
-const PAIR_PER_MINUTE: u32 = 120;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
     // What the service starts as it stops for the tray's Restart Koppel.
     #[cfg(windows)]
-    if args.first().map(String::as_str) == Some(koppel_windows::service::RESTART_ARGUMENT) {
+    if std::env::args().nth(1).as_deref() == Some(koppel_windows::service::RESTART_ARGUMENT) {
         return koppel_windows::service::restart_service();
     }
-    // A one-off for the image's health check: ask the UI port whether Koppel answers, and exit.
-    if healthcheck::requested(&args) {
-        return healthcheck::run(&Config::read(std::env::vars_os(), &args));
-    }
-    let reset = args
-        .iter()
-        .any(|a| a.eq_ignore_ascii_case("--reset-password"));
-    if !reset {
-        #[cfg(windows)]
-        {
-            let service_args = args.clone();
-            let as_service = koppel_windows::service::dispatch(move |service| {
-                init_logging(true);
-                let config = Config::read(std::env::vars_os(), &service_args);
-                u32::from(finish(block_on(run(&config, Some(service)))) != ExitCode::SUCCESS)
-            });
-            if let Some(code) = as_service {
-                return code;
-            }
+    let mut loaded = Loaded::read();
+    match loaded.command {
+        // A one-off for the image's health check: ask the UI port whether Koppel answers, and exit.
+        // It stays quiet about how the settings were spelt, as it runs every 30 seconds.
+        Command::Healthcheck => healthcheck::run(&loaded.settings),
+        Command::ResetPassword => {
+            init_logging(false);
+            loaded.log_notes();
+            finish(block_on(reset_password(&loaded.settings)))
         }
-    }
-    init_logging(false);
-    let config = Config::read(std::env::vars_os(), &args);
-    if reset {
-        finish(block_on(reset_password(&config)))
-    } else {
-        finish(block_on(run(&config, None)))
+        Command::Serve => {
+            #[cfg(windows)]
+            {
+                let for_service = loaded.clone();
+                let as_service = koppel_windows::service::dispatch(move |service| {
+                    let mut loaded = for_service;
+                    init_logging(true);
+                    loaded.log_notes();
+                    u32::from(
+                        finish(block_on(run(&loaded.settings, Some(service)))) != ExitCode::SUCCESS,
+                    )
+                });
+                if let Some(code) = as_service {
+                    return code;
+                }
+            }
+            init_logging(false);
+            loaded.log_notes();
+            finish(block_on(run(&loaded.settings, None)))
+        }
     }
 }
 
@@ -105,25 +100,25 @@ fn finish(result: Result<(), Box<dyn Error>>) -> ExitCode {
     }
 }
 
-async fn run(config: &Config, service: Option<Service>) -> Result<(), Box<dyn Error>> {
-    let ui_port = config.port("Ports:Ui", UI_PORT)?;
-    let network_port = config.port("Ports:Network", ui_port)?;
-    let address = config.listen_address()?;
-    let reach = config.reach()?;
-    let setup_window = config.setup_window()?;
-    let auth_per_minute = config.count("RateLimits:AuthPerMinute", AUTH_PER_MINUTE)?;
+async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dyn Error>> {
+    let ui_port = settings.ui_port();
+    let network_port = settings.network_port();
+    let address = settings.listen_address();
+    let reach = settings.reach();
+    let setup_window = settings.setup_window();
+    let auth_per_minute = settings.auth_per_minute();
     let network = NetworkOptions {
         address,
-        discovery: config.flag("Discovery:Enabled", true)?,
-        discovery_port: config.port("Discovery:Port", network_port)?,
+        discovery: settings.discovery_enabled(),
+        discovery_port: settings.discovery_port(),
         probe_targets: None,
-        token_per_minute: config.count("RateLimits:TokenPerMinute", TOKEN_PER_MINUTE)?,
-        pair_per_minute: config.count("RateLimits:PairPerMinute", PAIR_PER_MINUTE)?,
+        token_per_minute: settings.token_per_minute(),
+        pair_per_minute: settings.pair_per_minute(),
     };
-    let usb = usb::options(config)?;
+    let usb = usb::options(settings)?;
 
-    let secrets = open_files(config)?;
-    let paths = config.paths(&std::env::current_dir()?);
+    let secrets = open_files(settings)?;
+    let paths = settings.paths(&std::env::current_dir()?);
     let host = Host {
         name: koppel_web::machine_name(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -206,13 +201,8 @@ async fn run(config: &Config, service: Option<Service>) -> Result<(), Box<dyn Er
 /// Prepares the data folders, opens what seals the secret files, and converts a 0.1.x install's
 /// secret files, once. A failed conversion is logged and leaves them as they were; the start then
 /// stops on the first one still in the old format.
-fn open_files(config: &Config) -> Result<Arc<SecretBox>, Box<dyn Error>> {
-    let paths = config.paths(&std::env::current_dir()?);
-    if paths.key_certificate.is_some() {
-        tracing::warn!(
-            "Paths:KeyCertificate is set, but Koppel 0.2 no longer reads it. It was deprecated in 0.1.2"
-        );
-    }
+fn open_files(settings: &Settings) -> Result<Arc<SecretBox>, Box<dyn Error>> {
+    let paths = settings.paths(&std::env::current_dir()?);
     paths.prepare().map_err(|e| {
         format!(
             "could not prepare {} and {}: {e}",
@@ -227,12 +217,12 @@ fn open_files(config: &Config) -> Result<Arc<SecretBox>, Box<dyn Error>> {
     Ok(secrets)
 }
 
-/// `koppel --reset-password`, as 0.1.x's `UiPasswordReset`.
-async fn reset_password(config: &Config) -> Result<(), Box<dyn Error>> {
-    let setup_window = config.setup_window()?;
-    let done = match open_files(config) {
+/// `koppel reset-password`, as 0.1.x's `UiPasswordReset`.
+async fn reset_password(settings: &Settings) -> Result<(), Box<dyn Error>> {
+    let setup_window = settings.setup_window();
+    let done = match open_files(settings) {
         Ok(secrets) => {
-            let paths = config.paths(&std::env::current_dir()?);
+            let paths = settings.paths(&std::env::current_dir()?);
             koppel_web::reset_password(&paths, &secrets)
                 .await
                 .map_err(|e| e.to_string())
@@ -242,7 +232,7 @@ async fn reset_password(config: &Config) -> Result<(), Box<dyn Error>> {
     if let Err(e) = done {
         println!("Could not reset the password: {e}");
         println!(
-            "Run this as an administrator (Windows), as root (Linux package: sudo koppel --reset-password) or as the user Koppel runs as (Docker: docker compose exec koppel koppel --reset-password)."
+            "Run this as an administrator (Windows), as root (Linux package: sudo koppel reset-password) or as the user Koppel runs as (Docker: docker compose exec koppel koppel reset-password)."
         );
         return Err("the password was not reset".into());
     }

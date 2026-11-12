@@ -1,9 +1,9 @@
-//! What drives USB on this machine, from the settings 0.1.x read: the Linux kernel's usbip-host and
-//! vhci-hcd through sysfs (`Usb:SysRoot`, `/sys` unless set), another USB/IP server to share from
-//! instead (`Usb:Upstream`, such as usbipd-win on a Windows host), usbip-win2's `usbip.exe` on
-//! Windows (`Usb:UsbipPath`, else the copy the installer bundles, else a standalone install), the
-//! attach deadline (`Usb:AttachTimeoutSeconds`) and the gateway (`Gateway:Port`, `Gateway:Address`,
-//! `Gateway:MaxSessions`).
+//! What drives USB on this machine, from the settings: the Linux kernel's usbip-host and
+//! vhci-hcd through sysfs (`KOPPEL_USB_SYS_ROOT`, `/sys` unless set), another USB/IP server to share from
+//! instead (`KOPPEL_USB_UPSTREAM`, such as usbipd-win on a Windows host), usbip-win2's `usbip.exe` on
+//! Windows (`KOPPEL_USB_USBIP_PATH`, else the copy the installer bundles, else a standalone install), the
+//! attach deadline (`KOPPEL_USB_ATTACH_TIMEOUT_SECONDS`) and the gateway (`KOPPEL_GATEWAY_PORT`,
+//! `KOPPEL_GATEWAY_ADDRESS`, `KOPPEL_GATEWAY_MAX_SESSIONS`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,20 +14,20 @@ use koppel_usb::{
 };
 use koppel_web::UsbOptions;
 
-use crate::config::Config;
+use crate::config::Settings;
 
 /// What a platform Koppel cannot drive says.
 const UNSUPPORTED: &str = "Sharing and attaching USB devices needs Linux, or a USB/IP server or driver on the host. See docs/windows.md.";
 
 /// The USB side as the settings say.
-pub fn options(config: &Config) -> Result<UsbOptions, String> {
+pub fn options(settings: &Settings) -> Result<UsbOptions, String> {
     let unsupported = Arc::new(Unsupported::new(UNSUPPORTED));
-    let sys_root = config.get("Usb:SysRoot").unwrap_or("/sys").to_owned();
+    let sys_root = settings.usb_sys_root().to_owned();
 
-    let host: Arc<dyn UsbHost> = match config.get("Usb:Upstream") {
+    let host: Arc<dyn UsbHost> = match settings.usb_upstream() {
         Some(upstream) => {
-            let address =
-                UpstreamAddress::parse(upstream).map_err(|e| format!("Usb:Upstream: {e}"))?;
+            let address = UpstreamAddress::parse(upstream)
+                .map_err(|e| format!("KOPPEL_USB_UPSTREAM: {e}"))?;
             Arc::new(UsbIpUpstreamHost::new(
                 address.host,
                 address.port,
@@ -38,30 +38,23 @@ pub fn options(config: &Config) -> Result<UsbOptions, String> {
     };
     let attacher: Arc<dyn UsbAttacher> =
         native_attacher(&sys_root).unwrap_or_else(|| unsupported.clone());
-    let driver: Arc<dyn UsbIpDriver> = native_driver(config).unwrap_or(unsupported);
+    let driver: Arc<dyn UsbIpDriver> = native_driver(settings).unwrap_or(unsupported);
 
-    let attach_seconds = config.count("Usb:AttachTimeoutSeconds", 20)?;
     let gateway = GatewayOptions {
-        port: match config.get("Gateway:Port") {
-            Some("0") => 0,
-            _ => config.port("Gateway:Port", GatewayOptions::default_port())?,
-        },
-        address: config
-            .get("Gateway:Address")
-            .unwrap_or("127.0.0.1")
-            .trim()
-            .to_owned(),
-        max_sessions: config.count(
-            "Gateway:MaxSessions",
-            GatewayOptions::DEFAULT_MAX_SESSIONS as u32,
-        )? as usize,
+        port: settings
+            .gateway_port()
+            .unwrap_or_else(GatewayOptions::default_port),
+        address: settings.gateway_address().to_owned(),
+        max_sessions: settings
+            .gateway_max_sessions()
+            .map_or(GatewayOptions::DEFAULT_MAX_SESSIONS, |n| n as usize),
     };
     Ok(UsbOptions {
         host,
         attacher,
         driver,
         client: ClientOptions {
-            attach_timeout: Duration::from_secs(u64::from(attach_seconds)),
+            attach_timeout: Duration::from_secs(u64::from(settings.usb_attach_timeout_seconds())),
             ..ClientOptions::default()
         },
         gateway,
@@ -90,11 +83,11 @@ fn native_attacher(_sys_root: &str) -> Option<Arc<dyn UsbAttacher>> {
     None
 }
 
-/// usbip-win2's `usbip.exe`: `Usb:UsbipPath`, else the copy beside Koppel, else a standalone
+/// usbip-win2's `usbip.exe`: `KOPPEL_USB_USBIP_PATH`, else the copy beside Koppel, else a standalone
 /// install under Program Files.
 #[cfg(windows)]
-fn native_driver(config: &Config) -> Option<Arc<dyn UsbIpDriver>> {
-    let path = match config.get("Usb:UsbipPath") {
+fn native_driver(settings: &Settings) -> Option<Arc<dyn UsbIpDriver>> {
+    let path = match settings.usb_usbip_path() {
         Some(path) => std::path::PathBuf::from(path),
         None => {
             let bundled = std::env::current_exe()
@@ -114,6 +107,6 @@ fn native_driver(config: &Config) -> Option<Arc<dyn UsbIpDriver>> {
 }
 
 #[cfg(not(windows))]
-fn native_driver(_config: &Config) -> Option<Arc<dyn UsbIpDriver>> {
+fn native_driver(_settings: &Settings) -> Option<Arc<dyn UsbIpDriver>> {
     None
 }

@@ -11,6 +11,7 @@ A blank value counts as not set. `koppel --help` lists them with their variables
 koppel [options] [serve]           # run Koppel; no command means serve
 koppel [options] reset-password    # clear the UI password and end every session
 koppel [options] healthcheck       # ask a running Koppel's /healthz: exit 0 if it answers, 1 if not
+koppel [options] diagnostics [FILE] # a report for a support request: config with secrets removed, USB state, the log's end
 koppel --version                   # koppel 0.2.0 (commit 1a2b3c4d5, built 2026-11-12)
 ```
 

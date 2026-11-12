@@ -1,5 +1,5 @@
 # cargo-deny's policy for the Rust workspace: licences, advisories and where crates come from.
-# `cargo deny check` runs from src/ in the CI workflow. The licence list matches
+# `cargo deny check` runs from src/ by hand before a pull request. The licence list matches
 # installer/notices/about.toml, which the installer builds use for the notices, so the two agree.
 # Koppel's own crates are GPL-3.0-or-later (see CLAUDE.md for what may come in).
 

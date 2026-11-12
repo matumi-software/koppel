@@ -48,7 +48,7 @@ cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-cargo deny check                                    # licences, advisories and sources, as CI runs it (cargo install cargo-deny)
+cargo deny check                                    # licences, advisories and sources, before a pull request (cargo install cargo-deny)
 cargo run -p koppel                                  # https://localhost:5240; set Paths__Config and Paths__Keys to a folder of your own
 bash koppel-contract/run-against-rust.sh             # the contract tests against a fresh build (Git Bash on Windows)
 ./installer/windows/build.ps1                        # PowerShell: Koppel-Setup.exe
@@ -72,4 +72,4 @@ docker run --rm -v "$PWD:/repo:ro" rust:1.99.1-trixie bash -c   "mkdir /work && 
 
 Open them from a short-lived branch into `main`. `.github/pull_request_template.md` asks what changed and why, the issue it closes, how it was tested (the commands above) and whether `docs/` or `CHANGELOG.md` changed. `.github/CODEOWNERS` names the maintainers who review every pull request; add a collaborator there when one joins.
 
-The CI workflow (`.github/workflows/ci.yml`) runs on every pull request and on `main`, and its four checks must pass before a merge: Rust on Linux and Windows (`cargo fmt --all --check`, `cargo build`, `cargo test` and `cargo clippy -- -D warnings`, all with `--locked`), the UI (`pnpm install --frozen-lockfile`, typecheck, lint and both test suites), and Dependencies (`cargo deny check` with `src/deny.toml`: licences, advisories, sources). A new licence goes into `src/deny.toml` and `src/installer/notices/about.toml` together. Dependencies are updated by hand: no bot proposes updates, so check `cargo update` and `pnpm outdated` from time to time.
+There is no CI: no workflow runs on a hosted runner, so a pull request is checked by hand before it is opened, with the commands above: `cargo fmt --all --check`, `cargo build`, `cargo test` (in the Linux container) and `cargo clippy -- -D warnings`, all with `--locked`, the UI typecheck, lint and both test suites, and `cargo deny check` with `src/deny.toml` (licences, advisories, sources). `.github/scripts/check-pins.sh` checks that the toolchain versions and the two licence lists agree. A new licence goes into `src/deny.toml` and `src/installer/notices/about.toml` together. Dependencies are updated by hand: no bot proposes updates, so check `cargo update` and `pnpm outdated` from time to time.

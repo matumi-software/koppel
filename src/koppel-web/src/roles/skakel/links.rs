@@ -11,7 +11,7 @@
 //! koppel-usb makes a link under its own lock and reads nothing it reports before it is started,
 //! so making one only builds it; everything runs from [`Link::start`].
 
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use koppel_config::ConfigFile;
@@ -28,6 +28,7 @@ use super::remote::proto::WatchDevicesRequest;
 use super::remote::proto::remote_devices_client::RemoteDevicesClient;
 use super::streams::open_usb;
 use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
+use crate::sync::Unpoisoned;
 use crate::tasks::Tasks;
 
 /// How long a remote device list that ended waits before it is asked for again, while the link
@@ -228,7 +229,7 @@ impl Shared {
                 return Err("The saved connection is for another server now.".into());
             }
         }
-        *self.learned.lock().unwrap_or_else(PoisonError::into_inner) = with(&link);
+        *self.learned.locked() = with(&link);
         Ok(())
     }
 
@@ -260,10 +261,7 @@ impl Shared {
                 if written.server_url.as_deref() == Some(&to) && continues(&written, &link) =>
             {
                 let from = link.server_url.clone().unwrap_or_default();
-                self.learned
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .server_url = Some(to.clone());
+                self.learned.locked().server_url = Some(to.clone());
                 tracing::info!("The server moved from {from} to {to}; the connection follows it");
                 self.activity.record(
                     EntityRef::new("link", host_of(&to), EntityKind::Link),
@@ -283,22 +281,14 @@ impl Shared {
     }
 
     fn learned(&self) -> ClientConnection {
-        self.learned
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.learned.locked().clone()
     }
 
     /// Asks the server for its device list and passes each one on, while the link is up. A list
     /// that ends while the link stays up is asked for again.
     fn watch_devices(self: &Arc<Self>, link: Weak<skakel_client::Link>) {
         let stop = CancellationToken::new();
-        if let Some(previous) = self
-            .watching
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .replace(stop.clone())
-        {
+        if let Some(previous) = self.watching.locked().replace(stop.clone()) {
             previous.cancel();
         }
         let shared = Arc::downgrade(self);
@@ -335,12 +325,7 @@ impl Shared {
     }
 
     fn stop_watching(&self) {
-        if let Some(stop) = self
-            .watching
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(stop) = self.watching.locked().take() {
             stop.cancel();
         }
     }

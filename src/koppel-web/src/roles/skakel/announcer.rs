@@ -11,7 +11,7 @@
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use koppel_config::ConfigFile;
@@ -22,6 +22,8 @@ use skakel_wire::{SkakelApp, VERSIONS};
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+
+use crate::sync::Unpoisoned;
 
 /// What the answers say, but the fingerprint.
 pub(crate) struct Announcement {
@@ -83,8 +85,7 @@ impl Announcer {
     #[cfg(test)]
     pub(crate) fn addresses(&self) -> Vec<SocketAddr> {
         self.running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .locked()
             .as_ref()
             .map(|answering| answering.addresses.clone())
             .unwrap_or_default()
@@ -137,7 +138,7 @@ impl Announcer {
             }
         }
         let stop = CancellationToken::new();
-        let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut running = self.running.locked();
         if running.is_some() {
             return;
         }
@@ -171,19 +172,12 @@ impl Announcer {
     }
 
     fn is_running(&self) -> bool {
-        self.running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .is_some()
+        self.running.locked().is_some()
     }
 
     /// Stops answering, and returns once the UDP port is free again.
     pub(crate) async fn stop(&self) {
-        let running = self
-            .running
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
+        let running = self.running.locked().take();
         if let Some(answering) = running {
             answering.stop.cancel();
             for task in answering.tasks {

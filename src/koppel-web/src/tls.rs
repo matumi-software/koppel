@@ -2,7 +2,7 @@
 //! rustls settings around it.
 
 use std::fmt;
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::{Arc, RwLock};
 
 use rustls::ServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -11,6 +11,7 @@ use rustls::sign::CertifiedKey;
 use tokio_rustls::TlsAcceptor;
 
 use crate::WebError;
+use crate::sync::UnpoisonedRw;
 
 /// The certificate the server presents. Every handshake reads the current one, so a replaced
 /// certificate is what the next connection sees. Connections already open keep theirs.
@@ -27,15 +28,12 @@ impl CertificateSlot {
 
     /// The certificate new connections get.
     pub fn current(&self) -> Arc<CertifiedKey> {
-        self.current
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.current.read_locked().clone()
     }
 
     /// Presents `certified` from the next handshake on.
     pub fn replace(&self, certified: CertifiedKey) {
-        *self.current.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(certified);
+        *self.current.write_locked() = Arc::new(certified);
     }
 }
 

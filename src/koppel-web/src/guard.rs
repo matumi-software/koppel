@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -40,6 +40,7 @@ use crate::access::{UiAccess, UiReach, address_key};
 use crate::auth::session::{clear_cookie, from_request};
 use crate::auth::{SignedIn, UiAuth};
 use crate::surface::{RoleScope, is_network_path};
+use crate::sync::Unpoisoned;
 
 /// The header every change to the UI's API carries.
 pub(crate) const UI_HEADER: &str = "x-koppel-ui";
@@ -293,7 +294,7 @@ impl RateLimit {
     }
 
     fn allow_at(&self, caller: &str, now: Instant) -> bool {
-        let mut callers = self.callers.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut callers = self.callers.locked();
         let Callers { windows, swept } = &mut *callers;
         // Windows that are over go once per window, so the map holds only callers of the last minute.
         if swept.is_none_or(|at| now.duration_since(at) >= self.window) {

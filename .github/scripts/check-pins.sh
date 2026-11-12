@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fails when the places that name one tool version or one licence list disagree. Run from anywhere:
 #   .github/scripts/check-pins.sh
-# CI runs it as the Pins job. It reads files only, so it needs nothing installed.
+# It reads files only, so it needs nothing installed.
 set -eu
 cd "$(dirname "$0")/../.."
 

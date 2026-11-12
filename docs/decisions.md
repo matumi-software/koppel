@@ -3,7 +3,7 @@
 ## Known limits
 
 - The Linux container is privileged and runs as root. Narrowing it needs a test on a real kernel. The Windows composes also run as root, because the volume belongs to it.
-- The installer, the image and the release files are not signed, and a release is built by hand from a checklist (see "To release" in [building.md](building.md)). `.github/workflows/ci.yml` exists, but Koppel runs no jobs on CI runners, so the checks in building.md are run by hand.
+- The installer, the image and the release files are not signed, and a release is built by hand from a checklist (see "To release" in [building.md](building.md)). The checks in building.md are run by hand before a pull request.
 - The rollback of a failed fresh install was not exercised (see ["Tested"](usb.md#tested)).
 - Printers are untried, and the arm64 image and `.deb` are untested on a Raspberry Pi.
 - Webcams do not stream from a Linux server to a Windows client (#22); a Windows server through usbipd-win to a Linux client does.

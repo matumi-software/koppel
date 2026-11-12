@@ -1,35 +1,26 @@
-//! Signing in to the UI: the one password in `ui-auth.json`, the first-run setup window, the session
-//! cookie and how a session ends, as 0.1.x's `Login/*` does it. See "UI sign-in" in
-//! docs/security.md.
+//! Signing in to the UI: the one password in `ui-auth.json`, the first-run setup window, the sessions
+//! (kept in memory, see [`session`]) and how a session ends. See "UI sign-in" in docs/security.md.
 
 pub(crate) mod endpoints;
 pub(crate) mod password;
+pub(crate) mod session;
 pub(crate) mod throttle;
-pub(crate) mod ticket;
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
-use indexmap::IndexMap;
 use koppel_config::files::UiCredentials;
-use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox};
+use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, Secret, SecretBox};
 use ring::rand::{SecureRandom, SystemRandom};
 use time::OffsetDateTime;
 use tokio::sync::{Semaphore, broadcast};
 
+use session::Sessions;
+pub(crate) use session::SignedIn;
 use throttle::{Reservation, Throttle};
-use ticket::{CookieKey, Ticket};
 
-/// How long a session lasts without use. A request in its second half extends it.
-pub(crate) const LIFETIME: Duration = Duration::from_secs(12 * 3600);
-/// How long a session lasts at most, however much it is used. Counted from the sign-in, and a
-/// password change does not restart it.
-pub(crate) const ABSOLUTE_LIFETIME: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Password hashes that may run at once, for the whole server.
 const HASH_SLOTS: usize = 2;
-/// The most signed-out session ids kept.
-const MAX_REVOKED: usize = 4096;
 
 /// `bytes` random bytes.
 pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
@@ -40,41 +31,6 @@ pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
     bytes
 }
 
-/// A new id or stamp, 32 hex digits as .NET's `Guid.NewGuid().ToString("N")`.
-pub(crate) fn new_id() -> String {
-    crate::activity::hex(&random_bytes::<16>())
-}
-
-/// Sessions that end, told to the live push so their streams close.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SessionEnd {
-    /// One session signed out.
-    Session(String),
-    /// The stamp changed: every session ends but the one that changed the password, if any.
-    AllBut(Option<String>),
-}
-
-impl SessionEnd {
-    pub(crate) fn ends(&self, session: &str) -> bool {
-        match self {
-            Self::Session(ended) => ended == session,
-            Self::AllBut(kept) => kept.as_deref() != Some(session),
-        }
-    }
-}
-
-/// The session a request carries, once checked.
-#[derive(Debug, Clone)]
-pub(crate) struct SignedIn {
-    pub id: String,
-    /// When it was first signed in, Unix seconds.
-    pub issued: i64,
-    /// How long it stays valid without another request: until the cookie runs out or the 7 day cap.
-    pub valid_for: Duration,
-    /// A cookie with a later expiry, when this request is in the second half of the session.
-    pub renewed: Option<String>,
-}
-
 /// What first-run setup decided.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SetupOutcome {
@@ -83,7 +39,7 @@ pub(crate) enum SetupOutcome {
     Closed,
 }
 
-/// Owns `ui-auth.json`, the setup window, the cookie key and the limits on guessing.
+/// Owns `ui-auth.json`, the setup window, the sessions and the limits on guessing.
 pub(crate) struct UiAuth {
     file: ConfigFile<UiCredentials>,
     window: Duration,
@@ -93,14 +49,14 @@ pub(crate) struct UiAuth {
     setup_token_required: bool,
     /// The token of the open window, made when it opens and gone once the password is set.
     setup_token: Mutex<Option<String>>,
-    key: CookieKey,
     setup_until: Mutex<Option<OffsetDateTime>>,
-    seen_stamp: Mutex<String>,
-    /// The session to keep for each new stamp a password change wrote, so two changes at once each
-    /// keep their own.
-    keep: Mutex<HashMap<String, String>>,
+    sessions: Sessions,
+    /// The password hash this server last wrote or saw. A file that differs from it was changed from
+    /// outside (a reset, a hand edit), which ends every session; a change made here sets it first.
+    seen_hash: Mutex<Option<Secret<String>>>,
     setup: tokio::sync::Mutex<()>,
-    ends: broadcast::Sender<SessionEnd>,
+    /// Told when the file changed, for whoever shows the password and setup state (the tray).
+    changes: broadcast::Sender<()>,
     slots: Arc<Semaphore>,
     throttle: Mutex<Throttle>,
 }
@@ -117,21 +73,19 @@ impl UiAuth {
         window: Duration,
         address: String,
         setup_token_required: bool,
-        key: CookieKey,
     ) -> Arc<Self> {
-        let stamp = stamp_of(&file.current());
+        let seen = file.current().password_hash.clone();
         let auth = Arc::new(Self {
             file: file.clone(),
             window,
             address,
             setup_token_required,
             setup_token: Mutex::new(None),
-            key,
             setup_until: Mutex::new(None),
-            seen_stamp: Mutex::new(stamp),
-            keep: Mutex::new(HashMap::new()),
+            sessions: Sessions::default(),
+            seen_hash: Mutex::new(seen),
             setup: tokio::sync::Mutex::new(()),
-            ends: broadcast::channel(64).0,
+            changes: broadcast::channel(8).0,
             slots: Arc::new(Semaphore::new(HASH_SLOTS)),
             throttle: Mutex::new(Throttle::default()),
         });
@@ -150,10 +104,6 @@ impl UiAuth {
 
     pub(crate) fn has_password(&self) -> bool {
         self.file.current().has_password()
-    }
-
-    fn stamp(&self) -> String {
-        stamp_of(&self.file.current())
     }
 
     /// Until when the first password may be set, or `None` once there is one. It may lie in the
@@ -192,8 +142,9 @@ impl UiAuth {
         same_bytes(given.trim().as_bytes(), token.as_bytes())
     }
 
-    pub(crate) fn ends(&self) -> broadcast::Receiver<SessionEnd> {
-        self.ends.subscribe()
+    /// Wakes when the password was set, changed or cleared, or the setup window opened or closed.
+    pub(crate) fn changes(&self) -> broadcast::Receiver<()> {
+        self.changes.subscribe()
     }
 
     /// A hash slot, or `None` when both are busy. Nothing waits for one.
@@ -242,140 +193,69 @@ impl UiAuth {
         if !self.setup_open() {
             return Ok(SetupOutcome::Closed);
         }
-        let hash = hash_off_thread(password).await;
-        let stamp = new_id();
+        let hash: Secret<String> = hash_off_thread(password).await.into();
+        // Set before the write, so the file's own change is not taken for one from outside.
+        *lock(&self.seen_hash) = Some(hash.clone());
         self.file
             .update(|_| UiCredentials {
-                password_hash: Some(hash.into()),
-                security_stamp: Some(stamp),
-                revoked_sessions: IndexMap::new(),
+                password_hash: Some(hash),
             })
             .await?;
         *lock(&self.setup_token) = None;
         Ok(SetupOutcome::Done)
     }
 
-    /// Replaces the password and the stamp. Every session but `keep` ends.
+    /// A new session, and the `Set-Cookie` value that names it.
+    pub(crate) fn sign_in(&self) -> String {
+        session::set_cookie(&self.sessions.start())
+    }
+
+    /// The session behind a cookie value, if it is one and still good: one this server started, not
+    /// ended, not run out, within 7 days of its sign-in, and with a password set.
+    pub(crate) fn check(&self, value: &str) -> Option<SignedIn> {
+        if !self.has_password() {
+            return None;
+        }
+        self.sessions.check(value)
+    }
+
+    /// Signs one session out. A copy of its cookie is refused from now on, and its live push ends.
+    pub(crate) fn sign_out(&self, session: &str) {
+        self.sessions.end(session);
+    }
+
+    /// Replaces the password. Every session but `keep` ends, and so do their live pushes.
     pub(crate) async fn change_password(
         &self,
         next: String,
         keep: &str,
     ) -> Result<(), ConfigFileError> {
-        let hash = hash_off_thread(next).await;
-        let stamp = new_id();
-        lock(&self.keep).insert(stamp.clone(), keep.to_owned());
+        let hash: Secret<String> = hash_off_thread(next).await.into();
+        *lock(&self.seen_hash) = Some(hash.clone());
         self.file
-            .update(|current| UiCredentials {
-                password_hash: Some(hash.into()),
-                security_stamp: Some(stamp),
-                revoked_sessions: current.revoked_sessions.clone(),
+            .update(|_| UiCredentials {
+                password_hash: Some(hash),
             })
             .await?;
+        self.sessions.end_all_but(Some(keep));
         Ok(())
     }
 
-    /// Revokes a session that signed out, written to the file so a copy of its cookie is refused
-    /// after a restart too. Each id is kept until its session could no longer have been valid.
-    pub(crate) async fn revoke(&self, session: &str, issued: i64) -> Result<(), ConfigFileError> {
-        let until = OffsetDateTime::from_unix_timestamp(issued)
-            .unwrap_or(OffsetDateTime::UNIX_EPOCH)
-            + ABSOLUTE_LIFETIME;
-        let now = OffsetDateTime::now_utc();
-        self.file
-            .update(|current| {
-                let mut kept: IndexMap<String, OffsetDateTime> = current
-                    .revoked_sessions
-                    .iter()
-                    .filter(|(id, ends)| **ends > now && *id != session)
-                    .map(|(id, ends)| (id.clone(), *ends))
-                    .collect();
-                while kept.len() >= MAX_REVOKED {
-                    let soonest = kept
-                        .iter()
-                        .min_by_key(|(_, ends)| **ends)
-                        .map(|(id, _)| id.clone());
-                    match soonest {
-                        Some(id) => kept.shift_remove(&id),
-                        None => break,
-                    };
-                }
-                kept.insert(session.to_owned(), until);
-                UiCredentials {
-                    revoked_sessions: kept,
-                    ..current.clone()
-                }
-            })
-            .await?;
-        let _ = self.ends.send(SessionEnd::Session(session.to_owned()));
-        Ok(())
-    }
-
-    fn is_revoked(&self, session: &str) -> bool {
-        let now = OffsetDateTime::now_utc();
-        self.file
-            .current()
-            .revoked_sessions
-            .get(session)
-            .copied()
-            .is_some_and(|until| until > now)
-    }
-
-    /// A cookie for a new session, or for `session` going on under the stamp now in force.
-    pub(crate) fn cookie(&self, session: Option<&str>, issued: Option<i64>) -> String {
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        let ticket = Ticket {
-            session: session.map_or_else(new_id, str::to_owned),
-            stamp: self.stamp(),
-            issued: issued.unwrap_or(now),
-            expires: now + LIFETIME.as_secs() as i64,
-        };
-        ticket::set_cookie(&self.key.seal(&ticket))
-    }
-
-    /// The session behind a cookie value, if it is one and still good: signed by this key, under
-    /// the stamp in force, with a password set, not signed out, not run out, and within 7 days of
-    /// its sign-in.
-    pub(crate) fn check(&self, value: &str) -> Result<SignedIn, Rejected> {
-        let ticket = self.key.open(value).ok_or(Rejected::NotOurs)?;
-        let now = OffsetDateTime::now_utc().unix_timestamp();
-        let cap = ticket.issued + ABSOLUTE_LIFETIME.as_secs() as i64;
-        if ticket.stamp != self.stamp()
-            || !self.has_password()
-            || cap <= now
-            || ticket.expires <= now
-            || self.is_revoked(&ticket.session)
-        {
-            return Err(Rejected::Ended);
-        }
-        let renewed = (ticket.expires - now < LIFETIME.as_secs() as i64 / 2)
-            .then(|| self.cookie(Some(&ticket.session), Some(ticket.issued)));
-        let until = if renewed.is_some() {
-            (now + LIFETIME.as_secs() as i64).min(cap)
-        } else {
-            ticket.expires.min(cap)
-        };
-        Ok(SignedIn {
-            id: ticket.session,
-            issued: ticket.issued,
-            valid_for: Duration::from_secs((until - now).max(0) as u64),
-            renewed,
-        })
-    }
-
+    // The file changed. A password that is not the one this server wrote is a change from outside, a
+    // reset or a hand edit: every session ends, and no password opens setup again even when it was
+    // open.
     fn changed(&self, credentials: &UiCredentials) {
-        let stamp = stamp_of(credentials);
-        let fresh = {
-            let mut seen = lock(&self.seen_stamp);
-            let fresh = *seen != stamp;
-            *seen = stamp.clone();
-            fresh
+        let outside = {
+            let mut seen = lock(&self.seen_hash);
+            let outside = *seen != credentials.password_hash;
+            seen.clone_from(&credentials.password_hash);
+            outside
         };
-        // No password under a new stamp is a reset, which opens setup again even when it was open.
-        self.sync_window(fresh);
-        if fresh {
-            let keep = lock(&self.keep).remove(&stamp);
-            let _ = self.ends.send(SessionEnd::AllBut(keep));
+        if outside {
+            self.sessions.end_all_but(None);
         }
+        self.sync_window(outside);
+        let _ = self.changes.send(());
     }
 
     // A password closes the window. No password opens it when none was open yet (a start, or the
@@ -420,22 +300,25 @@ impl UiAuth {
     }
 }
 
-/// Why a cookie was not taken.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Rejected {
-    /// Not a cookie this server signed: left alone, as ASP.NET left a cookie it could not read.
-    NotOurs,
-    /// A session that has ended: the answer clears the cookie.
-    Ended,
+/// 0.2.0 signed its session cookies with a key in `keys/ui-session.key`. Sessions are in memory now,
+/// so the file is of no use: it is deleted at the first start of this version. (`ui-auth.json` stays,
+/// it holds the password; the stamp and the list of signed-out sessions an older version wrote to it
+/// are ignored, and gone the next time the password changes.)
+pub(crate) fn remove_session_key(keys: &std::path::Path) {
+    let path = keys.join("ui-session.key");
+    match std::fs::remove_file(&path) {
+        Ok(()) => tracing::info!(
+            "Deleted {}: UI sessions are kept in memory now, so everyone signs in once",
+            path.display()
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!("Could not delete {}: {e}", path.display()),
+    }
 }
 
 /// Equal bytes, taking as long for a near miss as for a far one. The length is not secret.
 fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
-}
-
-fn stamp_of(credentials: &UiCredentials) -> String {
-    credentials.security_stamp.clone().unwrap_or_default()
 }
 
 async fn hash_off_thread(password: String) -> String {
@@ -444,8 +327,8 @@ async fn hash_off_thread(password: String) -> String {
         .expect("hashing does not panic")
 }
 
-/// `koppel --reset-password`: clears the UI password and changes the stamp, which ends every
-/// session. It edits the file on disk, so it works while Koppel runs (the running one sees the
+/// `koppel reset-password`: clears the UI password, which ends every session of a running Koppel (a
+/// restart ends them anyway). It edits the file on disk, so it works while Koppel runs (the running one sees the
 /// change and opens setup again at once) and when it does not (the next start opens it). A file
 /// that cannot be read is replaced: what an admin who forgot the password and lost the keys has
 /// left.
@@ -460,11 +343,8 @@ pub async fn reset_password(
         file = koppel_config::open::ui_auth(paths, secrets);
         file.start().await?;
     }
-    let stamp = new_id();
     file.update(|_| UiCredentials {
         password_hash: None,
-        security_stamp: Some(stamp),
-        revoked_sessions: IndexMap::new(),
     })
     .await?;
     file.stop();
@@ -475,6 +355,7 @@ pub async fn reset_password(
 mod tests {
     use super::*;
     use crate::access::throttle_key;
+    use tokio_util::sync::CancellationToken;
 
     struct Folder(std::path::PathBuf);
 
@@ -485,8 +366,11 @@ mod tests {
     }
 
     async fn auth(token_required: bool) -> (Folder, Arc<UiAuth>) {
-        let root =
-            std::env::temp_dir().join(format!("koppel-auth-{}-{}", std::process::id(), new_id()));
+        let root = std::env::temp_dir().join(format!(
+            "koppel-auth-{}-{}",
+            std::process::id(),
+            crate::activity::hex(&random_bytes::<8>())
+        ));
         let (config, keys) = (root.join("config"), root.join("keys"));
         std::fs::create_dir_all(&config).unwrap();
         std::fs::create_dir_all(&keys).unwrap();
@@ -495,13 +379,11 @@ mod tests {
         let secrets = Arc::new(SecretBox::open(&keys).unwrap());
         let file = koppel_config::open::ui_auth(&paths, &secrets);
         file.start().await.unwrap();
-        let key = CookieKey::load(&keys, &secrets).unwrap();
         let auth = UiAuth::new(
             file,
             Duration::from_secs(600),
             "https://bench:5240".into(),
             token_required,
-            key,
         );
         (folder, auth)
     }
@@ -574,5 +456,87 @@ mod tests {
         }
         assert!(auth.precheck("login:2001:db8:ffff::/64").is_some());
         assert!(!auth.reserve("login:2001:db8:ffff::/64").granted);
+    }
+
+    const PASSWORD: &str = "a long enough password";
+
+    /// A password set and `n` sessions signed in: the cookie values.
+    async fn signed_in(auth: &UiAuth, n: usize) -> Vec<String> {
+        assert_eq!(
+            auth.set_first_password(PASSWORD.into()).await.unwrap(),
+            SetupOutcome::Done
+        );
+        (0..n).map(|_| id_of(&auth.sign_in())).collect()
+    }
+
+    fn id_of(set_cookie: &str) -> String {
+        let (name, rest) = set_cookie.split_once('=').unwrap();
+        assert_eq!(name, session::COOKIE_NAME);
+        rest.split(';').next().unwrap().to_owned()
+    }
+
+    #[tokio::test]
+    async fn setup_signs_in_and_the_first_password_does_not_end_its_own_session() {
+        let (_folder, auth) = auth(false).await;
+        assert!(
+            auth.check(&"A".repeat(43)).is_none(),
+            "no password, no session"
+        );
+        let ids = signed_in(&auth, 1).await;
+        assert!(auth.check(&ids[0]).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_password_change_ends_every_session_but_the_one_that_changed_it() {
+        let (_folder, auth) = auth(false).await;
+        let ids = signed_in(&auth, 3).await;
+        let tokens: Vec<_> = ids.iter().map(|id| auth.check(id).unwrap().ended).collect();
+
+        auth.change_password("another long password".into(), &ids[1])
+            .await
+            .unwrap();
+
+        // The write came back to this server as a change it made itself: it ends nothing more.
+        assert!(auth.check(&ids[1]).is_some(), "the changing session stays");
+        assert!(auth.check(&ids[0]).is_none() && auth.check(&ids[2]).is_none());
+        assert_eq!(
+            tokens.iter().map(|t| t.is_cancelled()).collect::<Vec<_>>(),
+            [true, false, true]
+        );
+        assert!(auth.verify(Some("another long password".into())).await);
+        assert!(!auth.verify(Some(PASSWORD.into())).await);
+    }
+
+    #[tokio::test]
+    async fn signing_out_ends_one_session_and_its_push_and_a_copy_of_the_cookie() {
+        let (_folder, auth) = auth(false).await;
+        let ids = signed_in(&auth, 2).await;
+        let token = auth.check(&ids[0]).unwrap().ended;
+        auth.sign_out(&ids[0]);
+        assert!(token.is_cancelled());
+        assert!(auth.check(&ids[0]).is_none());
+        assert!(auth.check(&ids[1]).is_some());
+    }
+
+    #[tokio::test]
+    async fn a_reset_from_outside_ends_every_session_and_opens_setup() {
+        let (_folder, auth) = auth(false).await;
+        let ids = signed_in(&auth, 2).await;
+        let tokens: Vec<_> = ids.iter().map(|id| auth.check(id).unwrap().ended).collect();
+        assert!(!auth.setup_open(), "a password is set");
+        let mut changes = auth.changes();
+
+        // As `koppel reset-password` writes it, while this server runs.
+        auth.file
+            .update(|_| UiCredentials {
+                password_hash: None,
+            })
+            .await
+            .unwrap();
+
+        assert!(tokens.iter().all(CancellationToken::is_cancelled));
+        assert!(ids.iter().all(|id| auth.check(id).is_none()));
+        assert!(auth.setup_open(), "setup is open again");
+        assert!(changes.try_recv().is_ok(), "the tray is told");
     }
 }

@@ -151,15 +151,34 @@ async fn signing_in_sets_a_strict_http_only_session_cookie() {
 
     let header = answer
         .session_set_cookie()
-        .expect("signing in sets koppel.ui");
+        .expect("signing in sets the session cookie");
     let lower = header.to_ascii_lowercase();
     for attribute in ["httponly", "samesite=strict", "secure", "path=/"] {
         assert!(lower.contains(attribute), "{attribute} in {header}");
     }
+    // The __Host- prefix needs Secure and Path=/ and forbids a Domain.
+    assert!(header.starts_with("__Host-"), "{header}");
+    assert!(!lower.contains("domain="), "{header}");
     assert!(
         !lower.contains("expires=") && !lower.contains("max-age="),
-        "a session cookie, the 12 hours are in the ticket: {header}"
+        "a session cookie, the 12 hours are the server's to count: {header}"
     );
+    // An opaque 256-bit id: 43 URL-safe base64 characters, a new one for each sign-in.
+    let value = answer.session_cookie().expect("a value");
+    assert_eq!(value.len(), 43, "{value}");
+    assert!(
+        value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+        "{value}"
+    );
+    let again = main
+        .target
+        .anonymous()
+        .post("/api/auth/login", json!({ "password": password() }))
+        .await
+        .expect(204);
+    assert_ne!(again.session_cookie().expect("a value"), value);
 
     let session = main
         .target
@@ -208,13 +227,11 @@ async fn signing_out_ends_the_session_and_a_copy_of_its_cookie() {
         .session_set_cookie()
         .expect("signing out clears the cookie");
     assert!(
-        cleared.starts_with("koppel.ui=;"),
+        cleared.starts_with("__Host-koppel-session=;"),
         "an empty value: {cleared}"
     );
     assert!(
-        cleared
-            .to_ascii_lowercase()
-            .contains("expires=thu, 01 jan 1970"),
+        cleared.to_ascii_lowercase().contains("max-age=0"),
         "expired: {cleared}"
     );
 
@@ -268,14 +285,13 @@ async fn changing_the_password_signs_out_other_sessions_and_keeps_this_one() {
         .await
         .expect(204);
     changed.empty();
-    let renewed = main.target.with_cookie(
-        &changed
-            .session_cookie()
-            .expect("this session gets a cookie for the new password"),
+    assert!(
+        changed.session_set_cookie().is_none(),
+        "this session goes on with the cookie it has"
     );
+    let renewed = this.clone();
 
     other.get("/api/settings").await.expect(401);
-    this.get("/api/settings").await.expect(401);
     renewed.get("/api/settings").await.expect(200);
 
     let anonymous = main.target.anonymous();

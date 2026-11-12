@@ -15,8 +15,9 @@ use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
+use super::session::clear_cookie;
 use super::throttle::Reservation;
-use super::{SetupOutcome, SignedIn, password, ticket};
+use super::{SetupOutcome, SignedIn, password};
 use crate::access::{address_key, throttle_key};
 use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::{self, JsonBody};
@@ -109,7 +110,7 @@ pub(crate) async fn setup(
                 "The first UI password was set from {}",
                 address_key(remote.ip())
             );
-            signed_in(auth.cookie(None, None))
+            signed_in(auth.sign_in())
         }
         Ok(SetupOutcome::AlreadySet) => already_set(),
         Ok(SetupOutcome::Closed) => json::error(StatusCode::FORBIDDEN, &auth.closed_reason()),
@@ -146,25 +147,20 @@ pub(crate) async fn login(
     }
     if auth.verify(request.password).await {
         auth.clear(&key);
-        return signed_in(auth.cookie(None, None));
+        return signed_in(auth.sign_in());
     }
     fail(&app, attempt, &caller, "Sign-in");
     json::error(StatusCode::UNAUTHORIZED, "That password is not right.")
 }
 
-/// Removes the cookie from this browser and revokes the session id, so a copy of the cookie is
-/// refused too, and closes the session's live push.
+/// Ends the session, so a copy of its cookie is refused too and its live push closes, and removes
+/// the cookie from this browser.
 pub(crate) async fn logout(
     State(app): State<AuthApi>,
     Extension(session): Extension<SignedIn>,
 ) -> Response {
-    if let Err(e) = app.auth.revoke(&session.id, session.issued).await {
-        return json::failed("Signing out", e);
-    }
-    with_cookie(
-        StatusCode::NO_CONTENT.into_response(),
-        &ticket::clear_cookie(),
-    )
+    app.auth.sign_out(&session.id);
+    with_cookie(StatusCode::NO_CONTENT.into_response(), &clear_cookie())
 }
 
 /// Completes on this answer: unlike a setting there is no value to push back, and the new password
@@ -213,8 +209,8 @@ pub(crate) async fn change_password(
         "The UI password was changed and other sessions were signed out",
         None,
     );
-    // The change moved the stamp; this session gets a cookie for the new one.
-    signed_in(auth.cookie(Some(&session.id), Some(session.issued)))
+    // This session stays as it is: the same cookie goes on working.
+    StatusCode::NO_CONTENT.into_response()
 }
 
 fn machine(app: &AuthApi) -> EntityRef {

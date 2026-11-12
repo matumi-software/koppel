@@ -309,10 +309,6 @@ async fn a_0_1_2_install_is_upgraded_and_keeps_its_certificate_clients_connectio
     let auth = open::ui_auth(&paths, &secrets);
     auth.start().await.unwrap();
     assert!(auth.current().has_password());
-    assert_eq!(
-        auth.current().security_stamp.as_deref(),
-        Some("15369d15e204430db3e39bc88e2431ba")
-    );
     server.stop();
     connection.stop();
     auth.stop();

@@ -67,7 +67,7 @@ The config directory holds:
 - `settings.json`: plain, may be edited by hand.
 - `secrets.json`: Skakel's server state (`SkakelState`): the HTTPS certificate, the registered clients and the prepared next certificate. Encrypted. Created on every machine at first start, whatever the role, because the certificate is made then. Skakel's own type is stored as it is (`koppel-web/src/roles/skakel/store.rs`): Skakel reads it once at start and writes it after every change. A file from 0.1.x or 0.2.0 is rewritten into this shape at the first start by `koppel-upgrade` (see "The upgrade" below), and a token signing key such an older state held is dropped.
 - `connection.json` (client role): server address, pinned fingerprint, client ID and secret, and during a certificate handover the server's next fingerprint. Encrypted. Its format did not change in 0.1.1, so a client keeps its connection, and once its server runs 0.1.1 too it links as before.
-- `ui-auth.json`: the UI password hash and security stamp. Encrypted.
+- `ui-auth.json`: the UI password hash. Encrypted. Sessions are not kept on disk; an older version's stamp and list of signed-out sessions in the file are ignored.
 - `devices.json` (server role): the bus IDs the user chose to share, with their VID:PID. Plain.
 - `attached.json` (client role): the devices this client attached, with the server they belong to. The client attaches them again whenever the server offers them and nobody is using them: after a restart, an upgrade, a dropped link, or a replug on the server. Detaching forgets the device. Plain.
 
@@ -131,7 +131,7 @@ with the same rules.
 - **Hardening:** as 0.1.x on Windows (owner Administrators, a protected ACL for SYSTEM and
   Administrators, an unelevated process keeping its own access, links refused, `%ProgramData%\Koppel`
   itself when the folders are in it), and on Linux a link refused, the owner checked and `chmod 700`.
-- **Session key:** `ui-session.key` in the keys directory, sealed the same way, signs the UI's session cookies (see ["The UI's server side in Rust"](ui.md#the-uis-server-side-in-rust)).
+- **No session key:** sessions are in memory (see ["The UI's server side in Rust"](ui.md#the-uis-server-side-in-rust)). 0.2.0's `ui-session.key` is deleted at the first start of this version.
 - **Secret files:** a six byte header, `KPSF`, a format version (1) and a scheme. Scheme 1, on Windows,
   is machine DPAPI over the JSON. Scheme 2, elsewhere, is AES-256-GCM with a random key in
   `koppel-secrets.key` in the keys directory, mode `0600`; the file then holds that key's id and a
@@ -146,7 +146,7 @@ with the same rules.
   volume seals when there is one (and `koppel-secrets.key` in the keys directory is then only read,
   never made); otherwise `koppel-secrets.key` seals. `koppel-secrets.<anything>.key` files are older
   keys, only read. A file's key id says which key opens it, and at every start the secret files
-  (and `ui-session.key`) that an older key sealed are written again with the current one, so a
+  that an older key sealed are written again with the current one, so a
   rotation, or a move of the key out of the volume, is one start. A key from outside is any secret
   of 32 to 4096 bytes; the AES key and the id come from it by HKDF-SHA256.
 - **Secrets in memory:** the secret fields of the file structs are `Secret<String>`, which prints
@@ -178,7 +178,7 @@ with the same rules.
   (`key-*.xml`, with the master key in plain base64 on Linux). Koppel never deletes it: that would end a
   rollback, and an upgrade should not remove a file its owner did not ask it to. It is no longer used,
   and the log says so once, at the conversion. To remove it, back up the data folder and delete the
-  `key-*.xml` files in `keys/` (not `koppel-secrets.key` or `ui-session.key`). There is no command for it.
+  `key-*.xml` files in `keys/` (not `koppel-secrets.key`). There is no command for it.
 - **What carries over:** the certificate, so pinned clients keep their pin; the clients and their
   secrets; the client's connection; the UI password. The token signing key does not carry over: Skakel 0.3.0's
   tokens are random strings the server remembers, tokens last 30 minutes and live only in a client's

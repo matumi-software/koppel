@@ -5,8 +5,8 @@
 //! only once the change is on disk, so the UI never shows what was not saved. A stream that falls
 //! behind is closed rather than skipping events, and the UI fetches everything again when it opens a
 //! new one. A comment goes out every 15 seconds, so a dead connection is noticed and proxies keep it
-//! open. The stream ends when its session does: signing out, a password change or reset elsewhere,
-//! or the session's cookie running out.
+//! open. The stream ends when its session does (the session's token is cancelled): signing out, a
+//! password change or reset elsewhere, or the session running out.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -19,8 +19,9 @@ use axum::response::sse::{Event, KeepAlive, Sse};
 use serde::Serialize;
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
-use crate::auth::{SessionEnd, SignedIn};
+use crate::auth::SignedIn;
 use crate::state::PushApi;
 
 /// `settings.json` was written: the settings.
@@ -101,8 +102,7 @@ pub(crate) async fn events(
 ) -> impl IntoResponse {
     let live = Live {
         events: app.push.subscribe(),
-        ends: app.auth.ends(),
-        session: session.id,
+        ended: session.ended,
         until: Instant::now() + session.valid_for,
     };
     let stream = futures_util::stream::unfold(Some(live), |state| async move {
@@ -116,30 +116,22 @@ pub(crate) async fn events(
 /// One open stream.
 struct Live {
     events: broadcast::Receiver<Arc<Pushed>>,
-    ends: broadcast::Receiver<SessionEnd>,
-    session: String,
+    /// Cancelled when the session ends.
+    ended: CancellationToken,
     until: Instant,
 }
 
 impl Live {
     /// The next event, or `None` when the stream is over.
     async fn next(&mut self) -> Option<Event> {
-        loop {
-            tokio::select! {
-                pushed = self.events.recv() => {
-                    return match pushed {
-                        Ok(pushed) => Some(Event::default().event(pushed.name).data(&pushed.data)),
-                        // Behind or shutting down: the UI opens a new stream and refetches.
-                        Err(RecvError::Lagged(_) | RecvError::Closed) => None,
-                    };
-                }
-                end = self.ends.recv() => match end {
-                    Ok(end) if !end.ends(&self.session) => {}
-                    // Ended, or the stream cannot tell any more whether it was.
-                    _ => return None,
-                },
-                () = tokio::time::sleep_until(self.until) => return None,
-            }
+        tokio::select! {
+            pushed = self.events.recv() => match pushed {
+                Ok(pushed) => Some(Event::default().event(pushed.name).data(&pushed.data)),
+                // Behind or shutting down: the UI opens a new stream and refetches.
+                Err(RecvError::Lagged(_) | RecvError::Closed) => None,
+            },
+            () = self.ended.cancelled() => None,
+            () = tokio::time::sleep_until(self.until) => None,
         }
     }
 }

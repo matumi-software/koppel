@@ -104,6 +104,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 # `preserve_order` keeps the names of a JSON object in the order they were written.
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 base64 = "0.23.1"
+# The session cookie's header, written and read (MIT OR Apache-2.0, on the `time` already here). No default
+# features: no percent-encoding, no signing, no jar.
+cookie = { version = "0.18.1", default-features = false }
 # Dates are RFC 3339 strings (`time::serde::rfc3339`), in the files and in the API.
 time = { version = "0.3.55", features = ["serde-well-known"] }
 # An ordered map for the files that keep one (devices.json, ui-auth.json): MIT OR Apache-2.0, already

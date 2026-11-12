@@ -37,7 +37,8 @@ use koppel_config::files::KoppelSettings;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::access::{UiAccess, UiReach, address_key};
-use crate::auth::{Rejected, SignedIn, UiAuth, ticket};
+use crate::auth::session::{clear_cookie, from_request};
+use crate::auth::{SignedIn, UiAuth};
 use crate::surface::{RoleScope, is_network_path};
 
 /// The header every change to the UI's API carries.
@@ -164,34 +165,26 @@ pub(crate) async fn auth_limit(
 }
 
 /// Anonymous routes see the session too, when there is one: the state says whether it is good. A
-/// session that ended loses its cookie, and one past its half gets a later expiry, unless the route
-/// set a cookie of its own (a sign-in, a sign-out, a password change).
+/// cookie that names no session (ended, run out, or never one of ours) is removed from the browser,
+/// unless the route set a cookie of its own (a sign-in, a sign-out).
 pub(crate) async fn session(
     State(auth): State<Arc<UiAuth>>,
     mut request: Request,
     next: Next,
 ) -> Response {
     let mut clear = false;
-    let mut renewed = None;
-    if let Some(value) = ticket::from_request(request.headers()) {
+    if let Some(value) = from_request(request.headers()) {
         match auth.check(&value) {
-            Ok(session) => {
-                renewed = session.renewed.clone();
+            Some(session) => {
                 request.extensions_mut().insert(session);
             }
-            Err(Rejected::Ended) => clear = true,
-            Err(Rejected::NotOurs) => {}
+            None => clear = true,
         }
     }
     let mut response = next.run(request).await;
-    let cookie = if clear {
-        Some(ticket::clear_cookie())
-    } else {
-        renewed
-    };
-    if let Some(cookie) = cookie
+    if clear
         && !response.headers().contains_key(SET_COOKIE)
-        && let Ok(value) = HeaderValue::from_str(&cookie)
+        && let Ok(value) = HeaderValue::from_str(&clear_cookie())
     {
         response.headers_mut().insert(SET_COOKIE, value);
     }

@@ -18,7 +18,6 @@ use crate::access::{UiAccess, UiReach};
 use crate::activity::ActivityLog;
 use crate::api::client::ConnectionView;
 use crate::auth::UiAuth;
-use crate::auth::ticket::CookieKey;
 use crate::guard::RateLimit;
 use crate::host::Host;
 use crate::push::{self, Push};
@@ -112,9 +111,6 @@ pub enum StartError {
     Tls(#[from] WebError),
     #[error(transparent)]
     Skakel(#[from] ServerStartError),
-    /// The session key could not be read or made.
-    #[error("{0}")]
-    SessionKey(String),
 }
 
 /// What runs behind the roles, stopped in order when Koppel stops.
@@ -299,18 +295,12 @@ impl App {
         usb_client.start().await?;
         gateway.start().await;
 
-        let key = CookieKey::load(&paths.keys, &secrets).map_err(StartError::SessionKey)?;
+        crate::auth::remove_session_key(&paths.keys);
         let address = format!("https://{}:{}", host.name, host.ui_port);
         // A native Windows install is local only and a service has no console to read a token from,
         // so there the first caller within Ui:AllowFrom still sets the password.
         let setup_token_required = !cfg!(windows) && reach != UiReach::Local;
-        let auth = UiAuth::new(
-            ui_auth.clone(),
-            setup_window,
-            address,
-            setup_token_required,
-            key,
-        );
+        let auth = UiAuth::new(ui_auth.clone(), setup_window, address, setup_token_required);
 
         let stoppers: Vec<Box<dyn Fn() + Send + Sync>> = vec![
             Box::new({

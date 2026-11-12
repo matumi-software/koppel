@@ -10,7 +10,6 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize};
 use skakel_server::SkakelState;
-use time::OffsetDateTime;
 
 use crate::redact::Secret;
 
@@ -138,27 +137,20 @@ impl ClientConnection {
     }
 }
 
-/// `ui-auth.json`: the UI password's hash, the stamp that ends every session when it changes, and
-/// the sessions that signed out with when each would have ended. Encrypted.
+/// `ui-auth.json`: the UI password's hash. Encrypted. Sessions are not kept here: they live in memory.
+/// A file an older version wrote may still hold a security stamp and a list of signed-out sessions;
+/// they are ignored and go the next time the file is written.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UiCredentials {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password_hash: Option<Secret<String>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub security_stamp: Option<String>,
-    #[serde(default, with = "rfc3339_map")]
-    pub revoked_sessions: IndexMap<String, OffsetDateTime>,
 }
 
 impl UiCredentials {
-    /// What a new install writes: no password and an empty stamp.
+    /// What a new install writes: no password.
     pub fn empty() -> Self {
-        Self {
-            password_hash: None,
-            security_stamp: Some(String::new()),
-            revoked_sessions: IndexMap::new(),
-        }
+        Self::default()
     }
 
     pub fn has_password(&self) -> bool {
@@ -173,40 +165,6 @@ impl UiCredentials {
             }
             _ => None,
         }
-    }
-}
-
-/// A map of dates as RFC 3339 strings. `null` reads as an empty map.
-mod rfc3339_map {
-    use super::*;
-
-    #[derive(Deserialize)]
-    struct Date(#[serde(with = "time::serde::rfc3339")] OffsetDateTime);
-
-    struct DateRef<'a>(&'a OffsetDateTime);
-
-    impl Serialize for DateRef<'_> {
-        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            time::serde::rfc3339::serialize(self.0, serializer)
-        }
-    }
-
-    pub fn serialize<S: serde::Serializer>(
-        map: &IndexMap<String, OffsetDateTime>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        serializer.collect_map(map.iter().map(|(k, v)| (k, DateRef(v))))
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<IndexMap<String, OffsetDateTime>, D::Error> {
-        let dates = Option::<IndexMap<String, Date>>::deserialize(deserializer)?;
-        Ok(dates
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(k, Date(v))| (k, v))
-            .collect())
     }
 }
 
@@ -321,25 +279,15 @@ mod tests {
         );
 
         let credentials: UiCredentials = serde_json::from_str(
-            r#"{"passwordHash":null,"securityStamp":"abc","revokedSessions":{"s1":"2026-11-09T08:30:15.1234567+00:00","s2":"2026-11-09T08:30:15Z"},"hasPassword":false}"#,
+            r#"{"passwordHash":null,"securityStamp":"abc","revokedSessions":{"s1":"2026-11-09T08:30:15.1234567+00:00"},"hasPassword":false}"#,
         )
         .unwrap();
         assert!(!credentials.has_password());
-        assert_eq!(credentials.revoked_sessions.len(), 2);
-        let none: UiCredentials = serde_json::from_str(r#"{"revokedSessions":null}"#).unwrap();
-        assert!(none.revoked_sessions.is_empty());
+        // What an older version wrote beside the hash is read past and not written again.
         let written = serde_json::to_string(&credentials).unwrap();
-        assert!(
-            !written.contains("null") && !written.contains("hasPassword"),
-            "{written}"
-        );
+        assert_eq!(written, "{}");
         let back: UiCredentials = serde_json::from_str(&written).unwrap();
         assert_eq!(back, credentials);
-        assert_eq!(
-            back.revoked_sessions.keys().collect::<Vec<_>>(),
-            ["s1", "s2"],
-            "the order is kept"
-        );
     }
 
     /// Every secret in every file struct is a sentinel here; none may come out of `{:?}`, plain or
@@ -355,7 +303,6 @@ mod tests {
         };
         let credentials = UiCredentials {
             password_hash: Some("SENTINEL-PASSWORD-HASH".into()),
-            ..UiCredentials::empty()
         };
         let secrets: ServerSecrets = serde_json::from_str(
             r#"{"skakel":{"clients":[{"id":"client-1","name":"bench","secretHash":"sha256$AAAA","createdAt":"2026-11-09T08:30:15Z","generation":1,"secret":"SENTINEL-CLIENT-SECRET"}],"certificate":{"certificate":"AAAA","privateKey":"SENTINEL-PRIVATE-KEY"}}}"#,

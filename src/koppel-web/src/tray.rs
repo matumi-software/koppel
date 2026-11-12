@@ -284,7 +284,8 @@ impl NoticeRules {
 pub struct TrayFeed {
     app: Arc<App>,
     pushes: broadcast::Receiver<Arc<Pushed>>,
-    ends: broadcast::Receiver<crate::auth::SessionEnd>,
+    /// The password or the setup window changed.
+    auth: broadcast::Receiver<()>,
     activity: broadcast::Receiver<ActivityEvent>,
     rules: NoticeRules,
 }
@@ -302,7 +303,7 @@ impl TrayFeed {
         Self {
             app: app.clone(),
             pushes: app.push.subscribe(),
-            ends: app.auth.ends(),
+            auth: app.auth.changes(),
             activity: app.activity.watch(),
             rules,
         }
@@ -354,7 +355,7 @@ impl TrayFeed {
     pub async fn changed(&mut self) {
         tokio::select! {
             _ = self.pushes.recv() => {}
-            _ = self.ends.recv() => {}
+            _ = self.auth.recv() => {}
             () = tokio::time::sleep(ROUND) => {}
         }
     }

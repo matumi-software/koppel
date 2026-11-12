@@ -37,6 +37,7 @@ serde_json.workspace = true
 time.workspace = true
 ring.workspace = true
 base64.workspace = true
+cookie.workspace = true
 futures-util.workspace = true
 socket2.workspace = true
 if-addrs.workspace = true
@@ -51,6 +52,8 @@ protox.workspace = true
 tonic-prost-build.workspace = true
 
 [dev-dependencies]
+# Paused time (`start_paused`), for the session and shutdown tests.
+tokio = { workspace = true, features = ["test-util"] }
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
 # The guard tests call the router with `ServiceExt::oneshot`.
 tower.workspace = true

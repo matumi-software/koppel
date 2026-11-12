@@ -238,9 +238,7 @@ fn open_files(settings: &Settings) -> Result<Arc<SecretBox>, Box<dyn Error>> {
     let _ = koppel_upgrade::upgrade(&paths, &secrets);
     // After a rotation, or a move of the key out of the keys directory, files sealed with an older
     // key are written again with the current one.
-    let mut sealed = paths.secret_files().to_vec();
-    sealed.push(paths.keys.join("ui-session.key"));
-    secrets.reseal(&sealed);
+    secrets.reseal(&paths.secret_files());
     Ok(secrets)
 }
 

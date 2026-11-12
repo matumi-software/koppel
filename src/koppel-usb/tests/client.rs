@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use koppel_config::files::{KoppelSettings, Role};
-use koppel_usb::{BeginAttachError, ClientOptions, GatewayOptions, OpenError, UsbDevice};
+use koppel_usb::{BeginAttachError, ClientOptions, GatewayOptions, OpenError};
 
 async fn bench() -> (Arc<FakeKernel>, ServerSide, Arc<FakeKernel>, ClientSide) {
     let server_kernel = FakeKernel::new();
@@ -232,27 +232,6 @@ async fn a_bus_id_that_is_not_one_is_refused() {
     let refused = client.client.begin_attach("1-1.4;calc").await;
 
     assert!(matches!(refused, Err(BeginAttachError::InvalidBusId)));
-    client.stop().await;
-    server.stop().await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn devices_with_a_bus_id_that_is_not_one_never_reach_the_client_list() {
-    let (server_kernel, server, _, client) = bench().await;
-    server_kernel.plug(vec![
-        dongle(),
-        UsbDevice {
-            bus_id: "1-1.5 --stop".into(),
-            ..dongle()
-        },
-    ]);
-    server.server.set_shared("1-1.4", true).await.unwrap();
-
-    client.link().await;
-
-    let devices = client.client.current().devices;
-    assert_eq!(devices.len(), 1);
-    assert_eq!(devices[0].device.bus_id, "1-1.4");
     client.stop().await;
     server.stop().await;
 }

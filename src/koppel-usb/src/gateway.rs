@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::UsbClient;
 use crate::peer_check::{AnyPeer, GatewayPeerCheck};
-use crate::tasks::{BackgroundTasks, lock};
+use crate::tasks::{Backoff, Tasks, lock};
 
 const STOP_WAIT: Duration = Duration::from_secs(5);
 const MIN_BACKOFF: Duration = Duration::from_secs(5);
@@ -83,7 +83,7 @@ struct Inner {
     /// Cancelled when the role starts or stops wanting the gateway; a child of `stopping`.
     role_changed: Mutex<CancellationToken>,
     running: AtomicBool,
-    tasks: BackgroundTasks,
+    tasks: Tasks,
     run: Mutex<Option<JoinHandle<()>>>,
     subscription: Mutex<Option<Subscription>>,
 }
@@ -107,7 +107,7 @@ impl UsbIpGateway {
                 role_changed: Mutex::new(stopping.child_token()),
                 stopping,
                 running: AtomicBool::new(false),
-                tasks: BackgroundTasks::default(),
+                tasks: Tasks::default(),
                 run: Mutex::new(None),
                 subscription: Mutex::new(None),
             }),
@@ -175,8 +175,13 @@ impl UsbIpGateway {
         }
         inner.stopping.cancel();
         let run = lock(&inner.run).take();
-        if let Some(run) = run {
-            let _ = run.await;
+        if let Some(mut run) = run {
+            // The loop ends once its sessions have, which they do on the token; a session stuck
+            // in a driver call must not hold up Koppel stopping.
+            if tokio::time::timeout(STOP_WAIT * 2, &mut run).await.is_err() {
+                tracing::warn!("The USB/IP gateway did not stop in time");
+                run.abort();
+            }
         }
     }
 }
@@ -215,13 +220,13 @@ impl Inner {
         check: Arc<dyn GatewayPeerCheck>,
         slots: Arc<Semaphore>,
     ) {
-        let mut backoff = MIN_BACKOFF;
+        let mut backoff = Backoff::new(MIN_BACKOFF, MAX_BACKOFF);
         while !self.stopping.is_cancelled() {
             let iteration = lock(&self.role_changed).clone();
             if !self.wanted() {
                 self.client.set_gateway(None, None).await;
                 iteration.cancelled().await;
-                backoff = MIN_BACKOFF;
+                backoff.reset();
                 continue;
             }
 
@@ -234,7 +239,7 @@ impl Inner {
                 .listen(SocketAddr::new(address, port), &check, &slots, &iteration)
                 .await;
             match listened {
-                Ok(()) => backoff = MIN_BACKOFF,
+                Ok(()) => backoff.reset(),
                 Err(e) => {
                     // A port that is taken or reserved, or anything else: the host keeps running,
                     // the UI says why.
@@ -250,10 +255,9 @@ impl Inner {
                         )
                         .await;
                     tokio::select! {
-                        _ = tokio::time::sleep(backoff) => {}
-                        _ = iteration.cancelled() => {}
+                        () = tokio::time::sleep(backoff.next_wait()) => {}
+                        () = iteration.cancelled() => {}
                     }
-                    backoff = (backoff * 2).min(MAX_BACKOFF);
                 }
             }
             self.running.store(false, Ordering::SeqCst);
@@ -282,7 +286,7 @@ impl Inner {
                     Ok(accepted) => accepted,
                     Err(e) => break Err(e),
                 },
-                _ = iteration.cancelled() => break Ok(()),
+                () = iteration.cancelled() => break Ok(()),
             };
             let _ = socket.set_nodelay(true);
             let Ok(slot) = slots.clone().try_acquire_owned() else {
@@ -315,7 +319,7 @@ async fn serve(
 ) {
     let allowed = tokio::select! {
         allowed = check.allows(peer, gateway) => allowed,
-        _ = stopping.cancelled() => return,
+        () = stopping.cancelled() => return,
     };
     if !allowed {
         tracing::warn!(

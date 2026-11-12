@@ -23,7 +23,7 @@ impl UsbIpDriver for WorkingDriver {
         &'a self,
         _: &'a str,
         _: u16,
-        _: &'a str,
+        _: &'a koppel_usb::BusId,
     ) -> BoxFuture<'a, Result<u32, UsbError>> {
         Box::pin(async { Ok(0) })
     }
@@ -32,7 +32,7 @@ impl UsbIpDriver for WorkingDriver {
         &'a self,
         _: &'a str,
         _: u16,
-        _: &'a str,
+        _: &'a koppel_usb::BusId,
         _: u32,
     ) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async { Ok(()) })

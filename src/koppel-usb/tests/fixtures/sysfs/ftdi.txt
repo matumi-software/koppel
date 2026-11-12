@@ -1,0 +1,39 @@
+# One USB device as sysfs prints it, in the form of the kernel's attribute files: each value is
+# followed by a newline, numbers are decimal or hex as the attribute defines. Sections start with
+# "== " and a path below the device folder; a path ending in "/" is a folder.
+== idVendor
+0403
+== idProduct
+6001
+== bcdDevice
+0600
+== bDeviceClass
+00
+== bDeviceSubClass
+00
+== bDeviceProtocol
+00
+== bConfigurationValue
+1
+== bNumConfigurations
+1
+== busnum
+1
+== devnum
+5
+== speed
+12
+== manufacturer
+FTDI
+== product
+FT232R USB UART
+== serial
+A50285BI
+== driver/name
+ftdi_sio
+== 1-1.4:1.0/bInterfaceClass
+ff
+== 1-1.4:1.0/bInterfaceSubClass
+ff
+== 1-1.4:1.0/bInterfaceProtocol
+ff

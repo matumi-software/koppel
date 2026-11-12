@@ -16,7 +16,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// Imports the device on a stream, as a client would, and expects it to be granted.
 async fn import(stream: &mut MemoryStream, bus_id: &str) {
     stream
-        .write_all(&protocol::import_request(bus_id))
+        .write_all(&protocol::import_request(&bus_id.parse().unwrap()))
         .await
         .unwrap();
     let header = protocol::read_header(stream).await.unwrap();
@@ -132,7 +132,7 @@ async fn two_imports_of_one_device_do_not_reset_it_at_the_same_time() {
     let mut second = side.open_stream("bench-4");
 
     first
-        .write_all(&protocol::import_request("1-1.4"))
+        .write_all(&protocol::import_request(&"1-1.4".parse().unwrap()))
         .await
         .unwrap();
     assert!(kernel.reset_started(Duration::from_secs(10)).await);
@@ -141,7 +141,7 @@ async fn two_imports_of_one_device_do_not_reset_it_at_the_same_time() {
     // reset too. A second reset is the only thing that can happen here, so the wait is bounded by
     // how long to look for it.
     second
-        .write_all(&protocol::import_request("1-1.4"))
+        .write_all(&protocol::import_request(&"1-1.4".parse().unwrap()))
         .await
         .unwrap();
     assert!(
@@ -206,10 +206,10 @@ async fn an_import_of_a_bus_id_that_is_not_one_is_refused() {
     let side = ServerSide::start(FakeKernel::new(), true, true).await;
     let mut session = side.open_stream("bench-6");
 
-    session
-        .write_all(&protocol::import_request("../1-1"))
-        .await
-        .unwrap();
+    let mut request = protocol::header(protocol::OP_REQ_IMPORT, 0).to_vec();
+    request.extend_from_slice(b"../1-1");
+    request.resize(protocol::HEADER_SIZE + protocol::BUS_ID_SIZE, 0);
+    session.write_all(&request).await.unwrap();
 
     assert_eq!(
         protocol::read_header(&mut session).await.unwrap().status,

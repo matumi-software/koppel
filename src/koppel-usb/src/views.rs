@@ -1,30 +1,118 @@
 //! What the UI and the remote clients see, with 0.1.x's JSON names.
 
 use koppel_config::json::date_time_offset;
-use serde::{Deserialize, Serialize};
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Deserializer, Serialize};
 use time::OffsetDateTime;
 
-use crate::UsbSpeed;
+use crate::{BusId, UsbSpeed};
+
+/// Where a device stands, in the design system's state words: `local`, `shared`, `attached`, or
+/// `offline` (shared but unplugged). A word this version does not know reads as `local`, so a
+/// newer server's list still loads and the device is simply not offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeviceState {
+    Shared,
+    Attached,
+    Offline,
+    #[default]
+    #[serde(other)]
+    Local,
+}
+
+impl DeviceState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Shared => "shared",
+            Self::Attached => "attached",
+            Self::Offline => "offline",
+        }
+    }
+
+    /// The state a word stands for; an unknown word is `Local`.
+    pub fn parse(word: &str) -> Self {
+        match word {
+            "shared" => Self::Shared,
+            "attached" => Self::Attached,
+            "offline" => Self::Offline,
+            _ => Self::Local,
+        }
+    }
+}
+
+/// Where the link to the server stands: `unconfigured`, `connecting`, `connected` or `error`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LinkState {
+    #[default]
+    Unconfigured,
+    Connecting,
+    Connected,
+    Error,
+}
+
+impl LinkState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unconfigured => "unconfigured",
+            Self::Connecting => "connecting",
+            Self::Connected => "connected",
+            Self::Error => "error",
+        }
+    }
+}
 
 /// A device as the UI sees it. `state` uses the design system's state words: `local`, `shared`,
 /// `attached`, or `offline` (shared but unplugged).
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeviceView {
-    pub bus_id: String,
+    pub bus_id: BusId,
+    #[serde(default)]
     pub vid_pid: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub manufacturer: Option<String>,
+    #[serde(default)]
     pub speed: String,
-    pub state: String,
+    #[serde(default)]
+    pub state: DeviceState,
+    #[serde(default)]
     pub attached_to: Option<String>,
-    #[serde(with = "date_time_offset::option")]
+    #[serde(with = "date_time_offset::option", default)]
     pub attached_since: Option<OffsetDateTime>,
     /// Why the last change to this device failed, for the UI.
+    #[serde(default)]
     pub fault: Option<String>,
+    #[serde(default)]
     pub serial: Option<String>,
+    #[serde(default)]
     pub driver: Option<String>,
+    #[serde(default)]
     pub interfaces: Option<Vec<String>>,
+}
+
+impl DeviceView {
+    /// A row for `bus_id` with nothing else filled in.
+    pub fn new(bus_id: BusId) -> Self {
+        Self {
+            bus_id,
+            vid_pid: String::new(),
+            name: String::new(),
+            manufacturer: None,
+            speed: String::new(),
+            state: DeviceState::Local,
+            attached_to: None,
+            attached_since: None,
+            fault: None,
+            serial: None,
+            driver: None,
+            interfaces: None,
+        }
+    }
 }
 
 /// What the server's UI shows: its devices, or why it cannot share any.
@@ -39,7 +127,36 @@ pub struct ServerDevices {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct RemoteDevices {
+    /// A row whose bus ID is not one is dropped while reading, not the whole list.
+    #[serde(deserialize_with = "lenient_devices")]
     pub devices: Vec<DeviceView>,
+}
+
+fn lenient_devices<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<DeviceView>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Row {
+        Device(Box<DeviceView>),
+        Unreadable(IgnoredAny),
+    }
+    let rows = Vec::<Row>::deserialize(deserializer)?;
+    let total = rows.len();
+    let devices: Vec<DeviceView> = rows
+        .into_iter()
+        .filter_map(|row| match row {
+            Row::Device(device) => Some(*device),
+            Row::Unreadable(_) => None,
+        })
+        .collect();
+    if devices.len() != total {
+        tracing::warn!(
+            "Ignored {} devices from the server with a bus ID that is not valid",
+            total - devices.len()
+        );
+    }
+    Ok(devices)
 }
 
 impl ServerDevices {
@@ -51,16 +168,15 @@ impl ServerDevices {
             devices: self
                 .devices
                 .iter()
-                .filter(|d| d.state == "shared" || d.state == "attached")
+                .filter(|d| matches!(d.state, DeviceState::Shared | DeviceState::Attached))
                 .map(|d| DeviceView {
-                    bus_id: d.bus_id.clone(),
                     vid_pid: d.vid_pid.clone(),
                     name: d.name.clone(),
                     manufacturer: d.manufacturer.clone(),
                     speed: d.speed.clone(),
-                    state: d.state.clone(),
+                    state: d.state,
                     interfaces: d.interfaces.clone(),
-                    ..DeviceView::default()
+                    ..DeviceView::new(d.bus_id.clone())
                 })
                 .collect(),
         }
@@ -86,8 +202,7 @@ pub struct ClientDeviceView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientDevices {
-    /// `unconfigured`, `connecting`, `connected` or `error`.
-    pub link: String,
+    pub link: LinkState,
     pub link_message: Option<String>,
     pub devices: Vec<ClientDeviceView>,
     pub unavailable: Option<String>,
@@ -145,23 +260,18 @@ mod tests {
         let server = ServerDevices {
             devices: vec![
                 DeviceView {
-                    bus_id: "1-1.4".into(),
                     vid_pid: "064f:2af9".into(),
                     name: "CodeMeter-Stick".into(),
-                    state: "attached".into(),
+                    state: DeviceState::Attached,
                     attached_to: Some("client-1".into()),
                     attached_since: Some(OffsetDateTime::UNIX_EPOCH),
                     fault: Some("detail".into()),
                     serial: Some("SERIAL-123".into()),
                     driver: Some("usbip-host".into()),
                     interfaces: Some(vec!["Vendor specific".into()]),
-                    ..DeviceView::default()
+                    ..DeviceView::new("1-1.4".parse().unwrap())
                 },
-                DeviceView {
-                    bus_id: "2-1".into(),
-                    state: "local".into(),
-                    ..DeviceView::default()
-                },
+                DeviceView::new("2-1".parse().unwrap()),
             ],
             unavailable: None,
         };
@@ -170,7 +280,7 @@ mod tests {
 
         assert_eq!(remote.devices.len(), 1);
         let device = &remote.devices[0];
-        assert_eq!(device.state, "attached");
+        assert_eq!(device.state, DeviceState::Attached);
         assert_eq!(device.attached_to, None);
         assert_eq!(device.attached_since, None);
         assert_eq!(device.serial, None);
@@ -182,10 +292,10 @@ mod tests {
     #[test]
     fn views_use_the_json_names_of_0_1() {
         let json = serde_json::to_value(ClientDevices {
-            link: "connected".into(),
+            link: LinkState::Connected,
             link_message: None,
             devices: vec![ClientDeviceView {
-                device: DeviceView::default(),
+                device: DeviceView::new("1-1.4".parse().unwrap()),
                 attached_here: true,
                 port: Some(8),
                 attached_since: None,
@@ -199,7 +309,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(json["devices"][0]["attachedHere"], true);
-        assert_eq!(json["devices"][0]["device"]["busId"], "");
+        assert_eq!(json["devices"][0]["device"]["busId"], "1-1.4");
+        assert_eq!(json["devices"][0]["device"]["state"], "local");
+        assert_eq!(json["link"], "connected");
         assert!(json["devices"][0]["device"]["attachedSince"].is_null());
         assert!(json["gatewayFault"].is_null());
         assert!(json.get("linkMessage").is_some());
@@ -213,6 +325,63 @@ mod tests {
         .unwrap();
 
         assert_eq!(remote.devices[0].bus_id, "1-1.4");
-        assert_eq!(remote.devices[0].state, "shared");
+        assert_eq!(remote.devices[0].state, DeviceState::Shared);
+    }
+}
+
+#[cfg(test)]
+mod word_tests {
+    use super::*;
+
+    #[test]
+    fn the_state_words_are_the_ones_the_ui_knows() {
+        for (state, word) in [
+            (DeviceState::Local, "local"),
+            (DeviceState::Shared, "shared"),
+            (DeviceState::Attached, "attached"),
+            (DeviceState::Offline, "offline"),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&state).unwrap(),
+                format!("\"{word}\"")
+            );
+            assert_eq!(state.as_str(), word);
+            assert_eq!(DeviceState::parse(word), state);
+            assert_eq!(
+                serde_json::from_str::<DeviceState>(&format!("\"{word}\"")).unwrap(),
+                state
+            );
+        }
+        for (state, word) in [
+            (LinkState::Unconfigured, "unconfigured"),
+            (LinkState::Connecting, "connecting"),
+            (LinkState::Connected, "connected"),
+            (LinkState::Error, "error"),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&state).unwrap(),
+                format!("\"{word}\"")
+            );
+            assert_eq!(state.as_str(), word);
+        }
+    }
+
+    #[test]
+    fn a_state_word_from_a_newer_server_reads_as_local() {
+        assert_eq!(
+            serde_json::from_str::<DeviceState>("\"quarantined\"").unwrap(),
+            DeviceState::Local
+        );
+    }
+
+    #[test]
+    fn a_row_with_a_bad_bus_id_is_dropped_and_the_rest_of_the_list_stays() {
+        let remote: RemoteDevices = serde_json::from_str(
+            r#"{"devices":[{"busId":"1-1 --stop","name":"bad"},{"busId":"2-1","name":"ok","state":"shared"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(remote.devices.len(), 1);
+        assert_eq!(remote.devices[0].name, "ok");
     }
 }

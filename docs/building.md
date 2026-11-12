@@ -119,7 +119,7 @@ move by about 10% from run to run.
   builds, tests and clippy are unchanged.
 - **No `panic = "abort"`:** Koppel relies on unwinding. koppel-config runs each change handler as its own
   tokio task and logs one that panics while the rest still run (`file.rs`, `deliver`, tested by
-  `a_handler_that_panics_does_not_stop_the_others`); koppel-usb's `BackgroundTasks` and listener lists do the
+  `a_handler_that_panics_does_not_stop_the_others`); koppel-usb's `Tasks` (a `TaskTracker` with a panic log) and its listeners do the
   same (`tasks.rs`); and the web server runs each connection as its own task (koppel-web's `server.rs`), so
   a panic while serving one ends that connection, not the process.
 - **Dependencies:** unchanged. Koppel's own entries already leave out the default features it does not use.

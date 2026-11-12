@@ -1,3 +1,5 @@
+use crate::BusId;
+
 /// Device speed, numbered as the kernel's `enum usb_device_speed` and the USB/IP wire format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum UsbSpeed {
@@ -50,10 +52,10 @@ impl UsbInterface {
 }
 
 /// A USB device as the host sees it, with what USB/IP needs to describe it.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsbDevice {
     /// The kernel's bus ID, such as `1-1.4`. Stable for a port, not for a device.
-    pub bus_id: String,
+    pub bus_id: BusId,
     pub path: String,
     pub bus_num: u32,
     pub dev_num: u32,
@@ -75,6 +77,30 @@ pub struct UsbDevice {
 }
 
 impl UsbDevice {
+    /// A device on `bus_id` with every other field empty, for a host to fill in.
+    pub fn new(bus_id: BusId) -> Self {
+        Self {
+            bus_id,
+            path: String::new(),
+            bus_num: 0,
+            dev_num: 0,
+            speed: UsbSpeed::Unknown,
+            vendor_id: 0,
+            product_id: 0,
+            bcd_device: 0,
+            class: 0,
+            sub_class: 0,
+            protocol: 0,
+            configuration_value: 0,
+            num_configurations: 0,
+            interfaces: Vec::new(),
+            manufacturer: None,
+            product: None,
+            serial: None,
+            driver: None,
+        }
+    }
+
     /// USB/IP's device ID: bus number in the high 16 bits, device number in the low.
     pub fn dev_id(&self) -> u32 {
         (self.bus_num << 16) | self.dev_num
@@ -112,20 +138,84 @@ impl ExportStatus {
     }
 }
 
+/// Which of vhci-hcd's two root hubs a port is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Hub {
+    /// `hs`: the high-speed hub, for everything below SuperSpeed.
+    HighSpeed,
+    /// `ss`: the SuperSpeed hub.
+    SuperSpeed,
+}
+
+impl Hub {
+    /// The hub a device of this speed needs.
+    pub fn for_speed(speed: UsbSpeed) -> Self {
+        if speed >= UsbSpeed::Super {
+            Self::SuperSpeed
+        } else {
+            Self::HighSpeed
+        }
+    }
+
+    /// The name vhci-hcd's status file uses.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HighSpeed => "hs",
+            Self::SuperSpeed => "ss",
+        }
+    }
+
+    /// `hs` or `ss`; anything else is no hub of ours.
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "hs" => Some(Self::HighSpeed),
+            "ss" => Some(Self::SuperSpeed),
+            _ => None,
+        }
+    }
+}
+
+/// A virtual port's state, numbered as the kernel's `VDEV_ST_*` (the number is what the status
+/// file prints).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PortStatus {
+    /// `VDEV_ST_NULL`: nothing attached.
+    Null,
+    /// `VDEV_ST_NOTASSIGNED`: claimed, not yet connected.
+    NotAssigned,
+    /// `VDEV_ST_USED`: a device is attached.
+    Used,
+    /// `VDEV_ST_ERROR`.
+    Error,
+    /// A number this version does not know.
+    Other(u32),
+}
+
+impl PortStatus {
+    pub fn from_kernel(value: u32) -> Self {
+        match value {
+            4 => Self::Null,
+            5 => Self::NotAssigned,
+            6 => Self::Used,
+            7 => Self::Error,
+            other => Self::Other(other),
+        }
+    }
+}
+
 /// A virtual host controller port on the client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VhciPort {
     pub port: u32,
-    /// `hs` or `ss`.
-    pub hub: String,
-    pub status: u32,
+    pub hub: Hub,
+    pub status: PortStatus,
     pub dev_id: u32,
-    pub local_bus_id: Option<String>,
+    pub local_bus_id: Option<BusId>,
 }
 
 impl VhciPort {
-    /// `VDEV_ST_NULL`: nothing attached.
+    /// Nothing is attached on this port.
     pub fn is_free(&self) -> bool {
-        self.status == 4
+        self.status == PortStatus::Null
     }
 }

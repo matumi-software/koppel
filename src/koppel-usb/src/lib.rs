@@ -38,29 +38,40 @@ pub mod windows;
 
 use time::OffsetDateTime;
 
-pub use activity::{ActivityOutcome, ActivityReason, ActivitySink, EntityRef, NoActivity};
+pub use activity::{
+    ActivityOutcome, ActivityReason, ActivitySink, EntityKind, EntityRef, NoActivity,
+};
+pub use bus_id::BusId;
 pub use checks::{SystemCheck, attach_check, share_check};
 pub use client::{
-    BeginAttachError, ClientOptions, Link, LinkEvents, LinkStatus, Links, UsbClient, check_import,
+    BeginAttachError, ClientOptions, Deps, ImportMismatch, Link, LinkEvents, LinkStatus, Links,
+    UsbClient, check_import,
 };
 pub use data_plane::{RemoteClient, UsbDataPlane};
-pub use device::{ExportStatus, UsbDevice, UsbInterface, UsbSpeed, VhciPort};
-pub use error::UsbError;
+pub use device::{ExportStatus, Hub, PortStatus, UsbDevice, UsbInterface, UsbSpeed, VhciPort};
+pub use error::{Module, UsbError};
 pub use gateway::{GatewayOptions, UsbIpGateway};
 pub use host::{Export, HostKind, Unsupported, UsbAttacher, UsbHost, UsbIpDriver};
 pub use relay::{loopback_pair, relay};
-pub use server::{SetSharedError, UsbServer, shared_expects};
+pub use server::{ServerDeps, SetSharedError, UsbServer, shared_expects};
 pub use stream::{BoxFuture, CloseReason, DeviceStream, OpenError, StreamOpener};
-pub use tasks::{Listener, WakeSignal};
+pub use tasks::Listener;
 pub use upstream::{UpstreamAddress, UsbIpUpstreamHost};
 pub use views::{
-    ClientDeviceView, ClientDevices, DeviceView, RemoteDevices, ServerDevices,
-    interface_class_name, speed_label,
+    ClientDeviceView, ClientDevices, DeviceState, DeviceView, LinkState, RemoteDevices,
+    ServerDevices, interface_class_name, speed_label,
 };
 
 /// Where the time comes from, so a test can move it by hand.
 pub trait Clock: Send + Sync {
+    /// The wall clock, for what people read: when a device was attached.
     fn now(&self) -> OffsetDateTime;
+
+    /// A monotonic reading, for what is measured: when to look again, when to try again. A step of
+    /// the wall clock never stalls or hurries it.
+    fn monotonic(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now()
+    }
 }
 
 /// The system's clock, in UTC.

@@ -32,13 +32,13 @@ impl TcpTable for WindowsTcpTable {
                 return Ok(parse(&buffer));
             }
             if result != ERROR_INSUFFICIENT_BUFFER.0 && result != NO_ERROR.0 {
-                return Err(UsbError::new(format!(
+                return Err(UsbError::failed(format!(
                     "Could not read the TCP table (error {result})."
                 )));
             }
             buffer = vec![0u32; (size as usize).div_ceil(4).max(1)];
         }
-        Err(UsbError::new(
+        Err(UsbError::failed(
             "The TCP table kept changing while it was read.",
         ))
     }

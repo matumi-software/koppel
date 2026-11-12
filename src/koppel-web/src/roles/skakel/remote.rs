@@ -13,7 +13,7 @@ use axum::http::header::{HeaderValue, WWW_AUTHENTICATE};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use futures_util::Stream;
-use koppel_usb::{DeviceView, RemoteDevices};
+use koppel_usb::{DeviceState, DeviceView, RemoteDevices};
 use skakel_server::ClientPrincipal;
 use tokio::sync::watch;
 use tonic::{Request, Status};
@@ -94,12 +94,12 @@ pub(crate) fn to_proto(devices: &RemoteDevices) -> DeviceList {
             .devices
             .iter()
             .map(|d| RemoteDevice {
-                bus_id: d.bus_id.clone(),
+                bus_id: d.bus_id.to_string(),
                 vid_pid: d.vid_pid.clone(),
                 name: d.name.clone(),
                 manufacturer: d.manufacturer.clone(),
                 speed: d.speed.clone(),
-                state: d.state.clone(),
+                state: d.state.as_str().to_owned(),
                 interfaces: d.interfaces.as_ref().map(|names| InterfaceList {
                     names: names.clone(),
                 }),
@@ -111,18 +111,20 @@ pub(crate) fn to_proto(devices: &RemoteDevices) -> DeviceList {
 /// A list the service sent, as the client's USB layer takes it.
 pub(crate) fn from_proto(list: DeviceList) -> RemoteDevices {
     RemoteDevices {
+        // A row whose bus ID is not one is left out.
         devices: list
             .devices
             .into_iter()
-            .map(|d| DeviceView {
-                bus_id: d.bus_id,
-                vid_pid: d.vid_pid,
-                name: d.name,
-                manufacturer: d.manufacturer,
-                speed: d.speed,
-                state: d.state,
-                interfaces: d.interfaces.map(|i| i.names),
-                ..DeviceView::default()
+            .filter_map(|d| {
+                Some(DeviceView {
+                    vid_pid: d.vid_pid,
+                    name: d.name,
+                    manufacturer: d.manufacturer,
+                    speed: d.speed,
+                    state: DeviceState::parse(&d.state),
+                    interfaces: d.interfaces.map(|i| i.names),
+                    ..DeviceView::new(d.bus_id.parse().ok()?)
+                })
             })
             .collect(),
     }
@@ -137,20 +139,18 @@ mod tests {
         let devices = RemoteDevices {
             devices: vec![
                 DeviceView {
-                    bus_id: "1-1.4".into(),
                     vid_pid: "064f:2af9".into(),
                     name: "CodeMeter-Stick".into(),
                     manufacturer: Some("WIBU-SYSTEMS AG".into()),
                     speed: "USB 1.1 (12 Mbit/s)".into(),
-                    state: "shared".into(),
+                    state: DeviceState::Shared,
                     interfaces: Some(vec!["Vendor specific".into()]),
-                    ..DeviceView::default()
+                    ..DeviceView::new("1-1.4".parse().unwrap())
                 },
                 DeviceView {
-                    bus_id: "2-1".into(),
-                    state: "attached".into(),
+                    state: DeviceState::Attached,
                     interfaces: Some(Vec::new()),
-                    ..DeviceView::default()
+                    ..DeviceView::new("2-1".parse().unwrap())
                 },
             ],
         };

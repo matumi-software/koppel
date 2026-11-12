@@ -7,7 +7,8 @@ use std::io;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::{UsbDevice, UsbInterface, UsbSpeed};
+use crate::bus_id::InvalidBusId;
+use crate::{BusId, UsbDevice, UsbInterface, UsbSpeed};
 
 pub const VERSION: u16 = 0x0111;
 pub const OP_REQ_DEVLIST: u16 = 0x8005;
@@ -53,33 +54,43 @@ pub fn dev_list_request() -> [u8; HEADER_SIZE] {
 }
 
 /// OP_REQ_IMPORT: the header, then the bus ID in 32 bytes.
-pub fn import_request(bus_id: &str) -> [u8; HEADER_SIZE + BUS_ID_SIZE] {
+pub fn import_request(bus_id: &BusId) -> [u8; HEADER_SIZE + BUS_ID_SIZE] {
     let mut message = [0u8; HEADER_SIZE + BUS_ID_SIZE];
     message[..HEADER_SIZE].copy_from_slice(&header(OP_REQ_IMPORT, 0));
-    write_string(&mut message[HEADER_SIZE..], bus_id);
+    write_string(&mut message[HEADER_SIZE..], bus_id.as_str());
     message
 }
 
-/// OP_REP_DEVLIST: the exportable devices, each followed by its interfaces.
+/// How many interfaces go on the wire for `device`: the record has one byte for the count.
+fn interface_count(device: &UsbDevice) -> u8 {
+    u8::try_from(device.interfaces.len()).unwrap_or(u8::MAX)
+}
+
+/// OP_REP_DEVLIST: the exportable devices, each followed by its interfaces. A device with more
+/// interfaces than the record can count (255) is sent with the first 255.
 pub fn dev_list_reply(devices: &[UsbDevice]) -> Vec<u8> {
-    let size = HEADER_SIZE
-        + 4
-        + devices
-            .iter()
-            .map(|d| DEVICE_SIZE + d.interfaces.len() * INTERFACE_SIZE)
-            .sum::<usize>();
-    let mut message = vec![0u8; size];
-    message[..HEADER_SIZE].copy_from_slice(&header(OP_REP_DEVLIST, STATUS_OK));
-    message[HEADER_SIZE..HEADER_SIZE + 4].copy_from_slice(&(devices.len() as u32).to_be_bytes());
-    let mut offset = HEADER_SIZE + 4;
+    let count = u32::try_from(devices.len()).unwrap_or(u32::MAX);
+    let devices = &devices[..usize::try_from(count).unwrap_or(devices.len())];
+    let size: usize = devices
+        .iter()
+        .map(|d| DEVICE_SIZE + usize::from(interface_count(d)) * INTERFACE_SIZE)
+        .sum();
+    let mut message = Vec::with_capacity(HEADER_SIZE + 4 + size);
+    message.extend_from_slice(&header(OP_REP_DEVLIST, STATUS_OK));
+    message.extend_from_slice(&count.to_be_bytes());
     for device in devices {
-        write_device(&mut message[offset..offset + DEVICE_SIZE], device);
-        offset += DEVICE_SIZE;
-        for interface in &device.interfaces {
-            message[offset] = interface.class;
-            message[offset + 1] = interface.sub_class;
-            message[offset + 2] = interface.protocol;
-            offset += INTERFACE_SIZE;
+        message.extend_from_slice(&device_record(device));
+        for interface in device
+            .interfaces
+            .iter()
+            .take(usize::from(interface_count(device)))
+        {
+            message.extend_from_slice(&[
+                interface.class,
+                interface.sub_class,
+                interface.protocol,
+                0,
+            ]);
         }
     }
     message
@@ -90,20 +101,18 @@ pub fn import_reply(device: Option<&UsbDevice>) -> Vec<u8> {
     let Some(device) = device else {
         return header(OP_REP_IMPORT, STATUS_ERROR).to_vec();
     };
-    let mut message = vec![0u8; HEADER_SIZE + DEVICE_SIZE];
-    message[..HEADER_SIZE].copy_from_slice(&header(OP_REP_IMPORT, STATUS_OK));
-    write_device(&mut message[HEADER_SIZE..], device);
+    let mut message = Vec::with_capacity(HEADER_SIZE + DEVICE_SIZE);
+    message.extend_from_slice(&header(OP_REP_IMPORT, STATUS_OK));
+    message.extend_from_slice(&device_record(device));
     message
 }
 
-/// Writes the 312 byte device record. `target` must hold at least that many bytes. The
-/// interface count is the number of interfaces the device lists.
-pub fn write_device(target: &mut [u8], device: &UsbDevice) {
-    assert!(target.len() >= DEVICE_SIZE, "need {DEVICE_SIZE} bytes");
-    let target = &mut target[..DEVICE_SIZE];
-    target.fill(0);
+/// The 312 byte device record. The interface count is the number of interfaces the device
+/// lists, at most 255.
+pub fn device_record(device: &UsbDevice) -> [u8; DEVICE_SIZE] {
+    let mut target = [0u8; DEVICE_SIZE];
     write_string(&mut target[..256], &device.path);
-    write_string(&mut target[256..256 + BUS_ID_SIZE], &device.bus_id);
+    write_string(&mut target[256..256 + BUS_ID_SIZE], device.bus_id.as_str());
     target[288..292].copy_from_slice(&device.bus_num.to_be_bytes());
     target[292..296].copy_from_slice(&device.dev_num.to_be_bytes());
     target[296..300].copy_from_slice(&device.speed.wire().to_be_bytes());
@@ -115,17 +124,19 @@ pub fn write_device(target: &mut [u8], device: &UsbDevice) {
     target[308] = device.protocol;
     target[309] = device.configuration_value;
     target[310] = device.num_configurations;
-    target[311] = device.interfaces.len() as u8;
+    target[311] = interface_count(device);
+    target
 }
 
 /// Reads a 312 byte device record. The interfaces are not part of it, so the device has none.
-pub fn read_device(source: &[u8]) -> UsbDevice {
+/// A record whose bus ID is not one is an error: it came from another machine.
+pub fn read_device(source: &[u8; DEVICE_SIZE]) -> Result<UsbDevice, InvalidBusId> {
     let u32_at = |at: usize| {
         u32::from_be_bytes([source[at], source[at + 1], source[at + 2], source[at + 3]])
     };
     let u16_at = |at: usize| u16::from_be_bytes([source[at], source[at + 1]]);
-    UsbDevice {
-        bus_id: read_string(&source[256..256 + BUS_ID_SIZE]),
+    let bus_id: BusId = read_string(&source[256..256 + BUS_ID_SIZE]).parse()?;
+    Ok(UsbDevice {
         path: read_string(&source[..256]),
         bus_num: u32_at(288),
         dev_num: u32_at(292),
@@ -138,12 +149,8 @@ pub fn read_device(source: &[u8]) -> UsbDevice {
         protocol: source[308],
         configuration_value: source[309],
         num_configurations: source[310],
-        interfaces: Vec::new(),
-        manufacturer: None,
-        product: None,
-        serial: None,
-        driver: None,
-    }
+        ..UsbDevice::new(bus_id)
+    })
 }
 
 pub async fn read_header<R: AsyncRead + Unpin + ?Sized>(stream: &mut R) -> io::Result<OpHeader> {
@@ -152,7 +159,7 @@ pub async fn read_header<R: AsyncRead + Unpin + ?Sized>(stream: &mut R) -> io::R
     Ok(parse_header(&buffer))
 }
 
-/// The bus ID that follows an OP_REQ_IMPORT header.
+/// The bus ID that follows an OP_REQ_IMPORT header, as text: the caller checks it.
 pub async fn read_bus_id<R: AsyncRead + Unpin + ?Sized>(stream: &mut R) -> io::Result<String> {
     let mut buffer = [0u8; BUS_ID_SIZE];
     stream.read_exact(&mut buffer).await?;
@@ -165,12 +172,12 @@ pub async fn read_imported_device<R: AsyncRead + Unpin + ?Sized>(
 ) -> io::Result<UsbDevice> {
     let mut buffer = [0u8; DEVICE_SIZE];
     stream.read_exact(&mut buffer).await?;
-    Ok(read_device(&buffer))
+    read_device(&buffer).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Reads the body of an OP_REP_DEVLIST after its header, from a server that is not trusted to
 /// keep it small: more than `max_devices` devices, or more than `max_bytes` bytes in all, is an
-/// `InvalidData` error that says so.
+/// `InvalidData` error that says so. A record whose bus ID is not one is left out.
 pub async fn read_dev_list<R: AsyncRead + Unpin + ?Sized>(
     stream: &mut R,
     max_devices: usize,
@@ -178,7 +185,7 @@ pub async fn read_dev_list<R: AsyncRead + Unpin + ?Sized>(
 ) -> io::Result<Vec<UsbDevice>> {
     let mut count = [0u8; 4];
     stream.read_exact(&mut count).await?;
-    let expected = u32::from_be_bytes(count) as usize;
+    let expected = usize::try_from(u32::from_be_bytes(count)).unwrap_or(usize::MAX);
     if expected > max_devices {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -191,8 +198,8 @@ pub async fn read_dev_list<R: AsyncRead + Unpin + ?Sized>(
     let mut buffer = [0u8; DEVICE_SIZE];
     for _ in 0..expected {
         stream.read_exact(&mut buffer).await?;
-        let mut device = read_device(&buffer);
-        let mut interfaces = vec![0u8; buffer[311] as usize * INTERFACE_SIZE];
+        let device = read_device(&buffer);
+        let mut interfaces = vec![0u8; usize::from(buffer[311]) * INTERFACE_SIZE];
         read += buffer.len() + interfaces.len();
         if read > max_bytes {
             return Err(io::Error::new(
@@ -201,11 +208,14 @@ pub async fn read_dev_list<R: AsyncRead + Unpin + ?Sized>(
             ));
         }
         stream.read_exact(&mut interfaces).await?;
-        device.interfaces = interfaces
-            .chunks(INTERFACE_SIZE)
-            .map(|i| UsbInterface::new(i[0], i[1], i[2]))
-            .collect();
-        devices.push(device);
+        // The interfaces were read either way, so the next record starts where it should.
+        if let Ok(mut device) = device {
+            device.interfaces = interfaces
+                .chunks(INTERFACE_SIZE)
+                .map(|i| UsbInterface::new(i[0], i[1], i[2]))
+                .collect();
+            devices.push(device);
+        }
     }
     Ok(devices)
 }
@@ -231,9 +241,8 @@ fn read_string(source: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    pub(crate) fn ftdi() -> UsbDevice {
+    fn ftdi() -> UsbDevice {
         UsbDevice {
-            bus_id: "1-1.4".into(),
             path: "/sys/devices/pci0000:00/0000:00:14.0/usb1/1-1/1-1.4".into(),
             bus_num: 1,
             dev_num: 5,
@@ -248,13 +257,13 @@ mod tests {
             product: Some("FT232R USB UART".into()),
             serial: Some("A50285BI".into()),
             driver: Some("usbip-host".into()),
-            ..UsbDevice::default()
+            ..UsbDevice::new("1-1.4".parse().unwrap())
         }
     }
 
     #[test]
     fn import_request_is_header_plus_a_32_byte_bus_id() {
-        let request = import_request("1-1.4");
+        let request = import_request(&"1-1.4".parse().unwrap());
 
         assert_eq!(request.len(), 40);
         assert_eq!(u16::from_be_bytes([request[0], request[1]]), 0x0111);
@@ -341,9 +350,142 @@ mod tests {
 
     #[test]
     fn a_string_too_long_for_its_field_keeps_its_terminator() {
-        let request = import_request(&"1".repeat(40));
+        let record = device_record(&UsbDevice {
+            path: "1".repeat(400),
+            ..ftdi()
+        });
 
-        assert_eq!(&request[8..39], "1".repeat(31).as_bytes());
-        assert_eq!(request[39], 0);
+        assert_eq!(&record[..255], "1".repeat(255).as_bytes());
+        assert_eq!(record[255], 0);
+    }
+
+    #[test]
+    fn more_interfaces_than_the_record_can_count_are_cut_at_255() {
+        let wide = UsbDevice {
+            interfaces: vec![UsbInterface::new(1, 2, 3); 300],
+            ..ftdi()
+        };
+
+        let reply = dev_list_reply(&[wide]);
+
+        assert_eq!(reply[8 + 4 + 311], 255);
+        assert_eq!(reply.len(), 8 + 4 + 312 + 255 * 4);
+    }
+
+    #[tokio::test]
+    async fn a_record_with_a_bad_bus_id_is_left_out_and_the_next_one_still_reads() {
+        let mut reply = dev_list_reply(&[ftdi(), ftdi()]);
+        // Spoil the first record's bus ID.
+        let at = HEADER_SIZE + 4 + 256;
+        reply[at..at + 6].copy_from_slice(b"1-1 --");
+
+        let devices = read_dev_list(&mut &reply[HEADER_SIZE..], 10, 4096)
+            .await
+            .unwrap();
+
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].bus_id, "1-1.4");
+        assert_eq!(devices[0].interfaces, ftdi().interfaces);
+    }
+
+    mod properties {
+        use std::future::Future;
+
+        use proptest::prelude::*;
+
+        use super::*;
+
+        fn bus_id() -> impl Strategy<Value = BusId> {
+            (1u32..100, prop::collection::vec(1u32..30, 1..4)).prop_map(|(bus, ports)| {
+                let ports: Vec<String> = ports.iter().map(u32::to_string).collect();
+                format!("{bus}-{}", ports.join(".")).parse().unwrap()
+            })
+        }
+
+        fn device() -> impl Strategy<Value = UsbDevice> {
+            (
+                bus_id(),
+                "[ -~]{0,120}",
+                (any::<u32>(), any::<u32>(), 0u32..7),
+                (any::<u16>(), any::<u16>(), any::<u16>()),
+                (
+                    any::<u8>(),
+                    any::<u8>(),
+                    any::<u8>(),
+                    any::<u8>(),
+                    any::<u8>(),
+                ),
+                prop::collection::vec((any::<u8>(), any::<u8>(), any::<u8>()), 0..6),
+            )
+                .prop_map(
+                    |(
+                        bus_id,
+                        path,
+                        (bus_num, dev_num, speed),
+                        (vendor_id, product_id, bcd_device),
+                        (class, sub_class, protocol, configuration_value, num_configurations),
+                        interfaces,
+                    )| UsbDevice {
+                        path,
+                        bus_num,
+                        dev_num,
+                        speed: UsbSpeed::from_wire(speed),
+                        vendor_id,
+                        product_id,
+                        bcd_device,
+                        class,
+                        sub_class,
+                        protocol,
+                        configuration_value,
+                        num_configurations,
+                        interfaces: interfaces
+                            .into_iter()
+                            .map(|(c, s, p)| UsbInterface::new(c, s, p))
+                            .collect(),
+                        ..UsbDevice::new(bus_id)
+                    },
+                )
+        }
+
+        fn run<T>(work: impl Future<Output = T>) -> T {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(work)
+        }
+
+        proptest! {
+            #[test]
+            fn a_device_list_reads_back_as_it_was_written(
+                devices in prop::collection::vec(device(), 0..5)
+            ) {
+                let reply = dev_list_reply(&devices);
+                let read = run(read_dev_list(&mut &reply[HEADER_SIZE..], 16, 1 << 20)).unwrap();
+                prop_assert_eq!(read, devices);
+            }
+
+            #[test]
+            fn an_import_record_reads_back_without_its_interfaces(device in device()) {
+                let read = read_device(&device_record(&device)).unwrap();
+                prop_assert_eq!(&read, &UsbDevice { interfaces: Vec::new(), ..device });
+            }
+
+            #[test]
+            fn any_record_bytes_read_as_a_device_or_an_error_and_never_panic(
+                bytes in prop::collection::vec(any::<u8>(), DEVICE_SIZE)
+            ) {
+                let record: [u8; DEVICE_SIZE] = bytes.try_into().unwrap();
+                let _ = read_device(&record);
+            }
+
+            #[test]
+            fn any_bytes_read_as_a_device_list_or_an_error_within_the_caps(
+                bytes in prop::collection::vec(any::<u8>(), 0..2000)
+            ) {
+                if let Ok(devices) = run(read_dev_list(&mut bytes.as_slice(), 4, 1500)) {
+                    prop_assert!(devices.len() <= 4);
+                }
+            }
+        }
     }
 }

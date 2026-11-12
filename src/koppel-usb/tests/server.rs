@@ -7,7 +7,7 @@ use std::fs;
 use std::sync::Arc;
 
 use common::*;
-use koppel_usb::{SetSharedError, UsbDevice};
+use koppel_usb::{DeviceState, SetSharedError, UsbDevice};
 
 fn other_device() -> UsbDevice {
     UsbDevice {
@@ -18,7 +18,7 @@ fn other_device() -> UsbDevice {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_different_device_on_a_shared_port_is_unbound_and_not_exportable() {
     let kernel = FakeKernel::new();
     kernel.plug(vec![other_device()]);
@@ -28,7 +28,7 @@ async fn a_different_device_on_a_shared_port_is_unbound_and_not_exportable() {
 
     assert!(kernel.unshared().contains(&"1-1.4".to_owned()));
     let device = &devices.devices[0];
-    assert_eq!(device.state, "local");
+    assert_eq!(device.state, DeviceState::Local);
     assert!(
         device
             .fault
@@ -40,7 +40,7 @@ async fn a_different_device_on_a_shared_port_is_unbound_and_not_exportable() {
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_device_bound_on_the_port_but_not_the_shared_one_is_not_exportable_even_before_it_is_unbound()
  {
     let kernel = FakeKernel::new();
@@ -53,7 +53,7 @@ async fn a_device_bound_on_the_port_but_not_the_shared_one_is_not_exportable_eve
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_bad_bus_id_is_refused_and_not_saved() {
     let kernel = FakeKernel::new();
     let side = ServerSide::start(kernel.clone(), false, true).await;
@@ -77,7 +77,7 @@ async fn a_bad_bus_id_is_refused_and_not_saved() {
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_gone_device_shows_its_remembered_vid_pid_as_unplugged() {
     let kernel = FakeKernel::new();
     kernel.bind("1-1.4", false);
@@ -92,12 +92,12 @@ async fn a_gone_device_shows_its_remembered_vid_pid_as_unplugged() {
     let devices = side.server.current();
 
     let gone = devices.devices.iter().find(|d| d.bus_id == "3-2").unwrap();
-    assert_eq!(gone.state, "offline");
+    assert_eq!(gone.state, DeviceState::Offline);
     assert_eq!(gone.vid_pid, "046d:c548");
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_remembered_device_that_moved_to_another_saved_port_is_not_also_listed_as_unplugged() {
     let kernel = FakeKernel::new();
     kernel.bind("1-1.4", false);
@@ -115,14 +115,14 @@ async fn a_remembered_device_that_moved_to_another_saved_port_is_not_also_listed
         .current()
         .devices
         .iter()
-        .map(|d| d.bus_id.clone())
+        .map(|d| d.bus_id.to_string())
         .collect();
 
     assert_eq!(listed, vec!["1-1.4"]);
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_share_the_kernel_refused_is_not_saved_and_shows_as_a_fault() {
     let kernel = FakeKernel::new();
     kernel.bind("1-1.4", false);
@@ -153,23 +153,23 @@ async fn a_share_the_kernel_refused_is_not_saved_and_shows_as_a_fault() {
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn start_up_unbinds_devices_bound_to_usbip_host_that_were_never_shared() {
     let kernel = FakeKernel::new();
     let side = ServerSide::start(kernel.clone(), false, true).await;
 
     assert!(!kernel.is_bound("1-1.4"));
-    assert_eq!(side.server.current().devices[0].state, "local");
+    assert_eq!(side.server.current().devices[0].state, DeviceState::Local);
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn start_up_unbinds_saved_shares_when_share_on_startup_is_off() {
     let kernel = FakeKernel::new();
     let side = ServerSide::start(kernel.clone(), true, false).await;
 
     assert!(!kernel.is_bound("1-1.4"));
-    assert_eq!(side.server.current().devices[0].state, "local");
+    assert_eq!(side.server.current().devices[0].state, DeviceState::Local);
     assert!(
         fs::read_to_string(side.config_file("devices.json"))
             .unwrap()
@@ -179,7 +179,7 @@ async fn start_up_unbinds_saved_shares_when_share_on_startup_is_off() {
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn the_poll_survives_a_host_that_fails_and_picks_up_changes_afterwards() {
     let kernel = FakeKernel::new();
     let side = ServerSide::start(kernel.clone(), true, true).await;
@@ -197,7 +197,7 @@ async fn the_poll_survives_a_host_that_fails_and_picks_up_changes_afterwards() {
     kernel.plug(vec![
         dongle(),
         UsbDevice {
-            bus_id: "2-1".into(),
+            bus_id: "2-1".parse().unwrap(),
             ..dongle()
         },
     ]);
@@ -209,7 +209,7 @@ async fn the_poll_survives_a_host_that_fails_and_picks_up_changes_afterwards() {
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_host_error_at_start_up_does_not_stop_the_server_and_the_saved_share_is_applied_by_the_poll()
  {
     let kernel = FakeKernel::new();
@@ -224,25 +224,25 @@ async fn a_host_error_at_start_up_does_not_stop_the_server_and_the_saved_share_i
             .current()
             .devices
             .iter()
-            .any(|d| d.state == "shared")
+            .any(|d| d.state == DeviceState::Shared)
     })
     .await;
     assert!(kernel.is_bound("1-1.4"));
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn start_up_keeps_what_was_shared_and_saved() {
     let kernel = FakeKernel::new();
     let side = ServerSide::start(kernel.clone(), true, true).await;
 
     assert!(kernel.is_bound("1-1.4"));
     assert!(kernel.unshared().is_empty());
-    assert_eq!(side.server.current().devices[0].state, "shared");
+    assert_eq!(side.server.current().devices[0].state, DeviceState::Shared);
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn plugging_and_unplugging_reach_the_activity_log() {
     let kernel = FakeKernel::new();
     let side = ServerSide::start(kernel.clone(), true, true).await;
@@ -260,7 +260,7 @@ async fn plugging_and_unplugging_reach_the_activity_log() {
 
 const CORRUPT: &str = "{ not json";
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_corrupt_devices_file_does_not_stop_the_start_and_says_why() {
     let kernel = FakeKernel::new();
     let side = ServerSide::open(server_dir(true, Some(CORRUPT)), kernel).await;
@@ -279,7 +279,7 @@ async fn a_corrupt_devices_file_does_not_stop_the_start_and_says_why() {
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn a_healthy_server_has_no_devices_file_problem() {
     let side = ServerSide::start(FakeKernel::new(), true, true).await;
 
@@ -287,7 +287,7 @@ async fn a_healthy_server_has_no_devices_file_problem() {
     side.stop().await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn sharing_a_device_over_a_corrupt_devices_file_moves_it_aside_and_writes_a_fresh_one() {
     let kernel = FakeKernel::new();
     let side = ServerSide::open(server_dir(true, Some(CORRUPT)), kernel).await;
@@ -311,5 +311,71 @@ async fn sharing_a_device_over_a_corrupt_devices_file_moves_it_aside_and_writes_
     assert_eq!(aside.len(), 1);
     assert_eq!(fs::read_to_string(aside[0].path()).unwrap(), CORRUPT);
     assert_eq!(side.server.shared_problem(), None);
+    side.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_poll_tick_scans_the_host_once() {
+    let kernel = FakeKernel::new();
+    let side = ServerSide::start(kernel.clone(), true, true).await;
+    let before = kernel.listings();
+
+    // One tick of the two second poll: nothing changed, so one scan feeds both the sharing check
+    // and the snapshot.
+    tokio::time::sleep(std::time::Duration::from_millis(2100)).await;
+
+    assert_eq!(kernel.listings() - before, 1);
+    side.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_host_that_keeps_failing_is_asked_less_often() {
+    let kernel = FakeKernel::new();
+    let side = ServerSide::start(kernel.clone(), true, true).await;
+    kernel.fail_listings("sysfs said no", 1000);
+    let before = kernel.listings();
+
+    // Thirty seconds is fifteen ticks. After a failure the host is left alone for 4 seconds, then 8,
+    // then 16, so it is asked far fewer than fifteen times.
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+    let asked = kernel.listings() - before;
+    assert!((3..=6).contains(&asked), "asked {asked} times");
+    side.stop().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_device_whose_state_cannot_be_read_does_not_hide_the_others() {
+    let kernel = FakeKernel::new();
+    kernel.plug(vec![
+        dongle(),
+        UsbDevice {
+            product: Some("Second".into()),
+            ..UsbDevice::new("1-2".parse().unwrap())
+        },
+    ]);
+    kernel.bind("1-2", true);
+    kernel.fail_status("1-2", "sysfs vanished");
+    let dir = server_dir(
+        true,
+        Some(
+            r#"{ "busIds": ["1-1.4", "1-2"], "vidPids": { "1-1.4": "064f:2af9", "1-2": "0000:0000" } }"#,
+        ),
+    );
+
+    let side = ServerSide::open(dir, kernel).await;
+
+    let devices = side.server.current();
+    assert_eq!(devices.devices.len(), 2);
+    let broken = devices.devices.iter().find(|d| d.bus_id == "1-2").unwrap();
+    assert_eq!(broken.state, DeviceState::Shared);
+    assert!(broken.fault.as_deref().unwrap().contains("sysfs vanished"));
+    let fine = devices
+        .devices
+        .iter()
+        .find(|d| d.bus_id == "1-1.4")
+        .unwrap();
+    assert_eq!(fine.state, DeviceState::Shared);
+    assert_eq!(fine.fault, None);
     side.stop().await;
 }

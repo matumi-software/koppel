@@ -12,8 +12,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::tasks::lock;
 use crate::{
-    ActivityOutcome, ActivityReason, ActivitySink, CloseReason, DeviceStream, EntityRef,
-    ExportStatus, UsbServer, bus_id, protocol,
+    ActivityOutcome, ActivityReason, ActivitySink, BusId, CloseReason, DeviceStream, EntityRef,
+    ExportStatus, UsbServer, protocol,
 };
 
 /// Time for a client to ask for the device list or an import once its stream is open.
@@ -49,7 +49,7 @@ struct Inner {
     sessions: Mutex<HashMap<u64, CancellationToken>>,
     next_session: AtomicU64,
     /// One lock per bus ID for the status check, the reset and the start of an export.
-    bus_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    bus_locks: Mutex<HashMap<BusId, Arc<tokio::sync::Mutex<()>>>>,
     /// Cancelled when the role leaves the server side; replaced for the sessions after.
     serving: Mutex<CancellationToken>,
     /// Cancelled when a session ends; a new one per session.
@@ -200,17 +200,18 @@ impl Inner {
         abort: &CancellationToken,
     ) {
         let refuse = protocol::import_reply(None);
-        if !bus_id::is_valid(bus_id) {
+        let Ok(bus_id) = bus_id.parse::<BusId>() else {
             let _ = session.write_all(&refuse).await;
             return;
-        }
+        };
+        let bus_id = &bus_id;
 
         // The status check, the reset and the start of the export are one step per device.
         // Without it, two imports can both see the device available, and the second one's reset
         // hits the first one's session. The lock is let go as soon as the export has begun, when
         // the device reads as in use.
         let bus_lock = lock(&self.bus_locks)
-            .entry(bus_id.to_owned())
+            .entry(bus_id.clone())
             .or_default()
             .clone();
         let mut guard = tokio::select! {
@@ -220,7 +221,7 @@ impl Inner {
 
         let host = self.server.host().clone();
         let device = match self.server.exportable().await {
-            Ok(devices) => devices.into_iter().find(|d| d.bus_id == bus_id),
+            Ok(devices) => devices.into_iter().find(|d| d.bus_id == *bus_id),
             Err(e) => {
                 tracing::warn!("A USB session failed: {e}");
                 None
@@ -259,7 +260,7 @@ impl Inner {
             tracing::debug!("USB session ended: {e}");
             return;
         }
-        let device_name = device.product.clone().unwrap_or_else(|| bus_id.to_owned());
+        let device_name = device.product.clone().unwrap_or_else(|| bus_id.to_string());
         tracing::info!("Device {bus_id} attached by {}", client.id);
         self.activity.record(
             EntityRef::device(bus_id, &device_name),

@@ -2,7 +2,7 @@ Koppel shares USB devices across the network: a server offers the devices plugge
 
 ## Product rule: the server confirms, the UI never assumes
 
-Every change goes to the server over REST and is only shown as done when the server pushes the confirmed state back over SignalR, after it has written the change to its config file. The design system makes that wait visible everywhere.
+Every change goes to the server over REST and is only shown as done when the server pushes the confirmed state back over Server-Sent Events, after it has written the change to its config file. The design system makes that wait visible everywhere.
 
 - A control the user just changed moves to **pending**: the stripe pattern in `pending` over `pending-subtle`, plus a word ("Saving…"). It never jumps straight to its new confirmed look.
 - When the confirmation arrives, the control settles into its confirmed state and the caption reads "Saved". When the server rejects or times out, the control returns to its last confirmed state, turns `fault` and says why ("Not saved: device is in use").

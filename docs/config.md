@@ -141,7 +141,7 @@ with the same rules.
   Two Koppels starting together end up with one key either way. Data Protection's key ring is no longer used. By default anyone who can
   read the keys directory on Linux can decrypt the files, since the key sits beside them; a key from
   `KOPPEL_KEY_FILE`, a systemd credential or a Docker secret moves it out (see "Keeping the key outside
-  the volume" in `docs/security.md`).
+  the volume" in `docs/security.md`; the unit file and `docker-compose.yml` carry the commented examples).
 - **The key ring:** the box reads every key it can find and seals with one. A key from outside the
   volume seals when there is one (and `koppel-secrets.key` in the keys directory is then only read,
   never made); otherwise `koppel-secrets.key` seals. `koppel-secrets.<anything>.key` files are older

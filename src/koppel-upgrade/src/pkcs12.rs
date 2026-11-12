@@ -553,67 +553,57 @@ mod tests {
         assert!(parse(&[0x30, 0x84, 0xFF, 0xFF, 0xFF, 0xFF]).is_err());
     }
 
-    /// xorshift64*: enough for test inputs, and the same on every run.
-    struct Random(u64);
-
-    impl Random {
-        fn next(&mut self) -> u64 {
-            self.0 ^= self.0 >> 12;
-            self.0 ^= self.0 << 25;
-            self.0 ^= self.0 >> 27;
-            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
-        }
-
-        fn below(&mut self, limit: usize) -> usize {
-            (self.next() % limit as u64) as usize
-        }
-
-        fn bytes(&mut self, length: usize) -> Vec<u8> {
-            (0..length).map(|_| self.next() as u8).collect()
-        }
-    }
-
-    #[test]
-    fn the_pkcs12_reader_never_panics_on_random_input() {
-        let mut random = Random(0xC0FF_EE00_1234_5678);
-        for case in 0..3000 {
-            let length = random.below(400);
-            let bytes = random.bytes(length);
-            let _ = parse(&bytes);
-
-            // A DER sequence of the right length, so the reader goes past the first check.
-            let mut framed = vec![0x30];
-            if length < 128 {
-                framed.push(length as u8);
-            } else {
-                framed.extend([0x82, (length >> 8) as u8, length as u8]);
-            }
-            framed.extend_from_slice(&bytes);
-            let _ = parse(&framed);
-            let _ = case;
-        }
-    }
-
-    #[test]
-    fn the_pkcs12_reader_never_panics_on_a_good_file_that_is_damaged() {
-        // Any certificate and key bytes do for `write`; it does not look inside them.
-        let good = write(
+    /// A good file, for the properties that damage one. Any certificate and key bytes do for
+    /// `write`; it does not look inside them.
+    fn good_file() -> Vec<u8> {
+        write(
             &[0x30, 0x03, 0x02, 0x01, 0x05],
             &[0x30, 0x03, 0x02, 0x01, 0x07],
         )
-        .unwrap();
-        assert!(parse(&good).is_ok());
-        let mut random = Random(99);
-        for length in 0..good.len() {
-            let _ = parse(&good[..length]);
+        .unwrap()
+    }
+
+    /// `body` inside a DER sequence of the right length, so the reader goes past the first check.
+    fn framed(body: &[u8]) -> Vec<u8> {
+        let length = body.len();
+        let mut out = vec![0x30];
+        if length < 128 {
+            out.push(length as u8);
+        } else {
+            out.extend([0x82, (length >> 8) as u8, length as u8]);
         }
-        for _ in 0..3000 {
+        out.extend_from_slice(body);
+        out
+    }
+
+    #[test]
+    fn a_good_file_parses() {
+        assert!(parse(&good_file()).is_ok());
+    }
+
+    proptest::proptest! {
+        // None of these may panic, whatever the bytes; whether `parse` accepts them is not the point.
+        #[test]
+        fn the_pkcs12_reader_never_panics_on_random_input(
+            bytes in proptest::collection::vec(proptest::prelude::any::<u8>(), 0..400),
+        ) {
+            let _ = parse(&bytes);
+            let _ = parse(&framed(&bytes));
+        }
+
+        #[test]
+        fn the_pkcs12_reader_never_panics_on_a_good_file_that_is_damaged(
+            damage in proptest::collection::vec((proptest::prelude::any::<usize>(), proptest::prelude::any::<u8>()), 1..4),
+            cut in proptest::prelude::any::<usize>(),
+        ) {
+            let good = good_file();
             let mut damaged = good.clone();
-            for _ in 0..1 + random.below(3) {
-                let position = random.below(damaged.len());
-                damaged[position] = random.next() as u8;
+            for (position, value) in damage {
+                let position = position % damaged.len();
+                damaged[position] = value;
             }
             let _ = parse(&damaged);
+            let _ = parse(&good[..cut % good.len()]);
         }
     }
 }

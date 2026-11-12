@@ -57,8 +57,8 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 The files are sealed with AES-256-GCM. The key can come from a file kept apart from the config and keys directories, so a backup or a copy of the volume does not carry it. The first of these that applies is used:
 
 1. **`KOPPEL_KEY_FILE`**: the path of a file. When it is set the file must exist, otherwise Koppel stops and says so.
-2. **A systemd credential** named `koppel-key`: `LoadCredential=koppel-key:/etc/koppel/key` (or `ImportCredential=`) in the unit makes `$CREDENTIALS_DIRECTORY/koppel-key`, readable by the service only and not by the other users on the machine.
-3. **A Docker secret** named `koppel-key`: mounted at `/run/secrets/koppel-key`. In Compose, list it under `secrets:` for the service and under the top level `secrets:` as a `file:` or `external` secret.
+2. **A systemd credential** named `koppel-key`: `LoadCredential=koppel-key:/etc/koppel/key` (or `ImportCredential=`) in the unit makes `$CREDENTIALS_DIRECTORY/koppel-key`, readable by the service only and not by the other users on the machine. The `.deb`'s unit (`koppel.service`) has this line ready, commented out; uncomment it once `/etc/koppel/key` exists, since with the line on the service does not start without the file.
+3. **A Docker secret** named `koppel-key`: mounted at `/run/secrets/koppel-key`. In Compose, list it under `secrets:` for the service and under the top level `secrets:` as a `file:` or `external` secret. `docker-compose.yml` has both parts ready, commented out, for a secret from the file `./koppel-key`. The Windows compose files are Windows containers, which keep DPAPI, so they have none.
 
 The file is any secret of 32 bytes or more, up to 4096; a trailing line break is ignored. Make one with:
 

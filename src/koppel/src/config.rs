@@ -1,7 +1,8 @@
 //! Koppel's settings and commands, as one typed [`Settings`] built once at start by clap.
 //!
 //! A setting is a command line option (`--ui-port 5250`) or an environment variable (`KOPPEL_UI_PORT`),
-//! the option winning. The commands are `serve` (the default), `reset-password` and `healthcheck`.
+//! the option winning. The commands are `serve` (the default), `reset-password`, `healthcheck` and
+//! `diagnostics`.
 //!
 //! 0.1.x's spellings keep working, as a deprecated alias that is logged once: `Ports__Ui` in the
 //! environment and `--Ports:Ui=5250` or `/Ports:Ui 5250` on the command line, matched without regard
@@ -63,7 +64,7 @@ const OTHER_KOPPEL_NAMES: &[&str] = &[
 const OTHER_KOPPEL_PREFIXES: &[&str] = &["KOPPEL_CONTRACT_"];
 
 /// What to run.
-#[derive(Subcommand, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq, Default)]
 pub enum Command {
     /// Run Koppel. This is what no command means, and what the service and the image start.
     #[default]
@@ -72,6 +73,12 @@ pub enum Command {
     ResetPassword,
     /// Ask a running Koppel's /healthz and exit 0 when it answers, 1 when it does not.
     Healthcheck,
+    /// Write a report to attach to a support request: version, OS, config files with secrets removed,
+    /// USB state and the end of the log. Run it as an administrator or root.
+    Diagnostics {
+        /// The file to write. Standard output unless given.
+        file: Option<String>,
+    },
 }
 
 impl Command {

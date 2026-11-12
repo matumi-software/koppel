@@ -12,6 +12,7 @@
 //! - [`ServerCertificate`]: the server certificate from `secrets.json`, as rustls presents it.
 
 mod certificate;
+pub mod diagnostics;
 #[cfg(windows)]
 pub mod dpapi;
 mod file;
@@ -31,7 +32,7 @@ pub use file::{
     Subscription, ValidateFn, Validator, encode_json, replace_file, utc_stamp,
 };
 pub use harden::harden_directory;
-pub use paths::{KoppelPaths, default_root};
+pub use paths::{KoppelPaths, default_root, log_folder, prepare_log_folder};
 pub use redact::Secret;
 pub use secret::{KeySource, KeySources, SecretBox, SecretError, SecretFormat, format_of};
 

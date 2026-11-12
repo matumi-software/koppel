@@ -86,6 +86,9 @@ clap = { version = "4.6.7", default-features = false, features = ["std", "derive
 # `Targets` filter reads the usual RUST_LOG form of `level` and `target=level` without one.
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi", "std"] }
+# tracing-appender (MIT, tokio project) gives the Windows service's log file its non-blocking worker thread; the
+# size-capped rotation is koppel-windows' own, since its rolling appender rotates by time only.
+tracing-appender = { version = "0.2.5", default-features = false }
 
 # The contract tests only (`koppel/tests/contract`, never shipped). The HTTP client is reqwest (MIT OR
 # Apache-2.0), as in Skakel, on the rustls and ring above with a certificate check the tests set up

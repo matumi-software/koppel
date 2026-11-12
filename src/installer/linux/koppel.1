@@ -24,6 +24,9 @@ systemd service, which starts at boot.
 Open the UI at
 .I https://localhost:5240/
 and set the password there within ten minutes of the first start.
+The page asks for a setup token, which
+.B journalctl \-u koppel
+shows.
 The browser warns about Koppel's own certificate the first time.
 .PP
 With no command, it runs the service in the foreground, which is what the unit does.

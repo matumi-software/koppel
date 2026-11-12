@@ -587,12 +587,12 @@ mod tests {
                 generation: 1,
                 secret: Some("SENTINEL-CLIENT-SECRET".into()),
             }],
-            signing_key: SkakelKeyRecord {
+            signing_key: Some(SkakelKeyRecord {
                 key_id: "k1".into(),
                 private_key: "SENTINEL-SIGNING-KEY".into(),
                 created_at: now,
                 accept_until: None,
-            },
+            }),
             retired_signing_keys: vec![SkakelKeyRecord {
                 key_id: "k0".into(),
                 private_key: "SENTINEL-RETIRED-KEY".into(),

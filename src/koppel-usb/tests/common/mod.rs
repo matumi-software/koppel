@@ -2,6 +2,8 @@
 //! joins a client to a server in memory. Each test file uses part of it.
 #![allow(dead_code)]
 
+pub mod files;
+
 use std::collections::HashSet;
 use std::fs;
 use std::future::Future;
@@ -692,13 +694,13 @@ impl ServerSide {
         let activity = Arc::new(Log::default());
         let server = UsbServer::new(ServerDeps {
             host,
-            shared: open::devices(&paths),
-            settings: settings.clone(),
+            shared: files::shared(&open::devices(&paths)),
+            settings: files::settings(&settings),
             activity: activity.clone(),
             clock: Arc::new(SystemClock),
         });
         server.start().await.unwrap();
-        let plane = UsbDataPlane::new(server.clone(), activity.clone(), settings.clone());
+        let plane = UsbDataPlane::new(server.clone(), activity.clone(), files::settings(&settings));
         plane.start();
         Self {
             dir,
@@ -786,7 +788,7 @@ impl MemoryLinks {
 }
 
 impl Links for MemoryLinks {
-    fn connect(&self, connection: &ClientConnection, events: LinkEvents) -> Arc<dyn Link> {
+    fn connect(&self, connection: &koppel_usb::Connection, events: LinkEvents) -> Arc<dyn Link> {
         self.made.fetch_add(1, Ordering::SeqCst);
         Arc::new(MemoryLink {
             server: self.server.clone(),
@@ -947,9 +949,9 @@ impl ClientSide {
         connection.start().await.unwrap();
         let activity = Arc::new(Log::default());
         let client = UsbClient::new(Deps {
-            settings: settings.clone(),
-            connection: connection.clone(),
-            remembered: ConfigFile::new(
+            settings: files::settings(&settings),
+            connection: files::connection(&connection),
+            remembered: files::attached(&ConfigFile::new(
                 paths.attached_file(),
                 AttachedDevices::default(),
                 Options {
@@ -957,7 +959,7 @@ impl ClientSide {
                     start_with_defaults_when_unusable: true,
                     ..Options::default()
                 },
-            ),
+            )),
             platform: {
                 let mut platform = Platform::unsupported("No driver or vhci-hcd here.");
                 platform.attacher = setup.attacher;
@@ -974,7 +976,7 @@ impl ClientSide {
         // 0.1.x's tests had it.
         let gateway = UsbIpGateway::new(
             client.clone(),
-            settings.clone(),
+            files::settings(&settings),
             setup.gateway,
             Some(Arc::new(AnyPeer)),
         );

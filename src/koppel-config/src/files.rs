@@ -12,7 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use skakel_server::SkakelState;
 use ts_rs::TS;
 
-use crate::redact::Secret;
+use koppel_secrets::Secret;
 
 /// Which side of the link this machine plays. Written as `server`, `client` or `both`; a hand edit
 /// may capitalise it.

@@ -1,4 +1,5 @@
-//! A value that must not end up in a log: [`Secret`].
+//! A value that must not end up in a log: [`Secret`]. A leaf crate (serde and zeroize only), so the
+//! crates that carry a secret around without reading it need nothing else.
 
 use std::fmt;
 use std::ops::Deref;

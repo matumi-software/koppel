@@ -68,6 +68,7 @@ sections describe the behaviour; this one says where it lives in Rust and what d
 | `stream`, `relay` | The stream to the other machine, an in-memory pair for tests, the relay and the loopback socket pair |
 | `server`, `data_plane` | `UsbServer` and `UsbDataPlane` |
 | `client/` (`mod`, `actor`, `slots`, `attach`, `gateway_session`), `gateway`, `peer_check` | `UsbClient` (made from a `Deps` struct), its actor, the per-device state machine, the gateway's sessions, `UsbIpGateway`, and which connections the gateway serves |
+| `store` | `Role`, `UsbSettings`, `Connection`, `SharedDevices` and `AttachedDevices`, the values the roles read and save, and the `Observed` and `Store` traits they read and save them through |
 | `views`, `checks`, `activity` | What the UI sees, with 0.1.x's JSON names, the USB system checks, and the activity events |
 
 - **The stream to the other machine:** the crate does not know Skakel. A `DeviceStream` is the byte
@@ -78,7 +79,7 @@ sections describe the behaviour; this one says where it lives in Rust and what d
   that also starts, stops and says its address, made by the `Links` the transport provides; the link
   reports its state and each device list through `LinkEvents`. `koppel-web` implements these on
   Skakel's gRPC streams, one connection per device stream (see ["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust)). The
-  crate's own tests use the in-memory pair.
+  crate's own tests use the in-memory pair, and real config files behind the store traits (`tests/common/files.rs`, a test copy of the program's glue).
 - **Export in two steps:** `UsbHost::export` readies the device (the kernel holds its socket, or
   usbipd-win accepted the import) and returns an `Export`; the data plane answers the import and then
   calls `Export::relay`.
@@ -86,9 +87,13 @@ sections describe the behaviour; this one says where it lives in Rust and what d
   address (`serverMoved`), and saving the certificates the server announces; see "The roles on Skakel
   in Rust". The client still carries its remembered devices over to the server's next certificate in
   `attached.json`.
-- **Settings and files:** the server, the data plane, the client and the gateway follow `settings.json`
-  and `connection.json` through `koppel-config`'s `ConfigFile` subscriptions, and keep `devices.json`
-  and `attached.json` through it. `KOPPEL_USB_ATTACH_TIMEOUT_SECONDS` and the `Gateway:` settings come in as
+- **Settings and files:** the crate names no config file. The server, the data plane, the client and
+  the gateway follow the settings (`Observed<UsbSettings>`) and the saved connection
+  (`Observed<Connection>`), and save the shares and the attached devices into a `Store<SharedDevices>`
+  and a `Store<AttachedDevices>`. `koppel-web/src/roles/usb_store.rs` puts those on `settings.json`,
+  `connection.json`, `devices.json` and `attached.json`, through `koppel-config`'s `ConfigFile`. A change
+  is delivered through the file as before, so a settings update still returns once the roles have applied
+  it. `KOPPEL_USB_ATTACH_TIMEOUT_SECONDS` and the `Gateway:` settings come in as
   `ClientOptions` and `GatewayOptions`. The activity log implements `ActivitySink`.
 - **The gateway's check:** on Windows with a loopback address it looks the connection up in the TCP
   table. Koppel ships no Windows container, so it does not check whether it runs in one.

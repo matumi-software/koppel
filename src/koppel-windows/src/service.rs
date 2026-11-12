@@ -119,14 +119,10 @@ impl Service {
     }
 }
 
-/// The handle the service reports its state through. Reporting may be done from any thread.
+/// The handle the service reports its state through. `ServiceStatusHandle` is `Send` and `Sync`
+/// itself, so reporting may be done from any thread.
 #[derive(Clone, Copy)]
 struct Status(ServiceStatusHandle);
-
-// SAFETY: SetServiceStatus may be called with the handle from any thread.
-unsafe impl Send for Status {}
-// SAFETY: as above.
-unsafe impl Sync for Status {}
 
 impl Status {
     fn report(&self, state: ServiceState, accept: ServiceControlAccept, exit: ServiceExitCode) {

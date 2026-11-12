@@ -14,6 +14,7 @@ use crate::auth::UiAuth;
 use crate::host::Host;
 use crate::push::Push;
 use crate::roles::{SkakelClientRole, SkakelServerRole, UsbClientRole, UsbServerRole};
+use crate::tls::CertificateSlot;
 
 /// `/api/v1/auth/*`: sign-in and the password.
 #[derive(Clone)]
@@ -49,6 +50,13 @@ pub(crate) struct ClientApi {
     pub client: Arc<SkakelClientRole>,
     pub connection: ConfigFile<ClientConnection>,
     pub usb_client: Arc<UsbClientRole>,
+}
+
+/// `/readyz`.
+#[derive(Clone)]
+pub(crate) struct ReadyApi {
+    pub usb_client: Arc<UsbClientRole>,
+    pub certificate: Arc<CertificateSlot>,
 }
 
 /// `/api/v1/events`.
@@ -97,6 +105,15 @@ impl FromRef<Arc<App>> for ClientApi {
             client: app.client.clone(),
             connection: app.connection.clone(),
             usb_client: app.usb_client.clone(),
+        }
+    }
+}
+
+impl FromRef<Arc<App>> for ReadyApi {
+    fn from_ref(app: &Arc<App>) -> Self {
+        Self {
+            usb_client: app.usb_client.clone(),
+            certificate: app.certificate(),
         }
     }
 }

@@ -9,6 +9,10 @@ pub struct Host {
     /// The machine's name, as .NET's `Environment.MachineName` gives it.
     pub name: String,
     pub version: String,
+    /// The short git commit the program was built from, or `unknown`.
+    pub commit: String,
+    /// The UTC date it was built, such as `2026-11-12`.
+    pub built: String,
     pub started_at: OffsetDateTime,
     pub ui_port: u16,
     pub network_port: u16,

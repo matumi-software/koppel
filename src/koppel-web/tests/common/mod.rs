@@ -352,6 +352,8 @@ impl Node {
             host: Host {
                 name: "bench".into(),
                 version: "0.2.0".into(),
+                commit: "abc123def".into(),
+                built: "2026-01-01".into(),
                 started_at: time::OffsetDateTime::now_utc(),
                 ui_port: port,
                 network_port: port,

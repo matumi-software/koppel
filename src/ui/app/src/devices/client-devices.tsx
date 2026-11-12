@@ -111,6 +111,7 @@ export function ClientDevicesPage() {
       {link === 'connecting' && <Note>Connecting to {server}…</Note>}
       {link === 'error' && <Note tone="error">Cannot reach {server}: {data?.linkMessage}</Note>}
       {data?.unavailable && <Note tone="error">{data.unavailable}</Note>}
+      {data?.gatewayFault && <Note tone="error">The USB/IP gateway is not listening: {data.gatewayFault}</Note>}
       {link === 'connected' && entries.length === 0 && <Note>{server} is not sharing any devices.</Note>}
       {groups
         .filter((g) => g.items.length > 0)

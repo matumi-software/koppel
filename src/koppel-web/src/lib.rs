@@ -18,6 +18,7 @@ mod guard;
 mod host;
 mod json;
 pub mod push;
+mod ready;
 mod redirect;
 pub mod roles;
 mod routes;

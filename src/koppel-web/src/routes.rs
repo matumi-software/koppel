@@ -1,7 +1,7 @@
 //! The routers, one per surface, each with the layers that surface needs (see `guard.rs` for what
 //! each layer answers):
 //!
-//! - **UI** ([`ui`]): `/healthz`, the REST API under `/api` ([`crate::api::router`]) and the UI's own
+//! - **UI** ([`ui`]): `/healthz` and `/readyz`, the REST API under `/api` ([`crate::api::router`]) and the UI's own
 //!   files for everything else. Behind `Ui:AllowFrom`; its API is behind the origin check and the
 //!   session.
 //! - **Network** ([`network`]): what other Koppel machines call, while the role is server or both:
@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{Request, State};
+use axum::extract::{FromRef, Request, State};
 use axum::http::{Method, StatusCode};
 use axum::middleware::{from_fn, from_fn_with_state};
 use axum::response::{IntoResponse, Response};
@@ -38,6 +38,7 @@ use tower_service::Service;
 use crate::app::App;
 use crate::guard::{self, RoleGate};
 use crate::roles::SkakelServerRole;
+use crate::state::ReadyApi;
 use crate::surface::{RoleScope, is_grpc_path, is_network_path, starts_with_segments};
 use crate::{api, ui};
 
@@ -97,6 +98,10 @@ fn wrapped(router: Router) -> Router {
 pub(crate) fn ui(app: &Arc<App>) -> Router {
     let router = Router::new()
         .route("/healthz", get(crate::healthz))
+        .route(
+            "/readyz",
+            get(crate::ready::readyz).with_state(ReadyApi::from_ref(app)),
+        )
         .nest("/api/v1", api::router(app))
         .fallback(files)
         .layer(from_fn_with_state(app.access.clone(), guard::allow_from))

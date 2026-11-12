@@ -26,17 +26,13 @@ pub use usb::{UsbClientRole, UsbServerRole};
 /// A boxed future, so the traits can be used as `dyn`.
 pub type Fut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// A change that could not be saved, in a few words for the log. The caller gets 500.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RoleError(pub String);
-
-impl std::fmt::Display for RoleError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
+/// A change that could not be saved. The caller gets 500 and the log gets the whole chain.
+#[derive(Debug, thiserror::Error)]
+pub enum RoleError {
+    /// Skakel's server refused or could not write the change.
+    #[error(transparent)]
+    Server(#[from] skakel_server::ServerError),
 }
-
-impl std::error::Error for RoleError {}
 
 /// One registered client, as the server's UI lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -137,8 +133,27 @@ pub struct PairingRequestView {
     pub requested_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
     pub expires_at: OffsetDateTime,
-    pub state: String,
+    pub state: RequestState,
     pub message: Option<String>,
+}
+
+/// Where a pairing request on the server stands. Skakel 0.3.0 words it as `waiting` or `denied`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RequestState {
+    Waiting,
+    Denied,
+}
+
+impl RequestState {
+    /// The state Skakel's word stands for. Skakel documents two; a word added later reads as
+    /// waiting, which keeps the request on the list for a person to decide.
+    pub fn of(word: &str) -> Self {
+        match word {
+            "denied" => Self::Denied,
+            _ => Self::Waiting,
+        }
+    }
 }
 
 /// What approving a pairing request came to.
@@ -150,11 +165,13 @@ pub enum Approval {
 }
 
 /// Why a client could not be added.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error)]
 pub enum RegisterError {
     /// Nothing is left of the name once control and format characters are taken out.
+    #[error("the name is empty")]
     EmptyName,
-    Failed(RoleError),
+    #[error("the client could not be saved")]
+    Failed(#[source] RoleError),
 }
 
 /// The server role: Skakel's clients, certificates and pairing. See the module docs.
@@ -190,15 +207,75 @@ pub trait ServerRole: Send + Sync {
     fn deny<'a>(&'a self, id: &'a str) -> Fut<'a, bool>;
 }
 
+/// How a connection test ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Outcome {
+    Ok,
+    Incomplete,
+    Unreachable,
+    CertificateMismatch,
+    RejectedCredentials,
+    ClientUnknown,
+    VersionMismatch,
+    UnexpectedAnswer,
+    TooManyRequests,
+}
+
+impl Outcome {
+    /// The fixed wording of 0.1.x. A version mismatch has none of its own: it always carries
+    /// Skakel's words, which name both sides' versions.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Ok => "Connected.",
+            Self::Incomplete => {
+                "Fill in the server address, fingerprint, client ID and secret first."
+            }
+            Self::Unreachable => {
+                "Could not reach the server. Check the address and that the server is running."
+            }
+            Self::CertificateMismatch => {
+                "The server's certificate does not match the fingerprint. Copy the fingerprint from the server's Clients section again."
+            }
+            Self::RejectedCredentials => {
+                "The server refused the client ID or secret. Check them, or ask for a new client."
+            }
+            Self::UnexpectedAnswer => {
+                "The server did not answer like a Koppel server. Check the address and the port."
+            }
+            Self::TooManyRequests => {
+                "The server is turning requests away for now, from this address or, after too many wrong secrets, for this client. Try again in a few minutes."
+            }
+            Self::ClientUnknown | Self::VersionMismatch => {
+                "The server accepted the token but no longer knows this client. Ask for a new client."
+            }
+        }
+    }
+}
+
 /// How a connection test ended: a fixed set, with fixed wording.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionTest {
     pub ok: bool,
-    /// `ok`, `incomplete`, `unreachable`, `certificateMismatch`, `rejectedCredentials`,
-    /// `clientUnknown`, `versionMismatch`, `unexpectedAnswer` or `tooManyRequests`.
-    pub outcome: String,
+    pub outcome: Outcome,
     pub message: String,
+}
+
+impl ConnectionTest {
+    /// The outcome with its own words.
+    pub fn of(outcome: Outcome) -> Self {
+        Self::saying(outcome, outcome.message())
+    }
+
+    /// The outcome with other words, such as Skakel's.
+    pub fn saying(outcome: Outcome, message: impl Into<String>) -> Self {
+        Self {
+            ok: outcome == Outcome::Ok,
+            outcome,
+            message: message.into(),
+        }
+    }
 }
 
 /// A server found on the local network.
@@ -219,8 +296,7 @@ pub struct DiscoveredServer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingStatus {
-    /// `idle`, `requesting`, `waiting`, `confirm`, `paired`, `denied`, `expired` or `failed`.
-    pub state: String,
+    pub state: PairingState,
     pub server_name: Option<String>,
     pub server_url: Option<String>,
     pub code: Option<String>,
@@ -230,14 +306,30 @@ pub struct PairingStatus {
     pub server_fingerprint: Option<String>,
 }
 
+/// Where the client's pairing stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PairingState {
+    #[default]
+    Idle,
+    Requesting,
+    Waiting,
+    /// The server approved, and the person confirms replacing the saved connection.
+    Confirm,
+    Paired,
+    Denied,
+    Expired,
+    Failed,
+}
+
 impl PairingStatus {
     pub fn idle() -> Self {
-        Self::of("idle", None)
+        Self::of(PairingState::Idle, None)
     }
 
-    pub fn of(state: &str, message: Option<String>) -> Self {
+    pub fn of(state: PairingState, message: Option<String>) -> Self {
         Self {
-            state: state.to_owned(),
+            state,
             server_name: None,
             server_url: None,
             code: None,
@@ -380,6 +472,69 @@ pub fn is_bus_id(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn word<T: Serialize>(value: T) -> String {
+        serde_json::to_value(value)
+            .expect("serialises")
+            .as_str()
+            .expect("a word")
+            .to_owned()
+    }
+
+    #[test]
+    fn the_wire_words_are_0_1_xs() {
+        let states = [
+            (PairingState::Idle, "idle"),
+            (PairingState::Requesting, "requesting"),
+            (PairingState::Waiting, "waiting"),
+            (PairingState::Confirm, "confirm"),
+            (PairingState::Paired, "paired"),
+            (PairingState::Denied, "denied"),
+            (PairingState::Expired, "expired"),
+            (PairingState::Failed, "failed"),
+        ];
+        for (state, text) in states {
+            assert_eq!(word(state), text);
+        }
+        let outcomes = [
+            (Outcome::Ok, "ok"),
+            (Outcome::Incomplete, "incomplete"),
+            (Outcome::Unreachable, "unreachable"),
+            (Outcome::CertificateMismatch, "certificateMismatch"),
+            (Outcome::RejectedCredentials, "rejectedCredentials"),
+            (Outcome::ClientUnknown, "clientUnknown"),
+            (Outcome::VersionMismatch, "versionMismatch"),
+            (Outcome::UnexpectedAnswer, "unexpectedAnswer"),
+            (Outcome::TooManyRequests, "tooManyRequests"),
+        ];
+        for (outcome, text) in outcomes {
+            assert_eq!(word(outcome), text);
+        }
+        assert_eq!(word(RequestState::Waiting), "waiting");
+        assert_eq!(word(RequestState::Denied), "denied");
+        assert_eq!(RequestState::of("denied"), RequestState::Denied);
+        assert_eq!(RequestState::of("anything else"), RequestState::Waiting);
+    }
+
+    #[test]
+    fn only_ok_is_ok_and_the_words_are_fixed() {
+        let ok = ConnectionTest::of(Outcome::Ok);
+        assert!(ok.ok);
+        assert_eq!(ok.message, "Connected.");
+        let mismatch = ConnectionTest::saying(Outcome::VersionMismatch, "Skakel's words");
+        assert!(!mismatch.ok);
+        assert_eq!(mismatch.message, "Skakel's words");
+        assert!(!ConnectionTest::of(Outcome::Unreachable).ok);
+    }
+
+    #[test]
+    fn a_register_error_keeps_its_source() {
+        use std::error::Error;
+        let error = RegisterError::Failed(RoleError::Server(skakel_server::ServerError::Store(
+            std::io::Error::other("disk"),
+        )));
+        assert!(error.source().is_some());
+    }
 
     #[test]
     fn bus_ids_are_the_kernels_form() {

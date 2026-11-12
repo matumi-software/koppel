@@ -2,20 +2,24 @@
 //! and pairing by the eight-digit code, as 0.1.x's `RemoteServer`, `ServerFinder` and
 //! `PairingClient` did them. The link itself is koppel-usb's client over [`super::links`].
 
-use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use koppel_config::ConfigFile;
 use koppel_config::files::{ClientConnection, KoppelSettings, Role};
 use skakel_client::{
-    Browser, ClientOptions, Credentials, FailureKind, PairingClient, PairingError, Pins, Url,
+    Browser, ClientOptions, Credentials, FailureKind, PairingClient, PairingError, Pins,
+    StatusCode, Url,
 };
 use time::OffsetDateTime;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::api::client::ConnectionUpdate;
 use crate::push::{self, Push};
-use crate::roles::{ClientRole, ConnectionTest, DiscoveredServer, Fut, PairingStatus};
+use crate::roles::{
+    ClientRole, ConnectionTest, DiscoveredServer, Fut, Outcome, PairingState, PairingStatus,
+};
 
 /// How long the connection test may take, the token request and the hello together.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -32,27 +36,51 @@ pub struct SkakelClientRole {
     own: Arc<dyn Fn() -> String + Send + Sync>,
     /// The name the server's people see this machine as.
     machine: String,
-    pairing: Mutex<Pairings>,
+    /// The pairing, with one owner: every change goes through this watch.
+    pairing: watch::Sender<Pairings>,
     me: Weak<Self>,
 }
 
-#[derive(Default)]
+/// Where the pairing stands. Idle until a run starts.
 struct Pairings {
     run: Option<Arc<Run>>,
-    status: Option<PairingStatus>,
+    status: PairingStatus,
+    /// What the server approved, which waits for the person to confirm or has been saved.
+    approved: Option<ConnectionUpdate>,
+    /// The person confirmed and the save is under way.
+    confirming: bool,
     next: u64,
 }
 
-/// One pairing attempt. Its identity decides who may set the status; what the server approved
-/// waits here for the person to confirm.
+impl Default for Pairings {
+    fn default() -> Self {
+        Self {
+            run: None,
+            status: PairingStatus::idle(),
+            approved: None,
+            confirming: false,
+            next: 0,
+        }
+    }
+}
+
+impl Pairings {
+    /// Back to idle; run numbers keep counting so an old run can never match a new one.
+    fn reset(&mut self) {
+        *self = Self {
+            next: self.next,
+            ..Self::default()
+        };
+    }
+}
+
+/// One pairing attempt. Its identity decides who may change the pairing.
 struct Run {
     id: u64,
     server_url: String,
     fingerprint: String,
     server_name: String,
     stop: CancellationToken,
-    approved: Mutex<Option<ConnectionUpdate>>,
-    confirming: Mutex<bool>,
 }
 
 impl SkakelClientRole {
@@ -69,7 +97,7 @@ impl SkakelClientRole {
             browser,
             own,
             machine,
-            pairing: Mutex::new(Pairings::default()),
+            pairing: watch::channel(Pairings::default()).0,
             me: me.clone(),
         });
         let weak = Arc::downgrade(&role);
@@ -109,25 +137,39 @@ impl SkakelClientRole {
         });
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Pairings> {
-        self.pairing.lock().unwrap_or_else(PoisonError::into_inner)
+    /// Whether `run` is still the pairing's run.
+    fn is_current(&self, run: &Run) -> bool {
+        self.pairing
+            .borrow()
+            .run
+            .as_ref()
+            .is_some_and(|r| r.id == run.id)
     }
 
     /// Sets the status for a run, unless another run or a cancel has taken over since.
     fn set(&self, run: &Run, status: PairingStatus) {
-        {
-            let mut pairings = self.lock();
-            if pairings.run.as_ref().is_none_or(|r| r.id != run.id) {
-                return;
-            }
-            pairings.status = Some(status.clone());
-        }
-        self.push.send(push::PAIRING_STATUS_CHANGED, &status);
+        self.set_with(run, status, |_| {});
     }
 
-    fn status(run: &Run, state: &str) -> PairingStatus {
+    /// Sets the status for a run and changes the rest of the pairing in the same step.
+    fn set_with(&self, run: &Run, status: PairingStatus, also: impl FnOnce(&mut Pairings)) {
+        let pushed = status.clone();
+        let changed = self.pairing.send_if_modified(|pairings| {
+            if pairings.run.as_ref().is_none_or(|r| r.id != run.id) {
+                return false;
+            }
+            pairings.status = status;
+            also(pairings);
+            true
+        });
+        if changed {
+            self.push.send(push::PAIRING_STATUS_CHANGED, &pushed);
+        }
+    }
+
+    fn status(run: &Run, state: PairingState) -> PairingStatus {
         PairingStatus {
-            state: state.to_owned(),
+            state,
             server_name: Some(run.server_name.clone()),
             server_url: Some(run.server_url.clone()),
             code: None,
@@ -138,12 +180,12 @@ impl SkakelClientRole {
     }
 
     async fn run(self: Arc<Self>, run: Arc<Run>) {
-        let mut status = Self::status(&run, "requesting");
+        let mut status = Self::status(&run, PairingState::Requesting);
         self.set(&run, status.clone());
         let address = match Url::parse(&run.server_url) {
             Ok(address) => address,
             Err(e) => {
-                status.state = "failed".into();
+                status.state = PairingState::Failed;
                 status.message = Some(format!("Could not pair with {}: {e}", run.server_name));
                 self.set(&run, status);
                 return;
@@ -157,7 +199,7 @@ impl SkakelClientRole {
         let request = match opened {
             Ok(request) => request,
             Err(PairingError::InvalidClientName) => {
-                status.state = "failed".into();
+                status.state = PairingState::Failed;
                 status.message = Some(format!(
                     "Could not pair with {}: this machine's name is not one a server takes.",
                     run.server_name
@@ -166,7 +208,7 @@ impl SkakelClientRole {
                 return;
             }
             Err(PairingError::Closed) => {
-                status.state = "failed".into();
+                status.state = PairingState::Failed;
                 status.message = Some(closed_message(&run.server_name));
                 self.set(&run, status);
                 return;
@@ -182,13 +224,13 @@ impl SkakelClientRole {
             }
             Err(error) => {
                 tracing::warn!("Pairing with {} failed: {error}", run.server_name);
-                status.state = "failed".into();
+                status.state = PairingState::Failed;
                 status.message = Some(format!("Could not pair with {}: {error}", run.server_name));
                 self.set(&run, status);
                 return;
             }
         };
-        status.state = "waiting".into();
+        status.state = PairingState::Waiting;
         status.code = Some(request.code().to_owned());
         status.expires_at = Some(OffsetDateTime::from(request.expires_at()));
         self.set(&run, status.clone());
@@ -219,7 +261,7 @@ impl SkakelClientRole {
     /// a client with no connection or one for the same server, otherwise held until the person
     /// confirms.
     async fn approved(&self, run: &Run, mut status: PairingStatus, credentials: Credentials) {
-        if self.lock().run.as_ref().is_none_or(|r| r.id != run.id) {
+        if !self.is_current(run) {
             return;
         }
         let update = ConnectionUpdate::paired(
@@ -233,23 +275,22 @@ impl SkakelClientRole {
         if (existing.server_url.is_some() || existing.client_id.is_some())
             && !update.keeps_server(&existing)
         {
-            *run.approved.lock().unwrap_or_else(PoisonError::into_inner) = Some(update);
             tracing::info!(
                 "{} approved; waiting for the person to confirm replacing the connection",
                 run.server_name
             );
-            status.state = "confirm".into();
+            status.state = PairingState::Confirm;
             status.message = Some(format!(
                 "{} approved this machine. Saving replaces your connection to {}.",
                 run.server_name,
                 existing.server_url.as_deref().unwrap_or_default()
             ));
-            self.set(run, status);
+            self.set_with(run, status, |p| p.approved = Some(update));
             return;
         }
         if let Err(e) = self.connection.update(|c| update.apply(c)).await {
             tracing::warn!("Pairing with {} failed: {e}", run.server_name);
-            status.state = "failed".into();
+            status.state = PairingState::Failed;
             status.message = Some(format!(
                 "Could not save the connection to {}: {e}",
                 run.server_name
@@ -257,36 +298,33 @@ impl SkakelClientRole {
             self.set(run, status);
             return;
         }
-        *run.approved.lock().unwrap_or_else(PoisonError::into_inner) = Some(update);
         tracing::info!("Paired with {}", run.server_name);
-        self.set(run, Self::status(run, "paired"));
+        self.set_with(run, Self::status(run, PairingState::Paired), |p| {
+            p.approved = Some(update);
+        });
     }
 
     /// "Paired" holds only while the saved connection is the one it made.
     fn on_connection_changed(&self, saved: &ClientConnection) {
-        {
-            let mut pairings = self.lock();
-            let Some(run) = pairings.run.clone() else {
-                return;
-            };
-            let paired = pairings
-                .status
-                .as_ref()
-                .is_some_and(|s| s.state == "paired");
-            let made = run
-                .approved
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .clone();
-            let still = made.is_some_and(|made| made.matches(saved));
-            if !paired || still {
-                return;
+        let reset = self.pairing.send_if_modified(|pairings| {
+            if pairings.run.is_none() {
+                return false;
             }
-            pairings.run = None;
-            pairings.status = None;
+            let paired = pairings.status.state == PairingState::Paired;
+            let still = pairings
+                .approved
+                .as_ref()
+                .is_some_and(|made| made.matches(saved));
+            if !paired || still {
+                return false;
+            }
+            pairings.reset();
+            true
+        });
+        if reset {
+            self.push
+                .send(push::PAIRING_STATUS_CHANGED, &PairingStatus::idle());
         }
-        self.push
-            .send(push::PAIRING_STATUS_CHANGED, &PairingStatus::idle());
     }
 }
 
@@ -306,35 +344,39 @@ fn failed(run: &Run, mut status: PairingStatus, error: &skakel_client::Error) ->
     status.code = None;
     let name = &run.server_name;
     let (state, message) = match error.kind() {
-        FailureKind::PairingDenied => ("denied", format!("{name} refused the request.")),
-        FailureKind::PairingExpired => ("expired", error.failure().message().to_owned()),
+        FailureKind::PairingDenied => {
+            (PairingState::Denied, format!("{name} refused the request."))
+        }
+        FailureKind::PairingExpired => {
+            (PairingState::Expired, error.failure().message().to_owned())
+        }
         FailureKind::TooManyRequests => (
-            "failed",
+            PairingState::Failed,
             format!(
                 "{name} is taking no more pairing requests for now. Try again in a few minutes."
             ),
         ),
-        FailureKind::PairingClosed => ("failed", closed_message(name)),
+        FailureKind::PairingClosed => (PairingState::Failed, closed_message(name)),
         // Skakel's words name both versions and say which end to update: a Koppel 0.2.0 server
         // speaks protocol 2, this one protocol 3, and they do not pair.
         FailureKind::VersionMismatch => (
-            "failed",
+            PairingState::Failed,
             format!(
                 "Could not pair with {name}: {} Koppel 0.2.0 speaks Skakel 2 and Koppel 0.2.1 speaks Skakel 3, so update both machines to the same release.",
                 error.failure().message()
             ),
         ),
         // A machine that is a client only answers 404 to everything a pairing client asks.
-        FailureKind::UnexpectedAnswer if answered_404(error) => (
-            "failed",
+        FailureKind::UnexpectedAnswer if answered(error) == Some(StatusCode::NOT_FOUND) => (
+            PairingState::Failed,
             format!("{name} does not take pairing requests. It may be set up as a client only."),
         ),
         _ => (
-            "failed",
+            PairingState::Failed,
             format!("Could not pair with {name}: {}", error.failure().message()),
         ),
     };
-    status.state = state.to_owned();
+    status.state = state;
     status.message = Some(message);
     status
 }
@@ -346,46 +388,24 @@ fn closed_message(name: &str) -> String {
     )
 }
 
-/// Whether the server answered 404. skakel-client keeps the status only in its error's cause,
-/// whose words are its own: "The server answered 404."
-fn answered_404(error: &skakel_client::Error) -> bool {
+/// The HTTP status the server answered with, when skakel-client kept one. 0.3.0 keeps it only in
+/// its error's cause (`StatusError`, private) and shows it as "The server answered 404.", so this
+/// is the one place that reads the number back out of that sentence. A typed status from Skakel
+/// would replace it.
+fn answered(error: &skakel_client::Error) -> Option<StatusCode> {
     let mut cause = std::error::Error::source(error);
     while let Some(e) = cause {
-        if e.to_string() == "The server answered 404." {
-            return true;
+        let text = e.to_string();
+        if let Some(code) = text
+            .strip_prefix("The server answered ")
+            .and_then(|rest| rest.strip_suffix('.'))
+            .and_then(|code| code.parse::<u16>().ok())
+        {
+            return StatusCode::from_u16(code).ok();
         }
         cause = e.source();
     }
-    false
-}
-
-/// A connection test's outcome, in 0.1.x's fixed words.
-fn outcome(outcome: &str, message: Option<String>) -> ConnectionTest {
-    let words = match outcome {
-        "ok" => "Connected.",
-        "incomplete" => "Fill in the server address, fingerprint, client ID and secret first.",
-        "unreachable" => {
-            "Could not reach the server. Check the address and that the server is running."
-        }
-        "certificateMismatch" => {
-            "The server's certificate does not match the fingerprint. Copy the fingerprint from the server's Clients section again."
-        }
-        "rejectedCredentials" => {
-            "The server refused the client ID or secret. Check them, or ask for a new client."
-        }
-        "unexpectedAnswer" => {
-            "The server did not answer like a Koppel server. Check the address and the port."
-        }
-        "tooManyRequests" => {
-            "The server is turning requests away for now, from this address or, after too many wrong secrets, for this client. Try again in a few minutes."
-        }
-        _ => "The server accepted the token but no longer knows this client. Ask for a new client.",
-    };
-    ConnectionTest {
-        ok: outcome == "ok",
-        outcome: outcome.to_owned(),
-        message: message.unwrap_or_else(|| words.to_owned()),
-    }
+    None
 }
 
 /// Skakel's failure as one of the outcomes, as 0.1.x's `ConnectionTestResult.From`. A version
@@ -393,17 +413,17 @@ fn outcome(outcome: &str, message: Option<String>) -> ConnectionTest {
 /// reads as one the server no longer knows; anything a test cannot run into counts as unreachable.
 fn tested(failure: &skakel_client::Failure) -> ConnectionTest {
     match failure.kind() {
-        FailureKind::CertificateMismatch => outcome("certificateMismatch", None),
-        FailureKind::RejectedCredentials => outcome("rejectedCredentials", None),
+        FailureKind::CertificateMismatch => ConnectionTest::of(Outcome::CertificateMismatch),
+        FailureKind::RejectedCredentials => ConnectionTest::of(Outcome::RejectedCredentials),
         FailureKind::ClientUnknown | FailureKind::Revoked | FailureKind::Rotated => {
-            outcome("clientUnknown", None)
+            ConnectionTest::of(Outcome::ClientUnknown)
         }
         FailureKind::VersionMismatch => {
-            outcome("versionMismatch", Some(failure.message().to_owned()))
+            ConnectionTest::saying(Outcome::VersionMismatch, failure.message())
         }
-        FailureKind::UnexpectedAnswer => outcome("unexpectedAnswer", None),
-        FailureKind::TooManyRequests => outcome("tooManyRequests", None),
-        _ => outcome("unreachable", None),
+        FailureKind::UnexpectedAnswer => ConnectionTest::of(Outcome::UnexpectedAnswer),
+        FailureKind::TooManyRequests => ConnectionTest::of(Outcome::TooManyRequests),
+        _ => ConnectionTest::of(Outcome::Unreachable),
     }
 }
 
@@ -412,16 +432,16 @@ impl ClientRole for SkakelClientRole {
         Box::pin(async move {
             let saved = self.connection.current();
             if !saved.is_complete() {
-                return outcome("incomplete", None);
+                return ConnectionTest::of(Outcome::Incomplete);
             }
             let Some(address) = saved.server_url.as_deref().and_then(|u| Url::parse(u).ok()) else {
-                return outcome("unreachable", None);
+                return ConnectionTest::of(Outcome::Unreachable);
             };
             let Ok(pins) = Pins::with_next(
                 saved.server_fingerprint.as_deref().unwrap_or_default(),
                 saved.next_server_fingerprint.as_deref(),
             ) else {
-                return outcome("certificateMismatch", None);
+                return ConnectionTest::of(Outcome::CertificateMismatch);
             };
             let credentials = Credentials::new(
                 saved.client_id.clone().unwrap_or_default(),
@@ -433,12 +453,9 @@ impl ClientRole for SkakelClientRole {
                 Err(e) => return tested(e.failure()),
             };
             match link.hello().await {
-                Ok(hello) => outcome(
-                    "ok",
-                    Some(format!(
-                        "Connected to {} as {}.",
-                        hello.server, hello.client_id
-                    )),
+                Ok(hello) => ConnectionTest::saying(
+                    Outcome::Ok,
+                    format!("Connected to {} as {}.", hello.server, hello.client_id),
                 ),
                 Err(e) => tested(e.failure()),
             }
@@ -481,10 +498,7 @@ impl ClientRole for SkakelClientRole {
     }
 
     fn pairing(&self) -> PairingStatus {
-        self.lock()
-            .status
-            .clone()
-            .unwrap_or_else(PairingStatus::idle)
+        self.pairing.borrow().status.clone()
     }
 
     fn begin_pairing<'a>(
@@ -506,8 +520,8 @@ impl ClientRole for SkakelClientRole {
                         .and_then(|u| u.host_str().map(str::to_owned))
                         .unwrap_or_else(|| server_url.to_owned())
                 });
-            let run = {
-                let mut pairings = self.lock();
+            let mut started = None;
+            self.pairing.send_modify(|pairings| {
                 pairings.next += 1;
                 let run = Arc::new(Run {
                     id: pairings.next,
@@ -515,13 +529,16 @@ impl ClientRole for SkakelClientRole {
                     fingerprint: crate::api::client::normalize(fingerprint),
                     server_name,
                     stop: CancellationToken::new(),
-                    approved: Mutex::new(None),
-                    confirming: Mutex::new(false),
                 });
+                pairings.approved = None;
+                pairings.confirming = false;
                 if let Some(previous) = pairings.run.replace(run.clone()) {
                     previous.stop.cancel();
                 }
-                run
+                started = Some(run);
+            });
+            let Some(run) = started else {
+                return;
             };
             tokio::spawn(me.run(run));
         })
@@ -529,37 +546,24 @@ impl ClientRole for SkakelClientRole {
 
     fn confirm_pairing(&self) -> Fut<'_, bool> {
         Box::pin(async move {
-            let (run, update) = {
-                let pairings = self.lock();
-                let Some(run) = pairings.run.clone() else {
-                    return false;
-                };
-                if pairings
-                    .status
-                    .as_ref()
-                    .is_none_or(|s| s.state != "confirm")
+            let mut taken = None;
+            self.pairing.send_if_modified(|pairings| {
+                if pairings.status.state == PairingState::Confirm
+                    && !pairings.confirming
+                    && let (Some(run), Some(update)) =
+                        (pairings.run.clone(), pairings.approved.clone())
                 {
-                    return false;
+                    pairings.confirming = true;
+                    taken = Some((run, update));
                 }
-                let mut confirming = run
-                    .confirming
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                let approved = run
-                    .approved
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .clone();
-                let (Some(update), false) = (approved, *confirming) else {
-                    return false;
-                };
-                *confirming = true;
-                drop(confirming);
-                (run, update)
+                false
+            });
+            let Some((run, update)) = taken else {
+                return false;
             };
             if let Err(e) = self.connection.update(|c| update.apply(c)).await {
                 tracing::warn!("Pairing with {} failed: {e}", run.server_name);
-                let mut status = Self::status(&run, "failed");
+                let mut status = Self::status(&run, PairingState::Failed);
                 status.message = Some(format!(
                     "Could not save the connection to {}: {e}",
                     run.server_name
@@ -568,20 +572,19 @@ impl ClientRole for SkakelClientRole {
                 return true;
             }
             tracing::info!("Paired with {}", run.server_name);
-            self.set(&run, Self::status(&run, "paired"));
+            self.set(&run, Self::status(&run, PairingState::Paired));
             true
         })
     }
 
     fn cancel_pairing(&self) -> Fut<'_, ()> {
         Box::pin(async move {
-            {
-                let mut pairings = self.lock();
+            self.pairing.send_modify(|pairings| {
                 if let Some(run) = pairings.run.take() {
                     run.stop.cancel();
                 }
-                pairings.status = None;
-            }
+                pairings.reset();
+            });
             self.push
                 .send(push::PAIRING_STATUS_CHANGED, &PairingStatus::idle());
         })

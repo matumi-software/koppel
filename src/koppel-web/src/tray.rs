@@ -15,7 +15,7 @@ use tokio::sync::broadcast::{self, error::TryRecvError};
 use crate::activity::{ActivityEvent, ActivityOutcome, ActivityReason};
 use crate::app::App;
 use crate::push::Pushed;
-use crate::roles::{ClientDevices, PairingRequestView, ServerDevices};
+use crate::roles::{ClientDevices, PairingRequestView, RequestState, ServerDevices};
 
 /// A notification icon's tooltip holds 127 characters.
 pub const MAX_TIP: usize = 127;
@@ -252,7 +252,7 @@ impl NoticeRules {
     ) -> Vec<TrayNotice> {
         let mut notices = Vec::new();
         for request in requests {
-            if request.state == "waiting"
+            if request.state == RequestState::Waiting
                 && self.seen_requests.insert(request.id.clone())
                 && settings.notify_pairing
             {
@@ -551,14 +551,14 @@ mod tests {
         assert_eq!(rules.from_activity(&down, &settings), None);
     }
 
-    fn request(id: &str, state: &str) -> PairingRequestView {
+    fn request(id: &str, state: RequestState) -> PairingRequestView {
         PairingRequestView {
             id: id.into(),
             client_name: "lab-pc".into(),
             from: "10.0.0.2".into(),
             requested_at: OffsetDateTime::UNIX_EPOCH,
             expires_at: OffsetDateTime::UNIX_EPOCH,
-            state: state.into(),
+            state,
             message: None,
         }
     }
@@ -567,7 +567,7 @@ mod tests {
     fn each_waiting_request_is_told_once() {
         let settings = KoppelSettings::default();
         let mut rules = NoticeRules::default();
-        let first = rules.from_pairing(&[request("a", "waiting")], &settings);
+        let first = rules.from_pairing(&[request("a", RequestState::Waiting)], &settings);
         assert_eq!(first.len(), 1);
         assert_eq!(first[0].page, "#clients");
         assert_eq!(
@@ -577,7 +577,10 @@ mod tests {
         assert!(
             rules
                 .from_pairing(
-                    &[request("a", "waiting"), request("b", "denied")],
+                    &[
+                        request("a", RequestState::Waiting),
+                        request("b", RequestState::Denied)
+                    ],
                     &settings
                 )
                 .is_empty()
@@ -585,7 +588,7 @@ mod tests {
         assert!(rules.from_pairing(&[], &settings).is_empty());
         assert_eq!(
             rules
-                .from_pairing(&[request("a", "waiting")], &settings)
+                .from_pairing(&[request("a", RequestState::Waiting)], &settings)
                 .len(),
             1
         );

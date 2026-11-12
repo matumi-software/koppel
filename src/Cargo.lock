@@ -1131,6 +1131,7 @@ dependencies = [
  "skakel-server",
  "skakel-wire",
  "socket2",
+ "thiserror",
  "time",
  "tokio",
  "tokio-rustls",

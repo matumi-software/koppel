@@ -21,5 +21,5 @@ mod streams;
 pub use client::SkakelClientRole;
 pub(crate) use links::SkakelLinks;
 pub use server::SkakelServerRole;
-pub(crate) use server::{APP_ID, ServerParts};
+pub(crate) use server::{APP_ID, ServerParts, ServerStartError};
 pub(crate) use store::SecretsStore;

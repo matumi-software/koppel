@@ -2,7 +2,9 @@ use std::net::TcpStream;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::{BoxFuture, DeviceStream, ExportStatus, UsbDevice, UsbError, UsbSpeed, VhciPort};
+use crate::{
+    BoxFuture, BusId, DeviceStream, ExportStatus, UsbDevice, UsbError, UsbSpeed, VhciPort,
+};
 
 /// Which kind of host this is, for the system checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,22 +46,22 @@ pub trait UsbHost: Send + Sync {
 
     /// What to tell the user when this host cannot share or unshare a device itself, such as the
     /// command to run on the machine that does.
-    fn sharing_advice(&self, bus_id: &str, share: bool) -> String;
+    fn sharing_advice(&self, bus_id: &BusId, share: bool) -> String;
 
     /// Takes the device from its driver and gives it to usbip-host, so it can be exported. Only
     /// where [`UsbHost::can_share`].
-    fn share<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>>;
+    fn share<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>>;
 
     /// Gives the device back to its normal driver. Only where [`UsbHost::can_unshare`].
-    fn unshare<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>>;
+    fn unshare<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>>;
 
-    fn status<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<ExportStatus, UsbError>>;
+    fn status<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<ExportStatus, UsbError>>;
 
     /// Resets a shared device on its USB port, so a client gets it the way a fresh plug-in would.
     /// A driver on this machine may have changed the device before it was shared: Linux's
     /// Logitech receiver driver switches the receiver to a mode only that driver reads, and the
     /// mouse then stays silent on the client. Only where [`UsbHost::can_reset`].
-    fn reset<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>>;
+    fn reset<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>>;
 
     /// Exports the device. When this returns, the host is ready (the kernel holds its socket, or
     /// the upstream server accepted the import) and no USB traffic has flowed yet, which is when
@@ -109,7 +111,7 @@ pub trait UsbIpDriver: Send + Sync {
         &'a self,
         host: &'a str,
         port: u16,
-        bus_id: &'a str,
+        bus_id: &'a BusId,
     ) -> BoxFuture<'a, Result<u32, UsbError>>;
 
     /// Detaches the device on `driver_port` and stops the driver from attaching it again.
@@ -117,7 +119,7 @@ pub trait UsbIpDriver: Send + Sync {
         &'a self,
         host: &'a str,
         port: u16,
-        bus_id: &'a str,
+        bus_id: &'a BusId,
         driver_port: u32,
     ) -> BoxFuture<'a, Result<(), UsbError>>;
 }
@@ -136,7 +138,7 @@ impl Unsupported {
     }
 
     fn refuse<T: Send + 'static>(&self) -> BoxFuture<'static, Result<T, UsbError>> {
-        let error = UsbError::new(self.reason.clone());
+        let error = UsbError::Unavailable(self.reason.clone());
         Box::pin(async move { Err(error) })
     }
 }
@@ -170,23 +172,23 @@ impl UsbHost for Unsupported {
         false
     }
 
-    fn sharing_advice(&self, _: &str, _: bool) -> String {
+    fn sharing_advice(&self, _: &BusId, _: bool) -> String {
         self.reason.clone()
     }
 
-    fn share<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn share<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         self.refuse()
     }
 
-    fn unshare<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn unshare<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         self.refuse()
     }
 
-    fn status<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
+    fn status<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
         Box::pin(async { Ok(ExportStatus::NotExported) })
     }
 
-    fn reset<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn reset<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -205,11 +207,11 @@ impl UsbAttacher for Unsupported {
     }
 
     fn attach(&self, _: &TcpStream, _: u32, _: UsbSpeed) -> Result<u32, UsbError> {
-        Err(UsbError::new(self.reason.clone()))
+        Err(UsbError::Unavailable(self.reason.clone()))
     }
 
     fn detach(&self, _: u32) -> Result<(), UsbError> {
-        Err(UsbError::new(self.reason.clone()))
+        Err(UsbError::Unavailable(self.reason.clone()))
     }
 }
 
@@ -222,7 +224,7 @@ impl UsbIpDriver for Unsupported {
         &'a self,
         _: &'a str,
         _: u16,
-        _: &'a str,
+        _: &'a BusId,
     ) -> BoxFuture<'a, Result<u32, UsbError>> {
         self.refuse()
     }
@@ -231,7 +233,7 @@ impl UsbIpDriver for Unsupported {
         &'a self,
         _: &'a str,
         _: u16,
-        _: &'a str,
+        _: &'a BusId,
         _: u32,
     ) -> BoxFuture<'a, Result<(), UsbError>> {
         self.refuse()

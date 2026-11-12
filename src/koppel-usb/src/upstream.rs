@@ -4,10 +4,11 @@
 use std::collections::BTreeMap;
 use std::io;
 use std::net::Ipv6Addr;
+
+use http::uri::Authority;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use time::OffsetDateTime;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
@@ -15,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use crate::host::{Export, HostKind, UsbHost};
 use crate::tasks::lock;
 use crate::{
-    BoxFuture, Clock, DeviceStream, ExportStatus, UsbDevice, UsbError, bus_id, protocol, relay,
+    BoxFuture, BusId, Clock, DeviceStream, ExportStatus, UsbDevice, UsbError, protocol, relay,
 };
 
 /// The most devices Koppel accepts in one list.
@@ -46,7 +47,7 @@ struct Inner {
     port: u16,
     clock: Arc<dyn Clock>,
     deadline: Duration,
-    in_use: Mutex<BTreeMap<String, UsbDevice>>,
+    in_use: Mutex<BTreeMap<BusId, UsbDevice>>,
     snapshot: Mutex<Option<Arc<Snapshot>>>,
     /// Cancelled once the refresh it belongs to has stored its snapshot.
     refresh: Mutex<Option<CancellationToken>>,
@@ -55,7 +56,7 @@ struct Inner {
 struct Snapshot {
     devices: Vec<UsbDevice>,
     unavailable: Option<String>,
-    next_refresh: OffsetDateTime,
+    next_refresh: tokio::time::Instant,
 }
 
 impl UsbIpUpstreamHost {
@@ -91,16 +92,17 @@ impl UsbIpUpstreamHost {
         let current = lock(&self.inner.snapshot).clone();
         let snapshot = match current {
             Some(snapshot) => {
-                if self.inner.clock.now() >= snapshot.next_refresh {
+                if self.inner.clock.monotonic() >= snapshot.next_refresh {
                     self.start_refresh();
                 }
                 snapshot
             }
             None => {
                 self.start_refresh().cancelled().await;
+                // A refresh that panicked leaves nothing; the host then reads as not reachable.
                 lock(&self.inner.snapshot)
                     .clone()
-                    .expect("a finished refresh leaves a snapshot")
+                    .unwrap_or_else(|| Arc::new(self.inner.failed("the check did not finish")))
             }
         };
 
@@ -131,11 +133,21 @@ impl UsbIpUpstreamHost {
         let inner = self.inner.clone();
         let finished = done.clone();
         tokio::spawn(async move {
+            // Whatever happens below, even a panic, whoever waits for this refresh is let go.
+            let _done = Finished(finished);
             let snapshot = inner.list_upstream().await;
             *lock(&inner.snapshot) = Some(Arc::new(snapshot));
-            finished.cancel();
         });
         done
+    }
+}
+
+/// Cancels its token when dropped.
+struct Finished(CancellationToken);
+
+impl Drop for Finished {
+    fn drop(&mut self) {
+        self.0.cancel();
     }
 }
 
@@ -155,26 +167,28 @@ impl Inner {
         };
         let why = match tokio::time::timeout(self.deadline, look).await {
             Ok(Ok(devices)) => {
-                // Bus IDs come from another machine and end up in the UI and the logs.
+                // The reader already left out any device whose bus ID is not one.
                 return Snapshot {
-                    devices: devices
-                        .into_iter()
-                        .filter(|d| !d.is_hub() && bus_id::is_valid(&d.bus_id))
-                        .collect(),
+                    devices: devices.into_iter().filter(|d| !d.is_hub()).collect(),
                     unavailable: None,
-                    next_refresh: self.clock.now() + LIST_FOR,
+                    next_refresh: self.clock.monotonic() + LIST_FOR,
                 };
             }
             Ok(Err(e)) => e.to_string(),
             Err(_) => "it did not answer in time".to_owned(),
         };
+        self.failed(&why)
+    }
+
+    /// A snapshot that says the server cannot be reached, and when to look again.
+    fn failed(&self, why: &str) -> Snapshot {
         Snapshot {
             devices: Vec::new(),
             unavailable: Some(format!(
                 "Cannot reach the USB/IP server on {}:{} ({why}). On Windows, install usbipd-win with 'winget install usbipd' and share devices with 'usbipd bind --busid <id>'.",
                 self.host, self.port
             )),
-            next_refresh: self.clock.now() + RETRY_AFTER,
+            next_refresh: self.clock.monotonic() + RETRY_AFTER,
         }
     }
 
@@ -185,7 +199,7 @@ impl Inner {
     }
 
     /// Connects and imports `bus_id` under the deadline. Returns the connection, ready for traffic.
-    async fn import(&self, bus_id: &str) -> Result<TcpStream, UsbError> {
+    async fn import(&self, bus_id: &BusId) -> Result<TcpStream, UsbError> {
         let handshake = async {
             let mut upstream = self.connect().await?;
             upstream
@@ -193,12 +207,19 @@ impl Inner {
                 .await?;
             let reply = protocol::read_header(&mut upstream).await?;
             if reply.code != protocol::OP_REP_IMPORT || reply.status != protocol::STATUS_OK {
-                return Ok(Err(UsbError::new(format!(
+                return Ok(Err(UsbError::failed(format!(
                     "{} would not export {bus_id}. Another client may be using it.",
                     self.host
                 ))));
             }
-            protocol::read_imported_device(&mut upstream).await?;
+            let record = protocol::read_imported_device(&mut upstream).await?;
+            // The reply must describe the device that was asked for.
+            if record.bus_id != *bus_id {
+                return Ok(Err(UsbError::failed(format!(
+                    "{} answered the import of {bus_id} with a different device ({}).",
+                    self.host, record.bus_id
+                ))));
+            }
             Ok::<_, io::Error>(Ok(upstream))
         };
         let why = match tokio::time::timeout(self.deadline, handshake).await {
@@ -206,7 +227,7 @@ impl Inner {
             Ok(Err(e)) => e.to_string(),
             Err(_) => "it did not answer in time".to_owned(),
         };
-        Err(UsbError::new(format!(
+        Err(UsbError::failed(format!(
             "Could not import {bus_id} from {}:{}: {why}",
             self.host, self.port
         )))
@@ -222,7 +243,7 @@ struct UpstreamExport {
 /// Takes the bus ID out of the in-use list when dropped.
 struct Claim {
     inner: Arc<Inner>,
-    bus_id: String,
+    bus_id: BusId,
 }
 
 impl Drop for Claim {
@@ -281,7 +302,7 @@ impl UsbHost for UsbIpUpstreamHost {
         true
     }
 
-    fn sharing_advice(&self, bus_id: &str, share: bool) -> String {
+    fn sharing_advice(&self, bus_id: &BusId, share: bool) -> String {
         let host = &self.inner.host;
         if share {
             format!(
@@ -294,30 +315,32 @@ impl UsbHost for UsbIpUpstreamHost {
         }
     }
 
-    fn share<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn share<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         let advice = self.sharing_advice(bus_id, true);
-        Box::pin(async move { Err(UsbError::new(advice)) })
+        Box::pin(async move { Err(UsbError::failed(advice)) })
     }
 
-    fn unshare<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn unshare<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         let advice = self.sharing_advice(bus_id, false);
-        Box::pin(async move { Err(UsbError::new(advice)) })
+        Box::pin(async move { Err(UsbError::failed(advice)) })
     }
 
-    fn status<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
+    fn status<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
         Box::pin(async move {
             if lock(&self.inner.in_use).contains_key(bus_id) {
                 return Ok(ExportStatus::Used);
             }
-            Ok(if self.devices().await.iter().any(|d| d.bus_id == bus_id) {
-                ExportStatus::Available
-            } else {
-                ExportStatus::NotExported
-            })
+            Ok(
+                if self.devices().await.iter().any(|d| d.bus_id == *bus_id) {
+                    ExportStatus::Available
+                } else {
+                    ExportStatus::NotExported
+                },
+            )
         })
     }
 
-    fn reset<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn reset<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -328,13 +351,11 @@ impl UsbHost for UsbIpUpstreamHost {
         device: &'a UsbDevice,
     ) -> BoxFuture<'a, Result<Box<dyn Export>, UsbError>> {
         Box::pin(async move {
-            let bus_id = bus_id::require(&device.bus_id)?.to_owned();
+            let bus_id = device.bus_id.clone();
             {
                 let mut in_use = lock(&self.inner.in_use);
                 if in_use.contains_key(&bus_id) {
-                    return Err(UsbError::new(format!(
-                        "{bus_id} is already being used through this server."
-                    )));
+                    return Err(UsbError::Claimed(bus_id));
                 }
                 in_use.insert(bus_id.clone(), device.clone());
             }
@@ -379,45 +400,43 @@ impl UpstreamAddress {
             port,
         };
 
-        if let Some(rest) = text.strip_prefix('[') {
-            let Some(close) = rest.find(']') else {
-                return Err(bad("the text in [ ] is not an IPv6 address"));
-            };
-            let address = &rest[..close];
-            if address.parse::<Ipv6Addr>().is_err() {
-                return Err(bad("the text in [ ] is not an IPv6 address"));
+        // A bare IPv6 address has no room for a port, and `Authority` wants it in brackets.
+        if text.parse::<Ipv6Addr>().is_ok() {
+            return Ok(new(text, Self::DEFAULT_PORT));
+        }
+        if text.contains('@') {
+            return Err(bad("there is no room for a user name"));
+        }
+        let authority: Authority = text.parse().map_err(|_| {
+            if text.matches(':').count() > 1 && !text.starts_with('[') {
+                bad("put an IPv6 address in [ ] when it has a port")
+            } else if text.starts_with('[') {
+                bad("the text in [ ] is not an IPv6 address")
+            } else {
+                bad("it is not a host with a port")
             }
-            let after = &rest[close + 1..];
-            return if after.is_empty() {
-                Ok(new(address, Self::DEFAULT_PORT))
-            } else {
-                Ok(new(
-                    address,
-                    port_after_colon(after).ok_or_else(|| bad(PORT_RULE))?,
-                ))
-            };
-        }
-
-        let colons = text.matches(':').count();
-        if colons > 1 {
-            // Several colons without brackets can only be a bare IPv6 address, with no room for a port.
-            return if text.parse::<Ipv6Addr>().is_ok() {
-                Ok(new(text, Self::DEFAULT_PORT))
-            } else {
-                Err(bad("put an IPv6 address in [ ] when it has a port"))
-            };
-        }
-
-        let host = text.split(':').next().unwrap_or_default();
-        if host.is_empty() || host.chars().any(char::is_whitespace) {
+        })?;
+        let host = authority.host();
+        let bare = host
+            .strip_prefix('[')
+            .and_then(|h| h.strip_suffix(']'))
+            .map(|inner| {
+                inner
+                    .parse::<Ipv6Addr>()
+                    .map(|_| inner)
+                    .map_err(|_| bad("the text in [ ] is not an IPv6 address"))
+            })
+            .transpose()?
+            .unwrap_or(host);
+        if bare.is_empty() || bare.chars().any(char::is_whitespace) {
             return Err(bad("the host is missing"));
         }
-        if colons == 1 {
-            let port = port_after_colon(&text[host.len()..]).ok_or_else(|| bad(PORT_RULE))?;
-            Ok(new(host, port))
-        } else {
-            Ok(new(host, Self::DEFAULT_PORT))
+        let after_host = &text[host.len()..];
+        if after_host.is_empty() {
+            return Ok(new(bare, Self::DEFAULT_PORT));
         }
+        let port = port_after_colon(after_host).ok_or_else(|| bad(PORT_RULE))?;
+        Ok(new(bare, port))
     }
 }
 

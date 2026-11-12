@@ -16,11 +16,11 @@ use koppel_config::{CodecError, ConfigFile, FileCodec, KoppelPaths, Options, Pla
 use koppel_usb::peer_check::AnyPeer;
 use koppel_usb::stream::memory;
 use koppel_usb::{
-    ActivityOutcome, ActivityReason, ActivitySink, BoxFuture, ClientOptions, CloseReason,
-    DeviceStream, EntityRef, Export, ExportStatus, GatewayOptions, Link, LinkEvents, LinkStatus,
-    Links, Listener, OpenError, RemoteClient, StreamOpener, SystemClock, UsbAttacher, UsbClient,
-    UsbDataPlane, UsbDevice, UsbError, UsbHost, UsbInterface, UsbIpDriver, UsbIpGateway, UsbServer,
-    UsbSpeed, VhciPort, protocol,
+    ActivityOutcome, ActivityReason, ActivitySink, BoxFuture, BusId, ClientOptions, CloseReason,
+    Deps, DeviceStream, EntityRef, Export, ExportStatus, GatewayOptions, Link, LinkEvents,
+    LinkState, LinkStatus, Links, Listener, OpenError, RemoteClient, ServerDeps, StreamOpener,
+    SystemClock, UsbAttacher, UsbClient, UsbDataPlane, UsbDevice, UsbError, UsbHost, UsbInterface,
+    UsbIpDriver, UsbIpGateway, UsbServer, UsbSpeed, VhciPort, protocol,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -36,7 +36,6 @@ pub fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// The dongle every test shares: a CodeMeter stick on 1-1.4.
 pub fn dongle() -> UsbDevice {
     UsbDevice {
-        bus_id: "1-1.4".into(),
         path: "/sys/devices/fake/1-1.4".into(),
         bus_num: 1,
         dev_num: 5,
@@ -51,16 +50,16 @@ pub fn dongle() -> UsbDevice {
         product: Some("CodeMeter-Stick".into()),
         serial: Some("SERIAL-123".into()),
         driver: Some("usbip-host".into()),
-        ..UsbDevice::default()
+        ..UsbDevice::new("1-1.4".parse().unwrap())
     }
 }
 
 /// Polls `condition` until it holds, for up to 30 seconds.
 pub async fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
-    let until = std::time::Instant::now() + Duration::from_secs(30);
+    let until = tokio::time::Instant::now() + Duration::from_secs(30);
     while !condition() {
         assert!(
-            std::time::Instant::now() < until,
+            tokio::time::Instant::now() < until,
             "{what} did not happen in 30 seconds"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -73,10 +72,10 @@ where
     F: FnMut() -> Fut,
     Fut: Future<Output = bool>,
 {
-    let until = std::time::Instant::now() + Duration::from_secs(30);
+    let until = tokio::time::Instant::now() + Duration::from_secs(30);
     while !condition().await {
         assert!(
-            std::time::Instant::now() < until,
+            tokio::time::Instant::now() < until,
             "{what} did not happen in 30 seconds"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -153,7 +152,8 @@ impl ActivitySink for Log {
 /// the device to usbip-host, unsharing gives it back, and a test can make either refuse.
 pub struct FakeKernel {
     state: Mutex<KernelState>,
-    used: Arc<AtomicBool>,
+    /// The devices a client has imported.
+    used: Arc<Mutex<HashSet<BusId>>>,
     reset_started: Semaphore,
     gates: Mutex<Gates>,
 }
@@ -175,6 +175,8 @@ struct KernelState {
     list_failures: usize,
     list_failure: String,
     list_failed: bool,
+    listings: usize,
+    status_failures: Vec<(String, String)>,
     attached: Vec<StdTcpStream>,
     detached_ports: Vec<u32>,
 }
@@ -193,10 +195,12 @@ impl Default for FakeKernel {
                 list_failures: 0,
                 list_failure: String::new(),
                 list_failed: false,
+                listings: 0,
+                status_failures: Vec::new(),
                 attached: Vec::new(),
                 detached_ports: Vec::new(),
             }),
-            used: Arc::new(AtomicBool::new(false)),
+            used: Arc::new(Mutex::new(HashSet::new())),
             reset_started: Semaphore::new(0),
             gates: Mutex::new(Gates::default()),
         }
@@ -244,6 +248,18 @@ impl FakeKernel {
         let mut state = lock(&self.state);
         state.list_failure = message.to_owned();
         state.list_failures = times;
+    }
+
+    /// How many times the host was asked for its devices.
+    pub fn listings(&self) -> usize {
+        lock(&self.state).listings
+    }
+
+    /// Reading the state of `bus_id` fails with `message`.
+    pub fn fail_status(&self, bus_id: &str, message: &str) {
+        lock(&self.state)
+            .status_failures
+            .push((bus_id.to_owned(), message.to_owned()));
     }
 
     pub fn listing_failed(&self) -> bool {
@@ -323,16 +339,17 @@ impl UsbHost for FakeKernel {
 
     fn list_devices(&self) -> BoxFuture<'_, Result<Vec<UsbDevice>, UsbError>> {
         let mut state = lock(&self.state);
+        state.listings += 1;
         let listed = if state.list_failures > 0 {
             state.list_failures -= 1;
             state.list_failed = true;
-            Err(UsbError::new(state.list_failure.clone()))
+            Err(UsbError::failed(state.list_failure.clone()))
         } else {
             Ok(state
                 .devices
                 .iter()
                 .map(|d| UsbDevice {
-                    driver: Some(if state.bound.contains(&d.bus_id) {
+                    driver: Some(if state.bound.contains(d.bus_id.as_str()) {
                         "usbip-host".into()
                     } else {
                         "ftdi_sio".into()
@@ -348,37 +365,45 @@ impl UsbHost for FakeKernel {
         device.driver.as_deref() == Some("usbip-host")
     }
 
-    fn sharing_advice(&self, _: &str, _: bool) -> String {
+    fn sharing_advice(&self, _: &BusId, _: bool) -> String {
         "Koppel shares devices itself.".into()
     }
 
-    fn share<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn share<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async move {
             let mut state = lock(&self.state);
             if let Some(failure) = &state.share_failure {
-                return Err(UsbError::new(failure.clone()));
+                return Err(UsbError::failed(failure.clone()));
             }
-            state.shared.push(bus_id.to_owned());
-            state.bound.insert(bus_id.to_owned());
+            state.shared.push(bus_id.to_string());
+            state.bound.insert(bus_id.to_string());
             Ok(())
         })
     }
 
-    fn unshare<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn unshare<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async move {
             let gate = lock(&self.gates).unshare.clone();
             if let Some(gate) = gate {
                 gate.wait().await;
             }
             let mut state = lock(&self.state);
-            state.unshared.push(bus_id.to_owned());
-            state.bound.remove(bus_id);
+            state.unshared.push(bus_id.to_string());
+            state.bound.remove(bus_id.as_str());
             Ok(())
         })
     }
 
-    fn status<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
-        let status = if self.used.load(Ordering::SeqCst) {
+    fn status<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
+        if let Some((_, message)) = lock(&self.state)
+            .status_failures
+            .iter()
+            .find(|(id, _)| id == bus_id.as_str())
+        {
+            let error = UsbError::failed(message.clone());
+            return Box::pin(async move { Err(error) });
+        }
+        let status = if lock(&self.used).contains(bus_id) {
             ExportStatus::Used
         } else {
             ExportStatus::Available
@@ -386,7 +411,7 @@ impl UsbHost for FakeKernel {
         Box::pin(async move { Ok(status) })
     }
 
-    fn reset<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn reset<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async move {
             self.reset_started.add_permits(1);
             let gate = lock(&self.gates).reset.clone();
@@ -398,16 +423,20 @@ impl UsbHost for FakeKernel {
         })
     }
 
-    fn export<'a>(&'a self, _: &'a UsbDevice) -> BoxFuture<'a, Result<Box<dyn Export>, UsbError>> {
+    fn export<'a>(
+        &'a self,
+        device: &'a UsbDevice,
+    ) -> BoxFuture<'a, Result<Box<dyn Export>, UsbError>> {
         Box::pin(async move {
             {
                 let mut state = lock(&self.state);
                 state.reset_before_export = state.reset;
                 state.reset = false;
             }
-            self.used.store(true, Ordering::SeqCst);
+            lock(&self.used).insert(device.bus_id.clone());
             Ok(Box::new(EchoExport {
                 used: self.used.clone(),
+                bus_id: device.bus_id.clone(),
             }) as Box<dyn Export>)
         })
     }
@@ -415,12 +444,13 @@ impl UsbHost for FakeKernel {
 
 /// Echoes what arrives, as usbip-host answers URBs, and frees the device when done.
 struct EchoExport {
-    used: Arc<AtomicBool>,
+    used: Arc<Mutex<HashSet<BusId>>>,
+    bus_id: BusId,
 }
 
 impl Drop for EchoExport {
     fn drop(&mut self) {
-        self.used.store(false, Ordering::SeqCst);
+        lock(&self.used).remove(&self.bus_id);
     }
 }
 
@@ -462,7 +492,7 @@ impl UsbAttacher for FakeKernel {
     fn attach(&self, socket: &StdTcpStream, _: u32, _: UsbSpeed) -> Result<u32, UsbError> {
         let kept = socket
             .try_clone()
-            .map_err(|e| UsbError::new(e.to_string()))?;
+            .map_err(|e| UsbError::failed(e.to_string()))?;
         lock(&self.state).attached.push(kept);
         Ok(8)
     }
@@ -542,11 +572,11 @@ impl UsbIpDriver for FakeDriver {
         &'a self,
         host: &'a str,
         port: u16,
-        bus_id: &'a str,
+        bus_id: &'a BusId,
     ) -> BoxFuture<'a, Result<u32, UsbError>> {
         Box::pin(async move {
             self.attaches.fetch_add(1, Ordering::SeqCst);
-            let fail = |e: std::io::Error| UsbError::new(e.to_string());
+            let fail = |e: std::io::Error| UsbError::failed(e.to_string());
             let mut stream = TcpStream::connect((host, port)).await.map_err(fail)?;
             stream
                 .write_all(&protocol::import_request(bus_id))
@@ -554,7 +584,7 @@ impl UsbIpDriver for FakeDriver {
                 .map_err(fail)?;
             let reply = protocol::read_header(&mut stream).await.map_err(fail)?;
             if reply.status != protocol::STATUS_OK {
-                return Err(UsbError::new("Device not available."));
+                return Err(UsbError::failed("Device not available."));
             }
             protocol::read_imported_device(&mut stream)
                 .await
@@ -582,7 +612,7 @@ impl UsbIpDriver for FakeDriver {
         &'a self,
         _: &'a str,
         _: u16,
-        bus_id: &'a str,
+        bus_id: &'a BusId,
         driver_port: u32,
     ) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async move {
@@ -624,13 +654,13 @@ impl ServerSide {
         let settings = open::settings(&paths);
         settings.start().await.unwrap();
         let activity = Arc::new(Log::default());
-        let server = UsbServer::new(
+        let server = UsbServer::new(ServerDeps {
             host,
-            open::devices(&paths),
-            settings.clone(),
-            activity.clone(),
-            Arc::new(SystemClock),
-        );
+            shared: open::devices(&paths),
+            settings: settings.clone(),
+            activity: activity.clone(),
+            clock: Arc::new(SystemClock),
+        });
         server.start().await.unwrap();
         let plane = UsbDataPlane::new(server.clone(), activity.clone(), settings.clone());
         plane.start();
@@ -879,10 +909,10 @@ impl ClientSide {
         );
         connection.start().await.unwrap();
         let activity = Arc::new(Log::default());
-        let client = UsbClient::new(
-            settings.clone(),
-            connection.clone(),
-            ConfigFile::new(
+        let client = UsbClient::new(Deps {
+            settings: settings.clone(),
+            connection: connection.clone(),
+            remembered: ConfigFile::new(
                 paths.attached_file(),
                 AttachedDevices::empty(),
                 Options {
@@ -891,13 +921,13 @@ impl ClientSide {
                     ..Options::default()
                 },
             ),
-            setup.attacher,
-            setup.driver,
-            links.clone(),
-            activity.clone(),
-            Arc::new(SystemClock),
-            setup.options,
-        );
+            attacher: setup.attacher,
+            driver: setup.driver,
+            links: links.clone(),
+            activity: activity.clone(),
+            clock: Arc::new(SystemClock),
+            options: setup.options,
+        });
         client.start().await.unwrap();
         // Every test connection comes from this process, so the gateway serves everyone, as
         // 0.1.x's tests had it.
@@ -945,7 +975,7 @@ impl ClientSide {
         let client = self.client.clone();
         eventually("the link to list the server's devices", || {
             let current = client.current();
-            current.link == "connected" && !current.devices.is_empty()
+            current.link == LinkState::Connected && !current.devices.is_empty()
         })
         .await;
     }

@@ -64,7 +64,7 @@ async fn an_import_nobody_asked_the_driver_for_is_refused() {
     // Another user's "usbip attach", or the driver trying again by itself: Koppel did not ask.
     let mut visitor = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     visitor
-        .write_all(&protocol::import_request("1-1.4"))
+        .write_all(&protocol::import_request(&"1-1.4".parse().unwrap()))
         .await
         .unwrap();
     assert_ne!(

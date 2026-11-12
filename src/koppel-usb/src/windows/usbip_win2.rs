@@ -5,7 +5,7 @@ use std::time::Duration;
 use tokio::process::Command;
 
 use crate::host::UsbIpDriver;
-use crate::{BoxFuture, UsbError, bus_id};
+use crate::{BoxFuture, BusId, UsbError};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -31,7 +31,7 @@ impl UsbipWin2Driver {
     /// `--stop` exits with when there are none, and for a device that was never attached that is
     /// the usual case, so a failed stop never fails the attach or the detach: the command after
     /// it reports what really went wrong.
-    async fn stop_attempts(&self, port: u16, host: &str, bus_id: &str) {
+    async fn stop_attempts(&self, port: u16, host: &str, bus_id: &BusId) {
         let port = port.to_string();
         let _ = self
             .run(&[
@@ -48,7 +48,7 @@ impl UsbipWin2Driver {
 
     async fn run(&self, arguments: &[&str]) -> Result<String, UsbError> {
         if let Some(reason) = self.unavailable() {
-            return Err(UsbError::new(reason));
+            return Err(UsbError::failed(reason));
         }
         let mut command = Command::new(&self.usbip_exe);
         command
@@ -59,22 +59,22 @@ impl UsbipWin2Driver {
             .creation_flags(CREATE_NO_WINDOW)
             .kill_on_drop(true);
         let child = command.spawn().map_err(|e| {
-            UsbError::new(format!("Could not start {}: {e}", self.usbip_exe.display()))
+            UsbError::failed(format!("Could not start {}: {e}", self.usbip_exe.display()))
         })?;
         let last = arguments.last().copied().unwrap_or_default();
         // Dropping the child on the timeout kills it.
         let output = tokio::time::timeout(COMMAND_TIMEOUT, child.wait_with_output())
             .await
             .map_err(|_| {
-                UsbError::new(format!(
+                UsbError::failed(format!(
                     "usbip.exe {last} did not finish in {} seconds.",
                     COMMAND_TIMEOUT.as_secs()
                 ))
             })?
-            .map_err(|e| UsbError::new(format!("usbip.exe {last} failed: {e}")))?;
+            .map_err(|e| UsbError::failed(format!("usbip.exe {last} failed: {e}")))?;
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            return Err(UsbError::new(
+            return Err(UsbError::failed(
                 error.strip_prefix("error: ").unwrap_or(&error).to_owned(),
             ));
         }
@@ -83,7 +83,7 @@ impl UsbipWin2Driver {
 }
 
 /// One token, so a value can never be read as an option of its own (usbip.exe takes `--bus-id=`).
-fn bus_id_option(bus_id: &str) -> String {
+fn bus_id_option(bus_id: &BusId) -> String {
     format!("--bus-id={bus_id}")
 }
 
@@ -103,10 +103,9 @@ impl UsbIpDriver for UsbipWin2Driver {
         &'a self,
         host: &'a str,
         port: u16,
-        bus_id: &'a str,
+        bus_id: &'a BusId,
     ) -> BoxFuture<'a, Result<u32, UsbError>> {
         Box::pin(async move {
-            let bus_id = bus_id::require(bus_id)?;
             // After a dropped connection the driver keeps trying to attach the device by itself.
             // Stop that first, so the device is not attached twice.
             self.stop_attempts(port, host, bus_id).await;
@@ -126,7 +125,7 @@ impl UsbIpDriver for UsbipWin2Driver {
                 ])
                 .await?;
             output.trim().parse::<u32>().map_err(|_| {
-                UsbError::new(format!(
+                UsbError::failed(format!(
                     "usbip.exe attached {bus_id} but did not say on which port: {}",
                     output.trim()
                 ))
@@ -138,11 +137,10 @@ impl UsbIpDriver for UsbipWin2Driver {
         &'a self,
         host: &'a str,
         port: u16,
-        bus_id: &'a str,
+        bus_id: &'a BusId,
         driver_port: u32,
     ) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async move {
-            let bus_id = bus_id::require(bus_id)?;
             // The driver attaches again by itself after a dropped connection, so stop that first.
             self.stop_attempts(port, host, bus_id).await;
             self.run(&["detach", "-p", &driver_port.to_string()])
@@ -185,24 +183,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn driver_refuses_a_bus_id_before_it_starts_usbip() {
-        let driver = UsbipWin2Driver::new("does-not-exist.exe");
-
-        let attach = driver.attach("127.0.0.1", 3242, "1-1 --stop").await;
-        let detach = driver.detach("127.0.0.1", 3242, "--all", 1).await;
-
-        assert!(attach.unwrap_err().message().contains("not a USB bus ID"));
-        assert!(detach.unwrap_err().message().contains("not a USB bus ID"));
-    }
-
-    #[tokio::test]
     async fn attach_goes_on_when_there_is_nothing_to_stop() {
         let folder = Folder::new("attach");
         let driver = UsbipWin2Driver::new(folder.fake_usbip(
             "echo %* | findstr /C:\"--stop\" >nul && (echo error: no attach attempt to stop 1>&2 & exit /b 1)\necho 7",
         ));
 
-        let port = driver.attach("127.0.0.1", 3242, "1-1.4").await.unwrap();
+        let port = driver
+            .attach("127.0.0.1", 3242, &"1-1.4".parse().unwrap())
+            .await
+            .unwrap();
 
         assert_eq!(port, 7);
     }
@@ -216,7 +206,10 @@ mod tests {
             log.display()
         )));
 
-        driver.detach("127.0.0.1", 3242, "1-1.4", 7).await.unwrap();
+        driver
+            .detach("127.0.0.1", 3242, &"1-1.4".parse().unwrap(), 7)
+            .await
+            .unwrap();
 
         assert!(fs::read_to_string(&log).unwrap().contains("detach -p 7"));
     }
@@ -227,9 +220,11 @@ mod tests {
         let driver =
             UsbipWin2Driver::new(folder.fake_usbip("echo error: device busy 1>&2\nexit /b 1"));
 
-        let attach = driver.attach("127.0.0.1", 3242, "1-1.4").await;
+        let attach = driver
+            .attach("127.0.0.1", 3242, &"1-1.4".parse().unwrap())
+            .await;
 
-        assert_eq!(attach.unwrap_err().message(), "device busy");
+        assert_eq!(attach.unwrap_err().to_string(), "device busy");
     }
 
     #[test]

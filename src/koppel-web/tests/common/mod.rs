@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use koppel_config::{KoppelPaths, SecretBox};
 use koppel_usb::{
-    BoxFuture, DeviceStream, Export, ExportStatus, GatewayOptions, UsbAttacher, UsbDevice,
+    BoxFuture, BusId, DeviceStream, Export, ExportStatus, GatewayOptions, UsbAttacher, UsbDevice,
     UsbError, UsbHost, UsbInterface, UsbSpeed, VhciPort,
 };
 use koppel_web::{App, AppOptions, Host, NetworkOptions, UiReach, UsbOptions};
@@ -68,7 +68,6 @@ impl Drop for TempDir {
 /// The dongle the tests share: a CodeMeter stick on 1-1.4.
 pub fn dongle() -> UsbDevice {
     UsbDevice {
-        bus_id: "1-1.4".into(),
         path: "/sys/devices/fake/1-1.4".into(),
         bus_num: 1,
         dev_num: 5,
@@ -83,7 +82,7 @@ pub fn dongle() -> UsbDevice {
         product: Some("CodeMeter-Stick".into()),
         serial: Some("SERIAL-123".into()),
         driver: None,
-        ..UsbDevice::default()
+        ..UsbDevice::new("1-1.4".parse().unwrap())
     }
 }
 
@@ -152,21 +151,21 @@ impl UsbHost for FakeKernel {
         device.driver.as_deref() == Some("usbip-host")
     }
 
-    fn sharing_advice(&self, _: &str, _: bool) -> String {
+    fn sharing_advice(&self, _: &BusId, _: bool) -> String {
         "Koppel shares devices itself.".into()
     }
 
-    fn share<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
-        lock(&self.bound).insert(bus_id.to_owned());
+    fn share<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
+        lock(&self.bound).insert(bus_id.to_string());
         Box::pin(async { Ok(()) })
     }
 
-    fn unshare<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
-        lock(&self.bound).remove(bus_id);
+    fn unshare<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
+        lock(&self.bound).remove(bus_id.as_str());
         Box::pin(async { Ok(()) })
     }
 
-    fn status<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
+    fn status<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
         let status = if self.used.load(Ordering::SeqCst) {
             ExportStatus::Used
         } else {
@@ -175,7 +174,7 @@ impl UsbHost for FakeKernel {
         Box::pin(async move { Ok(status) })
     }
 
-    fn reset<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
+    fn reset<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
         Box::pin(async { Ok(()) })
     }
 
@@ -235,7 +234,7 @@ impl UsbAttacher for FakeKernel {
     fn attach(&self, socket: &StdTcpStream, _: u32, _: UsbSpeed) -> Result<u32, UsbError> {
         let kept = socket
             .try_clone()
-            .map_err(|e| UsbError::new(e.to_string()))?;
+            .map_err(|e| UsbError::failed(e.to_string()))?;
         lock(&self.attached).push(kept);
         Ok(8)
     }

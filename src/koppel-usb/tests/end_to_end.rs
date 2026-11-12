@@ -120,7 +120,7 @@ async fn gateway_lets_a_usbip_driver_on_the_client_machine_list_and_attach() {
     }
 
     let mut usb = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    usb.write_all(&protocol::import_request("1-1.4"))
+    usb.write_all(&protocol::import_request(&"1-1.4".parse().unwrap()))
         .await
         .unwrap();
     let reply = protocol::read_header(&mut usb).await.unwrap();

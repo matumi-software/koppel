@@ -231,13 +231,13 @@ impl App {
         let certificate = store.slot();
         let own_acceptor =
             tls::acceptor(certificate.clone()).map_err(|e| StartError::Other(e.to_string()))?;
-        let usb_server = koppel_usb::UsbServer::new(
-            usb.host.clone(),
-            devices.clone(),
-            settings.clone(),
-            usb_activity.clone(),
-            clock.clone(),
-        );
+        let usb_server = koppel_usb::UsbServer::new(koppel_usb::ServerDeps {
+            host: usb.host.clone(),
+            shared: devices.clone(),
+            settings: settings.clone(),
+            activity: usb_activity.clone(),
+            clock: clock.clone(),
+        });
         let data_plane =
             UsbDataPlane::new(usb_server.clone(), usb_activity.clone(), settings.clone());
         let (remote, remote_view) = watch::channel(Arc::new(usb_server.current().for_remote()));
@@ -297,17 +297,17 @@ impl App {
             Browser::new(options)
         });
         let links = SkakelLinks::new(connection.clone(), browser.clone(), activity.clone());
-        let usb_client = koppel_usb::UsbClient::new(
-            settings.clone(),
-            connection.clone(),
-            attached.clone(),
-            usb.attacher.clone(),
-            usb.driver.clone(),
+        let usb_client = koppel_usb::UsbClient::new(koppel_usb::Deps {
+            settings: settings.clone(),
+            connection: connection.clone(),
+            remembered: attached.clone(),
+            attacher: usb.attacher.clone(),
+            driver: usb.driver.clone(),
             links,
-            usb_activity.clone(),
+            activity: usb_activity.clone(),
             clock,
-            usb.client,
-        );
+            options: usb.client,
+        });
         let gateway = UsbIpGateway::new(usb_client.clone(), settings.clone(), usb.gateway, None);
         let client = SkakelClientRole::new(
             connection.clone(),

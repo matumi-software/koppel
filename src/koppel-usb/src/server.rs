@@ -1,52 +1,57 @@
 //! The server role: the USB devices on this machine, the user's share choices in `devices.json`,
 //! and the device list the UI and the remote clients follow.
+//!
+//! One actor task owns everything that changes ([`Actor`]): which devices Koppel means to share,
+//! what went wrong with each, who holds which. The share choices, the poll, a role change and a
+//! client's attach all reach it as commands, one after the other, so two of them can never
+//! change the host at once. What it learns it publishes through a `watch` channel, and a
+//! listener sees the newest snapshot each time it changes.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::future::Future;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use koppel_config::files::{KoppelSettings, Role, SharedDevices};
 use koppel_config::json::OrderedMap;
 use koppel_config::{ConfigFile, ConfigFileError, Subscription};
 use time::OffsetDateTime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio_util::sync::CancellationToken;
 
-use crate::tasks::{BackgroundTasks, Handlers, lock};
+use crate::tasks::{Backoff, Listener, Tasks, listen, lock};
 use crate::{
-    ActivityOutcome, ActivityReason, ActivitySink, Clock, DeviceView, EntityRef, ExportStatus,
-    Listener, ServerDevices, UsbDevice, UsbError, UsbHost, WakeSignal, bus_id,
-    interface_class_name, speed_label,
+    ActivityOutcome, ActivityReason, ActivitySink, BusId, Clock, DeviceState, DeviceView,
+    EntityRef, ExportStatus, ServerDevices, UsbDevice, UsbError, UsbHost, interface_class_name,
+    speed_label,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const STOP_WAIT: Duration = Duration::from_secs(5);
-const WRONG_DEVICE: &str = "A different device is plugged into this port now, so it is not shared. Share it again to use it.";
+/// A host that keeps failing is asked after 4 seconds, then 8, 16 and at last every 30.
+const POLL_BACKOFF_MIN: Duration = Duration::from_secs(4);
+const POLL_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
 /// Whether `devices.json` says to share this device: its bus ID is saved, and it is the VID:PID
 /// that was shared there. A bus ID is a port, so a different device plugged into the same port
 /// is not shared without asking. A share saved before the VID:PID was recorded matches by port.
 pub fn shared_expects(shared: &SharedDevices, device: &UsbDevice) -> bool {
-    let saved = shared
-        .bus_ids
-        .as_ref()
-        .is_some_and(|ids| ids.contains(&device.bus_id));
+    let saved = saved_contains(shared, &device.bus_id);
     saved
         && shared
             .vid_pids
             .as_ref()
-            .and_then(|v| v.get(&device.bus_id))
+            .and_then(|v| v.get(device.bus_id.as_str()))
             .is_none_or(|vid_pid| *vid_pid == device.vid_pid())
 }
 
-fn saved_contains(shared: &SharedDevices, bus_id: &str) -> bool {
+fn saved_contains(shared: &SharedDevices, bus_id: &BusId) -> bool {
     shared
         .bus_ids
         .as_ref()
-        .is_some_and(|ids| ids.iter().any(|b| b == bus_id))
+        .is_some_and(|ids| ids.iter().any(|b| b == bus_id.as_str()))
 }
 
 fn serves(role: Role) -> bool {
@@ -54,156 +59,173 @@ fn serves(role: Role) -> bool {
 }
 
 /// Why a share choice was not taken.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SetSharedError {
     /// The bus ID is not a USB bus ID. Nothing was changed. The endpoint answers 400.
+    #[error("That is not a USB bus ID.")]
     InvalidBusId,
     /// The host could not list its devices.
-    Host(UsbError),
+    #[error("{0}")]
+    Host(#[source] UsbError),
     /// The kernel took the change, but `devices.json` could not be written, so the change was
     /// undone.
-    Save(ConfigFileError),
+    #[error("{0}")]
+    Save(#[source] ConfigFileError),
+    /// The server stopped before it could answer.
+    #[error("The USB server is not running.")]
+    Stopped,
 }
 
-impl fmt::Display for SetSharedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidBusId => f.write_str("That is not a USB bus ID."),
-            Self::Host(e) => write!(f, "{e}"),
-            Self::Save(e) => write!(f, "{e}"),
-        }
-    }
+enum Command {
+    /// Applies the saved shares and takes the first look.
+    Init {
+        reply: oneshot::Sender<()>,
+    },
+    SetShared {
+        bus_id: BusId,
+        share: bool,
+        reply: oneshot::Sender<Result<(), SetSharedError>>,
+    },
+    /// A client imported (`Some`) or released (`None`) a device.
+    Attached {
+        bus_id: BusId,
+        client: Option<(String, OffsetDateTime)>,
+    },
+    SettingsChanged {
+        role: Role,
+        reply: oneshot::Sender<()>,
+    },
+    Stop {
+        reply: oneshot::Sender<()>,
+    },
 }
 
-impl std::error::Error for SetSharedError {}
-
-/// Server role: tracks the USB devices on this machine, applies the user's share choices to the
-/// host, and tells its listeners whenever what the host reports changes. Polls the host every two
-/// seconds, which also catches plugging and unplugging. Cheap to clone.
-///
-/// A snapshot is taken, and given a sequence number, under a lock. It is delivered to the
-/// listeners outside that lock, by one pump, in order, and a snapshot that a newer one overtook
-/// while the listeners were busy is dropped. Listeners push to the network, so a slow or stuck
-/// peer holds up only the pump, never an import, a share or the poll.
-#[derive(Clone)]
-pub struct UsbServer {
-    inner: Arc<Inner>,
-}
-
-struct Inner {
+struct Shared {
     host: Arc<dyn UsbHost>,
     shared: ConfigFile<SharedDevices>,
     settings: ConfigFile<KoppelSettings>,
     activity: Arc<dyn ActivitySink>,
     clock: Arc<dyn Clock>,
-    state: Mutex<State>,
-    /// Taken while a snapshot is built and queued.
-    refresh_gate: tokio::sync::Mutex<()>,
-    /// Taken while share choices are applied to the host.
-    apply_gate: tokio::sync::Mutex<()>,
-    deliveries: mpsc::UnboundedSender<Delivery>,
-    receiver: Mutex<Option<mpsc::UnboundedReceiver<Delivery>>>,
-    refresh_requested: WakeSignal,
-    tasks: BackgroundTasks,
-    listeners: Handlers<ServerDevices>,
-    stopping: CancellationToken,
-    subscription: Mutex<Option<Subscription>>,
+    commands: mpsc::UnboundedSender<Command>,
+    snapshot: watch::Receiver<Arc<ServerDevices>>,
+    listeners: Tasks,
+    actor_stop: CancellationToken,
 }
 
-#[derive(Default)]
-struct State {
-    faults: HashMap<String, String>,
-    attached_to: HashMap<String, (String, OffsetDateTime)>,
-    names: HashMap<String, String>,
-    /// The bus IDs Koppel means to have shared right now. Saved shares come back into it at
-    /// start-up only when `ShareOnStartup` is on.
-    active: HashSet<String>,
-    role: Role,
-    present: Option<HashSet<String>>,
-    last: Option<ServerDevices>,
-    current: Arc<ServerDevices>,
-    sequence: u64,
+impl Shared {
+    fn send(&self, command: Command) {
+        let _ = self.commands.send(command);
+    }
+
+    /// Bound for export, and the device the user shared on that port.
+    fn is_exportable(&self, device: &UsbDevice) -> bool {
+        self.host.is_shared(device)
+            && (!self.host.can_share() || shared_expects(&self.shared.current(), device))
+    }
 }
 
-struct Delivery {
-    sequence: u64,
-    devices: Arc<ServerDevices>,
-    plugs: Vec<PlugEvent>,
+/// What a [`UsbServer`] is made from.
+pub struct ServerDeps {
+    pub host: Arc<dyn UsbHost>,
+    /// `devices.json`, opened with [`koppel_config::open::devices`].
+    pub shared: ConfigFile<SharedDevices>,
+    pub settings: ConfigFile<KoppelSettings>,
+    pub activity: Arc<dyn ActivitySink>,
+    pub clock: Arc<dyn Clock>,
 }
 
-struct PlugEvent {
-    bus_id: String,
-    name: String,
-    reason: ActivityReason,
-    summary: String,
+/// Server role: tracks the USB devices on this machine, applies the user's share choices to the
+/// host, and tells its listeners whenever what the host reports changes. Polls the host every two
+/// seconds, which also catches plugging and unplugging. Cheap to clone.
+///
+/// A snapshot is built by the actor, between two commands, and published. Listeners push to the
+/// network, so a slow or stuck peer holds up only its own listener, never an import, a share or
+/// the poll.
+#[derive(Clone)]
+pub struct UsbServer {
+    shared: Arc<Shared>,
+    run: Arc<Mutex<Option<Actor>>>,
+    actor: Arc<Mutex<Option<JoinHandle<()>>>>,
+    subscription: Arc<Mutex<Option<Subscription>>>,
 }
 
 impl UsbServer {
-    /// A server over `host`, with the share choices in `shared` (`devices.json`, opened with
-    /// [`koppel_config::open::devices`]) and the role in `settings`. Nothing runs until
-    /// [`Self::start`].
-    pub fn new(
-        host: Arc<dyn UsbHost>,
-        shared: ConfigFile<SharedDevices>,
-        settings: ConfigFile<KoppelSettings>,
-        activity: Arc<dyn ActivitySink>,
-        clock: Arc<dyn Clock>,
-    ) -> Self {
-        let (deliveries, receiver) = mpsc::unbounded_channel();
+    /// A server over `deps.host`, with the share choices in `devices.json` and the role in the
+    /// settings. Nothing runs until [`Self::start`].
+    pub fn new(deps: ServerDeps) -> Self {
+        let (commands_tx, commands) = mpsc::unbounded_channel();
+        let (snapshot_tx, snapshot) = watch::channel(Arc::new(ServerDevices::default()));
+        let shared = Arc::new(Shared {
+            host: deps.host,
+            shared: deps.shared,
+            settings: deps.settings,
+            activity: deps.activity,
+            clock: deps.clock,
+            commands: commands_tx,
+            snapshot,
+            listeners: Tasks::default(),
+            actor_stop: CancellationToken::new(),
+        });
+        let actor = Actor {
+            shared: shared.clone(),
+            commands,
+            snapshot: snapshot_tx,
+            faults: HashMap::new(),
+            attached_to: HashMap::new(),
+            names: HashMap::new(),
+            active: HashSet::new(),
+            role: Role::default(),
+            present: None,
+            last: None,
+            backoff: Backoff::new(POLL_BACKOFF_MIN, POLL_BACKOFF_MAX),
+            not_before: None,
+        };
         Self {
-            inner: Arc::new(Inner {
-                host,
-                shared,
-                settings,
-                activity,
-                clock,
-                state: Mutex::new(State::default()),
-                refresh_gate: tokio::sync::Mutex::new(()),
-                apply_gate: tokio::sync::Mutex::new(()),
-                deliveries,
-                receiver: Mutex::new(Some(receiver)),
-                refresh_requested: WakeSignal::new(),
-                tasks: BackgroundTasks::default(),
-                listeners: Handlers::new("the device list"),
-                stopping: CancellationToken::new(),
-                subscription: Mutex::new(None),
-            }),
+            shared,
+            run: Arc::new(Mutex::new(Some(actor))),
+            actor: Arc::new(Mutex::new(None)),
+            subscription: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn host(&self) -> &Arc<dyn UsbHost> {
-        &self.inner.host
+        &self.shared.host
     }
 
     /// The latest snapshot of the device list.
     pub fn current(&self) -> Arc<ServerDevices> {
-        lock(&self.inner.state).current.clone()
+        self.shared.snapshot.borrow().clone()
     }
 
     /// Why `devices.json` is not being used, or `None`. Koppel then started with nothing shared.
     pub fn shared_problem(&self) -> Option<String> {
-        self.inner.shared.problem()
+        self.shared.shared.problem()
     }
 
-    /// Calls `listener` with every new snapshot, in order, from one pump.
+    /// Calls `listener` with every new snapshot, newest first when it falls behind.
     pub fn on_changed<F, Fut>(&self, listener: F) -> Listener
     where
         F: Fn(Arc<ServerDevices>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        self.inner.listeners.add(listener)
+        listen(
+            &self.shared.listeners,
+            "the device list",
+            self.shared.snapshot.clone(),
+            listener,
+        )
     }
 
     pub fn remove_listener(&self, listener: Listener) {
-        self.inner.listeners.remove(listener);
+        listener.stop();
     }
 
     /// Devices a client may import: bound for export, and the ones the user shared.
     pub async fn exportable(&self) -> Result<Vec<UsbDevice>, UsbError> {
-        let devices = self.inner.host.list_devices().await?;
+        let devices = self.shared.host.list_devices().await?;
         Ok(devices
             .into_iter()
-            .filter(|d| self.inner.is_exportable(d))
+            .filter(|d| self.shared.is_exportable(d))
             .collect())
     }
 
@@ -211,57 +233,51 @@ impl UsbServer {
     /// then starts the poll. A host error here is logged and does not stop the start: the poll
     /// applies the saved shares on its next pass.
     pub async fn start(&self) -> Result<(), ConfigFileError> {
-        let inner = &self.inner;
-        inner.shared.start().await?;
-        lock(&inner.state).role = inner.settings.current().role;
-        let weak = Arc::downgrade(inner);
-        let subscription = inner.settings.subscribe(move |next| {
+        let shared = &self.shared;
+        shared.shared.start().await?;
+        let Some(actor) = lock(&self.run).take() else {
+            return Ok(());
+        };
+        *lock(&self.actor) = Some(tokio::spawn(actor.run()));
+
+        let (reply, ready) = oneshot::channel();
+        shared.send(Command::Init { reply });
+        let _ = ready.await;
+
+        let weak = Arc::downgrade(shared);
+        let subscription = shared.settings.subscribe(move |next| {
             let weak = weak.clone();
             async move {
-                if let Some(inner) = weak.upgrade() {
-                    inner.on_settings(&next).await;
+                if let Some(shared) = weak.upgrade() {
+                    let (reply, applied) = oneshot::channel();
+                    shared.send(Command::SettingsChanged {
+                        role: next.role,
+                        reply,
+                    });
+                    let _ = applied.await;
                 }
             }
         });
-        *lock(&inner.subscription) = Some(subscription);
-
-        let first = async {
-            inner.reconcile().await?;
-            inner.refresh(false).await
-        };
-        if let Err(e) = first.await {
-            tracing::warn!(
-                "Setting up the shared devices at start-up failed; the next poll tries again: {e}"
-            );
-        }
-
-        let receiver = lock(&inner.receiver).take();
-        if let Some(receiver) = receiver {
-            inner.tasks.spawn(
-                "deliver the device list",
-                deliver(Arc::downgrade(inner), receiver, inner.stopping.clone()),
-            );
-        }
-        inner.tasks.spawn(
-            "poll the USB devices",
-            poll(Arc::downgrade(inner), inner.stopping.clone()),
-        );
-        inner.tasks.spawn(
-            "refresh on request",
-            refresh_when_requested(Arc::downgrade(inner), inner.stopping.clone()),
-        );
+        *lock(&self.subscription) = Some(subscription);
         Ok(())
     }
 
-    /// Stops the poll and the pump, and waits a moment for background work.
+    /// Stops the poll and the listeners, and waits a moment for background work.
     pub async fn stop(&self) {
-        let inner = &self.inner;
-        if let Some(subscription) = lock(&inner.subscription).take() {
-            inner.settings.unsubscribe(subscription);
+        let shared = &self.shared;
+        if let Some(subscription) = lock(&self.subscription).take() {
+            shared.settings.unsubscribe(subscription);
         }
-        inner.shared.stop();
-        inner.stopping.cancel();
-        inner.tasks.wait(STOP_WAIT).await;
+        shared.shared.stop();
+        let (reply, stopped) = oneshot::channel();
+        shared.send(Command::Stop { reply });
+        let _ = tokio::time::timeout(STOP_WAIT, stopped).await;
+        shared.listeners.stop(STOP_WAIT).await;
+        shared.actor_stop.cancel();
+        let actor = lock(&self.actor).take();
+        if let Some(actor) = actor {
+            let _ = tokio::time::timeout(STOP_WAIT, actor).await;
+        }
     }
 
     /// Applies the choice to the host, and only when that worked records it in `devices.json`,
@@ -269,41 +285,214 @@ impl UsbServer {
     /// fault and nothing is saved, so a share that never took effect is not applied by surprise
     /// at the next start.
     pub async fn set_shared(&self, bus_id: &str, share: bool) -> Result<(), SetSharedError> {
-        if !bus_id::is_valid(bus_id) {
-            return Err(SetSharedError::InvalidBusId);
-        }
-        let inner = &self.inner;
-        let failure = {
-            let _applying = inner.apply_gate.lock().await;
-            let devices = inner
-                .host
-                .list_devices()
-                .await
-                .map_err(SetSharedError::Host)?;
-            let device = devices.into_iter().find(|d| d.bus_id == bus_id);
-            let failure = inner.apply_choice(bus_id, share, device.as_ref()).await;
-            if failure.is_none() {
-                inner
-                    .save_choice(bus_id, share, device.as_ref())
-                    .await
-                    .map_err(SetSharedError::Save)?;
-            }
-            failure
-        };
+        let bus_id: BusId = bus_id.parse().map_err(|_| SetSharedError::InvalidBusId)?;
+        let (reply, done) = oneshot::channel();
+        self.shared.send(Command::SetShared {
+            bus_id,
+            share,
+            reply,
+        });
+        done.await.map_err(|_| SetSharedError::Stopped)?
+    }
 
-        if let Err(e) = inner.refresh(true).await {
+    /// Called by the data plane when a client imports or releases a device. The listeners hear
+    /// about it a moment later, and nobody waits for that.
+    pub fn set_attached(&self, bus_id: &BusId, client_id: Option<&str>) {
+        let client = client_id.map(|c| (c.to_owned(), self.shared.clock.now()));
+        self.shared.send(Command::Attached {
+            bus_id: bus_id.clone(),
+            client,
+        });
+    }
+}
+
+struct Actor {
+    shared: Arc<Shared>,
+    commands: mpsc::UnboundedReceiver<Command>,
+    snapshot: watch::Sender<Arc<ServerDevices>>,
+    faults: HashMap<BusId, String>,
+    attached_to: HashMap<BusId, (String, OffsetDateTime)>,
+    names: HashMap<BusId, String>,
+    /// The bus IDs Koppel means to have shared right now. Saved shares come back into it at
+    /// start-up only when `ShareOnStartup` is on.
+    active: HashSet<BusId>,
+    role: Role,
+    present: Option<HashSet<BusId>>,
+    last: Option<ServerDevices>,
+    /// How long a failing host is left alone, and until when it is now.
+    backoff: Backoff,
+    not_before: Option<tokio::time::Instant>,
+}
+
+impl Actor {
+    async fn run(mut self) {
+        let mut timer =
+            tokio::time::interval_at(tokio::time::Instant::now() + POLL_INTERVAL, POLL_INTERVAL);
+        timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let stop = self.shared.actor_stop.clone();
+        loop {
+            tokio::select! {
+                command = self.commands.recv() => match command {
+                    Some(Command::Stop { reply }) => {
+                        let _ = reply.send(());
+                    }
+                    Some(command) => self.handle(command).await,
+                    None => return,
+                },
+                _ = timer.tick() => self.poll().await,
+                () = stop.cancelled() => return,
+            }
+        }
+    }
+
+    async fn handle(&mut self, command: Command) {
+        match command {
+            Command::Init { reply } => {
+                self.role = self.shared.settings.current().role;
+                let first = async {
+                    self.activate_saved(&self.shared.settings.current());
+                    let mut devices = self.shared.host.list_devices().await?;
+                    if self.apply_intent(&devices, true).await {
+                        devices = self.shared.host.list_devices().await?;
+                    }
+                    self.refresh(&devices, false).await
+                };
+                if let Err(e) = first.await {
+                    tracing::warn!(
+                        "Setting up the shared devices at start-up failed; the next poll tries again: {e}"
+                    );
+                }
+                let _ = reply.send(());
+            }
+            Command::SetShared {
+                bus_id,
+                share,
+                reply,
+            } => {
+                let _ = reply.send(self.set_shared(bus_id, share).await);
+            }
+            Command::Attached { bus_id, client } => {
+                match client {
+                    Some(client) => {
+                        self.attached_to.insert(bus_id, client);
+                    }
+                    None => {
+                        self.attached_to.remove(&bus_id);
+                    }
+                }
+                self.look(true).await;
+            }
+            Command::SettingsChanged { role, reply } => self.on_settings(role, reply).await,
+            Command::Stop { .. } => {}
+        }
+    }
+
+    /// Every two seconds: re-share a device that came back (on a server only; a pure client never
+    /// binds anything to usbip-host), then look again. Whatever the host does, the poll goes on: it
+    /// is what notices a plugged device and re-shares one. A host that keeps failing is asked less
+    /// often, up to every 30 seconds. One scan of the host serves both the sharing and the
+    /// snapshot; only when the sharing changed the host is it looked at again.
+    async fn poll(&mut self) {
+        if self
+            .not_before
+            .is_some_and(|until| self.shared.clock.monotonic() < until)
+        {
+            return;
+        }
+        let pass = async {
+            let mut devices = self.shared.host.list_devices().await?;
+            if serves(self.role) && self.apply_intent(&devices, false).await {
+                devices = self.shared.host.list_devices().await?;
+            }
+            self.refresh(&devices, false).await
+        };
+        match pass.await {
+            Ok(()) => {
+                self.backoff.reset();
+                self.not_before = None;
+            }
+            Err(e) => {
+                tracing::warn!("Reading USB devices failed: {e}");
+                self.not_before = Some(self.shared.clock.monotonic() + self.backoff.next_wait());
+            }
+        }
+    }
+
+    /// Looks at the host and publishes, always with `force`, otherwise when it changed.
+    async fn look(&mut self, force: bool) {
+        let looked = async {
+            let devices = self.shared.host.list_devices().await?;
+            self.refresh(&devices, force).await
+        };
+        if let Err(e) = looked.await {
             tracing::warn!("Reading USB devices failed: {e}");
         }
+    }
 
-        let name = inner.name_of(bus_id, bus_id);
-        let entity = EntityRef::device(bus_id, &name);
+    /// A settings change that moves the role in or out of the server side shares or unshares to
+    /// match. The settings update does not wait for giving every device back, which can take a
+    /// while.
+    async fn on_settings(&mut self, role: Role, reply: oneshot::Sender<()>) {
+        let was = serves(self.role);
+        self.role = role;
+        if was == serves(role) {
+            let _ = reply.send(());
+            return;
+        }
+        if was {
+            let _ = reply.send(());
+            self.unshare_everything().await;
+            self.look(true).await;
+            return;
+        }
+        self.activate_saved(&self.shared.settings.current());
+        let applied = async {
+            let mut devices = self.shared.host.list_devices().await?;
+            if self.apply_intent(&devices, false).await {
+                devices = self.shared.host.list_devices().await?;
+            }
+            Ok::<_, UsbError>(devices)
+        };
+        match applied.await {
+            Ok(devices) => {
+                if let Err(e) = self.refresh(&devices, true).await {
+                    tracing::warn!("Reading USB devices failed: {e}");
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Sharing the saved devices failed: {e}");
+                self.look(true).await;
+            }
+        }
+        let _ = reply.send(());
+    }
+
+    async fn set_shared(&mut self, bus_id: BusId, share: bool) -> Result<(), SetSharedError> {
+        let devices = self
+            .shared
+            .host
+            .list_devices()
+            .await
+            .map_err(SetSharedError::Host)?;
+        let device = devices.into_iter().find(|d| d.bus_id == bus_id);
+        let failure = self.apply_choice(&bus_id, share, device.as_ref()).await;
+        if failure.is_none() {
+            self.save_choice(&bus_id, share, device.as_ref())
+                .await
+                .map_err(SetSharedError::Save)?;
+        }
+
+        self.look(true).await;
+
+        let name = self.name_of(&bus_id);
+        let entity = EntityRef::device(&bus_id, &name);
         let reason = if share {
             ActivityReason::Shared
         } else {
             ActivityReason::Unshared
         };
         match failure {
-            Some(failure) => inner.activity.record(
+            Some(failure) => self.shared.activity.record(
                 entity,
                 reason,
                 ActivityOutcome::Failed,
@@ -313,7 +502,7 @@ impl UsbServer {
                 ),
                 Some(failure),
             ),
-            None => inner.activity.record(
+            None => self.shared.activity.record(
                 entity,
                 reason,
                 ActivityOutcome::Succeeded,
@@ -328,328 +517,143 @@ impl UsbServer {
         Ok(())
     }
 
-    /// Called by the data plane when a client imports or releases a device. The listeners hear
-    /// about it a moment later, and nobody waits for that.
-    pub fn set_attached(&self, bus_id: &str, client_id: Option<&str>) {
-        {
-            let mut state = lock(&self.inner.state);
-            match client_id {
-                Some(client) => {
-                    let since = self.inner.clock.now();
-                    state
-                        .attached_to
-                        .insert(bus_id.to_owned(), (client.to_owned(), since));
-                }
-                None => {
-                    state.attached_to.remove(bus_id);
-                }
-            }
-        }
-        self.inner.refresh_requested.set();
-    }
-}
-
-/// Takes snapshots off the queue in order and hands the newest to the listeners. Snapshots
-/// overtaken while the listeners ran are dropped; their plug events are still recorded.
-async fn deliver(
-    inner: Weak<Inner>,
-    mut receiver: mpsc::UnboundedReceiver<Delivery>,
-    stopping: CancellationToken,
-) {
-    let mut delivered = 0u64;
-    loop {
-        let first = tokio::select! {
-            next = receiver.recv() => next,
-            _ = stopping.cancelled() => None,
-        };
-        let Some(first) = first else {
-            return;
-        };
-        let mut plugs = Vec::new();
-        let mut latest: Option<Arc<ServerDevices>> = None;
-        let mut batch = vec![first];
-        while let Ok(next) = receiver.try_recv() {
-            batch.push(next);
-        }
-        for next in batch {
-            plugs.extend(next.plugs);
-            if next.sequence > delivered {
-                delivered = next.sequence;
-                latest = Some(next.devices);
-            }
-        }
-        let Some(inner) = inner.upgrade() else {
-            return;
-        };
-        if let Some(devices) = latest {
-            inner.listeners.raise(devices).await;
-        }
-        for plug in plugs {
-            inner.activity.record(
-                EntityRef::device(&plug.bus_id, &plug.name),
-                plug.reason,
-                ActivityOutcome::Succeeded,
-                plug.summary,
-                None,
-            );
-        }
-    }
-}
-
-/// Every two seconds: re-share a device that came back (on a server only; a pure client never
-/// binds anything to usbip-host), then look again. Whatever the host does, the poll goes on: it
-/// is what notices a plugged device and re-shares one. A host that keeps failing is asked less
-/// often, up to every fifteenth tick.
-async fn poll(inner: Weak<Inner>, stopping: CancellationToken) {
-    let mut timer =
-        tokio::time::interval_at(tokio::time::Instant::now() + POLL_INTERVAL, POLL_INTERVAL);
-    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut failures = 0u32;
-    let mut skip = 0u32;
-    loop {
-        tokio::select! {
-            _ = timer.tick() => {}
-            _ = stopping.cancelled() => return,
-        }
-        if skip > 0 {
-            skip -= 1;
-            continue;
-        }
-        let Some(inner) = inner.upgrade() else {
-            return;
-        };
-        let pass = async {
-            if serves(lock(&inner.state).role) {
-                let _applying = inner.apply_gate.lock().await;
-                inner.apply_intent(false).await?;
-            }
-            inner.refresh(false).await
-        };
-        match pass.await {
-            Ok(()) => failures = 0,
-            Err(e) => {
-                tracing::warn!("Reading USB devices failed: {e}");
-                skip = (1u32 << failures.min(4)).min(14);
-                failures += 1;
-            }
-        }
-    }
-}
-
-/// Refreshes for the callers that only ask for it, so none of them waits on the host.
-async fn refresh_when_requested(inner: Weak<Inner>, stopping: CancellationToken) {
-    loop {
-        let signal = match inner.upgrade() {
-            Some(inner) => inner,
-            None => return,
-        };
-        tokio::select! {
-            _ = signal.refresh_requested.wait() => {}
-            _ = stopping.cancelled() => return,
-        }
-        if let Err(e) = signal.refresh(true).await {
-            tracing::warn!("Reading USB devices failed: {e}");
-        }
-    }
-}
-
-impl Inner {
-    /// Bound for export, and the device the user shared on that port.
-    fn is_exportable(&self, device: &UsbDevice) -> bool {
-        self.host.is_shared(device)
-            && (!self.host.can_share() || shared_expects(&self.shared.current(), device))
-    }
-
-    fn name_of(&self, bus_id: &str, otherwise: &str) -> String {
-        lock(&self.state)
-            .names
+    fn name_of(&self, bus_id: &BusId) -> String {
+        self.names
             .get(bus_id)
             .cloned()
-            .unwrap_or_else(|| otherwise.to_owned())
-    }
-
-    /// At start-up: shares what the user saved (when `ShareOnStartup` is on and this is a
-    /// server), and unbinds whatever else is bound to usbip-host, such as a share a crash or an
-    /// earlier run left behind.
-    async fn reconcile(&self) -> Result<(), UsbError> {
-        let _applying = self.apply_gate.lock().await;
-        self.activate_saved(&self.settings.current());
-        self.apply_intent(true).await
+            .unwrap_or_else(|| bus_id.to_string())
     }
 
     /// Makes the saved shares the ones Koppel means to have, when this machine is a server that
     /// re-shares on start.
-    fn activate_saved(&self, settings: &KoppelSettings) {
-        let saved = self.shared.current();
-        let mut state = lock(&self.state);
-        state.active.clear();
+    fn activate_saved(&mut self, settings: &KoppelSettings) {
+        let saved = self.shared.shared.current();
+        self.active.clear();
         if !serves(settings.role) || !settings.share_on_startup {
             return;
         }
         for bus_id in saved.bus_ids.iter().flatten() {
-            state.active.insert(bus_id.clone());
+            if let Ok(bus_id) = bus_id.parse() {
+                self.active.insert(bus_id);
+            }
         }
     }
 
     /// Brings the host in line with what Koppel means to share. A device that is bound but is not
     /// the one the user shared on that port is unbound, and says so. With `unshare_strays`, so is
-    /// every other bound device Koppel does not mean to share. Call with the apply gate held.
-    async fn apply_intent(&self, unshare_strays: bool) -> Result<(), UsbError> {
-        let devices = self.host.list_devices().await?;
-        if self.host.unavailable().is_some() || !self.host.can_share() {
-            return Ok(());
+    /// every other bound device Koppel does not mean to share. Returns true when it asked the
+    /// host to change anything.
+    async fn apply_intent(&mut self, devices: &[UsbDevice], unshare_strays: bool) -> bool {
+        let host = self.shared.host.clone();
+        if host.unavailable().is_some() || !host.can_share() {
+            return false;
         }
-        let saved = self.shared.current();
-        for device in &devices {
-            let bus_id = device.bus_id.as_str();
-            let (active, faulted) = {
-                let state = lock(&self.state);
-                (
-                    state.active.contains(bus_id),
-                    state.faults.contains_key(bus_id),
-                )
-            };
+        let saved = self.shared.shared.current();
+        let mut changed = false;
+        for device in devices {
+            let bus_id = &device.bus_id;
+            let active = self.active.contains(bus_id);
+            let faulted = self.faults.contains_key(bus_id);
             if active && shared_expects(&saved, device) {
-                if !self.host.is_shared(device) && !faulted {
+                if !host.is_shared(device) && !faulted {
                     self.try_apply(bus_id, true).await;
+                    changed = true;
                 }
-            } else if self.host.is_shared(device)
-                && self.host.can_unshare()
+            } else if host.is_shared(device)
+                && host.can_unshare()
                 && (unshare_strays || saved_contains(&saved, bus_id))
             {
                 let wrong_device =
                     saved_contains(&saved, bus_id) && !shared_expects(&saved, device);
                 let failure = self.try_apply(bus_id, false).await;
+                changed = true;
                 if failure.is_none() && wrong_device {
-                    lock(&self.state)
-                        .faults
-                        .insert(bus_id.to_owned(), WRONG_DEVICE.to_owned());
+                    self.faults
+                        .insert(bus_id.clone(), UsbError::WrongDevice.to_string());
                 }
             }
         }
-        Ok(())
+        changed
     }
 
-    /// A settings change that moves the role in or out of the server side shares or unshares to
-    /// match.
-    async fn on_settings(self: &Arc<Self>, next: &KoppelSettings) {
-        let was = {
-            let mut state = lock(&self.state);
-            let was = serves(state.role);
-            state.role = next.role;
-            was
-        };
-        if was == serves(next.role) {
-            return;
-        }
-
-        if was {
-            // Giving every device back can take a while. The settings change is confirmed to the
-            // UI without it.
-            let inner = self.clone();
-            self.tasks
-                .spawn("unshare on leaving the server role", async move {
-                    {
-                        let _applying = inner.apply_gate.lock().await;
-                        // The role came back while this waited: the handler for that change shares again.
-                        if !serves(lock(&inner.state).role) {
-                            inner.unshare_everything().await;
-                        }
-                    }
-                    if let Err(e) = inner.refresh(true).await {
-                        tracing::warn!("Reading USB devices failed: {e}");
-                    }
-                });
-            return;
-        }
-
-        {
-            let _applying = self.apply_gate.lock().await;
-            self.activate_saved(next);
-            if let Err(e) = self.apply_intent(false).await {
-                tracing::warn!("Sharing the saved devices failed: {e}");
-            }
-        }
-        if let Err(e) = self.refresh(true).await {
-            tracing::warn!("Reading USB devices failed: {e}");
-        }
-    }
-
-    /// A machine that is no longer a server gives back every device Koppel shared. Call with the
-    /// apply gate held.
-    async fn unshare_everything(&self) {
-        let saved = self.shared.current();
-        let devices = self.host.list_devices().await;
-        lock(&self.state).active.clear();
+    /// A machine that is no longer a server gives back every device Koppel shared.
+    async fn unshare_everything(&mut self) {
+        let saved = self.shared.shared.current();
+        let devices = self.shared.host.list_devices().await;
+        self.active.clear();
         let Ok(devices) = devices else {
             return;
         };
-        if self.host.unavailable().is_some() || !self.host.can_unshare() {
+        if self.shared.host.unavailable().is_some() || !self.shared.host.can_unshare() {
             return;
         }
-        for device in devices
+        let shared: Vec<BusId> = devices
             .iter()
-            .filter(|d| self.host.is_shared(d) && saved_contains(&saved, &d.bus_id))
-        {
-            self.try_apply(&device.bus_id, false).await;
+            .filter(|d| self.shared.host.is_shared(d) && saved_contains(&saved, &d.bus_id))
+            .map(|d| d.bus_id.clone())
+            .collect();
+        for bus_id in shared {
+            self.try_apply(&bus_id, false).await;
         }
     }
 
     /// What the host can do for the choice. Returns why it failed, or `None` when it took effect.
     async fn apply_choice(
-        &self,
-        bus_id: &str,
+        &mut self,
+        bus_id: &BusId,
         share: bool,
         device: Option<&UsbDevice>,
     ) -> Option<String> {
-        if let Some(unavailable) = self.host.unavailable() {
+        let host = self.shared.host.clone();
+        if let Some(unavailable) = host.unavailable() {
             return Some(self.fail(bus_id, unavailable));
         }
         let can = if share {
-            self.host.can_share()
+            host.can_share()
         } else {
-            self.host.can_unshare()
+            host.can_unshare()
         };
         if can {
             return self.try_apply(bus_id, share).await;
         }
         // The host shares by its own tools. A choice that already matches what it exports is
         // nothing to apply.
-        if share != device.is_some_and(|d| self.host.is_shared(d)) {
-            return Some(self.fail(bus_id, self.host.sharing_advice(bus_id, share)));
+        if share != device.is_some_and(|d| host.is_shared(d)) {
+            return Some(self.fail(bus_id, host.sharing_advice(bus_id, share)));
         }
-        lock(&self.state).faults.remove(bus_id);
+        self.faults.remove(bus_id);
         None
     }
 
     /// Writes the choice to `devices.json` after it took effect. If the file cannot be written,
     /// the host change is undone.
     async fn save_choice(
-        &self,
-        bus_id: &str,
+        &mut self,
+        bus_id: &BusId,
         share: bool,
         device: Option<&UsbDevice>,
     ) -> Result<(), ConfigFileError> {
         let vid_pid = device.map(UsbDevice::vid_pid);
         let saved = self
             .shared
+            .shared
             .update(|current| {
                 let mut bus_ids = current.bus_ids.clone().unwrap_or_default();
                 if share {
-                    if !bus_ids.iter().any(|b| b == bus_id) {
-                        bus_ids.push(bus_id.to_owned());
+                    if !bus_ids.iter().any(|b| b == bus_id.as_str()) {
+                        bus_ids.push(bus_id.to_string());
                     }
                 } else {
-                    bus_ids.retain(|b| b != bus_id);
+                    bus_ids.retain(|b| b != bus_id.as_str());
                 }
                 let vid_pids = match (&vid_pid, share) {
                     (Some(vid_pid), true) => {
                         let mut map = current.vid_pids.clone().unwrap_or_else(OrderedMap::new);
-                        map.insert(bus_id, vid_pid.clone());
+                        map.insert(bus_id.as_str(), vid_pid.clone());
                         Some(map)
                     }
                     _ => current.vid_pids.clone().map(|mut map| {
-                        map.remove(bus_id);
+                        map.remove(bus_id.as_str());
                         map
                     }),
                 };
@@ -661,101 +665,101 @@ impl Inner {
             .await;
         if let Err(e) = saved {
             let can_undo = if share {
-                self.host.can_unshare()
+                self.shared.host.can_unshare()
             } else {
-                self.host.can_share()
+                self.shared.host.can_share()
             };
             if can_undo {
                 self.try_apply(bus_id, !share).await;
             }
             return Err(e);
         }
-        let mut state = lock(&self.state);
         if share {
-            state.active.insert(bus_id.to_owned());
+            self.active.insert(bus_id.clone());
         } else {
-            state.active.remove(bus_id);
+            self.active.remove(bus_id);
         }
         Ok(())
     }
 
-    async fn try_apply(&self, bus_id: &str, share: bool) -> Option<String> {
+    async fn try_apply(&mut self, bus_id: &BusId, share: bool) -> Option<String> {
         let result = if share {
-            self.host.share(bus_id).await
+            self.shared.host.share(bus_id).await
         } else {
-            self.host.unshare(bus_id).await
+            self.shared.host.unshare(bus_id).await
         };
         match result {
             Ok(()) => {
-                lock(&self.state).faults.remove(bus_id);
+                self.faults.remove(bus_id);
                 None
             }
-            Err(e) => Some(self.fail(bus_id, e.message().to_owned())),
+            Err(e) => {
+                tracing::debug!("Applying the share choice for {bus_id} failed: {e:?}");
+                Some(self.fail(bus_id, e.to_string()))
+            }
         }
     }
 
-    fn fail(&self, bus_id: &str, reason: String) -> String {
-        lock(&self.state)
-            .faults
-            .insert(bus_id.to_owned(), reason.clone());
+    fn fail(&mut self, bus_id: &BusId, reason: String) -> String {
+        self.faults.insert(bus_id.clone(), reason.clone());
         tracing::warn!("Could not apply the share choice for {bus_id}: {reason}");
         reason
     }
 
-    /// Builds a snapshot and queues it for the listeners when it changed, or always with `force`.
-    /// Only the snapshot and its place in the queue are taken under the gate; listeners run in
-    /// the pump.
-    async fn refresh(&self, force: bool) -> Result<(), UsbError> {
-        let _refreshing = self.refresh_gate.lock().await;
-        let next = self.build().await?;
-        let mut state = lock(&self.state);
-        if !force && state.last.as_ref() == Some(&next) {
+    /// Builds a snapshot from the devices just listed and publishes it when it changed, or always
+    /// with `force`.
+    async fn refresh(&mut self, devices: &[UsbDevice], force: bool) -> Result<(), UsbError> {
+        let next = self.build(devices).await;
+        if !force && self.last.as_ref() == Some(&next) {
             return Ok(());
         }
-        state.last = Some(next.clone());
+        self.last = Some(next.clone());
         let next = Arc::new(next);
-        state.current = next.clone();
-        state.sequence += 1;
-        let plugs = plug_changes(&mut state, &next);
-        let _ = self.deliveries.send(Delivery {
-            sequence: state.sequence,
-            devices: next,
-            plugs,
-        });
+        let plugs = self.plug_changes(&next);
+        self.snapshot.send_replace(next);
+        for plug in plugs {
+            self.shared.activity.record(
+                EntityRef::device(&plug.bus_id, &plug.name),
+                plug.reason,
+                ActivityOutcome::Succeeded,
+                plug.summary,
+                None,
+            );
+        }
         Ok(())
     }
 
-    async fn build(&self) -> Result<ServerDevices, UsbError> {
-        let saved = self.shared.current();
-        let devices = self.host.list_devices().await?;
+    async fn build(&mut self, devices: &[UsbDevice]) -> ServerDevices {
+        let saved = self.shared.shared.current();
         let mut views = Vec::with_capacity(devices.len());
-        for d in &devices {
+        for d in devices {
             let name = d
                 .product
                 .clone()
                 .unwrap_or_else(|| "Unknown device".to_owned());
-            lock(&self.state)
-                .names
-                .insert(d.bus_id.clone(), name.clone());
-            let state = if self.is_exportable(d) {
-                if self.host.status(&d.bus_id).await? == ExportStatus::Used {
-                    "attached"
-                } else {
-                    "shared"
+            self.names.insert(d.bus_id.clone(), name.clone());
+            let mut fault = self.faults.get(&d.bus_id).cloned();
+            let state = if self.shared.is_exportable(d) {
+                match self.shared.host.status(&d.bus_id).await {
+                    Ok(ExportStatus::Used) => DeviceState::Attached,
+                    Ok(_) => DeviceState::Shared,
+                    Err(e) => {
+                        // One device that cannot be read does not take the others with it.
+                        tracing::warn!("Could not read the state of {}: {e}", d.bus_id);
+                        fault.get_or_insert_with(|| {
+                            format!("Koppel could not read the state of this device: {e}")
+                        });
+                        DeviceState::Shared
+                    }
                 }
             } else {
-                "local"
+                DeviceState::Local
             };
-            let (holder, fault) = {
-                let s = lock(&self.state);
-                (
-                    s.attached_to
-                        .get(&d.bus_id)
-                        .cloned()
-                        .filter(|_| state == "attached"),
-                    s.faults.get(&d.bus_id).cloned(),
-                )
-            };
+            let holder = self
+                .attached_to
+                .get(&d.bus_id)
+                .cloned()
+                .filter(|_| state == DeviceState::Attached);
             let mut interfaces: Vec<String> = Vec::new();
             for interface in &d.interfaces {
                 let name = interface_class_name(interface.class);
@@ -764,58 +768,107 @@ impl Inner {
                 }
             }
             views.push(DeviceView {
-                bus_id: d.bus_id.clone(),
                 vid_pid: d.vid_pid(),
                 name,
                 manufacturer: d.manufacturer.clone(),
                 speed: speed_label(d.speed).to_owned(),
-                state: state.to_owned(),
+                state,
                 attached_to: holder.as_ref().map(|(client, _)| client.clone()),
                 attached_since: holder.map(|(_, since)| since),
                 fault,
                 serial: d.serial.clone(),
                 driver: d.driver.clone(),
                 interfaces: Some(interfaces),
+                ..DeviceView::new(d.bus_id.clone())
             });
         }
 
         // A shared device that is gone stays visible, so the user knows it comes back shared. It
         // shows what was remembered about it: its VID:PID, and its name when this run has seen it.
-        let intent: Vec<&String> = saved.bus_ids.iter().flatten().collect();
-        let remembered = saved.vid_pids.as_ref();
-        let gone: Vec<&String> = intent
+        let intent: Vec<BusId> = saved
+            .bus_ids
             .iter()
-            .copied()
+            .flatten()
+            .filter_map(|b| b.parse().ok())
+            .collect();
+        let remembered = saved.vid_pids.as_ref();
+        let gone: Vec<&BusId> = intent
+            .iter()
             .filter(|bus_id| devices.iter().all(|d| d.bus_id != **bus_id))
             .collect();
         for bus_id in &gone {
-            if has_moved(bus_id, &gone, remembered, &devices, &intent) {
+            if has_moved(bus_id, &gone, remembered, devices, &intent) {
                 continue;
             }
-            let state = lock(&self.state);
             views.push(DeviceView {
-                bus_id: (*bus_id).clone(),
                 vid_pid: remembered
-                    .and_then(|r| r.get(bus_id))
+                    .and_then(|r| r.get(bus_id.as_str()))
                     .cloned()
                     .unwrap_or_default(),
-                name: state
+                name: self
                     .names
                     .get(*bus_id)
                     .cloned()
                     .unwrap_or_else(|| "Unplugged device".to_owned()),
-                state: "offline".to_owned(),
-                fault: state.faults.get(*bus_id).cloned(),
-                ..DeviceView::default()
+                state: DeviceState::Offline,
+                fault: self.faults.get(*bus_id).cloned(),
+                ..DeviceView::new((*bus_id).clone())
             });
         }
 
         views.sort_by(|a, b| a.bus_id.cmp(&b.bus_id));
-        Ok(ServerDevices {
+        ServerDevices {
             devices: views,
-            unavailable: self.host.unavailable(),
-        })
+            unavailable: self.shared.host.unavailable(),
+        }
     }
+
+    /// Devices that appeared or disappeared since the last look. The first look only remembers.
+    fn plug_changes(&mut self, devices: &ServerDevices) -> Vec<PlugEvent> {
+        let present: HashSet<BusId> = devices
+            .devices
+            .iter()
+            .filter(|d| d.state != DeviceState::Offline)
+            .map(|d| d.bus_id.clone())
+            .collect();
+        let Some(previous) = self.present.replace(present.clone()) else {
+            return Vec::new();
+        };
+        let mut plugged: Vec<&BusId> = present.difference(&previous).collect();
+        let mut unplugged: Vec<&BusId> = previous.difference(&present).collect();
+        plugged.sort();
+        unplugged.sort();
+        let mut changes = Vec::new();
+        for (bus_id, plugged_in) in plugged
+            .into_iter()
+            .map(|b| (b, true))
+            .chain(unplugged.into_iter().map(|b| (b, false)))
+        {
+            let name = self.name_of(bus_id);
+            changes.push(PlugEvent {
+                summary: if plugged_in {
+                    format!("{name} was plugged in on bus {bus_id}")
+                } else {
+                    format!("{name} was unplugged from bus {bus_id}")
+                },
+                bus_id: bus_id.clone(),
+                name,
+                reason: if plugged_in {
+                    ActivityReason::Plugged
+                } else {
+                    ActivityReason::Unplugged
+                },
+            });
+        }
+        changes
+    }
+}
+
+struct PlugEvent {
+    bus_id: BusId,
+    name: String,
+    reason: ActivityReason,
+    summary: String,
 }
 
 /// A remembered device that was plugged into another port is listed there, so its old port is
@@ -824,71 +877,27 @@ impl Inner {
 /// devices the two cannot be told apart, so when more are gone than present, every gone row is
 /// kept.
 fn has_moved(
-    bus_id: &str,
-    gone: &[&String],
+    bus_id: &BusId,
+    gone: &[&BusId],
     remembered: Option<&OrderedMap<String>>,
     present: &[UsbDevice],
-    intent: &[&String],
+    intent: &[BusId],
 ) -> bool {
     let Some(remembered) = remembered else {
         return false;
     };
-    let Some(vid_pid) = remembered.get(bus_id) else {
+    let Some(vid_pid) = remembered.get(bus_id.as_str()) else {
         return false;
     };
     let elsewhere = present
         .iter()
-        .filter(|d| d.vid_pid() == *vid_pid && intent.iter().any(|b| **b == d.bus_id))
+        .filter(|d| d.vid_pid() == *vid_pid && intent.contains(&d.bus_id))
         .count();
     let gone_same = gone
         .iter()
-        .filter(|g| remembered.get(g) == Some(vid_pid))
+        .filter(|g| remembered.get(g.as_str()) == Some(vid_pid))
         .count();
     elsewhere > 0 && gone_same <= elsewhere
-}
-
-/// Devices that appeared or disappeared since the last look. The first look only remembers.
-fn plug_changes(state: &mut State, devices: &ServerDevices) -> Vec<PlugEvent> {
-    let present: HashSet<String> = devices
-        .devices
-        .iter()
-        .filter(|d| d.state != "offline")
-        .map(|d| d.bus_id.clone())
-        .collect();
-    let Some(previous) = state.present.replace(present.clone()) else {
-        return Vec::new();
-    };
-    let mut plugged: Vec<&String> = present.difference(&previous).collect();
-    let mut unplugged: Vec<&String> = previous.difference(&present).collect();
-    plugged.sort();
-    unplugged.sort();
-    let name = |bus_id: &str| {
-        state
-            .names
-            .get(bus_id)
-            .cloned()
-            .unwrap_or_else(|| bus_id.to_owned())
-    };
-    let mut changes = Vec::new();
-    for bus_id in plugged {
-        let name = name(bus_id);
-        changes.push(PlugEvent {
-            summary: format!("{name} was plugged in on bus {bus_id}"),
-            bus_id: bus_id.clone(),
-            name,
-            reason: ActivityReason::Plugged,
-        });
-    }
-    for bus_id in unplugged {
-        let name = name(bus_id);
-        changes.push(PlugEvent {
-            summary: format!("{name} was unplugged from bus {bus_id}"),
-            bus_id: bus_id.clone(),
-            name,
-            reason: ActivityReason::Unplugged,
-        });
-    }
-    changes
 }
 
 #[cfg(test)]
@@ -897,10 +906,9 @@ mod tests {
 
     fn device(bus_id: &str, vendor_id: u16, product_id: u16) -> UsbDevice {
         UsbDevice {
-            bus_id: bus_id.into(),
             vendor_id,
             product_id,
-            ..UsbDevice::default()
+            ..UsbDevice::new(bus_id.parse().unwrap())
         }
     }
 

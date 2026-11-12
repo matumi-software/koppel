@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use common::*;
 use koppel_usb::stream::memory;
 use koppel_usb::{
-    Clock, CloseReason, DeviceStream, ExportStatus, UsbDevice, UsbHost, UsbInterface,
+    Clock, CloseReason, DeviceState, DeviceStream, ExportStatus, UsbDevice, UsbHost, UsbInterface,
     UsbIpUpstreamHost, protocol,
 };
 use time::OffsetDateTime;
@@ -69,27 +69,39 @@ impl Drop for FakeUsbIpServer {
 }
 
 /// A clock the test moves by hand. Timers still run on the real clock.
-struct ManualClock(Mutex<OffsetDateTime>);
+struct ManualClock {
+    wall: Mutex<OffsetDateTime>,
+    start: tokio::time::Instant,
+    moved: Mutex<Duration>,
+}
 
 impl ManualClock {
     fn new() -> Arc<Self> {
-        Arc::new(Self(Mutex::new(OffsetDateTime::UNIX_EPOCH)))
+        Arc::new(Self {
+            wall: Mutex::new(OffsetDateTime::UNIX_EPOCH),
+            start: tokio::time::Instant::now(),
+            moved: Mutex::new(Duration::ZERO),
+        })
     }
 
     fn advance(&self, by: Duration) {
-        *lock(&self.0) += by;
+        *lock(&self.wall) += by;
+        *lock(&self.moved) += by;
     }
 }
 
 impl Clock for ManualClock {
     fn now(&self) -> OffsetDateTime {
-        *lock(&self.0)
+        *lock(&self.wall)
+    }
+
+    fn monotonic(&self) -> tokio::time::Instant {
+        self.start + *lock(&self.moved)
     }
 }
 
 fn device(bus_id: &str) -> UsbDevice {
     UsbDevice {
-        bus_id: bus_id.into(),
         path: r"USB\VID_064F&PID_2AF9\0".into(),
         bus_num: 2,
         dev_num: 3,
@@ -100,7 +112,18 @@ fn device(bus_id: &str) -> UsbDevice {
         configuration_value: 1,
         num_configurations: 1,
         interfaces: vec![UsbInterface::new(0xff, 0, 0)],
-        ..UsbDevice::default()
+        ..UsbDevice::new(bus_id.parse().unwrap())
+    }
+}
+
+/// A list whose second device carries a bus ID that is not one.
+async fn answer_list_spoiled(mut tcp: TcpStream, devices: Vec<UsbDevice>) {
+    if protocol::read_header(&mut tcp).await.is_ok() {
+        let mut reply = protocol::dev_list_reply(&devices);
+        let second = protocol::HEADER_SIZE + 4 + protocol::DEVICE_SIZE + protocol::INTERFACE_SIZE;
+        let at = second + 256;
+        reply[at..at + 8].copy_from_slice(b"../../et");
+        let _ = tcp.write_all(&reply).await;
     }
 }
 
@@ -263,7 +286,7 @@ async fn a_list_with_more_devices_than_the_cap_is_refused() {
 #[tokio::test]
 async fn bus_ids_that_are_not_bus_ids_are_dropped() {
     let server =
-        FakeUsbIpServer::start(|tcp| answer_list(tcp, vec![device("2-3"), device("../../etc")]))
+        FakeUsbIpServer::start(|tcp| answer_list_spoiled(tcp, vec![device("2-3"), device("2-4")]))
             .await;
     let host =
         UsbIpUpstreamHost::with_deadline("127.0.0.1", server.port, ManualClock::new(), DEADLINE);
@@ -273,7 +296,7 @@ async fn bus_ids_that_are_not_bus_ids_are_dropped() {
         .await
         .unwrap()
         .into_iter()
-        .map(|d| d.bus_id)
+        .map(|d| d.bus_id.to_string())
         .collect();
 
     assert_eq!(listed, vec!["2-3"]);
@@ -302,13 +325,19 @@ async fn export_relays_the_network_stream_straight_to_the_server_and_reports_it_
     client.read_exact(&mut echoed).await.unwrap();
 
     assert_eq!(&echoed, b"ping");
-    assert_eq!(host.status("2-3").await.unwrap(), ExportStatus::Used);
+    assert_eq!(
+        host.status(&"2-3".parse().unwrap()).await.unwrap(),
+        ExportStatus::Used
+    );
     drop(client);
     tokio::time::timeout(Duration::from_secs(5), relaying)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(host.status("2-3").await.unwrap(), ExportStatus::Available);
+    assert_eq!(
+        host.status(&"2-3".parse().unwrap()).await.unwrap(),
+        ExportStatus::Available
+    );
 }
 
 #[tokio::test]
@@ -330,7 +359,7 @@ async fn a_second_export_of_a_device_in_use_is_refused_without_connecting_to_the
         second
             .err()
             .unwrap()
-            .message()
+            .to_string()
             .contains("already being used")
     );
     assert_eq!(
@@ -339,7 +368,10 @@ async fn a_second_export_of_a_device_in_use_is_refused_without_connecting_to_the
         "the claim comes before the connection, so the second import never reached the server"
     );
     drop(first);
-    assert_eq!(host.status("2-3").await.unwrap(), ExportStatus::Available);
+    assert_eq!(
+        host.status(&"2-3".parse().unwrap()).await.unwrap(),
+        ExportStatus::Available
+    );
 }
 
 #[tokio::test]
@@ -356,8 +388,17 @@ async fn an_export_the_server_refuses_gives_the_claim_back() {
 
     let export = host.export(&device("2-3")).await;
 
-    assert!(export.err().unwrap().message().contains("would not export"));
-    assert_eq!(host.status("2-3").await.unwrap(), ExportStatus::Available);
+    assert!(
+        export
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("would not export")
+    );
+    assert_eq!(
+        host.status(&"2-3".parse().unwrap()).await.unwrap(),
+        ExportStatus::Available
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -365,7 +406,7 @@ async fn a_client_attaches_a_device_the_usbip_server_exports_and_traffic_reaches
     let imports = Arc::new(AtomicUsize::new(0));
     let counted = imports.clone();
     let exported = UsbDevice {
-        bus_id: "2-3".into(),
+        bus_id: "2-3".parse().unwrap(),
         ..dongle()
     };
     let shared = exported.clone();
@@ -388,7 +429,10 @@ async fn a_client_attaches_a_device_the_usbip_server_exports_and_traffic_reaches
 
     client.link().await;
     assert_eq!(client.client.current().devices[0].device.bus_id, "2-3");
-    assert_eq!(client.client.current().devices[0].device.state, "shared");
+    assert_eq!(
+        client.client.current().devices[0].device.state,
+        DeviceState::Shared
+    );
     client.client.begin_attach("2-3").await.unwrap();
     eventually("the attach", || client.attached_here()).await;
 
@@ -397,4 +441,33 @@ async fn a_client_attaches_a_device_the_usbip_server_exports_and_traffic_reaches
     assert_eq!(imports.load(Ordering::SeqCst), 1);
     client.stop().await;
     server.stop().await;
+}
+
+#[tokio::test]
+async fn an_import_answered_with_another_device_is_refused_and_gives_the_claim_back() {
+    let imports = Arc::new(AtomicUsize::new(0));
+    let counted = imports.clone();
+    // Asked for 2-3, the server sends the record of 2-4.
+    let server = FakeUsbIpServer::start(move |tcp| {
+        list_or_import(tcp, device("2-4"), true, counted.clone(), false)
+    })
+    .await;
+    let host =
+        UsbIpUpstreamHost::with_deadline("127.0.0.1", server.port, ManualClock::new(), DEADLINE);
+    host.list_devices().await.unwrap();
+
+    let export = host.export(&device("2-3")).await;
+
+    assert!(
+        export
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("with a different device")
+    );
+    // The claim is gone: the device does not read as in use.
+    assert_ne!(
+        host.status(&"2-3".parse().unwrap()).await.unwrap(),
+        ExportStatus::Used
+    );
 }

@@ -4,22 +4,40 @@
 
 use serde::Serialize;
 
+use crate::BusId;
+
+/// What an event is about: a device or a server link, sent as `device` or `link`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EntityKind {
+    Device,
+    Link,
+}
+
+impl EntityKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Device => "device",
+            Self::Link => "link",
+        }
+    }
+}
+
 /// What an event is about: a device or a server link.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct EntityRef {
     pub id: String,
     pub name: String,
-    /// `device` or `link`.
     #[serde(rename = "type")]
-    pub kind: String,
+    pub kind: EntityKind,
 }
 
 impl EntityRef {
-    pub fn device(bus_id: &str, name: &str) -> Self {
+    pub fn device(bus_id: &BusId, name: &str) -> Self {
         Self {
-            id: bus_id.to_owned(),
+            id: bus_id.to_string(),
             name: name.to_owned(),
-            kind: "device".to_owned(),
+            kind: EntityKind::Device,
         }
     }
 
@@ -27,7 +45,7 @@ impl EntityRef {
         Self {
             id: "link".to_owned(),
             name: name.to_owned(),
-            kind: "link".to_owned(),
+            kind: EntityKind::Link,
         }
     }
 }

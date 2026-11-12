@@ -34,7 +34,7 @@ koppel-windows = { path = "koppel-windows", version = "0.2.0" }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "signal"] }
 # The tokio project's helpers (MIT), already here through h2. The USB layer takes its
 # CancellationToken, which cancels a whole tree of tasks (an attach, its relay, a link's epoch).
-tokio-util = "0.7.20"
+tokio-util = { version = "0.7.20", features = ["rt"] }
 
 # The web stack. Every crate here, and what it pulls in, is MIT, Apache-2.0, BSD, ISC or Unicode-3.0
 # (checked with `cargo metadata`). rustls runs on ring rather than aws-lc-rs, which needs a C toolchain
@@ -43,6 +43,9 @@ axum = { version = "0.8.9", default-features = false, features = ["http1", "http
 hyper = "1.12.0"
 hyper-util = { version = "0.1.21", features = ["server-auto", "tokio"] }
 http-body-util = "0.1.5"
+# The HTTP types (MIT OR Apache-2.0), already here through axum and hyper. koppel-usb reads a URL's
+# authority with its `Uri`.
+http = "1.5.0"
 tower-service = "0.3.3"
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
@@ -128,6 +131,9 @@ winresource = "0.1.34"
 # ioctl sysfs cannot do: resetting a USB device through its usbfs node on Linux. koppel-config takes
 # it too, for `geteuid`, to check who owns the config and keys directories.
 libc = "0.2.191"
+# Typed errors for koppel-usb (MIT OR Apache-2.0), already here through the Skakel crates and
+# tonic. The Display of each variant is the sentence the UI shows; the source stays for the log.
+thiserror = "2.0.21"
 
 # The transport between Koppel machines: Skakel 0.3.0 (MIT), protocol version 3 over gRPC, from its
 # repository at the release tag; Skakel is not on crates.io. What they pull in is MIT, Apache-2.0, BSD, ISC,

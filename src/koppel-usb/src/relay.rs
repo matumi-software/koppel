@@ -85,7 +85,7 @@ pub async fn loopback_pair() -> io::Result<(StdTcpStream, TcpStream)> {
 mod tests {
     use std::io::{Read, Write};
 
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
     use super::*;
     use crate::stream::memory;
@@ -108,6 +108,85 @@ mod tests {
 
         assert_eq!(&kernel_end.1, b"urb");
         assert_eq!(&back, b"ack");
+    }
+
+    /// A destination that notes how each write and flush arrives, and says nothing back.
+    struct Notes {
+        writes: std::sync::Arc<std::sync::Mutex<Vec<usize>>>,
+        flushes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl AsyncRead for Notes {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            _: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    impl AsyncWrite for Notes {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            buf: &[u8],
+        ) -> std::task::Poll<io::Result<usize>> {
+            self.writes.lock().unwrap().push(buf.len());
+            std::task::Poll::Ready(Ok(buf.len()))
+        }
+
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            self.flushes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            std::task::Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<io::Result<()>> {
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    /// The stream to the other machine frames its writes, so the relay must write what one read
+    /// returned as one write and flush it at once: one message per read, as 0.1.x's WebSocket
+    /// stream sent. `tokio::io::copy_bidirectional` reads into 8 KiB and flushes only when the
+    /// reader would block, so it changes that, which is why the relay is not swapped for it (see
+    /// docs/decisions.md).
+    #[tokio::test]
+    async fn one_read_is_one_write_and_one_flush() {
+        let (mut source, source_inner) = memory::pair();
+        let writes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let flushes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let notes = Notes {
+            writes: writes.clone(),
+            flushes: flushes.clone(),
+        };
+        let stop = CancellationToken::new();
+        let ended = stop.clone();
+        let running = tokio::spawn(async move { relay(source_inner, notes, &ended).await });
+
+        let mut total = 0;
+        for size in [5usize, 4096, 3] {
+            source.write_all(&vec![7u8; size]).await.unwrap();
+            total += size;
+            let written = writes.clone();
+            let until = tokio::time::Instant::now() + Duration::from_secs(5);
+            while written.lock().unwrap().iter().sum::<usize>() < total {
+                assert!(tokio::time::Instant::now() < until, "the write arrives");
+                tokio::task::yield_now().await;
+            }
+        }
+        stop.cancel();
+        running.await.unwrap();
+
+        assert_eq!(*writes.lock().unwrap(), vec![5, 4096, 3]);
+        assert_eq!(flushes.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[tokio::test]

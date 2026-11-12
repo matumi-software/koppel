@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 use super::usbfs;
 use crate::host::{Export, UsbHost};
 use crate::{
-    BoxFuture, DeviceStream, ExportStatus, UsbDevice, UsbError, UsbInterface, UsbSpeed, bus_id,
-    loopback_pair, relay,
+    BoxFuture, BusId, DeviceStream, ExportStatus, Module, UsbDevice, UsbError, UsbInterface,
+    UsbSpeed, loopback_pair, relay,
 };
 
 /// The Linux kernel's USB/IP server side (`usbip-host`), driven through sysfs, the way the
@@ -53,7 +53,7 @@ impl SysfsUsbHost {
         Box::pin(async move {
             tokio::task::spawn_blocking(move || work(&tree))
                 .await
-                .map_err(|e| UsbError::new(format!("Reading sysfs failed: {e}")))?
+                .map_err(|e| UsbError::failed(format!("Reading sysfs failed: {e}")))?
         })
     }
 }
@@ -83,28 +83,28 @@ impl UsbHost for SysfsUsbHost {
         device.driver.as_deref() == Some("usbip-host")
     }
 
-    fn sharing_advice(&self, _: &str, _: bool) -> String {
+    fn sharing_advice(&self, _: &BusId, _: bool) -> String {
         self.unavailable()
             .unwrap_or_else(|| "Koppel shares devices on this machine itself.".to_owned())
     }
 
-    fn share<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
-        let bus_id = bus_id.to_owned();
+    fn share<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
+        let bus_id = bus_id.clone();
         self.run(move |tree| tree.share(&bus_id))
     }
 
-    fn unshare<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
-        let bus_id = bus_id.to_owned();
+    fn unshare<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
+        let bus_id = bus_id.clone();
         self.run(move |tree| tree.unshare(&bus_id))
     }
 
-    fn status<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
-        let bus_id = bus_id.to_owned();
+    fn status<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<ExportStatus, UsbError>> {
+        let bus_id = bus_id.clone();
         self.run(move |tree| tree.status(&bus_id))
     }
 
-    fn reset<'a>(&'a self, bus_id: &'a str) -> BoxFuture<'a, Result<(), UsbError>> {
-        let bus_id = bus_id.to_owned();
+    fn reset<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
+        let bus_id = bus_id.clone();
         self.run(move |tree| tree.reset(&bus_id))
     }
 
@@ -115,20 +115,22 @@ impl UsbHost for SysfsUsbHost {
         device: &'a UsbDevice,
     ) -> BoxFuture<'a, Result<Box<dyn Export>, UsbError>> {
         Box::pin(async move {
-            let bus_id = bus_id::require(&device.bus_id)?.to_owned();
+            let bus_id = device.bus_id.clone();
             if self.status(&bus_id).await? != ExportStatus::Available {
-                return Err(UsbError::new(format!(
-                    "Device {bus_id} is not available to export. It may be in use by another client."
-                )));
+                return Err(UsbError::Busy(bus_id));
             }
             let (kernel_end, relay_end) = loopback_pair()
                 .await
-                .map_err(|e| UsbError::new(format!("Could not export {bus_id}: {e}")))?;
-            let file = self.tree.devices().join(&bus_id).join("usbip_sockfd");
+                .map_err(|e| UsbError::io(format!("Could not export {bus_id}"), e))?;
+            let file = self
+                .tree
+                .devices()
+                .join(bus_id.as_str())
+                .join("usbip_sockfd");
             let fd = kernel_end.as_raw_fd().to_string();
             tokio::task::spawn_blocking(move || write(&file, &fd))
                 .await
-                .map_err(|e| UsbError::new(format!("Writing sysfs failed: {e}")))??;
+                .map_err(|e| UsbError::failed(format!("Writing sysfs failed: {e}")))??;
             Ok(Box::new(KernelExport {
                 kernel_end,
                 relay_end,
@@ -175,17 +177,14 @@ impl Tree {
     }
 
     fn unavailable(&self) -> Option<String> {
-        if self.usbip_host().is_dir() {
-            None
-        } else {
-            Some("The usbip-host kernel module is not loaded. Run 'modprobe usbip-host' on the host (add it to /etc/modules to keep it).".to_owned())
-        }
+        self.require_module().err().map(|e| e.to_string())
     }
 
     fn require_module(&self) -> Result<(), UsbError> {
-        match self.unavailable() {
-            Some(reason) => Err(UsbError::new(reason)),
-            None => Ok(()),
+        if self.usbip_host().is_dir() {
+            Ok(())
+        } else {
+            Err(UsbError::ModuleMissing(Module::UsbipHost))
         }
     }
 
@@ -195,16 +194,19 @@ impl Tree {
             return Ok(Vec::new());
         }
         let entries = fs::read_dir(&devices)
-            .map_err(|e| UsbError::new(format!("Could not read {}: {e}", devices.display())))?;
+            .map_err(|e| UsbError::failed(format!("Could not read {}: {e}", devices.display())))?;
         let mut listed = Vec::new();
         for entry in entries.flatten() {
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            if !entry.path().is_dir() || !bus_id::is_valid(&name) || self.is_imported(&name) {
+            let Ok(bus_id) = name.parse::<BusId>() else {
+                continue;
+            };
+            if !entry.path().is_dir() || self.is_imported(&bus_id) {
                 continue;
             }
-            if let Some(device) = self.read_device(&name)
+            if let Some(device) = self.read_device(&bus_id)
                 && !device.is_hub()
             {
                 listed.push(device);
@@ -214,20 +216,19 @@ impl Tree {
         Ok(listed)
     }
 
-    fn share(&self, bus_id: &str) -> Result<(), UsbError> {
+    fn share(&self, bus_id: &BusId) -> Result<(), UsbError> {
         self.require_module()?;
-        let bus_id = bus_id::require(bus_id)?;
-        let device = self.devices().join(bus_id);
+        let device = self.devices().join(bus_id.as_str());
         let usbip_host = self.usbip_host();
         write(&usbip_host.join("match_busid"), &format!("add {bus_id}"))?;
         let bound = (|| {
             if let Some(driver) = driver_of(&device)
                 && driver != "usbip-host"
             {
-                write(&device.join("driver").join("unbind"), bus_id)?;
+                write(&device.join("driver").join("unbind"), bus_id.as_str())?;
             }
             if driver_of(&device).as_deref() != Some("usbip-host") {
-                write(&usbip_host.join("bind"), bus_id)?;
+                write(&usbip_host.join("bind"), bus_id.as_str())?;
             }
             Ok(())
         })();
@@ -239,32 +240,31 @@ impl Tree {
         bound
     }
 
-    fn unshare(&self, bus_id: &str) -> Result<(), UsbError> {
+    fn unshare(&self, bus_id: &BusId) -> Result<(), UsbError> {
         self.require_module()?;
-        let bus_id = bus_id::require(bus_id)?;
-        let device = self.devices().join(bus_id);
+        let device = self.devices().join(bus_id.as_str());
         let usbip_host = self.usbip_host();
         if driver_of(&device).as_deref() == Some("usbip-host") {
-            write(&usbip_host.join("unbind"), bus_id)?;
+            write(&usbip_host.join("unbind"), bus_id.as_str())?;
         }
         write(&usbip_host.join("match_busid"), &format!("del {bus_id}"))?;
         // Let the kernel find the normal driver again.
         write(
             &self.sys.join("bus").join("usb").join("drivers_probe"),
-            bus_id,
+            bus_id.as_str(),
         )
     }
 
-    fn status(&self, bus_id: &str) -> Result<ExportStatus, UsbError> {
-        let bus_id = bus_id::require(bus_id)?;
-        Ok(read_attribute(&self.devices().join(bus_id), "usbip_status")
-            .and_then(|s| s.parse::<i64>().ok())
-            .map_or(ExportStatus::NotExported, ExportStatus::from_kernel))
+    fn status(&self, bus_id: &BusId) -> Result<ExportStatus, UsbError> {
+        Ok(
+            read_attribute(&self.devices().join(bus_id.as_str()), "usbip_status")
+                .and_then(|s| s.parse::<i64>().ok())
+                .map_or(ExportStatus::NotExported, ExportStatus::from_kernel),
+        )
     }
 
-    fn reset(&self, bus_id: &str) -> Result<(), UsbError> {
-        let bus_id = bus_id::require(bus_id)?;
-        let device = self.devices().join(bus_id);
+    fn reset(&self, bus_id: &BusId) -> Result<(), UsbError> {
+        let device = self.devices().join(bus_id.as_str());
         let node = self
             .dev
             .join("bus")
@@ -273,7 +273,7 @@ impl Tree {
             .join(format!("{:03}", read_u32(&device, "devnum")));
         // A real node is a character device, which is not a regular file.
         if !node.exists() || node.is_dir() {
-            return Err(UsbError::new(format!(
+            return Err(UsbError::failed(format!(
                 "Cannot reset {bus_id}: there is no device node {}.",
                 node.display()
             )));
@@ -283,13 +283,13 @@ impl Tree {
 
     /// Devices attached from another server sit under vhci-hcd. They are on loan to this machine,
     /// so they are never offered for sharing here.
-    fn is_imported(&self, bus_id: &str) -> bool {
-        fs::read_link(self.devices().join(bus_id))
+    fn is_imported(&self, bus_id: &BusId) -> bool {
+        fs::read_link(self.devices().join(bus_id.as_str()))
             .is_ok_and(|target| target.to_string_lossy().contains("vhci_hcd"))
     }
 
-    fn read_device(&self, bus_id: &str) -> Option<UsbDevice> {
-        let path = self.devices().join(bus_id);
+    fn read_device(&self, bus_id: &BusId) -> Option<UsbDevice> {
+        let path = self.devices().join(bus_id.as_str());
         let vendor_id = read_hex16(&path, "idVendor")?;
         let product_id = read_hex16(&path, "idProduct")?;
 
@@ -317,7 +317,7 @@ impl Tree {
             .collect();
 
         Some(UsbDevice {
-            bus_id: bus_id.to_owned(),
+            bus_id: bus_id.clone(),
             path: path.to_string_lossy().into_owned(),
             bus_num: read_u32(&path, "busnum"),
             dev_num: read_u32(&path, "devnum"),
@@ -328,8 +328,8 @@ impl Tree {
             class: read_hex8(&path, "bDeviceClass"),
             sub_class: read_hex8(&path, "bDeviceSubClass"),
             protocol: read_hex8(&path, "bDeviceProtocol"),
-            configuration_value: read_u32(&path, "bConfigurationValue") as u8,
-            num_configurations: read_u32(&path, "bNumConfigurations") as u8,
+            configuration_value: read_u8(&path, "bConfigurationValue"),
+            num_configurations: read_u8(&path, "bNumConfigurations"),
             interfaces,
             manufacturer: read_attribute(&path, "manufacturer"),
             product: read_attribute(&path, "product"),
@@ -380,6 +380,10 @@ fn read_u32(directory: &Path, name: &str) -> u32 {
         .unwrap_or(0)
 }
 
+fn read_u8(directory: &Path, name: &str) -> u8 {
+    u8::try_from(read_u32(directory, name)).unwrap_or(0)
+}
+
 fn read_hex16(directory: &Path, name: &str) -> Option<u16> {
     u16::from_str_radix(&read_attribute(directory, name)?, 16).ok()
 }
@@ -392,9 +396,9 @@ fn read_hex8(directory: &Path, name: &str) -> u8 {
 
 fn write(file: &Path, value: &str) -> Result<(), UsbError> {
     fs::write(file, value).map_err(|e: io::Error| {
-        UsbError::new(format!(
-            "The kernel refused '{value}' on {}: {e}",
-            file.display()
-        ))
+        UsbError::io(
+            format!("The kernel refused '{value}' on {}", file.display()),
+            e,
+        )
     })
 }

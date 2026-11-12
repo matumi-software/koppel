@@ -1,160 +1,139 @@
 use std::future::Future;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use tokio::sync::{Notify, mpsc};
-
-use crate::BoxFuture;
+use tokio::sync::watch;
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 
 pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Runs fire-and-forget work so that a panic in it is logged, and so whoever stops can wait for
-/// what is still running.
-#[derive(Default)]
-pub(crate) struct BackgroundTasks {
-    running: Arc<Running>,
+/// Everything one owner runs in the background: its tasks, and the token that tells them to end.
+/// Stopping cancels the token, closes the tracker and waits for the tasks, up to a limit.
+#[derive(Clone, Default)]
+pub(crate) struct Tasks {
+    tracker: TaskTracker,
+    stopping: CancellationToken,
 }
 
-#[derive(Default)]
-struct Running {
-    count: AtomicUsize,
-    idle: Notify,
-}
+impl Tasks {
+    /// Cancelled when the owner stops.
+    pub fn token(&self) -> &CancellationToken {
+        &self.stopping
+    }
 
-impl BackgroundTasks {
-    /// Starts `work`. A panic in it is logged with `name`.
+    /// Starts `work`. A panic in it is logged with `name`; the owner goes on.
     pub fn spawn(&self, name: impl Into<String>, work: impl Future<Output = ()> + Send + 'static) {
         let name = name.into();
-        let running = self.running.clone();
-        running.count.fetch_add(1, Ordering::SeqCst);
-        tokio::spawn(async move {
-            if let Err(e) = tokio::spawn(work).await
-                && e.is_panic()
-            {
-                tracing::error!("Background task {name} failed: it panicked");
-            }
-            if running.count.fetch_sub(1, Ordering::SeqCst) == 1 {
-                running.idle.notify_waiters();
-            }
+        self.tracker.spawn(async move {
+            let _log = PanicLog(name);
+            work.await;
         });
     }
 
-    /// Waits for what is running, up to `timeout`.
+    /// Tells the tasks to end and waits for them, up to `timeout`.
+    pub async fn stop(&self, timeout: Duration) {
+        self.stopping.cancel();
+        self.wait(timeout).await;
+    }
+
+    /// Waits for what is running, up to `timeout`, without cancelling anything.
     pub async fn wait(&self, timeout: Duration) {
-        let running = &self.running;
-        let waited = tokio::time::timeout(timeout, async {
-            loop {
-                let idle = running.idle.notified();
-                if running.count.load(Ordering::SeqCst) == 0 {
-                    return;
-                }
-                idle.await;
-            }
-        })
-        .await;
-        if waited.is_err() {
+        self.tracker.close();
+        if tokio::time::timeout(timeout, self.tracker.wait())
+            .await
+            .is_err()
+        {
             tracing::warn!(
                 "{} background tasks were still running when they were asked to stop",
-                running.count.load(Ordering::SeqCst)
+                self.tracker.len()
             );
         }
     }
 }
 
-/// A wake-up that cannot pile up: any number of [`WakeSignal::set`] calls before a wait count as
-/// one, so a burst of changes costs one pass of the loop that waits, not one per change.
-pub struct WakeSignal {
-    sender: mpsc::Sender<()>,
-    receiver: tokio::sync::Mutex<mpsc::Receiver<()>>,
-}
+/// Logs a panic of the task it lives in, as the unwinding drops it.
+struct PanicLog(String);
 
-impl Default for WakeSignal {
-    fn default() -> Self {
-        let (sender, receiver) = mpsc::channel(1);
-        Self {
-            sender,
-            receiver: tokio::sync::Mutex::new(receiver),
+impl Drop for PanicLog {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            tracing::error!("Background task {} failed: it panicked", self.0);
         }
-    }
-}
-
-impl WakeSignal {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn set(&self) {
-        let _ = self.sender.try_send(());
-    }
-
-    /// Forgets a wake-up nobody has waited for yet.
-    pub fn reset(&self) {
-        if let Ok(mut receiver) = self.receiver.try_lock() {
-            let _ = receiver.try_recv();
-        }
-    }
-
-    pub async fn wait(&self) {
-        let _ = self.receiver.lock().await.recv().await;
-    }
-
-    /// Waits for [`WakeSignal::set`] or for `timeout`, whichever comes first.
-    pub async fn wait_for(&self, timeout: Duration) {
-        let _ = tokio::time::timeout(timeout, self.wait()).await;
     }
 }
 
 /// Lets a listener stop listening.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Listener(u64);
+#[derive(Debug, Clone)]
+pub struct Listener(CancellationToken);
 
-type Handler<T> = Arc<dyn Fn(Arc<T>) -> BoxFuture<'static, ()> + Send + Sync>;
-
-/// The listeners of one kind of change, called one after another.
-pub(crate) struct Handlers<T> {
-    what: &'static str,
-    list: Mutex<Vec<(u64, Handler<T>)>>,
-    next: AtomicU64,
+impl Listener {
+    pub(crate) fn stop(&self) {
+        self.0.cancel();
+    }
 }
 
-impl<T: Send + Sync + 'static> Handlers<T> {
-    pub fn new(what: &'static str) -> Self {
-        Self {
-            what,
-            list: Mutex::new(Vec::new()),
-            next: AtomicU64::new(1),
-        }
-    }
-
-    pub fn add<F, Fut>(&self, handler: F) -> Listener
-    where
-        F: Fn(Arc<T>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-    {
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
-        let handler: Handler<T> = Arc::new(move |value| Box::pin(handler(value)));
-        lock(&self.list).push((id, handler));
-        Listener(id)
-    }
-
-    pub fn remove(&self, listener: Listener) {
-        lock(&self.list).retain(|(id, _)| *id != listener.0);
-    }
-
-    /// Calls each listener in turn and waits for it. One that panics is logged and the rest are
-    /// still called.
-    pub async fn raise(&self, value: Arc<T>) {
-        let handlers: Vec<Handler<T>> = lock(&self.list).iter().map(|(_, h)| h.clone()).collect();
-        for handler in handlers {
-            if let Err(e) = tokio::spawn(handler(value.clone())).await
-                && e.is_panic()
-            {
-                tracing::warn!("A listener of {} failed: it panicked", self.what);
+/// Calls `handler` with the newest value of `receiver` each time it changes, until the listener
+/// or the owner stops. A value a newer one overtook while the handler was busy is skipped, so a
+/// slow listener holds up only itself.
+pub(crate) fn listen<T, F, Fut>(
+    tasks: &Tasks,
+    what: &'static str,
+    mut receiver: watch::Receiver<T>,
+    handler: F,
+) -> Listener
+where
+    T: Clone + Send + Sync + 'static,
+    F: Fn(T) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let stop = tasks.token().child_token();
+    let listener = Listener(stop.clone());
+    tasks.spawn(format!("a listener of {what}"), async move {
+        loop {
+            tokio::select! {
+                changed = receiver.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+                _ = stop.cancelled() => return,
             }
+            let value = receiver.borrow_and_update().clone();
+            handler(value).await;
         }
+    });
+    listener
+}
+
+/// Waits 5, 10, 20 seconds and so on, up to a limit, and starts over after a success.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Backoff {
+    min: Duration,
+    max: Duration,
+    next: Duration,
+}
+
+impl Backoff {
+    pub fn new(min: Duration, max: Duration) -> Self {
+        Self {
+            min,
+            max,
+            next: min,
+        }
+    }
+
+    /// How long to wait now; the wait after it is twice as long, up to the limit.
+    pub fn next_wait(&mut self) -> Duration {
+        let wait = self.next;
+        self.next = (self.next * 2).min(self.max);
+        wait
+    }
+
+    pub fn reset(&mut self) {
+        self.next = self.min;
     }
 }
 
@@ -162,72 +141,70 @@ impl<T: Send + Sync + 'static> Handlers<T> {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn many_sets_before_a_wait_wake_it_once() {
-        let signal = Arc::new(WakeSignal::new());
-        for _ in 0..50 {
-            signal.set();
-        }
-
-        tokio::time::timeout(Duration::from_secs(5), signal.wait())
-            .await
-            .unwrap();
-
-        // Nothing is left queued: the next wait is pending, where a counting semaphore would pass again.
-        let waiting = signal.clone();
-        let second = tokio::spawn(async move { waiting.wait().await });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(!second.is_finished());
-        signal.set();
-        tokio::time::timeout(Duration::from_secs(5), second)
-            .await
-            .unwrap()
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn reset_forgets_a_wake_up_nobody_waited_for() {
-        let signal = Arc::new(WakeSignal::new());
-        signal.set();
-        signal.reset();
-
-        let waiting = signal.clone();
-        let wait = tokio::spawn(async move { waiting.wait().await });
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        assert!(!wait.is_finished());
-        signal.set();
-        tokio::time::timeout(Duration::from_secs(5), wait)
-            .await
-            .unwrap()
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn a_wait_with_a_time_limit_returns_when_set() {
-        let signal = Arc::new(WakeSignal::new());
-        let waiting = signal.clone();
-        let wait = tokio::spawn(async move { waiting.wait_for(Duration::from_secs(300)).await });
-
-        signal.set();
-
-        tokio::time::timeout(Duration::from_secs(5), wait)
-            .await
-            .unwrap()
-            .unwrap();
-    }
-
-    #[tokio::test]
-    async fn waiting_for_background_tasks_stops_at_the_timeout() {
-        let tasks = BackgroundTasks::default();
+    #[tokio::test(start_paused = true)]
+    async fn waiting_for_tasks_stops_at_the_timeout() {
+        let tasks = Tasks::default();
         tasks.spawn("quick", async {});
-        tasks.spawn("panics", async { panic!("on purpose") });
-        tasks.wait(Duration::from_secs(5)).await;
-        assert_eq!(tasks.running.count.load(Ordering::SeqCst), 0);
-
         tasks.spawn("slow", tokio::time::sleep(Duration::from_secs(60)));
-        let started = std::time::Instant::now();
+
+        let started = tokio::time::Instant::now();
         tasks.wait(Duration::from_millis(200)).await;
+
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stopping_cancels_the_token_the_tasks_wait_on() {
+        let tasks = Tasks::default();
+        let token = tasks.token().clone();
+        tasks.spawn("waits for the stop", async move { token.cancelled().await });
+
+        let started = tokio::time::Instant::now();
+        tasks.stop(Duration::from_secs(5)).await;
+
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_panicking_task_does_not_stop_the_wait() {
+        let tasks = Tasks::default();
+        tasks.spawn("panics", async { panic!("on purpose") });
+
+        tasks.wait(Duration::from_secs(5)).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_listener_sees_the_newest_value_and_can_be_stopped() {
+        let tasks = Tasks::default();
+        let (sender, receiver) = watch::channel(0u32);
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let listener = listen(&tasks, "numbers", receiver, move |n| {
+            let record = record.clone();
+            async move { lock(&record).push(n) }
+        });
+
+        sender.send_replace(1);
+        sender.send_replace(2);
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(*lock(&seen), vec![2]);
+
+        listener.stop();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        sender.send_replace(3);
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(*lock(&seen), vec![2]);
+        tasks.stop(Duration::from_secs(1)).await;
+    }
+
+    #[test]
+    fn the_backoff_doubles_up_to_its_limit_and_starts_over() {
+        let mut backoff = Backoff::new(Duration::from_secs(5), Duration::from_secs(60));
+
+        let waits: Vec<u64> = (0..6).map(|_| backoff.next_wait().as_secs()).collect();
+        backoff.reset();
+
+        assert_eq!(waits, vec![5, 10, 20, 40, 60, 60]);
+        assert_eq!(backoff.next_wait(), Duration::from_secs(5));
     }
 }

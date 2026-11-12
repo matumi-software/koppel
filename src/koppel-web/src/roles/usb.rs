@@ -144,7 +144,7 @@ impl ActivitySink for UsbActivity {
             koppel_usb::ActivityOutcome::Failed => activity::ActivityOutcome::Failed,
         };
         self.0.record(
-            activity::EntityRef::new(entity.id, entity.name, entity.kind),
+            activity::EntityRef::new(entity.id, entity.name, entity.kind.as_str().to_owned()),
             reason,
             outcome,
             summary,
@@ -164,12 +164,12 @@ fn system_check(check: koppel_usb::SystemCheck) -> SystemCheck {
 
 fn device(d: &koppel_usb::DeviceView) -> DeviceView {
     DeviceView {
-        bus_id: d.bus_id.clone(),
+        bus_id: d.bus_id.to_string(),
         vid_pid: d.vid_pid.clone(),
         name: d.name.clone(),
         manufacturer: d.manufacturer.clone(),
         speed: d.speed.clone(),
-        state: d.state.clone(),
+        state: d.state.as_str().to_owned(),
         attached_to: d.attached_to.clone(),
         attached_since: d.attached_since,
         fault: d.fault.clone(),
@@ -188,7 +188,7 @@ fn server_devices(devices: &koppel_usb::ServerDevices) -> ServerDevices {
 
 fn client_devices(devices: &koppel_usb::ClientDevices) -> ClientDevices {
     ClientDevices {
-        link: devices.link.clone(),
+        link: devices.link.as_str().to_owned(),
         link_message: devices.link_message.clone(),
         devices: devices
             .devices

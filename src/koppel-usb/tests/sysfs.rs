@@ -149,7 +149,7 @@ async fn a_hub_is_not_listed_but_the_devices_behind_it_are() {
         .await
         .unwrap()
         .into_iter()
-        .map(|d| d.bus_id)
+        .map(|d| d.bus_id.to_string())
         .collect();
 
     assert_eq!(listed, vec!["3-1.1", "3-1.2"]);
@@ -179,7 +179,7 @@ async fn devices_attached_from_another_server_are_not_listed() {
         .await
         .unwrap()
         .into_iter()
-        .map(|d| d.bus_id)
+        .map(|d| d.bus_id.to_string())
         .collect();
 
     assert_eq!(listed, vec!["3-2"]);
@@ -205,7 +205,7 @@ async fn share_claims_the_bus_id_unbinds_the_old_driver_and_binds_usbip_host() {
     sys.add_device("1-1.4", "0403:6001", "00", "12", "ftdi_sio", None);
     let usbip_host = sys.usbip_host();
 
-    sys.host().share("1-1.4").await.unwrap();
+    sys.host().share(&"1-1.4".parse().unwrap()).await.unwrap();
 
     assert_eq!(
         fs::read_to_string(usbip_host.join("match_busid")).unwrap(),
@@ -235,9 +235,9 @@ async fn a_share_whose_bind_fails_takes_the_bus_id_off_the_match_list_again() {
     )
     .unwrap();
 
-    let share = sys.host().share("1-1.4").await;
+    let share = sys.host().share(&"1-1.4".parse().unwrap()).await;
 
-    assert!(share.unwrap_err().message().contains("bind"));
+    assert!(share.unwrap_err().to_string().contains("bind"));
     assert_eq!(
         fs::read_to_string(usbip_host.join("match_busid")).unwrap(),
         "del 1-1.4"
@@ -250,7 +250,7 @@ async fn unshare_unbinds_takes_the_bus_id_off_and_lets_the_kernel_find_the_drive
     sys.add_device("1-1.4", "0403:6001", "00", "12", "usbip-host", None);
     let usbip_host = sys.usbip_host();
 
-    sys.host().unshare("1-1.4").await.unwrap();
+    sys.host().unshare(&"1-1.4".parse().unwrap()).await.unwrap();
 
     assert_eq!(
         fs::read_to_string(usbip_host.join("unbind")).unwrap(),
@@ -271,9 +271,14 @@ async fn share_without_the_module_explains_what_to_load() {
     let sys = Sys::new();
     sys.add_device("1-1.4", "0403:6001", "00", "12", "ftdi_sio", None);
 
-    let share = sys.host().share("1-1.4").await;
+    let share = sys.host().share(&"1-1.4".parse().unwrap()).await;
 
-    assert!(share.unwrap_err().message().contains("modprobe usbip-host"));
+    assert!(
+        share
+            .unwrap_err()
+            .to_string()
+            .contains("modprobe usbip-host")
+    );
 }
 
 #[tokio::test]
@@ -281,8 +286,9 @@ async fn bus_ids_that_could_escape_sysfs_are_refused() {
     let sys = Sys::new();
     sys.usbip_host();
 
-    assert!(sys.host().share("../../etc").await.is_err());
-    assert!(sys.host().share("1-1\n").await.is_err());
+    // A bus ID that could leave the device folder cannot be made, so no call can carry one.
+    assert!("../../etc".parse::<koppel_usb::BusId>().is_err());
+    assert!("1-1\n".parse::<koppel_usb::BusId>().is_err());
 }
 
 #[tokio::test]
@@ -290,7 +296,7 @@ async fn reset_goes_through_the_usbfs_node_for_the_device_bus_and_number() {
     let sys = Sys::new();
     sys.add_device("1-1.4", "046d:c52b", "00", "12", "usbip-host", None);
 
-    let reset = sys.host().reset("1-1.4").await;
+    let reset = sys.host().reset(&"1-1.4".parse().unwrap()).await;
 
     let expected = sys
         .root()
@@ -302,7 +308,7 @@ async fn reset_goes_through_the_usbfs_node_for_the_device_bus_and_number() {
     assert!(
         reset
             .unwrap_err()
-            .message()
+            .to_string()
             .contains(&expected.display().to_string())
     );
 }
@@ -315,9 +321,9 @@ async fn reset_reports_a_node_the_kernel_will_not_reset() {
     fs::create_dir_all(&node).unwrap();
     fs::write(node.join("005"), "").unwrap();
 
-    let reset = sys.host().reset("1-1.4").await;
+    let reset = sys.host().reset(&"1-1.4".parse().unwrap()).await;
 
-    assert!(reset.unwrap_err().message().contains("refused to reset"));
+    assert!(reset.unwrap_err().to_string().contains("refused to reset"));
 }
 
 #[tokio::test]
@@ -357,7 +363,7 @@ async fn export_refuses_a_device_that_is_in_use() {
 
     let export = host.export(&device).await;
 
-    assert!(export.err().unwrap().message().contains("not available"));
+    assert!(export.err().unwrap().to_string().contains("not available"));
 }
 
 #[tokio::test]
@@ -385,7 +391,13 @@ async fn vhci_picks_a_free_port_on_the_right_hub_and_writes_the_attach_line() {
     let (socket, _relay) = loopback_pair().await.unwrap();
 
     assert_eq!(attacher.ports().len(), 3);
-    assert_eq!(attacher.ports()[0].local_bus_id.as_deref(), Some("1-1"));
+    assert_eq!(
+        attacher.ports()[0]
+            .local_bus_id
+            .as_ref()
+            .map(|b| b.as_str()),
+        Some("1-1")
+    );
     let port = attacher.attach(&socket, 65541, UsbSpeed::Full).unwrap();
 
     assert_eq!(port, 1);

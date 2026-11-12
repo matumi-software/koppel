@@ -13,7 +13,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio_util::sync::CancellationToken;
 
-use crate::host::{Export, HostKind, UsbHost};
+use crate::host::{Capabilities, Export, UsbHost};
 use crate::tasks::lock;
 use crate::{
     BoxFuture, BusId, Clock, DeviceStream, ExportStatus, UsbDevice, UsbError, protocol, relay,
@@ -277,20 +277,8 @@ impl UsbHost for UsbIpUpstreamHost {
             .and_then(|s| s.unavailable.clone())
     }
 
-    fn can_share(&self) -> bool {
-        false
-    }
-
-    fn can_unshare(&self) -> bool {
-        false
-    }
-
-    fn can_reset(&self) -> bool {
-        false
-    }
-
-    fn kind(&self) -> HostKind {
-        HostKind::Upstream
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::UPSTREAM
     }
 
     fn list_devices(&self) -> BoxFuture<'_, Result<Vec<UsbDevice>, UsbError>> {

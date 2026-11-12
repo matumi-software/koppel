@@ -10,12 +10,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use koppel_config::files::{KoppelSettings, Role};
+use koppel_usb::{ClientDevices, DeviceState, LinkState, ServerDevices};
 use tokio::sync::broadcast::{self, error::TryRecvError};
 
 use crate::activity::{ActivityEvent, ActivityOutcome, ActivityReason};
 use crate::app::App;
 use crate::push::Pushed;
-use crate::roles::{ClientDevices, PairingRequestView, RequestState, ServerDevices};
+use crate::roles::{PairingRequestView, RequestState};
 
 /// A notification icon's tooltip holds 127 characters.
 pub const MAX_TIP: usize = 127;
@@ -108,12 +109,17 @@ fn server_line(server: &ServerDevices) -> (String, bool) {
     let shared = server
         .devices
         .iter()
-        .filter(|d| matches!(d.state.as_str(), "shared" | "attached" | "offline"))
+        .filter(|d| {
+            matches!(
+                d.state,
+                DeviceState::Shared | DeviceState::Attached | DeviceState::Offline
+            )
+        })
         .count();
     let in_use = server
         .devices
         .iter()
-        .filter(|d| d.state == "attached")
+        .filter(|d| d.state == DeviceState::Attached)
         .count();
     (
         format!(
@@ -127,14 +133,14 @@ fn server_line(server: &ServerDevices) -> (String, bool) {
 fn client_line(client: &ClientDevices, server_host: Option<&str>) -> (String, bool) {
     let server = server_host.unwrap_or("the server");
     let attached = client.devices.iter().filter(|d| d.attached_here).count();
-    match client.link.as_str() {
-        "connected" => (
+    match client.link {
+        LinkState::Connected => (
             format!("linked to {server}, {} attached", count(attached, "device")),
             false,
         ),
-        "connecting" => (format!("connecting to {server}"), false),
-        "unconfigured" => ("no server yet".to_owned(), false),
-        _ => (format!("cannot reach {server}"), true),
+        LinkState::Connecting => (format!("connecting to {server}"), false),
+        LinkState::Unconfigured => ("no server yet".to_owned(), false),
+        LinkState::Error => (format!("cannot reach {server}"), true),
     }
 }
 
@@ -357,34 +363,27 @@ impl TrayFeed {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activity::EntityRef;
-    use crate::roles::{ClientDeviceView, DeviceView};
+    use crate::activity::{EntityKind, EntityRef};
+    use koppel_usb::{ClientDeviceView, DeviceView};
     use time::OffsetDateTime;
 
-    fn device(state: &str) -> DeviceView {
+    fn device(state: DeviceState) -> DeviceView {
         DeviceView {
-            bus_id: "1-1".into(),
             vid_pid: "046d:c52b".into(),
             name: "Receiver".into(),
-            manufacturer: None,
             speed: "full".into(),
-            state: state.into(),
-            attached_to: None,
-            attached_since: None,
-            fault: None,
-            serial: None,
-            driver: None,
-            interfaces: None,
+            state,
+            ..DeviceView::new("1-1".parse().unwrap())
         }
     }
 
-    fn client(link: &str, attached: usize) -> ClientDevices {
+    fn client(link: LinkState, attached: usize) -> ClientDevices {
         ClientDevices {
-            link: link.into(),
+            link,
             link_message: None,
             devices: (0..attached + 1)
                 .map(|i| ClientDeviceView {
-                    device: device("shared"),
+                    device: device(DeviceState::Shared),
                     attached_here: i < attached,
                     port: None,
                     attached_since: None,
@@ -403,14 +402,14 @@ mod tests {
             role,
             password_set: true,
             setup_open: false,
-            client: client("connected", 2),
+            client: client(LinkState::Connected, 2),
             server_host: Some("t520-client".into()),
             server: ServerDevices {
                 devices: vec![
-                    device("shared"),
-                    device("attached"),
-                    device("offline"),
-                    device("local"),
+                    device(DeviceState::Shared),
+                    device(DeviceState::Attached),
+                    device(DeviceState::Offline),
+                    device(DeviceState::Local),
                 ],
                 unavailable: None,
             },
@@ -459,7 +458,7 @@ mod tests {
         assert!(describe(&f).tip.contains("timed out"));
 
         let mut f = facts(Role::Client);
-        f.client = client("error", 0);
+        f.client = client(LinkState::Error, 0);
         f.server_host = None;
         assert_eq!(
             describe(&f),
@@ -468,7 +467,7 @@ mod tests {
                 attention: true
             }
         );
-        f.client = client("unconfigured", 0);
+        f.client = client(LinkState::Unconfigured, 0);
         assert_eq!(describe(&f).tip, "Koppel: no server yet");
         assert!(!describe(&f).attention);
 
@@ -508,7 +507,7 @@ mod tests {
         ActivityEvent {
             id: "1".into(),
             timestamp_utc: OffsetDateTime::UNIX_EPOCH,
-            entity: EntityRef::new("link", "lab-pc", "link"),
+            entity: EntityRef::new("link", "lab-pc", EntityKind::Link),
             reason,
             outcome,
             summary: "Linked to lab-pc".into(),

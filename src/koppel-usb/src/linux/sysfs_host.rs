@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
 use super::usbfs;
-use crate::host::{Export, UsbHost};
+use crate::host::{Capabilities, Export, UsbHost};
 use crate::{
     BoxFuture, BusId, DeviceStream, ExportStatus, Module, UsbDevice, UsbError, UsbInterface,
     UsbSpeed, loopback_pair, relay,
@@ -63,16 +63,8 @@ impl UsbHost for SysfsUsbHost {
         self.tree.unavailable()
     }
 
-    fn can_share(&self) -> bool {
-        true
-    }
-
-    fn can_unshare(&self) -> bool {
-        true
-    }
-
-    fn can_reset(&self) -> bool {
-        true
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::KERNEL
     }
 
     fn list_devices(&self) -> BoxFuture<'_, Result<Vec<UsbDevice>, UsbError>> {

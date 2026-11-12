@@ -17,9 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api::client::ConnectionUpdate;
 use crate::push::{self, Push};
-use crate::roles::{
-    ClientRole, ConnectionTest, DiscoveredServer, Fut, Outcome, PairingState, PairingStatus,
-};
+use crate::roles::{ConnectionTest, DiscoveredServer, Outcome, PairingState, PairingStatus};
 
 /// How long the connection test may take, the token request and the hello together.
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -427,42 +425,40 @@ fn tested(failure: &skakel_client::Failure) -> ConnectionTest {
     }
 }
 
-impl ClientRole for SkakelClientRole {
-    fn test(&self) -> Fut<'_, ConnectionTest> {
-        Box::pin(async move {
-            let saved = self.connection.current();
-            if !saved.is_complete() {
-                return ConnectionTest::of(Outcome::Incomplete);
-            }
-            let Some(address) = saved.server_url.as_deref().and_then(|u| Url::parse(u).ok()) else {
-                return ConnectionTest::of(Outcome::Unreachable);
-            };
-            let Ok(pins) = Pins::with_next(
-                saved.server_fingerprint.as_deref().unwrap_or_default(),
-                saved.next_server_fingerprint.as_deref(),
-            ) else {
-                return ConnectionTest::of(Outcome::CertificateMismatch);
-            };
-            let credentials = Credentials::new(
-                saved.client_id.clone().unwrap_or_default(),
-                saved.client_secret.as_deref().cloned().unwrap_or_default(),
-            );
-            let options = ClientOptions::default().request_timeout(TEST_TIMEOUT);
-            let link = match skakel_client::Link::new(&address, pins, credentials, options) {
-                Ok(link) => link,
-                Err(e) => return tested(e.failure()),
-            };
-            match link.hello().await {
-                Ok(hello) => ConnectionTest::saying(
-                    Outcome::Ok,
-                    format!("Connected to {} as {}.", hello.server, hello.client_id),
-                ),
-                Err(e) => tested(e.failure()),
-            }
-        })
+impl SkakelClientRole {
+    pub async fn test(&self) -> ConnectionTest {
+        let saved = self.connection.current();
+        if !saved.is_complete() {
+            return ConnectionTest::of(Outcome::Incomplete);
+        }
+        let Some(address) = saved.server_url.as_deref().and_then(|u| Url::parse(u).ok()) else {
+            return ConnectionTest::of(Outcome::Unreachable);
+        };
+        let Ok(pins) = Pins::with_next(
+            saved.server_fingerprint.as_deref().unwrap_or_default(),
+            saved.next_server_fingerprint.as_deref(),
+        ) else {
+            return ConnectionTest::of(Outcome::CertificateMismatch);
+        };
+        let credentials = Credentials::new(
+            saved.client_id.clone().unwrap_or_default(),
+            saved.client_secret.as_deref().cloned().unwrap_or_default(),
+        );
+        let options = ClientOptions::default().request_timeout(TEST_TIMEOUT);
+        let link = match skakel_client::Link::new(&address, pins, credentials, options) {
+            Ok(link) => link,
+            Err(e) => return tested(e.failure()),
+        };
+        match link.hello().await {
+            Ok(hello) => ConnectionTest::saying(
+                Outcome::Ok,
+                format!("Connected to {} as {}.", hello.server, hello.client_id),
+            ),
+            Err(e) => tested(e.failure()),
+        }
     }
 
-    fn discovered(&self) -> Vec<DiscoveredServer> {
+    pub fn discovered(&self) -> Vec<DiscoveredServer> {
         let Some(browser) = &self.browser else {
             return Vec::new();
         };
@@ -497,97 +493,90 @@ impl ClientRole for SkakelClientRole {
             .collect()
     }
 
-    fn pairing(&self) -> PairingStatus {
+    pub fn pairing(&self) -> PairingStatus {
         self.pairing.borrow().status.clone()
     }
 
-    fn begin_pairing<'a>(
-        &'a self,
-        server_url: &'a str,
-        fingerprint: &'a str,
-        server_name: Option<&'a str>,
-    ) -> Fut<'a, ()> {
-        Box::pin(async move {
-            let Some(me) = self.myself() else {
-                return;
-            };
-            let server_name = server_name
-                .filter(|n| !n.trim().is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| {
-                    Url::parse(server_url)
-                        .ok()
-                        .and_then(|u| u.host_str().map(str::to_owned))
-                        .unwrap_or_else(|| server_url.to_owned())
-                });
-            let mut started = None;
-            self.pairing.send_modify(|pairings| {
-                pairings.next += 1;
-                let run = Arc::new(Run {
-                    id: pairings.next,
-                    server_url: server_url.to_owned(),
-                    fingerprint: crate::api::client::normalize(fingerprint),
-                    server_name,
-                    stop: CancellationToken::new(),
-                });
-                pairings.approved = None;
-                pairings.confirming = false;
-                if let Some(previous) = pairings.run.replace(run.clone()) {
-                    previous.stop.cancel();
-                }
-                started = Some(run);
+    pub async fn begin_pairing(
+        &self,
+        server_url: &str,
+        fingerprint: &str,
+        server_name: Option<&str>,
+    ) {
+        let Some(me) = self.myself() else {
+            return;
+        };
+        let server_name = server_name
+            .filter(|n| !n.trim().is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                Url::parse(server_url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(str::to_owned))
+                    .unwrap_or_else(|| server_url.to_owned())
             });
-            let Some(run) = started else {
-                return;
-            };
-            tokio::spawn(me.run(run));
-        })
-    }
-
-    fn confirm_pairing(&self) -> Fut<'_, bool> {
-        Box::pin(async move {
-            let mut taken = None;
-            self.pairing.send_if_modified(|pairings| {
-                if pairings.status.state == PairingState::Confirm
-                    && !pairings.confirming
-                    && let (Some(run), Some(update)) =
-                        (pairings.run.clone(), pairings.approved.clone())
-                {
-                    pairings.confirming = true;
-                    taken = Some((run, update));
-                }
-                false
+        let mut started = None;
+        self.pairing.send_modify(|pairings| {
+            pairings.next += 1;
+            let run = Arc::new(Run {
+                id: pairings.next,
+                server_url: server_url.to_owned(),
+                fingerprint: crate::api::client::normalize(fingerprint),
+                server_name,
+                stop: CancellationToken::new(),
             });
-            let Some((run, update)) = taken else {
-                return false;
-            };
-            if let Err(e) = self.connection.update(|c| update.apply(c)).await {
-                tracing::warn!("Pairing with {} failed: {e}", run.server_name);
-                let mut status = Self::status(&run, PairingState::Failed);
-                status.message = Some(format!(
-                    "Could not save the connection to {}: {e}",
-                    run.server_name
-                ));
-                self.set(&run, status);
-                return true;
+            pairings.approved = None;
+            pairings.confirming = false;
+            if let Some(previous) = pairings.run.replace(run.clone()) {
+                previous.stop.cancel();
             }
-            tracing::info!("Paired with {}", run.server_name);
-            self.set(&run, Self::status(&run, PairingState::Paired));
-            true
-        })
+            started = Some(run);
+        });
+        let Some(run) = started else {
+            return;
+        };
+        tokio::spawn(me.run(run));
     }
 
-    fn cancel_pairing(&self) -> Fut<'_, ()> {
-        Box::pin(async move {
-            self.pairing.send_modify(|pairings| {
-                if let Some(run) = pairings.run.take() {
-                    run.stop.cancel();
-                }
-                pairings.reset();
-            });
-            self.push
-                .send(push::PAIRING_STATUS_CHANGED, &PairingStatus::idle());
-        })
+    pub async fn confirm_pairing(&self) -> bool {
+        let mut taken = None;
+        self.pairing.send_if_modified(|pairings| {
+            if pairings.status.state == PairingState::Confirm
+                && !pairings.confirming
+                && let (Some(run), Some(update)) = (pairings.run.clone(), pairings.approved.clone())
+            {
+                pairings.confirming = true;
+                taken = Some((run, update));
+            }
+            false
+        });
+        let Some((run, update)) = taken else {
+            return false;
+        };
+        if let Err(e) = self.connection.update(|c| update.apply(c)).await {
+            tracing::warn!("Pairing with {} failed: {e}", run.server_name);
+            let mut status = Self::status(&run, PairingState::Failed);
+            status.message = Some(format!(
+                "Could not save the connection to {}: {e}",
+                run.server_name
+            ));
+            self.set(&run, status);
+            return true;
+        }
+        tracing::info!("Paired with {}", run.server_name);
+        self.set(&run, Self::status(&run, PairingState::Paired));
+        true
+    }
+
+    pub async fn cancel_pairing(&self) {
+        self.pairing.send_modify(|pairings| {
+            if let Some(run) = pairings.run.take() {
+                run.stop.cancel();
+            }
+            pairings.reset();
+        });
+        self.push
+            .send(push::PAIRING_STATUS_CHANGED, &PairingStatus::idle());
     }
 }
 

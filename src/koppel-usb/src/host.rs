@@ -1,4 +1,5 @@
 use std::net::TcpStream;
+use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
@@ -17,26 +18,53 @@ pub enum HostKind {
     Unsupported,
 }
 
+/// What a host can do, as a value callers read once and branch on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Capabilities {
+    pub kind: HostKind,
+    /// [`UsbHost::share`] works: Koppel itself decides which devices are shared.
+    pub share: bool,
+    /// [`UsbHost::unshare`] works.
+    pub unshare: bool,
+    /// [`UsbHost::reset`] does something.
+    pub reset: bool,
+}
+
+impl Capabilities {
+    /// This machine's kernel: Koppel binds, unbinds and resets devices itself.
+    pub const KERNEL: Self = Self {
+        kind: HostKind::Kernel,
+        share: true,
+        unshare: true,
+        reset: true,
+    };
+
+    /// A plain USB/IP server shares by its own tools, so Koppel only lists and exports.
+    pub const UPSTREAM: Self = Self {
+        kind: HostKind::Upstream,
+        share: false,
+        unshare: false,
+        reset: false,
+    };
+
+    /// Nothing here can share devices.
+    pub const NONE: Self = Self {
+        kind: HostKind::Unsupported,
+        share: false,
+        unshare: false,
+        reset: false,
+    };
+}
+
 /// The server side of USB/IP on this machine: list devices and hand them to the network. What a
 /// host can do differs (the Linux kernel shares devices itself; usbipd-win on another machine
-/// shares them by its own command), so the trait says what each host can do and callers check
-/// before they ask.
+/// shares them by its own command), so [`UsbHost::capabilities`] says what each host can do and
+/// callers check before they ask.
 pub trait UsbHost: Send + Sync {
     /// `None` when this machine can share USB devices; otherwise why not, for the UI.
     fn unavailable(&self) -> Option<String>;
 
-    /// True when [`UsbHost::share`] works: Koppel itself decides which devices are shared.
-    fn can_share(&self) -> bool;
-
-    /// True when [`UsbHost::unshare`] works.
-    fn can_unshare(&self) -> bool;
-
-    /// True when [`UsbHost::reset`] does something.
-    fn can_reset(&self) -> bool;
-
-    fn kind(&self) -> HostKind {
-        HostKind::Kernel
-    }
+    fn capabilities(&self) -> Capabilities;
 
     fn list_devices(&self) -> BoxFuture<'_, Result<Vec<UsbDevice>, UsbError>>;
 
@@ -49,10 +77,10 @@ pub trait UsbHost: Send + Sync {
     fn sharing_advice(&self, bus_id: &BusId, share: bool) -> String;
 
     /// Takes the device from its driver and gives it to usbip-host, so it can be exported. Only
-    /// where [`UsbHost::can_share`].
+    /// where [`Capabilities::share`].
     fn share<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>>;
 
-    /// Gives the device back to its normal driver. Only where [`UsbHost::can_unshare`].
+    /// Gives the device back to its normal driver. Only where [`Capabilities::unshare`].
     fn unshare<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>>;
 
     fn status<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<ExportStatus, UsbError>>;
@@ -60,7 +88,7 @@ pub trait UsbHost: Send + Sync {
     /// Resets a shared device on its USB port, so a client gets it the way a fresh plug-in would.
     /// A driver on this machine may have changed the device before it was shared: Linux's
     /// Logitech receiver driver switches the receiver to a mode only that driver reads, and the
-    /// mouse then stays silent on the client. Only where [`UsbHost::can_reset`].
+    /// mouse then stays silent on the client. Only where [`Capabilities::reset`].
     fn reset<'a>(&'a self, bus_id: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>>;
 
     /// Exports the device. When this returns, the host is ready (the kernel holds its socket, or
@@ -124,44 +152,124 @@ pub trait UsbIpDriver: Send + Sync {
     ) -> BoxFuture<'a, Result<(), UsbError>>;
 }
 
-/// Stands in where Koppel cannot drive USB.
-#[derive(Debug, Clone)]
-pub struct Unsupported {
+/// What drives USB on this machine: the host that shares, and what attaches, as the kernel
+/// does or as a driver such as usbip-win2 does. A part this machine lacks is `None`, and the
+/// platform says why with one reason.
+#[derive(Clone)]
+pub struct Platform {
+    pub host: Arc<dyn UsbHost>,
+    /// Attaches through this kernel's virtual host controller.
+    pub attacher: Option<Arc<dyn UsbAttacher>>,
+    /// Attaches through a USB/IP driver on this machine.
+    pub driver: Option<Arc<dyn UsbIpDriver>>,
+    /// This is Windows itself rather than Linux or a container, which changes what the system
+    /// checks look at.
+    pub native_windows: bool,
     reason: String,
 }
 
-impl Unsupported {
-    pub fn new(reason: impl Into<String>) -> Self {
+impl Platform {
+    /// `reason` is what a missing part says.
+    pub fn new(
+        host: Arc<dyn UsbHost>,
+        attacher: Option<Arc<dyn UsbAttacher>>,
+        driver: Option<Arc<dyn UsbIpDriver>>,
+        reason: impl Into<String>,
+    ) -> Self {
         Self {
+            host,
+            attacher,
+            driver,
+            native_windows: cfg!(windows),
             reason: reason.into(),
         }
     }
 
+    /// A machine Koppel cannot drive: it shares and attaches nothing, and says `reason`.
+    pub fn unsupported(reason: impl Into<String>) -> Self {
+        let reason = reason.into();
+        Self::new(Arc::new(NoHost(reason.clone())), None, None, reason)
+    }
+
+    /// For a test that runs as if on another operating system.
+    #[must_use]
+    pub fn on_windows(mut self, native_windows: bool) -> Self {
+        self.native_windows = native_windows;
+        self
+    }
+
+    /// `None` when this kernel can attach; otherwise why not.
+    pub fn attach_unavailable(&self) -> Option<String> {
+        match &self.attacher {
+            Some(attacher) => attacher.unavailable(),
+            None => Some(self.reason.clone()),
+        }
+    }
+
+    /// `None` when the driver is installed; otherwise why not.
+    pub fn driver_unavailable(&self) -> Option<String> {
+        match &self.driver {
+            Some(driver) => driver.unavailable(),
+            None => Some(self.reason.clone()),
+        }
+    }
+
+    fn missing(&self) -> UsbError {
+        UsbError::Unavailable(self.reason.clone())
+    }
+
+    pub(crate) fn attacher(&self) -> Result<&Arc<dyn UsbAttacher>, UsbError> {
+        self.attacher.as_ref().ok_or_else(|| self.missing())
+    }
+
+    pub(crate) fn driver(&self) -> Result<&Arc<dyn UsbIpDriver>, UsbError> {
+        self.driver.as_ref().ok_or_else(|| self.missing())
+    }
+
+    /// Hands `socket` to the virtual host controller. The write to sysfs blocks, so it runs off
+    /// the async workers; the controller takes its own reference to the socket, which the caller
+    /// keeps open until the device is detached.
+    pub(crate) async fn attach_kernel(
+        &self,
+        socket: &TcpStream,
+        dev_id: u32,
+        speed: UsbSpeed,
+    ) -> Result<u32, UsbError> {
+        let attacher = self.attacher()?.clone();
+        let socket = socket
+            .try_clone()
+            .map_err(|e| UsbError::failed(format!("The socket could not be handed over: {e}")))?;
+        tokio::task::spawn_blocking(move || attacher.attach(&socket, dev_id, speed))
+            .await
+            .map_err(|e| UsbError::failed(format!("The attach did not finish: {e}")))?
+    }
+
+    /// Frees a virtual port, off the async workers.
+    pub(crate) async fn detach_kernel(&self, port: u32) -> Result<(), UsbError> {
+        let attacher = self.attacher()?.clone();
+        tokio::task::spawn_blocking(move || attacher.detach(port))
+            .await
+            .map_err(|e| UsbError::failed(format!("The detach did not finish: {e}")))?
+    }
+}
+
+/// The host of a machine Koppel cannot drive.
+struct NoHost(String);
+
+impl NoHost {
     fn refuse<T: Send + 'static>(&self) -> BoxFuture<'static, Result<T, UsbError>> {
-        let error = UsbError::Unavailable(self.reason.clone());
+        let error = UsbError::Unavailable(self.0.clone());
         Box::pin(async move { Err(error) })
     }
 }
 
-impl UsbHost for Unsupported {
+impl UsbHost for NoHost {
     fn unavailable(&self) -> Option<String> {
-        Some(self.reason.clone())
+        Some(self.0.clone())
     }
 
-    fn can_share(&self) -> bool {
-        false
-    }
-
-    fn can_unshare(&self) -> bool {
-        false
-    }
-
-    fn can_reset(&self) -> bool {
-        false
-    }
-
-    fn kind(&self) -> HostKind {
-        HostKind::Unsupported
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::NONE
     }
 
     fn list_devices(&self) -> BoxFuture<'_, Result<Vec<UsbDevice>, UsbError>> {
@@ -173,7 +281,7 @@ impl UsbHost for Unsupported {
     }
 
     fn sharing_advice(&self, _: &BusId, _: bool) -> String {
-        self.reason.clone()
+        self.0.clone()
     }
 
     fn share<'a>(&'a self, _: &'a BusId) -> BoxFuture<'a, Result<(), UsbError>> {
@@ -193,49 +301,6 @@ impl UsbHost for Unsupported {
     }
 
     fn export<'a>(&'a self, _: &'a UsbDevice) -> BoxFuture<'a, Result<Box<dyn Export>, UsbError>> {
-        self.refuse()
-    }
-}
-
-impl UsbAttacher for Unsupported {
-    fn unavailable(&self) -> Option<String> {
-        Some(self.reason.clone())
-    }
-
-    fn ports(&self) -> Vec<VhciPort> {
-        Vec::new()
-    }
-
-    fn attach(&self, _: &TcpStream, _: u32, _: UsbSpeed) -> Result<u32, UsbError> {
-        Err(UsbError::Unavailable(self.reason.clone()))
-    }
-
-    fn detach(&self, _: u32) -> Result<(), UsbError> {
-        Err(UsbError::Unavailable(self.reason.clone()))
-    }
-}
-
-impl UsbIpDriver for Unsupported {
-    fn unavailable(&self) -> Option<String> {
-        Some(self.reason.clone())
-    }
-
-    fn attach<'a>(
-        &'a self,
-        _: &'a str,
-        _: u16,
-        _: &'a BusId,
-    ) -> BoxFuture<'a, Result<u32, UsbError>> {
-        self.refuse()
-    }
-
-    fn detach<'a>(
-        &'a self,
-        _: &'a str,
-        _: u16,
-        _: &'a BusId,
-        _: u32,
-    ) -> BoxFuture<'a, Result<(), UsbError>> {
         self.refuse()
     }
 }

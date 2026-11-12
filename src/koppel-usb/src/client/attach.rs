@@ -125,7 +125,9 @@ async fn through_driver(
     // The driver's own command has a time limit, and killing it half way could leave the attach
     // half done, so it is not cancelled; a change that came meanwhile is undone by the actor.
     let driver_port = shared
-        .driver
+        .platform
+        .driver()
+        .map_err(AttachError::from)?
         .attach(&LOOPBACK.to_string(), gateway_port, &key.bus_id)
         .await
         .map_err(AttachError::from)?;
@@ -143,7 +145,7 @@ async fn through_kernel(
     attempt: u64,
     cancel: &CancellationToken,
 ) -> Result<Option<DriverHold>, Failure> {
-    if let Some(reason) = shared.attacher.unavailable() {
+    if let Some(reason) = shared.platform.attach_unavailable() {
         return Err(AttachError::Usb(crate::UsbError::Unavailable(reason)).into());
     }
     let bus_id = &key.bus_id;
@@ -180,8 +182,9 @@ async fn hand_to_kernel(
 
     let (kernel_end, relay_end) = loopback_pair().await.map_err(AttachError::Loopback)?;
     let port = shared
-        .attacher
-        .attach(&kernel_end, device.dev_id(), device.speed)
+        .platform
+        .attach_kernel(&kernel_end, device.dev_id(), device.speed)
+        .await
         .map_err(AttachError::from)?;
 
     let attachment = Attachment {
@@ -204,7 +207,7 @@ async fn hand_to_kernel(
         refused => {
             // The attach is not wanted any more, or something else attached the device first;
             // give the port back.
-            let _ = shared.attacher.detach(port);
+            let _ = shared.platform.detach_kernel(port).await;
             return Err(match refused {
                 Ok(Err(super::slots::RegisterError::AlreadyAttached)) => {
                     AttachError::AlreadyAttached(bus_id.clone()).into()
@@ -257,7 +260,8 @@ pub(super) async fn release(
         if let Some(hold) = plan.hold {
             let loopback = LOOPBACK.to_string();
             if let Err(e) = shared
-                .driver
+                .platform
+                .driver()?
                 .detach(&loopback, hold.gateway_port, bus_id, hold.driver_port)
                 .await
             {
@@ -273,7 +277,7 @@ pub(super) async fn release(
             .filter(|a| a.kind == Kind::Kernel)
             .and_then(|a| a.port);
         if !detached && let Some(port) = kernel_port {
-            shared.attacher.detach(port)?;
+            shared.platform.detach_kernel(port).await?;
             detached = true;
         }
         Ok(detached)

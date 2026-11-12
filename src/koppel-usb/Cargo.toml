@@ -19,6 +19,10 @@ time.workspace = true
 thiserror.workspace = true
 http.workspace = true
 
+[features]
+# Test doubles other crates use: in-memory streams.
+test-util = []
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
@@ -26,6 +30,8 @@ libc.workspace = true
 windows.workspace = true
 
 [dev-dependencies]
+# The tests of this crate use the test doubles too.
+koppel-usb = { path = ".", features = ["test-util"] }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 proptest-state-machine = "0.9.0"
 serde_json.workspace = true

@@ -109,8 +109,7 @@ pub(crate) fn build(deps: Deps) -> (Arc<Shared>, Actor) {
         settings: deps.settings,
         connection: deps.connection,
         remembered: deps.remembered,
-        attacher: deps.attacher,
-        driver: deps.driver,
+        platform: deps.platform,
         links: deps.links,
         activity: deps.activity,
         clock: deps.clock,
@@ -315,7 +314,12 @@ impl Actor {
                     && let Some(port) = ended.port
                 {
                     // The link dropped without a detach; free the port.
-                    let _ = self.shared.attacher.detach(port);
+                    let shared = self.shared.clone();
+                    self.shared
+                        .workers
+                        .spawn("free the port of a dropped link", async move {
+                            let _ = shared.platform.detach_kernel(port).await;
+                        });
                 }
                 self.publish();
             }
@@ -777,7 +781,7 @@ impl Actor {
             } else {
                 self.gateway_fault
                     .clone()
-                    .or_else(|| self.shared.attacher.unavailable())
+                    .or_else(|| self.shared.platform.attach_unavailable())
             },
             gateway: self.gateway_port.is_some() && !uses_driver,
             gateway_fault: self.gateway_fault.clone(),

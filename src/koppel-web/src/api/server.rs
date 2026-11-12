@@ -5,12 +5,13 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use koppel_usb::BusId;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::activity::{ActivityOutcome, ActivityReason, EntityRef};
+use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::{self, JsonBody};
-use crate::roles::{Approval, RegisterError, is_bus_id};
+use crate::roles::{Approval, RegisterError};
 use crate::state::ServerApi;
 
 #[derive(Serialize)]
@@ -43,11 +44,11 @@ pub(crate) struct Share {
 }
 
 fn client_entity(id: &str, name: &str) -> EntityRef {
-    EntityRef::new(id, name, "client")
+    EntityRef::new(id, name, EntityKind::Client)
 }
 
 fn machine(app: &ServerApi) -> EntityRef {
-    EntityRef::new("machine", app.host.name.clone(), "machine")
+    EntityRef::new("machine", app.host.name.clone(), EntityKind::Machine)
 }
 
 fn secret(secret: &str) -> Response {
@@ -321,7 +322,7 @@ pub(crate) async fn share(
     Path(bus_id): Path<String>,
     JsonBody(request): JsonBody<Share>,
 ) -> Response {
-    if !is_bus_id(&bus_id) {
+    if bus_id.parse::<BusId>().is_err() {
         return json::problem(&[("busId", "That is not a USB bus ID, such as 1-1.4.")]);
     }
     if let Some(reason) = app.usb_server.current().unavailable {

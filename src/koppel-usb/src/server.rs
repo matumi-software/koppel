@@ -116,7 +116,7 @@ impl Shared {
     /// Bound for export, and the device the user shared on that port.
     fn is_exportable(&self, device: &UsbDevice) -> bool {
         self.host.is_shared(device)
-            && (!self.host.can_share() || shared_expects(&self.shared.current(), device))
+            && (!self.host.capabilities().share || shared_expects(&self.shared.current(), device))
     }
 }
 
@@ -541,7 +541,7 @@ impl Actor {
     /// host to change anything.
     async fn apply_intent(&mut self, devices: &[UsbDevice], unshare_strays: bool) -> bool {
         let host = self.shared.host.clone();
-        if host.unavailable().is_some() || !host.can_share() {
+        if host.unavailable().is_some() || !host.capabilities().share {
             return false;
         }
         let saved = self.shared.shared.current();
@@ -556,7 +556,7 @@ impl Actor {
                     changed = true;
                 }
             } else if host.is_shared(device)
-                && host.can_unshare()
+                && host.capabilities().unshare
                 && (unshare_strays || saved_contains(&saved, bus_id))
             {
                 let wrong_device =
@@ -580,7 +580,7 @@ impl Actor {
         let Ok(devices) = devices else {
             return;
         };
-        if self.shared.host.unavailable().is_some() || !self.shared.host.can_unshare() {
+        if self.shared.host.unavailable().is_some() || !self.shared.host.capabilities().unshare {
             return;
         }
         let shared: Vec<BusId> = devices
@@ -605,9 +605,9 @@ impl Actor {
             return Some(self.fail(bus_id, unavailable));
         }
         let can = if share {
-            host.can_share()
+            host.capabilities().share
         } else {
-            host.can_unshare()
+            host.capabilities().unshare
         };
         if can {
             return self.try_apply(bus_id, share).await;
@@ -656,9 +656,9 @@ impl Actor {
             .await;
         if let Err(e) = saved {
             let can_undo = if share {
-                self.shared.host.can_unshare()
+                self.shared.host.capabilities().unshare
             } else {
-                self.shared.host.can_share()
+                self.shared.host.capabilities().share
             };
             if can_undo {
                 self.try_apply(bus_id, !share).await;

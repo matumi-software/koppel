@@ -8,10 +8,7 @@ use std::time::Duration;
 use axum::Router;
 use koppel_config::files::{ClientConnection, KoppelSettings, Role};
 use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox, open};
-use koppel_usb::{
-    ActivitySink, GatewayOptions, SystemClock, Unsupported, UsbAttacher, UsbDataPlane, UsbHost,
-    UsbIpDriver, UsbIpGateway,
-};
+use koppel_usb::{ActivitySink, GatewayOptions, Platform, SystemClock, UsbDataPlane, UsbIpGateway};
 use skakel_client::{Browser, BrowserOptions};
 use skakel_wire::SkakelApp;
 use tokio::sync::watch;
@@ -27,10 +24,7 @@ use crate::host::Host;
 use crate::push::{self, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
 use crate::roles::skakel::{APP_ID, SecretsStore, ServerParts, ServerStartError, SkakelLinks};
-use crate::roles::{
-    ClientRole, ServerRole, SkakelClientRole, SkakelServerRole, UsbActivity, UsbClient,
-    UsbClientRole, UsbServer, UsbServerRole,
-};
+use crate::roles::{SkakelClientRole, SkakelServerRole, UsbActivity, UsbClientRole, UsbServerRole};
 use crate::routes::Routers;
 use crate::tls::{self, Acceptors, CertificateSlot};
 
@@ -85,12 +79,9 @@ impl NetworkOptions {
 
 /// What shares and attaches USB devices on this machine, and the client's timings.
 pub struct UsbOptions {
-    /// What the server shares from: the Linux kernel, a USB/IP server such as usbipd-win, or none.
-    pub host: Arc<dyn UsbHost>,
-    /// What attaches through this machine's kernel (vhci-hcd), or none.
-    pub attacher: Arc<dyn UsbAttacher>,
-    /// A USB/IP driver on this machine Koppel drives (usbip-win2), or none.
-    pub driver: Arc<dyn UsbIpDriver>,
+    /// What shares and attaches: the Linux kernel, a USB/IP server such as usbipd-win, a USB/IP
+    /// driver such as usbip-win2, or none of them.
+    pub platform: Platform,
     pub client: koppel_usb::ClientOptions,
     pub gateway: GatewayOptions,
 }
@@ -98,11 +89,8 @@ pub struct UsbOptions {
 impl UsbOptions {
     /// No USB at all, and why, as on a platform Koppel cannot drive.
     pub fn unsupported(reason: &str) -> Self {
-        let none = Arc::new(Unsupported::new(reason));
         Self {
-            host: none.clone(),
-            attacher: none.clone(),
-            driver: none,
+            platform: Platform::unsupported(reason),
             client: koppel_usb::ClientOptions::default(),
             gateway: GatewayOptions {
                 port: 0,
@@ -150,10 +138,10 @@ pub struct App {
     pub(crate) auth_limit: Arc<RateLimit>,
     pub(crate) activity: Arc<ActivityLog>,
     pub(crate) push: Push,
-    pub(crate) server: Arc<dyn ServerRole>,
-    pub(crate) client: Arc<dyn ClientRole>,
-    pub(crate) usb_server: Arc<dyn UsbServer>,
-    pub(crate) usb_client: Arc<dyn UsbClient>,
+    pub(crate) server: Arc<SkakelServerRole>,
+    pub(crate) client: Arc<SkakelClientRole>,
+    pub(crate) usb_server: Arc<UsbServerRole>,
+    pub(crate) usb_client: Arc<UsbClientRole>,
     certificate: Arc<CertificateSlot>,
     /// The web ports' acceptor while Skakel's server does not present the certificate.
     own_acceptor: tokio_rustls::TlsAcceptor,
@@ -218,7 +206,7 @@ impl App {
         let certificate = store.slot();
         let own_acceptor = tls::acceptor(certificate.clone())?;
         let usb_server = koppel_usb::UsbServer::new(koppel_usb::ServerDeps {
-            host: usb.host.clone(),
+            host: usb.platform.host.clone(),
             shared: devices.clone(),
             settings: settings.clone(),
             activity: usb_activity.clone(),
@@ -286,8 +274,7 @@ impl App {
             settings: settings.clone(),
             connection: connection.clone(),
             remembered: attached.clone(),
-            attacher: usb.attacher.clone(),
-            driver: usb.driver.clone(),
+            platform: usb.platform.clone(),
             links,
             activity: usb_activity.clone(),
             clock,
@@ -303,13 +290,10 @@ impl App {
         );
         client.follow(&settings).await;
 
-        let usb_server_role = UsbServerRole::new(usb_server.clone(), push.clone());
-        let usb_client_role = UsbClientRole::new(
-            usb_client.clone(),
-            usb.attacher.clone(),
-            usb.driver.clone(),
-            push.clone(),
-        );
+        let usb_server_role =
+            UsbServerRole::new(usb_server.clone(), usb.platform.clone(), push.clone());
+        let usb_client_role =
+            UsbClientRole::new(usb_client.clone(), usb.platform.clone(), push.clone());
         usb_server.start().await?;
         data_plane.start();
         usb_client.start().await?;

@@ -51,7 +51,7 @@ pub use data_plane::{RemoteClient, UsbDataPlane};
 pub use device::{ExportStatus, Hub, PortStatus, UsbDevice, UsbInterface, UsbSpeed, VhciPort};
 pub use error::{Module, UsbError};
 pub use gateway::{GatewayOptions, UsbIpGateway};
-pub use host::{Export, HostKind, Unsupported, UsbAttacher, UsbHost, UsbIpDriver};
+pub use host::{Capabilities, Export, HostKind, Platform, UsbAttacher, UsbHost, UsbIpDriver};
 pub use relay::{loopback_pair, relay};
 pub use server::{ServerDeps, SetSharedError, UsbServer, shared_expects};
 pub use stream::{BoxFuture, CloseReason, DeviceStream, OpenError, StreamOpener};

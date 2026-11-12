@@ -67,7 +67,8 @@ pub trait StreamOpener: Send + Sync {
     fn open(&self) -> BoxFuture<'_, Result<Box<dyn DeviceStream>, OpenError>>;
 }
 
-/// Two stream ends joined in memory.
+/// Two stream ends joined in memory, for tests.
+#[cfg(any(test, feature = "test-util"))]
 pub mod memory {
     use std::io;
     use std::sync::{Arc, Mutex, PoisonError};

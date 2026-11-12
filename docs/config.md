@@ -136,8 +136,21 @@ with the same rules.
   nonce before the ciphertext. The key file is made through a temp file and a hard link, so it never
   exists half written; on a file system without hard links (some network, FUSE and Docker bind
   mounts) it is made in place with `create_new`, and a start that meets it mid-write waits for it.
-  Two Koppels starting together end up with one key either way. Data Protection's key ring is no longer used. As before, anyone who can
-  read the keys directory on Linux can decrypt the files.
+  Two Koppels starting together end up with one key either way. Data Protection's key ring is no longer used. By default anyone who can
+  read the keys directory on Linux can decrypt the files, since the key sits beside them; a key from
+  `KOPPEL_KEY_FILE`, a systemd credential or a Docker secret moves it out (see "Keeping the key outside
+  the volume" in `docs/security.md`).
+- **The key ring:** the box reads every key it can find and seals with one. A key from outside the
+  volume seals when there is one (and `koppel-secrets.key` in the keys directory is then only read,
+  never made); otherwise `koppel-secrets.key` seals. `koppel-secrets.<anything>.key` files are older
+  keys, only read. A file's key id says which key opens it, and at every start the secret files
+  (and `ui-session.key`) that an older key sealed are written again with the current one, so a
+  rotation, or a move of the key out of the volume, is one start. A key from outside is any secret
+  of 32 to 4096 bytes; the AES key and the id come from it by HKDF-SHA256.
+- **Secrets in memory:** the secret fields of the file structs are `Secret<String>`, which prints
+  `Secret(<redacted>)`, wipes itself when dropped and reads and writes as the string it holds, so the
+  files do not change. The plaintext of a file being read or written is wiped after use. No copy of a
+  file's JSON is kept to see whether it changed (a SHA-256 of the bytes and a typed compare do that).
 - **The upgrade from 0.1.x:** at the first start, each of `secrets.json`, `connection.json` and
   `ui-auth.json` that is still a Data Protection payload is decrypted with the 0.1.x key ring (machine
   DPAPI on Windows, plain XML on Linux) and written again in the new format, with the same JSON inside.

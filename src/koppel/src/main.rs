@@ -24,7 +24,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use config::{Command, Loaded, Settings};
-use koppel_config::{SecretBox, convert_0_1_secrets};
+use koppel_config::{KeySource, SecretBox, convert_0_1_secrets};
 use koppel_web::{App, AppOptions, Host, NetworkOptions};
 use time::OffsetDateTime;
 use tokio::sync::watch;
@@ -211,9 +211,22 @@ fn open_files(settings: &Settings) -> Result<Arc<SecretBox>, Box<dyn Error>> {
         )
     })?;
     let secrets = Arc::new(SecretBox::open(&paths.keys)?);
+    let source = secrets.source();
+    if *source == KeySource::KeysDirectory {
+        tracing::info!(
+            "The secret files are sealed with the {source}, beside the files it protects: see \"Threat model\" in docs/security.md for a key kept elsewhere"
+        );
+    } else {
+        tracing::info!("The secret files are sealed with {source}");
+    }
     if let Err(e) = convert_0_1_secrets(&paths, &secrets) {
         tracing::error!("{e}");
     }
+    // After a rotation, or a move of the key out of the keys directory, files sealed with an older
+    // key are written again with the current one.
+    let mut sealed = paths.secret_files().to_vec();
+    sealed.push(paths.keys.join("ui-session.key"));
+    secrets.reseal(&sealed);
     Ok(secrets)
 }
 

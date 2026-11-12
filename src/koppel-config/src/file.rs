@@ -45,6 +45,7 @@ use serde_json::Value;
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use zeroize::Zeroizing;
 
 use crate::json;
 
@@ -501,7 +502,7 @@ where
     }
 
     async fn write(&self, value: &T) -> Result<Seen, ConfigFileError> {
-        let json = versioned_json(value);
+        let json = Zeroizing::new(versioned_json(value));
         let path = self.path.clone();
         let codec = self.codec.clone();
         tokio::task::spawn_blocking(move || {
@@ -774,13 +775,14 @@ fn load_blocking<T: Serialize + DeserializeOwned>(
     if known == Some(seen.hash) {
         return Ok(Loaded::Same(seen));
     }
-    let text = codec.decode(&bytes).map_err(|e| {
+    // The plaintext of an encrypted file is wiped when this function is done with it.
+    let text = Zeroizing::new(codec.decode(&bytes).map_err(|e| {
         ConfigFileError::new(
             path,
             ConfigErrorKind::Decrypt,
             format!("it could not be decrypted ({e})"),
         )
-    })?;
+    })?);
     let not_json = |e: serde_json::Error| {
         ConfigFileError::new(
             path,

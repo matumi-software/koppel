@@ -56,7 +56,7 @@ pub const DEFAULT_PASSWORD: &str = "contract-password-1";
 pub const UI_HEADER: &str = "X-Koppel-UI";
 
 /// The UI's session cookie.
-pub const COOKIE: &str = "koppel.ui";
+pub const COOKIE: &str = "__Host-koppel-session";
 
 /// The UI password the tests set and use.
 pub fn password() -> String {
@@ -120,7 +120,7 @@ impl Target {
         }
     }
 
-    /// A session that sends this `koppel.ui` cookie value.
+    /// A session that sends this session cookie value.
     pub fn with_cookie(&self, cookie: &str) -> Session {
         Session {
             target: self.clone(),
@@ -211,7 +211,7 @@ pub struct Session {
 }
 
 impl Session {
-    /// The `koppel.ui` cookie value this session sends, if any.
+    /// The session cookie value this session sends, if any.
     pub fn cookie(&self) -> Option<&str> {
         self.cookie.as_deref()
     }

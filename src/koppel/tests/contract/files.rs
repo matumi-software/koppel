@@ -47,7 +47,8 @@ fn snapshot(root: &Path) -> Vec<(String, Vec<u8>)> {
 }
 
 #[tokio::test]
-async fn settings_clients_the_certificate_and_the_password_survive_a_restart() {
+async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and_the_sessions_do_not()
+ {
     let mut main = Main::get().await;
     main.admin
         .patch(
@@ -83,10 +84,12 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart() {
 
     main.instance.restart().await;
 
-    // The UI session key is on disk too, so the browser stays signed in.
-    let settings_after = main.admin.get("/api/settings").await.expect(200).json();
-    assert_eq!(settings_after, settings);
+    // Sessions are in memory, so a restart signs everyone out; the password is on disk, so signing
+    // in again works.
+    main.admin.get("/api/settings").await.expect(401);
     let signed_in = main.target.sign_in().await;
+    let settings_after = signed_in.get("/api/settings").await.expect(200).json();
+    assert_eq!(settings_after, settings);
     // The pinned certificate is the one the restarted instance presents.
     assert_eq!(
         main.target.current_certificate().await,
@@ -405,4 +408,33 @@ mod permissions {
             "nothing was written through the link"
         );
     }
+}
+
+/// 0.2.0 signed its session cookies with `keys/ui-session.key`. Sessions are in memory now, so the
+/// file is deleted at the start, and nothing writes it again.
+#[tokio::test]
+async fn the_session_key_an_older_version_wrote_is_deleted_at_start() {
+    let mut main = Main::get().await;
+    let key = main.instance.keys_dir().join("ui-session.key");
+    assert!(
+        !key.exists(),
+        "this version never writes it, and signing in has just happened"
+    );
+
+    std::fs::write(&key, b"an old key").expect("a write");
+    main.instance.restart().await;
+
+    assert!(!key.exists(), "deleted at the first start");
+    assert!(
+        main.instance.log().contains("ui-session.key"),
+        "the log says so"
+    );
+    // The password is kept, and signing in works without the key.
+    main.target
+        .sign_in()
+        .await
+        .get("/api/settings")
+        .await
+        .expect(200);
+    assert!(!key.exists());
 }

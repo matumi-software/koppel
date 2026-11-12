@@ -55,7 +55,6 @@ pub(crate) struct ClientApi {
 #[derive(Clone)]
 pub(crate) struct PushApi {
     pub push: Push,
-    pub auth: Arc<UiAuth>,
 }
 
 impl FromRef<Arc<App>> for AuthApi {
@@ -106,7 +105,6 @@ impl FromRef<Arc<App>> for PushApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
             push: app.push.clone(),
-            auth: app.auth.clone(),
         }
     }
 }

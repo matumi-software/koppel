@@ -424,7 +424,7 @@ async fn a_password_change_ends_the_other_sessions_streams_and_keeps_its_own() {
     let other = main.target.sign_in().await;
     let mut kept = open(&changer).await;
     let mut ended = open(&other).await;
-    let changed = changer
+    changer
         .post(
             "/api/auth/password",
             json!({ "current": password(), "next": OTHER_PASSWORD }),
@@ -435,12 +435,7 @@ async fn a_password_change_ends_the_other_sessions_streams_and_keeps_its_own() {
         ended.ends_within(WAIT).await,
         "the other session's stream ends"
     );
-    let renewed = main.target.with_cookie(
-        &changed
-            .session_cookie()
-            .expect("the changing session gets a new cookie"),
-    );
-    renewed
+    changer
         .patch("/api/settings", json!({ "notifyPairing": true }))
         .await
         .expect(202);
@@ -448,7 +443,7 @@ async fn a_password_change_ends_the_other_sessions_streams_and_keeps_its_own() {
         Next::Event(..) => {}
         other => panic!("the changing session's stream should carry on, got {other:?}"),
     }
-    renewed
+    changer
         .post(
             "/api/auth/password",
             json!({ "current": OTHER_PASSWORD, "next": password() }),

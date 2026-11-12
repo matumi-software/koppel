@@ -27,6 +27,8 @@
 ## UI decisions (2026-11-12)
 
 - **No `id:` and replay from `Last-Event-ID` on the push.** A reconnect refetches every query, a handful of small GETs on a LAN. Replay would need the server to keep a buffer of events and say when the buffer no longer reaches back, and the UI would still need the refetch for that case. Revisit only if reconnect traffic shows up as a problem.
+- **No command id in the 202 answer, and no `ack` on the push.** The idea was that the answer to a change names the change and the pushed value carries it back, so the UI would not have to compare values. It would change the wire on both sides and in the contract tests, and the comparison it replaces is small, covered by tests and has one useful property: it also confirms a change made by hand in the config file or from another browser. Comparing values stays.
+- **Fonts are Latin and Latin Extended, woff2 only.** Every font file is embedded in the program, and the full `@fontsource` imports pulled in every subset and a `.woff` copy of each. Instrument Sans only has those two subsets anyway. JetBrains Mono also has Cyrillic, Greek and Vietnamese; a name in one of those scripts falls back to the system font in the `--font-sans` and `--font-mono` stacks, which draws all three. The ten files are in `react-ui/src/styles/fonts.css` with the packages' own unicode ranges. If the owner wants those scripts in the mono face too, add the faces there: about 20 KB per weight and script.
 
 ## koppel-usb 0.2.1 decisions
 

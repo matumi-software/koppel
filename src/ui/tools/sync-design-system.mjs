@@ -86,6 +86,11 @@ writeFileSync(join(target, 'tokens.css'), css);
 // Fonts are self-hosted by the library (fonts.css), so drop the design system's Google Fonts import.
 const components = readFileSync(join(source, 'components', 'bundle.css'), 'utf8')
   .replace(/^@import url\("https:\/\/fonts\.googleapis\.com[^\n]*\n+/m, '');
+// The import is cut by its shape. If the design system spells it another way, stop rather than ship a
+// stylesheet that asks Google for fonts on a network that may have no internet.
+if (components.includes('fonts.googleapis.com')) {
+  throw new Error('components/bundle.css still imports Google Fonts: update the pattern in sync-design-system.mjs.');
+}
 writeFileSync(join(target, 'components.css'), header('components/bundle.css') + components);
 
 console.log(`Wrote ${target}: tokens.css and components.css`);

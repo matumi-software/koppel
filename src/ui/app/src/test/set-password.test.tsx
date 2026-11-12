@@ -1,0 +1,90 @@
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { json, mockFetch } from './harness';
+import { noContent, openSetup, problem, renderGate, state } from './auth-fixtures';
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('first-run password', () => {
+  it('asks only for a password and says until when setup is open', async () => {
+    mockFetch({ 'GET /api/auth/state': () => json(openSetup()) });
+    renderGate();
+
+    await screen.findByRole('heading', { name: 'Set up bench-pc' });
+
+    expect(screen.getByText(new RegExp(`Setup is open until ${new Date('2026-11-03T12:40:00Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`))).toBeTruthy();
+    expect(screen.queryByLabelText('Setup code')).toBeNull();
+    expect(screen.queryByText(/setup-code\.txt|docker logs/)).toBeNull();
+    expect(screen.queryByText('The app')).toBeNull();
+  });
+
+  it('keeps the button off until the password is long enough and repeated, then sends only the password', async () => {
+    let passwordSet = false;
+    const { calls } = mockFetch({
+      'GET /api/auth/state': () => json(passwordSet ? state({ signedIn: true }) : openSetup()),
+      'POST /api/auth/setup': () => {
+        passwordSet = true;
+        return noContent();
+      },
+    });
+    renderGate();
+    const button = await screen.findByRole('button', { name: 'Set password and continue' });
+    await userEvent.type(screen.getByLabelText('New password'), 'short');
+    await userEvent.type(screen.getByLabelText('Repeat the password'), 'short');
+    expect(button.hasAttribute('disabled')).toBe(true);
+
+    await userEvent.clear(screen.getByLabelText('New password'));
+    await userEvent.clear(screen.getByLabelText('Repeat the password'));
+    await userEvent.type(screen.getByLabelText('New password'), 'correct horse battery');
+    await userEvent.type(screen.getByLabelText('Repeat the password'), 'correct horse battery');
+    await userEvent.click(button);
+
+    await screen.findByText('The app');
+    expect(calls.find((c) => c.key === 'POST /api/auth/setup')?.body).toEqual({ password: 'correct horse battery' });
+  });
+
+  it('shows the server\'s refusal and stays while setup is still open', async () => {
+    mockFetch({ 'GET /api/auth/state': () => json(openSetup()), 'POST /api/auth/setup': () => problem('Do not use "koppel" or "password" as the password.', 400) });
+    renderGate();
+    await userEvent.type(await screen.findByLabelText('New password'), 'koppel1234');
+    await userEvent.type(screen.getByLabelText('Repeat the password'), 'koppel1234');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set password and continue' }));
+
+    await screen.findByText('Do not use "koppel" or "password" as the password.');
+    expect(screen.getByRole('heading', { name: 'Set up bench-pc' })).toBeTruthy();
+  });
+
+  it('explains the timeout and how to restart once setup has closed', async () => {
+    const { count } = mockFetch({ 'GET /api/auth/state': () => json(state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' })) });
+    renderGate();
+
+    await screen.findByRole('heading', { name: 'Setup has timed out' });
+
+    expect(screen.getByText(/Restart Koppel, then open this page again/)).toBeTruthy();
+    expect(screen.getByText('sudo systemctl restart koppel')).toBeTruthy();
+    expect(screen.getByText('Restart Koppel', { selector: 'strong' })).toBeTruthy();
+    expect(screen.queryByLabelText('New password')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    await waitFor(() => expect(count('GET /api/auth/state')).toBe(2));
+  });
+
+  it('shows the timeout screen when a password comes too late', async () => {
+    let closed = false;
+    mockFetch({
+      'GET /api/auth/state': () => json(closed ? state({ passwordSet: false, setupUntil: '2026-11-03T12:40:00Z' }) : openSetup()),
+      'POST /api/auth/setup': () => {
+        closed = true;
+        return problem('Setup has timed out. Restart Koppel, then set it.', 403);
+      },
+    });
+    renderGate();
+    await userEvent.type(await screen.findByLabelText('New password'), 'correct horse battery');
+    await userEvent.type(screen.getByLabelText('Repeat the password'), 'correct horse battery');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Set password and continue' }));
+
+    await screen.findByRole('heading', { name: 'Setup has timed out' });
+  });
+});

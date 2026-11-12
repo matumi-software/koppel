@@ -20,7 +20,7 @@ work: a Windows client with a Linux server, and the other way round.
 From `src` in the repo:
 
 ```powershell
-docker build -f koppel\Dockerfile -t matumisoftware/koppel:0.2.0 .
+docker build -f installer\docker\Dockerfile -t matumisoftware/koppel:0.2.0 .
 ```
 
 That builds the image under the tag both Windows compose files name, so a build made here is used as it is. To use the published image instead, skip this step and Docker pulls it.

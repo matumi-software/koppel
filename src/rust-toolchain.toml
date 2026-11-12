@@ -1,0 +1,8 @@
+# The Rust the workspace builds with. CI reads it (`rustup toolchain install` from src/), the Dockerfile's
+# base image tag must name the same version (.github/scripts/check-pins.sh fails the Pins check when they
+# differ), and `rust-version` in Cargo.toml is the oldest Rust that may build it. No targets here: the
+# Dockerfile adds the three Linux musl ones itself, and a local build has no use for them.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

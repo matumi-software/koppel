@@ -72,10 +72,6 @@ pub(crate) struct UiAuth {
     throttle: Mutex<Throttle>,
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.locked()
-}
-
 impl UiAuth {
     /// Takes the started `ui-auth.json`, opens the setup window when there is no password, and
     /// follows the file for a reset or a hand edit.

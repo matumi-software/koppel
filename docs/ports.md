@@ -32,7 +32,7 @@ window on the server's Clients page (`POST /api/server/pairing/window` on the UI
 | 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/server/*` | Server or both |
 | 5240 HTTPS (`KOPPEL_UI_PORT`) | UI | `/api/client/*` | Client or both |
 | 5240 HTTPS (`KOPPEL_NETWORK_PORT`) | Network | Skakel under `/skakel`: info, pairing, tokens and hello. Skakel's and Koppel's gRPC calls: the control call, the remote device list and USB traffic. Koppel's own `/api/remote/*` behind a client's token | Server or both |
-| 5240 UDP (`KOPPEL_DISCOVERY_PORT`) | Network | Answers to discovery probes | Server or both |
+| 5240 UDP (`KOPPEL_DISCOVERY_PORT`) | Network | Answers to discovery probes, over IPv4 and over IPv6 when the web ports serve IPv6 | Server or both |
 | 3242 plain | Gateway for a USB/IP driver on this machine | Client or both, and only where `KOPPEL_GATEWAY_PORT` is set or on native Windows |
 
 Settings that move them:
@@ -41,7 +41,7 @@ Settings that move them:
 |---|---|---|
 | `KOPPEL_UI_PORT` | 5240 | The UI's port |
 | `KOPPEL_NETWORK_PORT` | `KOPPEL_UI_PORT` | The network surface's port. Set it to split the two |
-| `KOPPEL_DISCOVERY_PORT` | `KOPPEL_NETWORK_PORT` | The UDP port a server answers probes on and a client sends them to. A client only finds servers that use its own discovery port |
+| `KOPPEL_DISCOVERY_PORT` | `KOPPEL_NETWORK_PORT` | The UDP port a server answers probes on and a client sends them to. A client only finds servers that use its own discovery port. A server answers on this port over IPv4 and, when `KOPPEL_LISTEN_ADDRESS` is unset or an IPv6 address, over IPv6 as well; a client probes both |
 | `KOPPEL_LISTEN_ADDRESS` | Any address | The address the web ports bind to. Must be an IP address, or start-up fails naming the setting. Other Koppel machines must reach the network surface, so to keep the UI private use `KOPPEL_UI_ALLOW_FROM` |
 | `KOPPEL_UI_SETUP_WINDOW_MINUTES` | 10 | How long a machine without a UI password takes its first one, after it starts or after a reset. Whole minutes from 1 to 1440, or start-up fails naming the setting. On Linux and in Docker, with `KOPPEL_UI_ALLOW_FROM` other than `local`, the first password also needs the setup token printed in the log. See ["UI sign-in"](security.md#ui-sign-in) |
 | `KOPPEL_UI_ALLOW_FROM` | `lan`; `local` in Development | Who may use the UI, by the caller's address, as Sunshine's `origin_web_ui_allowed`. `local` is this machine only, `lan` adds the local network, `any` is everyone. A refused UI request gets 403; the network surface is not affected. The local network is loopback, 10/8, 172.16/12, 192.168/16, 169.254/16, IPv6 unique local and link-local addresses, and any network this machine has an address on (read again every 30 seconds), so a neighbour with a global IPv6 address counts. Carrier-grade NAT (100.64/10) does not. The Windows installer sets `local`, because the native app's UI is used on that machine only |

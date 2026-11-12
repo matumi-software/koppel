@@ -39,6 +39,10 @@ use crate::launcher::{self, Trays};
 use crate::shell::{describe, wait_for};
 use crate::{RESTART_CONTROL, SERVICE_NAME, SHUT_DOWN_CONTROL, ui_url};
 
+/// The tracing target of this module, which the event log's filter names.
+#[cfg(test)]
+pub(crate) const TARGET: &str = module_path!();
+
 /// What the service starts as it stops for the tray's Restart Koppel.
 pub const RESTART_ARGUMENT: &str = "--restart-service";
 

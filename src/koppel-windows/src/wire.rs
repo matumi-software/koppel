@@ -6,7 +6,8 @@
 //! - `{"type":"notice","title":"...","text":"...","page":"#clients"}`
 
 use koppel_web::tray::{MAX_TEXT, MAX_TIP, MAX_TITLE, TrayNotice, TrayState, cut};
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::json;
 
 /// The `state` line for `state`, without the newline.
 pub fn state_line(state: &TrayState) -> String {
@@ -26,30 +27,39 @@ pub enum Message {
     Notice(TrayNotice),
 }
 
+/// A line as it is on the wire, tagged by `type`. A type this tray does not know reads as
+/// [`Line::Unknown`], so a newer service can add messages without breaking an older tray.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum Line {
+    State {
+        tip: String,
+        #[serde(default)]
+        attention: bool,
+    },
+    Notice {
+        title: String,
+        text: String,
+        #[serde(default)]
+        page: Option<String>,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
 /// The message in `line`, or `None` when it is not one this tray can read.
 pub fn read(line: &str) -> Option<Message> {
-    let value: Value = serde_json::from_str(line).ok()?;
-    let object = value.as_object()?;
-    let text = |name: &str| object.get(name).and_then(Value::as_str);
-    match text("type")? {
-        "state" => {
-            let tip = text("tip")?;
-            let attention = object.get("attention") == Some(&Value::Bool(true));
-            Some(Message::State(TrayState {
-                tip: truncate(tip, MAX_TIP),
-                attention,
-            }))
-        }
-        "notice" => {
-            let title = text("title")?;
-            let body = text("text")?;
-            Some(Message::Notice(TrayNotice {
-                title: cut(title, MAX_TITLE),
-                text: cut(body, MAX_TEXT),
-                page: text("page").filter(|p| is_page(p)).unwrap_or("").to_owned(),
-            }))
-        }
-        _ => None,
+    match serde_json::from_str(line).ok()? {
+        Line::State { tip, attention } => Some(Message::State(TrayState {
+            tip: truncate(&tip, MAX_TIP),
+            attention,
+        })),
+        Line::Notice { title, text, page } => Some(Message::Notice(TrayNotice {
+            title: cut(&title, MAX_TITLE),
+            text: cut(&text, MAX_TEXT),
+            page: page.filter(|p| is_page(p)).unwrap_or_default(),
+        })),
+        Line::Unknown => None,
     }
 }
 
@@ -105,6 +115,8 @@ mod tests {
             r#"{"type":"later","tip":"x"}"#,
             r#"{"type":"state"}"#,
             r#"{"type":"state","tip":5}"#,
+            r#"{"tip":"x"}"#,
+            r#"{"type":5,"tip":"x"}"#,
             r#"{"type":"notice","title":"x"}"#,
         ] {
             assert_eq!(read(line), None, "{line}");

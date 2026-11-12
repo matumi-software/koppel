@@ -1,6 +1,12 @@
 //! Asks the UI's `/healthz` whether Koppel answers, as 0.1.x's health probe did, through WinHTTP so
 //! KoppelDesktop.exe carries no TLS stack of its own. Koppel's certificate is its own, self-signed,
 //! so the certificate is not checked: the answer only says whether Koppel is up.
+//!
+//! Decided not to pin the certificate. The probe sends nothing and trusts nothing it receives
+//! beyond "something answered 200 on the UI's address", which `opener` follows by opening the
+//! browser, and the browser checks (and warns about) the certificate itself. Pinning would need the
+//! service's fingerprint in a place every user can read, which is one more thing to keep in step
+//! with certificate renewal, to guard against a false "up" from a program already holding the port.
 
 use std::time::Duration;
 

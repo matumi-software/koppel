@@ -22,6 +22,9 @@ cbc.workspace = true
 des.workspace = true
 roxmltree.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
 

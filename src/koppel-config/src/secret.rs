@@ -19,12 +19,13 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
 use ring::rand::{SecureRandom, SystemRandom};
 
 use crate::dataprotection;
-use crate::file::{CodecError, FileCodec};
+use crate::file::{CodecError, FileCodec, create_private, sync_directory};
 
 /// What every secret file starts with.
 pub const MAGIC: [u8; 4] = *b"KPSF";
@@ -44,6 +45,9 @@ const KEY_MAGIC: [u8; 4] = *b"KPSK";
 const KEY_ID_LEN: usize = 16;
 const KEY_LEN: usize = 32;
 const HEADER_LEN: usize = 6;
+const KEY_FILE_LEN: usize = 5 + KEY_ID_LEN + KEY_LEN;
+const KEY_FILE_WAITS: u32 = 30;
+const KEY_FILE_WAIT: Duration = Duration::from_millis(100);
 
 /// Why a secret could not be sealed, opened, or its key loaded.
 #[derive(Debug)]
@@ -147,14 +151,14 @@ impl SecretBox {
             path: path.clone(),
             reason,
         };
-        let bytes = match fs::read(&path) {
+        let bytes = match read_key_file(&path) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 create_key_file(&path, &random).map_err(|e| failed(e.to_string()))?
             }
             Err(e) => return Err(failed(e.to_string())),
         };
-        if bytes.len() != 5 + KEY_ID_LEN + KEY_LEN || bytes[..4] != KEY_MAGIC {
+        if bytes.len() != KEY_FILE_LEN || bytes[..4] != KEY_MAGIC {
             return Err(failed("it is not a Koppel key file".into()));
         }
         if bytes[4] != VERSION {
@@ -276,9 +280,20 @@ impl SecretBox {
     }
 }
 
-/// Writes the key file once: to a temp file with mode `0600`, flushed, then linked into place so
-/// it never exists half written and an existing one is never replaced.
+/// Writes the key file once. The first choice is a temp file with mode `0600`, flushed, then linked
+/// into place, so it never exists half written and an existing one is never replaced. A file system
+/// without hard links (some network, FUSE and Docker bind mounts) refuses the link; the key file
+/// is then made in place with `create_new`, which still never replaces one, and a start that finds
+/// it while it is being written waits for it ([`read_key_file`]). The directory is flushed after.
 fn create_key_file(path: &Path, random: &SystemRandom) -> io::Result<Vec<u8>> {
+    create_key_file_with(path, random, &|from, to| fs::hard_link(from, to))
+}
+
+fn create_key_file_with(
+    path: &Path,
+    random: &SystemRandom,
+    link: &dyn Fn(&Path, &Path) -> io::Result<()>,
+) -> io::Result<Vec<u8>> {
     let mut bytes = KEY_MAGIC.to_vec();
     bytes.push(VERSION);
     let mut material = [0u8; KEY_ID_LEN + KEY_LEN];
@@ -290,24 +305,56 @@ fn create_key_file(path: &Path, random: &SystemRandom) -> io::Result<Vec<u8>> {
     let mut temp = path.as_os_str().to_owned();
     temp.push(format!(".{}.tmp", crate::random_hex(16)));
     let temp = PathBuf::from(temp);
-    let result = (|| {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&temp)?;
+    let linked = (|| {
+        let mut file = create_private(&temp)?;
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::hard_link(&temp, path)
+        link(&temp, path)
     })();
     let _ = fs::remove_file(&temp);
-    match result {
-        Ok(()) => Ok(bytes),
+    let result = match linked {
+        Ok(()) => Ok(()),
         // Another start made it first: use that one.
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => fs::read(path),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return read_key_file(path),
+        Err(e) => {
+            tracing::debug!(
+                "{} could not be linked into place ({e}); writing it in place",
+                path.display()
+            );
+            write_in_place(path, &bytes)
+        }
+    };
+    match result {
+        Ok(()) => {
+            sync_directory(path)?;
+            Ok(bytes)
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => read_key_file(path),
         Err(e) => Err(e),
     }
+}
+
+/// The key file made where it will stay, for a file system that cannot link. A crash in the middle
+/// leaves a short file, which a start refuses with the instruction to delete it: nothing was
+/// sealed with a key that never finished being written.
+fn write_in_place(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = create_private(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+/// Reads the key file, waiting a moment for one that another start is still writing.
+fn read_key_file(path: &Path) -> io::Result<Vec<u8>> {
+    let mut bytes = fs::read(path)?;
+    for _ in 0..KEY_FILE_WAITS {
+        if bytes.len() >= KEY_FILE_LEN {
+            break;
+        }
+        std::thread::sleep(KEY_FILE_WAIT);
+        bytes = fs::read(path)?;
+    }
+    Ok(bytes)
 }
 
 struct SecretCodec(Arc<SecretBox>);
@@ -414,6 +461,95 @@ mod tests {
         fs::write(dir.join(KEY_FILE), b"KPSK\x01short").unwrap();
         assert!(SecretBox::with_key_file(&dir).is_err());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_file_system_without_hard_links_still_gets_a_key_file() {
+        let dir = temp_dir("nolinks");
+        let path = dir.join(KEY_FILE);
+        let refuse = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::Unsupported));
+
+        let made = create_key_file_with(&path, &SystemRandom::new(), &refuse).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), made);
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "no temp file is left: {names:?}");
+        // And it is a usable key file.
+        let first = SecretBox::with_key_file(&dir).unwrap();
+        let sealed = first.protect(b"x").unwrap();
+        assert_eq!(
+            SecretBox::with_key_file(&dir)
+                .unwrap()
+                .unprotect(&sealed)
+                .unwrap(),
+            b"x"
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn without_hard_links_an_existing_key_file_is_used_and_not_replaced() {
+        let dir = temp_dir("nolinks-exists");
+        let existing = SecretBox::with_key_file(&dir).unwrap();
+        let before = fs::read(dir.join(KEY_FILE)).unwrap();
+        let refuse = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::PermissionDenied));
+
+        let made =
+            create_key_file_with(&dir.join(KEY_FILE), &SystemRandom::new(), &refuse).unwrap();
+
+        assert_eq!(made, before);
+        assert_eq!(fs::read(dir.join(KEY_FILE)).unwrap(), before);
+        let sealed = existing.protect(b"x").unwrap();
+        assert!(
+            SecretBox::with_key_file(&dir)
+                .unwrap()
+                .unprotect(&sealed)
+                .is_ok()
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_key_file_made_in_place_is_for_its_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("nolinks-mode");
+        let refuse = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::Unsupported));
+        create_key_file_with(&dir.join(KEY_FILE), &SystemRandom::new(), &refuse).unwrap();
+        let mode = fs::metadata(dir.join(KEY_FILE))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_key_file_that_is_still_being_written_is_waited_for() {
+        let dir = temp_dir("slow");
+        let path = dir.join(KEY_FILE);
+        let source = temp_dir("slow-source");
+        let whole = {
+            SecretBox::with_key_file(&source).unwrap();
+            fs::read(source.join(KEY_FILE)).unwrap()
+        };
+        fs::write(&path, &whole[..10]).unwrap();
+        let finish = {
+            let (path, whole) = (path.clone(), whole.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(300));
+                fs::write(path, whole).unwrap();
+            })
+        };
+
+        let opened = SecretBox::with_key_file(&dir);
+
+        finish.join().unwrap();
+        assert!(opened.is_ok(), "{opened:?}");
+        let _ = (fs::remove_dir_all(dir), fs::remove_dir_all(source));
     }
 
     #[cfg(windows)]

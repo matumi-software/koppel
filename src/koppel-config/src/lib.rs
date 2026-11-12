@@ -33,8 +33,8 @@ use ring::rand::{SecureRandom, SystemRandom};
 pub use certificate::{CertificateError, ServerCertificate};
 pub use dataprotection::{DataProtectionError, KOPPEL_PURPOSES, KeyRing};
 pub use file::{
-    CodecError, ConfigFile, ConfigFileError, FileCodec, Options, PlainText, Subscription,
-    ValidateFn, Validator,
+    CodecError, ConfigErrorKind, ConfigFile, ConfigFileError, FileCodec, Options, PlainText,
+    Subscription, ValidateFn, Validator,
 };
 pub use harden::harden_directory;
 pub use migrate::{Conversion, ConversionError, convert_0_1_secrets};
@@ -54,7 +54,10 @@ pub mod open {
         ConfigFile::new(
             paths.settings_file(),
             KoppelSettings::default(),
-            Options::default(),
+            Options {
+                warn_unknown_keys: true,
+                ..Options::default()
+            },
         )
     }
 
@@ -65,6 +68,7 @@ pub mod open {
             SharedDevices::empty(),
             Options {
                 start_with_defaults_when_unusable: true,
+                warn_unknown_keys: true,
                 ..Options::default()
             },
         )
@@ -77,6 +81,7 @@ pub mod open {
             AttachedDevices::empty(),
             Options {
                 start_with_defaults_when_unusable: true,
+                warn_unknown_keys: true,
                 ..Options::default()
             },
         )
@@ -120,7 +125,7 @@ pub mod open {
             Options {
                 codec: secrets.codec(),
                 validate: Some(Arc::new(UiCredentials::invalid)),
-                start_with_defaults_when_unusable: false,
+                ..Options::default()
             },
         )
     }

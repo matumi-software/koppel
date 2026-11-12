@@ -6,7 +6,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use koppel_config::files::{KoppelSettings, Role, SharedDevices};
-use koppel_config::{ConfigFile, KoppelPaths, Options, SecretBox, json, open};
+use koppel_config::{
+    CodecError, ConfigErrorKind, ConfigFile, FileCodec, KoppelPaths, Options, PlainText, SecretBox,
+    json, open,
+};
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -51,7 +54,7 @@ async fn a_missing_file_is_seeded_with_the_defaults_as_0_1_writes_them() {
     settings.start().await.unwrap();
 
     let written = fs::read(paths.settings_file()).unwrap();
-    let expected = "{\n  \"role\": \"server\",\n  \"shareOnStartup\": true,\n  \"setupComplete\": false,\n  \"notifyPairing\": true,\n  \"notifyLink\": true,\n  \"notifyAttachFailures\": true\n}";
+    let expected = "{\n  \"role\": \"server\",\n  \"shareOnStartup\": true,\n  \"setupComplete\": false,\n  \"notifyPairing\": true,\n  \"notifyLink\": true,\n  \"notifyAttachFailures\": true,\n  \"version\": 1\n}";
     let expected = expected.replace('\n', if cfg!(windows) { "\r\n" } else { "\n" });
     assert_eq!(String::from_utf8(written).unwrap(), expected);
     settings.stop();
@@ -99,7 +102,7 @@ async fn json_null_and_a_failed_check_are_named() {
         Options {
             codec: secrets.codec(),
             validate: Some(Arc::new(koppel_config::files::UiCredentials::invalid)),
-            start_with_defaults_when_unusable: false,
+            ..Options::default()
         },
     );
     assert_eq!(
@@ -440,5 +443,277 @@ async fn an_encrypted_file_round_trips_and_is_not_readable_as_text() {
         Some("very secret")
     );
     again.stop();
+    let _ = fs::remove_dir_all(dir);
+}
+
+fn settings_text(role: &str) -> String {
+    format!(r#"{{ "role": "{role}", "shareOnStartup": true }}"#)
+}
+
+/// Writes `edited` over the settings file and puts its time back as `modified`.
+fn edit_keeping_the_time(path: &Path, edited: String, modified: std::time::SystemTime) {
+    fs::write(path, edited).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+}
+
+#[tokio::test]
+async fn an_edit_with_the_same_size_and_time_as_our_write_is_still_seen() {
+    let dir = temp_dir("samestamp");
+    let paths = paths(&dir);
+    let settings = open::settings(&paths);
+    settings.start().await.unwrap();
+    settings.update(client()).await.unwrap();
+    let written = fs::read_to_string(paths.settings_file()).unwrap();
+    let modified = fs::metadata(paths.settings_file())
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    // "client" and "server" are both six letters, and the time is put back as it was: only the
+    // bytes tell this from our own write, as on a file system with a coarse clock.
+    let edited = written.replace("client", "server");
+    assert_eq!(edited.len(), written.len());
+    edit_keeping_the_time(&paths.settings_file(), edited, modified);
+
+    eventually(|| settings.current().role == Role::Server).await;
+    settings.stop();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn an_edit_over_our_own_write_is_not_taken_for_ours_by_an_update() {
+    let dir = temp_dir("samestamp-update");
+    let paths = paths(&dir);
+    let settings = open::settings(&paths);
+    settings.start().await.unwrap();
+    settings.update(client()).await.unwrap();
+    let written = fs::read_to_string(paths.settings_file()).unwrap();
+    let modified = fs::metadata(paths.settings_file())
+        .unwrap()
+        .modified()
+        .unwrap();
+    edit_keeping_the_time(
+        &paths.settings_file(),
+        written.replace("client", "server"),
+        modified,
+    );
+
+    // The change is made on top of the hand edit, not of what we wrote before it.
+    let next = settings
+        .update(|s| KoppelSettings {
+            setup_complete: true,
+            ..s.clone()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!((next.role, next.setup_complete), (Role::Server, true));
+    settings.stop();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_file_is_written_with_a_version_and_a_file_without_one_is_read() {
+    let dir = temp_dir("version");
+    let paths = paths(&dir);
+    fs::write(paths.settings_file(), settings_text("client")).unwrap();
+    let settings = open::settings(&paths);
+    settings.start().await.unwrap();
+    assert_eq!(settings.current().role, Role::Client);
+
+    settings
+        .update(|s| KoppelSettings {
+            setup_complete: true,
+            ..s.clone()
+        })
+        .await
+        .unwrap();
+
+    let text = fs::read_to_string(paths.settings_file()).unwrap();
+    assert!(text.contains("\"version\": 1"), "{text}");
+    settings.stop();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_file_from_a_newer_koppel_is_refused_and_left_alone() {
+    let dir = temp_dir("newer");
+    let paths = paths(&dir);
+    let text = r#"{ "version": 2, "role": "client", "colour": "blue" }"#;
+    fs::write(paths.settings_file(), text).unwrap();
+
+    let error = open::settings(&paths).start().await.unwrap_err();
+
+    assert_eq!(error.kind, ConfigErrorKind::Newer);
+    assert!(error.to_string().contains("version 2"), "{error}");
+    assert_eq!(fs::read_to_string(paths.settings_file()).unwrap(), text);
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn errors_say_what_kind_of_trouble_it_was() {
+    let dir = temp_dir("kinds");
+    let paths = paths(&dir);
+    for (text, kind) in [
+        ("{ nope", ConfigErrorKind::Parse),
+        ("null", ConfigErrorKind::Invalid),
+        (r#"{"role":1}"#, ConfigErrorKind::Parse),
+        (r#"{"version":"x"}"#, ConfigErrorKind::Invalid),
+    ] {
+        fs::write(paths.settings_file(), text).unwrap();
+        let error = open::settings(&paths).start().await.unwrap_err();
+        assert_eq!(error.kind, kind, "{text}");
+    }
+
+    let secrets = Arc::new(SecretBox::with_key_file(&paths.keys).unwrap());
+    let other_keys = dir.join("other-keys");
+    fs::create_dir_all(&other_keys).unwrap();
+    let sealed = SecretBox::with_key_file(&other_keys)
+        .unwrap()
+        .protect(b"{}")
+        .unwrap();
+    fs::write(paths.connection_file(), sealed).unwrap();
+    let error = open::connection(&paths, &secrets)
+        .start()
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ConfigErrorKind::Decrypt);
+    assert!(error.to_string().contains("restore the keys directory"));
+
+    // A directory where the file should be cannot be read.
+    let blocked = dir.join("blocked.json");
+    fs::create_dir(&blocked).unwrap();
+    let error = ConfigFile::new(&blocked, KoppelSettings::default(), Options::default())
+        .start()
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, ConfigErrorKind::Io);
+    assert!(!error.to_string().contains("restore the keys directory"));
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_file_over_the_size_limit_is_refused_without_reading_it_all() {
+    let dir = temp_dir("big");
+    let paths = paths(&dir);
+    fs::write(paths.settings_file(), vec![b' '; 9 * 1024 * 1024]).unwrap();
+
+    let error = open::settings(&paths).start().await.unwrap_err();
+
+    assert_eq!(error.kind, ConfigErrorKind::Io);
+    assert!(
+        error.reason.contains("larger than 8 MiB"),
+        "{}",
+        error.reason
+    );
+    let _ = fs::remove_dir_all(dir);
+}
+
+/// Fails to encode from the second write on, as a full disk would.
+struct FailsAfterFirst(Mutex<u32>);
+
+impl FileCodec for FailsAfterFirst {
+    fn encode(&self, json: &[u8]) -> Result<Vec<u8>, CodecError> {
+        let mut writes = self.0.lock().unwrap();
+        *writes += 1;
+        if *writes > 1 {
+            return Err(CodecError("the disk is full".into()));
+        }
+        PlainText.encode(json)
+    }
+
+    fn decode(&self, bytes: &[u8]) -> Result<Vec<u8>, CodecError> {
+        PlainText.decode(bytes)
+    }
+}
+
+#[tokio::test]
+async fn a_change_that_could_not_be_written_is_neither_kept_nor_delivered() {
+    let dir = temp_dir("fault");
+    let paths = paths(&dir);
+    let settings = ConfigFile::new(
+        paths.settings_file(),
+        KoppelSettings::default(),
+        Options {
+            codec: Arc::new(FailsAfterFirst(Mutex::new(0))),
+            ..Options::default()
+        },
+    );
+    settings.start().await.unwrap();
+    let before = fs::read(paths.settings_file()).unwrap();
+    let delivered = Arc::new(Mutex::new(0));
+    let count = delivered.clone();
+    settings.subscribe(move |_| {
+        *count.lock().unwrap() += 1;
+        async {}
+    });
+
+    let error = settings.update(client()).await.unwrap_err();
+
+    assert_eq!(error.kind, ConfigErrorKind::Io);
+    assert_eq!(settings.current().role, Role::Server);
+    assert_eq!(fs::read(paths.settings_file()).unwrap(), before);
+    assert_eq!(*delivered.lock().unwrap(), 0);
+    let names: Vec<_> = fs::read_dir(&paths.config)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["settings.json"]);
+    settings.stop();
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+async fn a_handler_that_waits_for_a_change_from_another_task_does_not_hold_it_for_ever() {
+    let dir = temp_dir("deadlock");
+    let paths = paths(&dir);
+    let settings = ConfigFile::new(
+        paths.settings_file(),
+        KoppelSettings::default(),
+        Options {
+            delivery_timeout: Duration::from_millis(400),
+            ..Options::default()
+        },
+    );
+    settings.start().await.unwrap();
+    let finished = Arc::new(Mutex::new(Vec::<String>::new()));
+    let log = finished.clone();
+    let file = settings.clone();
+    settings.subscribe(move |value: Arc<KoppelSettings>| {
+        let log = log.clone();
+        let file = file.clone();
+        async move {
+            if value.role == Role::Client {
+                // A spawned task has lost the sign that it is inside a delivery, so its update
+                // waits for the delivery this handler is part of, which waits for it.
+                let waits = tokio::spawn(async move {
+                    file.update(|s| KoppelSettings {
+                        role: Role::Both,
+                        ..s.clone()
+                    })
+                    .await
+                    .unwrap();
+                });
+                waits.await.unwrap();
+                log.lock().unwrap().push("handler done".into());
+            }
+        }
+    });
+
+    let started = std::time::Instant::now();
+    tokio::time::timeout(Duration::from_secs(10), settings.update(client()))
+        .await
+        .expect("the update must not wait for ever")
+        .unwrap();
+
+    assert!(started.elapsed() < Duration::from_secs(5));
+    eventually(|| finished.lock().unwrap().len() == 1).await;
+    assert_eq!(settings.current().role, Role::Both);
+    settings.stop();
     let _ = fs::remove_dir_all(dir);
 }

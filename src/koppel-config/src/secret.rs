@@ -22,7 +22,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ring::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
+use ring::hkdf;
 use ring::rand::{SecureRandom, SystemRandom};
+use zeroize::Zeroizing;
 
 use crate::dataprotection;
 use crate::file::{CodecError, FileCodec, create_private, sync_directory};
@@ -40,6 +42,10 @@ pub const SCHEME_KEY_FILE: u8 = 2;
 pub const DPAPI_ENTROPY: &[u8] = b"Koppel secret file";
 /// The key file's name in the keys directory.
 pub const KEY_FILE: &str = "koppel-secrets.key";
+/// The environment variable that names a key file outside the keys directory.
+pub const KEY_FILE_VARIABLE: &str = "KOPPEL_KEY_FILE";
+/// The name of the systemd credential and of the Docker secret that hold a key.
+pub const KEY_SOURCE_NAME: &str = "koppel-key";
 
 const KEY_MAGIC: [u8; 4] = *b"KPSK";
 const KEY_ID_LEN: usize = 16;
@@ -48,6 +54,8 @@ const HEADER_LEN: usize = 6;
 const KEY_FILE_LEN: usize = 5 + KEY_ID_LEN + KEY_LEN;
 const KEY_FILE_WAITS: u32 = 30;
 const KEY_FILE_WAIT: Duration = Duration::from_millis(100);
+const MIN_SOURCE_LEN: usize = 32;
+const MAX_SOURCE_LEN: usize = 4096;
 
 /// Why a secret could not be sealed, opened, or its key loaded.
 #[derive(Debug)]
@@ -99,84 +107,233 @@ pub fn format_of(bytes: &[u8]) -> SecretFormat {
     }
 }
 
+/// One AES-256-GCM key and the id its files carry.
+struct KeyEntry {
+    id: [u8; KEY_ID_LEN],
+    key: LessSafeKey,
+}
+
+/// The keys of the key file scheme. A file is opened with the key its id names. New files are
+/// sealed with `entries[sealing]`.
+struct KeyRing {
+    sealing: usize,
+    entries: Vec<KeyEntry>,
+}
+
 enum Scheme {
     #[cfg(windows)]
     Dpapi,
-    KeyFile {
-        id: [u8; KEY_ID_LEN],
-        key: Box<LessSafeKey>,
-    },
+    KeyFile(KeyRing),
+}
+
+/// Where the key that seals new files comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeySource {
+    /// Windows: machine DPAPI, no key to keep.
+    Dpapi,
+    /// `koppel-secrets.key` in the keys directory, beside the files it protects.
+    KeysDirectory,
+    /// The file `KOPPEL_KEY_FILE` names.
+    Environment(PathBuf),
+    /// A systemd credential: `koppel-key` in `$CREDENTIALS_DIRECTORY`.
+    Credential(PathBuf),
+    /// A Docker secret: `/run/secrets/koppel-key`.
+    DockerSecret(PathBuf),
+}
+
+impl KeySource {
+    /// True when the key is kept apart from the config and keys volume.
+    pub fn is_outside_the_volume(&self) -> bool {
+        !matches!(self, Self::KeysDirectory)
+    }
+}
+
+impl fmt::Display for KeySource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Dpapi => f.write_str("Windows DPAPI"),
+            Self::KeysDirectory => write!(f, "{KEY_FILE} in the keys directory"),
+            Self::Environment(path) => write!(f, "{KEY_FILE_VARIABLE} ({})", path.display()),
+            Self::Credential(path) => write!(f, "a systemd credential ({})", path.display()),
+            Self::DockerSecret(path) => write!(f, "a Docker secret ({})", path.display()),
+        }
+    }
+}
+
+/// The places a key can come from other than the keys directory, in the order they are tried.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeySources {
+    /// `KOPPEL_KEY_FILE`. When it is set the file must exist.
+    pub environment: Option<PathBuf>,
+    /// `$CREDENTIALS_DIRECTORY/koppel-key`, used when it exists.
+    pub credential: Option<PathBuf>,
+    /// `/run/secrets/koppel-key`, used when it exists.
+    pub docker_secret: Option<PathBuf>,
+}
+
+impl KeySources {
+    /// None of them: the key lives in the keys directory.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// From `KOPPEL_KEY_FILE`, `CREDENTIALS_DIRECTORY` and the standard Docker secrets folder.
+    pub fn from_environment() -> Self {
+        let set = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
+        Self {
+            environment: set(KEY_FILE_VARIABLE).map(PathBuf::from),
+            credential: set("CREDENTIALS_DIRECTORY")
+                .map(|directory| PathBuf::from(directory).join(KEY_SOURCE_NAME)),
+            docker_secret: Some(PathBuf::from("/run/secrets").join(KEY_SOURCE_NAME)),
+        }
+    }
+
+    /// The first source that applies.
+    fn chosen(&self) -> Result<Option<KeySource>, SecretError> {
+        if let Some(path) = &self.environment {
+            if !path.is_file() {
+                return Err(SecretError::KeyFile {
+                    path: path.clone(),
+                    reason: format!("{KEY_FILE_VARIABLE} names it and it is not a file"),
+                });
+            }
+            return Ok(Some(KeySource::Environment(path.clone())));
+        }
+        if let Some(path) = self.credential.as_ref().filter(|p| p.is_file()) {
+            return Ok(Some(KeySource::Credential(path.clone())));
+        }
+        if let Some(path) = self.docker_secret.as_ref().filter(|p| p.is_file()) {
+            return Ok(Some(KeySource::DockerSecret(path.clone())));
+        }
+        Ok(None)
+    }
 }
 
 /// Seals and opens Koppel's secret files.
 pub struct SecretBox {
     scheme: Scheme,
+    source: KeySource,
     random: SystemRandom,
 }
 
 impl fmt::Debug for SecretBox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self.scheme {
+        match &self.scheme {
             #[cfg(windows)]
-            Scheme::Dpapi => "SecretBox(dpapi)",
-            Scheme::KeyFile { .. } => "SecretBox(key file)",
-        })
+            Scheme::Dpapi => f.write_str("SecretBox(dpapi)"),
+            Scheme::KeyFile(ring) => write!(
+                f,
+                "SecretBox(key file, {} key(s), sealing from {})",
+                ring.entries.len(),
+                self.source
+            ),
+        }
     }
 }
 
 impl SecretBox {
-    /// The box for this platform: machine DPAPI on Windows, and elsewhere the key file in
-    /// `keys_directory`, made on first use. The directory must exist; [`crate::KoppelPaths::prepare`]
-    /// makes and restricts it.
+    /// The box for this platform: machine DPAPI on Windows, and elsewhere a key from
+    /// [`KeySources::from_environment`] or else the key file in `keys_directory`, made on first
+    /// use. The directory must exist; [`crate::KoppelPaths::prepare`] makes and restricts it.
     pub fn open(keys_directory: &Path) -> Result<Self, SecretError> {
         #[cfg(windows)]
         {
             let _ = keys_directory;
+            if std::env::var_os(KEY_FILE_VARIABLE).is_some() {
+                tracing::warn!(
+                    "{KEY_FILE_VARIABLE} is set, but Windows seals the secret files with DPAPI and does not read it"
+                );
+            }
             Ok(Self {
                 scheme: Scheme::Dpapi,
+                source: KeySource::Dpapi,
                 random: SystemRandom::new(),
             })
         }
         #[cfg(not(windows))]
         {
-            Self::with_key_file(keys_directory)
+            Self::with_sources(keys_directory, &KeySources::from_environment())
         }
     }
 
-    /// The key file scheme on any platform. Makes the key file when there is none.
+    /// The key file scheme on any platform, with the key in the keys directory. Makes the key file
+    /// when there is none.
     pub fn with_key_file(keys_directory: &Path) -> Result<Self, SecretError> {
+        Self::with_sources(keys_directory, &KeySources::none())
+    }
+
+    /// The key file scheme on any platform, with the key from `sources` when one applies.
+    ///
+    /// The ring holds every key it can read, and seals with one:
+    ///
+    /// - A key from `sources` seals. The key file in the keys directory, when there is one, is
+    ///   then only read, so files sealed before the move still open; [`Self::reseal`] moves them
+    ///   over, after which that file can be deleted. None is made, since a key made beside the
+    ///   files would defeat the point.
+    /// - Without a source, `koppel-secrets.key` seals, and is made when missing.
+    /// - `koppel-secrets.<anything>.key` files are older keys, only read. To rotate the key, rename
+    ///   `koppel-secrets.key` to such a name and start Koppel: it makes a new one and reseals.
+    pub fn with_sources(keys_directory: &Path, sources: &KeySources) -> Result<Self, SecretError> {
         let random = SystemRandom::new();
-        let path = keys_directory.join(KEY_FILE);
-        let failed = |reason: String| SecretError::KeyFile {
-            path: path.clone(),
-            reason,
-        };
-        let bytes = match read_key_file(&path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                create_key_file(&path, &random).map_err(|e| failed(e.to_string()))?
+        let mut entries: Vec<KeyEntry> = Vec::new();
+        let mut keep = |entry: KeyEntry| {
+            if !entries.iter().any(|known| known.id == entry.id) {
+                entries.push(entry);
             }
-            Err(e) => return Err(failed(e.to_string())),
         };
-        if bytes.len() != KEY_FILE_LEN || bytes[..4] != KEY_MAGIC {
-            return Err(failed("it is not a Koppel key file".into()));
+        let source = match sources.chosen()? {
+            Some(
+                source @ (KeySource::Environment(_)
+                | KeySource::Credential(_)
+                | KeySource::DockerSecret(_)),
+            ) => {
+                let (KeySource::Environment(path)
+                | KeySource::Credential(path)
+                | KeySource::DockerSecret(path)) = &source
+                else {
+                    unreachable!("matched above");
+                };
+                keep(derive_key(path)?);
+                let primary = keys_directory.join(KEY_FILE);
+                if primary.exists() {
+                    keep(load_key_file(&primary, &random, false)?);
+                }
+                source
+            }
+            _ => {
+                keep(load_key_file(
+                    &keys_directory.join(KEY_FILE),
+                    &random,
+                    true,
+                )?);
+                KeySource::KeysDirectory
+            }
+        };
+        for retired in retired_key_files(keys_directory) {
+            keep(load_retired_key(&retired, &random)?);
         }
-        if bytes[4] != VERSION {
-            return Err(failed(format!(
-                "it is version {}, and this Koppel reads version {VERSION}",
-                bytes[4]
-            )));
-        }
-        let id: [u8; KEY_ID_LEN] = bytes[5..5 + KEY_ID_LEN].try_into().expect("checked length");
-        let key = UnboundKey::new(&AES_256_GCM, &bytes[5 + KEY_ID_LEN..])
-            .map_err(|_| failed("its key is not usable".into()))?;
         Ok(Self {
-            scheme: Scheme::KeyFile {
-                id,
-                key: Box::new(LessSafeKey::new(key)),
-            },
+            scheme: Scheme::KeyFile(KeyRing {
+                sealing: 0,
+                entries,
+            }),
+            source,
             random,
         })
+    }
+
+    /// Where the key that seals new files comes from.
+    pub fn source(&self) -> &KeySource {
+        &self.source
+    }
+
+    /// How many keys can open files, the one that seals included.
+    pub fn keys_read(&self) -> usize {
+        match &self.scheme {
+            #[cfg(windows)]
+            Scheme::Dpapi => 1,
+            Scheme::KeyFile(ring) => ring.entries.len(),
+        }
     }
 
     /// The scheme this box seals with.
@@ -184,7 +341,7 @@ impl SecretBox {
         match self.scheme {
             #[cfg(windows)]
             Scheme::Dpapi => SCHEME_DPAPI,
-            Scheme::KeyFile { .. } => SCHEME_KEY_FILE,
+            Scheme::KeyFile(_) => SCHEME_KEY_FILE,
         }
     }
 
@@ -200,7 +357,8 @@ impl SecretBox {
                     .map_err(|e| SecretError::Seal(format!("DPAPI failed ({e})")))?;
                 out.extend_from_slice(&blob);
             }
-            Scheme::KeyFile { id, key } => {
+            Scheme::KeyFile(ring) => {
+                let KeyEntry { id, key } = &ring.entries[ring.sealing];
                 out.extend_from_slice(id);
                 let mut nonce = [0u8; NONCE_LEN];
                 self.random
@@ -208,11 +366,12 @@ impl SecretBox {
                     .map_err(|_| SecretError::Seal("no random bytes".into()))?;
                 let aad = out.clone();
                 out.extend_from_slice(&nonce);
-                let mut sealed = plaintext.to_vec();
+                // The copy of the plaintext is overwritten by the ciphertext in place.
+                let mut sealed = Zeroizing::new(plaintext.to_vec());
                 key.seal_in_place_append_tag(
                     Nonce::assume_unique_for_key(nonce),
                     Aad::from(aad),
-                    &mut sealed,
+                    &mut *sealed,
                 )
                 .map_err(|_| SecretError::Seal("AES-GCM failed".into()))?;
                 out.extend_from_slice(&sealed);
@@ -247,20 +406,22 @@ impl SecretBox {
             #[cfg(windows)]
             (SCHEME_DPAPI, Scheme::Dpapi) => crate::dpapi::unprotect(&bytes[HEADER_LEN..], DPAPI_ENTROPY)
                 .map_err(|e| SecretError::Open(format!("DPAPI could not decrypt it, so it was written on another machine or is damaged ({e})"))),
-            (SCHEME_KEY_FILE, Scheme::KeyFile { id, key }) => {
+            (SCHEME_KEY_FILE, Scheme::KeyFile(ring)) => {
                 let body = &bytes[HEADER_LEN..];
                 if body.len() < KEY_ID_LEN + NONCE_LEN + AES_256_GCM.tag_len() {
                     return Err(SecretError::Format("it is too short".into()));
                 }
-                if body[..KEY_ID_LEN] != id[..] {
+                let Some(entry) = ring.entries.iter().find(|e| body[..KEY_ID_LEN] == e.id[..]) else {
                     return Err(SecretError::Open(format!(
-                        "it was encrypted with another key file than the {KEY_FILE} in the keys directory"
+                        "it was encrypted with another key than the ones this Koppel has: the {KEY_FILE} in the keys directory, {KEY_FILE_VARIABLE}, a credential or a Docker secret"
                     )));
-                }
+                };
                 let aad = bytes[..HEADER_LEN + KEY_ID_LEN].to_vec();
                 let nonce: [u8; NONCE_LEN] = body[KEY_ID_LEN..KEY_ID_LEN + NONCE_LEN].try_into().expect("checked length");
-                let mut sealed = body[KEY_ID_LEN + NONCE_LEN..].to_vec();
-                let plain = key
+                // Decrypted in place, so this buffer holds the plaintext until it is wiped.
+                let mut sealed = Zeroizing::new(body[KEY_ID_LEN + NONCE_LEN..].to_vec());
+                let plain = entry
+                    .key
                     .open_in_place(Nonce::assume_unique_for_key(nonce), Aad::from(aad), &mut sealed)
                     .map_err(|_| SecretError::Open("it does not decrypt with the key file: it is damaged".into()))?;
                 Ok(plain.to_vec())
@@ -274,10 +435,175 @@ impl SecretBox {
         }
     }
 
+    /// Writes again, with the key that seals now, each of `files` that is sealed with another key
+    /// of the ring: after a rotation, or after moving the key out of the keys directory. A file
+    /// that is missing, or sealed another way, is left alone, and so is one that does not open: it
+    /// is named in the log, and its owner stops start-up with the reason when it is read. Returns
+    /// the files that were written.
+    // Off Windows the key file scheme is the only one, which makes the `let else` always match.
+    #[cfg_attr(not(windows), allow(irrefutable_let_patterns))]
+    pub fn reseal(&self, files: &[PathBuf]) -> Vec<PathBuf> {
+        let Scheme::KeyFile(ring) = &self.scheme else {
+            return Vec::new();
+        };
+        let sealing = ring.entries[ring.sealing].id;
+        let mut done = Vec::new();
+        for file in files {
+            let Ok(bytes) = fs::read(file) else {
+                continue;
+            };
+            let on_other_key = bytes.starts_with(&MAGIC)
+                && bytes.len() > HEADER_LEN + KEY_ID_LEN
+                && bytes[5] == SCHEME_KEY_FILE
+                && bytes[HEADER_LEN..HEADER_LEN + KEY_ID_LEN] != sealing[..];
+            if !on_other_key {
+                continue;
+            }
+            let plain = match self.unprotect(&bytes) {
+                Ok(plain) => Zeroizing::new(plain),
+                Err(e) => {
+                    tracing::warn!(
+                        "{} was not sealed again with the current key: {e}",
+                        file.display()
+                    );
+                    continue;
+                }
+            };
+            let written = self
+                .protect(&plain)
+                .map_err(|e| e.to_string())
+                .and_then(|sealed| {
+                    crate::file::write_atomic(file, &sealed)
+                        .map(|_| ())
+                        .map_err(|e| e.to_string())
+                });
+            match written {
+                Ok(()) => done.push(file.clone()),
+                Err(e) => tracing::warn!("{} could not be sealed again: {e}", file.display()),
+            }
+        }
+        if !done.is_empty() {
+            tracing::info!(
+                "Sealed {} file(s) again with the key from {}",
+                done.len(),
+                self.source
+            );
+        }
+        done
+    }
+
     /// A codec that encrypts a [`crate::ConfigFile`] with this box.
     pub fn codec(self: &Arc<Self>) -> Arc<dyn FileCodec> {
         Arc::new(SecretCodec(self.clone()))
     }
+}
+
+/// The key a file from outside the volume stands for. The file is any secret of 32 bytes or more
+/// (`openssl rand -base64 32` makes a good one); a trailing line break is ignored. The AES key and
+/// the key id come from it by HKDF-SHA256, so the same file is always the same key and the id
+/// says which files it opened.
+fn derive_key(path: &Path) -> Result<KeyEntry, SecretError> {
+    let failed = |reason: String| SecretError::KeyFile {
+        path: path.to_path_buf(),
+        reason,
+    };
+    let raw = Zeroizing::new(fs::read(path).map_err(|e| failed(e.to_string()))?);
+    let trimmed = raw.trim_ascii_end();
+    if trimmed.len() < MIN_SOURCE_LEN {
+        return Err(failed(format!(
+            "it holds {} bytes and needs at least {MIN_SOURCE_LEN}: make it with `openssl rand -base64 32`",
+            trimmed.len()
+        )));
+    }
+    if trimmed.len() > MAX_SOURCE_LEN {
+        return Err(failed(format!("it holds more than {MAX_SOURCE_LEN} bytes")));
+    }
+    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"Koppel key source v1");
+    let mut material = Zeroizing::new([0u8; KEY_LEN + KEY_ID_LEN]);
+    salt.extract(trimmed)
+        .expand(&[b"Koppel secret file key"], OutputLength(material.len()))
+        .and_then(|okm| okm.fill(&mut *material))
+        .map_err(|_| failed("a key could not be made from it".into()))?;
+    let id: [u8; KEY_ID_LEN] = material[KEY_LEN..].try_into().expect("fixed length");
+    let key = UnboundKey::new(&AES_256_GCM, &material[..KEY_LEN])
+        .map_err(|_| failed("its key is not usable".into()))?;
+    Ok(KeyEntry {
+        id,
+        key: LessSafeKey::new(key),
+    })
+}
+
+/// How many bytes HKDF is asked for.
+struct OutputLength(usize);
+
+impl hkdf::KeyType for OutputLength {
+    fn len(&self) -> usize {
+        self.0
+    }
+}
+
+/// The older keys beside the current one: `koppel-secrets.<anything>.key`, by name.
+fn retired_key_files(keys_directory: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(keys_directory) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.starts_with("koppel-secrets.")
+                && name.ends_with(".key")
+                && name.len() > "koppel-secrets..key".len()
+        })
+        .map(|entry| entry.path())
+        .collect();
+    files.sort();
+    files
+}
+
+/// A retired key: a Koppel key file, or a plain secret as a key source takes.
+fn load_retired_key(path: &Path, random: &SystemRandom) -> Result<KeyEntry, SecretError> {
+    let is_key_file = fs::read(path)
+        .map(|bytes| bytes.starts_with(&KEY_MAGIC) && bytes.len() == KEY_FILE_LEN)
+        .unwrap_or(false);
+    if is_key_file {
+        load_key_file(path, random, false)
+    } else {
+        derive_key(path)
+    }
+}
+
+/// Reads a `KPSK` key file. `make` makes it when it is missing.
+fn load_key_file(path: &Path, random: &SystemRandom, make: bool) -> Result<KeyEntry, SecretError> {
+    let failed = |reason: String| SecretError::KeyFile {
+        path: path.to_path_buf(),
+        reason,
+    };
+    let bytes = match read_key_file(path) {
+        Ok(bytes) => bytes,
+        Err(e) if make && e.kind() == io::ErrorKind::NotFound => {
+            create_key_file(path, random).map_err(|e| failed(e.to_string()))?
+        }
+        Err(e) => return Err(failed(e.to_string())),
+    };
+    let bytes = Zeroizing::new(bytes);
+    if bytes.len() != KEY_FILE_LEN || bytes[..4] != KEY_MAGIC {
+        return Err(failed("it is not a Koppel key file".into()));
+    }
+    if bytes[4] != VERSION {
+        return Err(failed(format!(
+            "it is version {}, and this Koppel reads version {VERSION}",
+            bytes[4]
+        )));
+    }
+    let id: [u8; KEY_ID_LEN] = bytes[5..5 + KEY_ID_LEN].try_into().expect("checked length");
+    let key = UnboundKey::new(&AES_256_GCM, &bytes[5 + KEY_ID_LEN..])
+        .map_err(|_| failed("its key is not usable".into()))?;
+    Ok(KeyEntry {
+        id,
+        key: LessSafeKey::new(key),
+    })
 }
 
 /// Writes the key file once. The first choice is a temp file with mode `0600`, flushed, then linked
@@ -423,7 +749,7 @@ mod tests {
                 .unprotect(&sealed)
                 .unwrap_err()
                 .to_string()
-                .contains("another key file")
+                .contains("another key")
         );
 
         let same = SecretBox::with_key_file(&one).unwrap();

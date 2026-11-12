@@ -41,7 +41,7 @@ pub use harden::harden_directory;
 pub use migrate::{Conversion, ConversionError, convert_0_1_secrets};
 pub use paths::{KoppelPaths, default_root};
 pub use redact::Secret;
-pub use secret::{SecretBox, SecretError, SecretFormat, format_of};
+pub use secret::{KeySource, KeySources, SecretBox, SecretError, SecretFormat, format_of};
 
 use files::{
     AttachedDevices, ClientConnection, KoppelSettings, ServerSecrets, SharedDevices, UiCredentials,

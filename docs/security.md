@@ -48,6 +48,29 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
   & "C:\Program Files\Matumi\Koppel\Koppel.exe" reset-password
   ```
 
+### Keeping the key outside the volume
+
+The files are sealed with AES-256-GCM. The key can come from a file kept apart from the config and keys directories, so a backup or a copy of the volume does not carry it. The first of these that applies is used:
+
+1. **`KOPPEL_KEY_FILE`**: the path of a file. When it is set the file must exist, otherwise Koppel stops and says so.
+2. **A systemd credential** named `koppel-key`: `LoadCredential=koppel-key:/etc/koppel/key` (or `ImportCredential=`) in the unit makes `$CREDENTIALS_DIRECTORY/koppel-key`, readable by the service only and not by the other users on the machine.
+3. **A Docker secret** named `koppel-key`: mounted at `/run/secrets/koppel-key`. In Compose, list it under `secrets:` for the service and under the top level `secrets:` as a `file:` or `external` secret.
+
+The file is any secret of 32 bytes or more, up to 4096; a trailing line break is ignored. Make one with:
+
+```sh
+openssl rand -base64 32 > koppel-key
+chmod 600 koppel-key
+```
+
+The AES key and a key id are derived from it with HKDF-SHA256, so the same file is the same key every time. Windows ignores all of this and keeps DPAPI (Koppel warns if `KOPPEL_KEY_FILE` is set there).
+
+Moving an install over: set the source and start Koppel. The old `koppel-secrets.key` in the keys directory is then only read, never made again, and at start every secret file sealed with it is written again with the new key (the log says how many). Once the log says so, stop Koppel, move `koppel-secrets.key` out of the keys directory (keep a copy with your offline backup, not in the volume), and start again. Losing the key outside the volume makes the secret files unreadable, as losing the keys directory does: see "If the key is lost" in `docs/config.md`. Back the key up separately from the volume.
+
+Rotating the key, with the key in the keys directory: stop Koppel, rename `koppel-secrets.key` to `koppel-secrets.<anything>.key`, start Koppel. It makes a new `koppel-secrets.key`, reads the renamed one, and seals every file again with the new key. When the log says so, delete the renamed file. Rotating a key from outside the volume is the same with a new key file: copy the old key file into the keys directory as `koppel-secrets.<anything>.key` (a retired key may be a Koppel key file or a plain secret like the ones above), point the source at the new one, start Koppel, and delete the copy once the log says the files were sealed again.
+
+What this buys: a copy of the volume alone, such as a backup, a snapshot or a disk image of the data folder, no longer opens `secrets.json`, `connection.json` and `ui-auth.json`. What it does not: a copy of the machine's whole file system, or root on the running machine, still has the key.
+
 ### Guards on the web surface
 
 - **Origin and header (UI surface):** an `Origin` that does not match the request's own scheme, host and port gets 403 on any `/api/*` call, the live push included. Behind a TLS proxy the scheme comes from `X-Forwarded-Proto`. A change (anything but GET or HEAD) also needs `X-Koppel-UI: 1`, otherwise 403. A page on another site cannot add that header without a CORS preflight, which this server never grants. The UI adds it in `api/http.ts` (`uiFetch`, used by every mutating fetch). The live push is a GET, so it needs no header, which an `EventSource` cannot send.
@@ -75,5 +98,10 @@ What it does not cover:
 - `KOPPEL_UI_ALLOW_FROM` and the per-caller limits on sign-in and pairing go by the caller's address as Koppel sees it; forwarded headers are not read. Behind NAT, such as port publishing that rewrites the source address, every caller arrives from one address: the local network check then lets everyone in, and one caller's wrong passwords lock out everyone else's address too.
 - The gateway on 3242 is plain USB/IP with no login (see ["USB client"](usb.md#usb-client)). Whoever reaches it uses the client's access to the server. On native Windows with a loopback address only the kernel's own connections get in, and only for imports Koppel asked the driver for; elsewhere, such as a container, the port publishing is all that keeps it local.
 - A registered client and the server it is paired with trust each other's USB/IP traffic: what one sends goes to the other's kernel driver (`usbip-host`, `vhci_hcd` or usbip-win2's driver) as it comes, and an attached device can be any device, a keyboard that types included. Koppel checks the bus ID and VID:PID of an import, not the traffic after it.
-- Anyone who can read the keys directory can decrypt the secret files, unless `Paths:KeyCertificate` protects the key ring (see ["Config on disk"](config.md#config-on-disk)). That setting is deprecated and goes in 0.2.0.
+- **On Linux and in Docker the key sits beside the files it protects.** By default `koppel-secrets.key` is in the keys directory, and the keys and config directories are one volume (`/koppel` in the image). A backup or a copy of the volume holds the key and the ciphertext together, so the encryption then protects only a copy of the config directory on its own. Anyone who can read the keys directory can decrypt the secret files. Keep the key elsewhere to change that (see "Keeping the key outside the volume" below). On Windows the key is machine-scope DPAPI: any process on the machine can unseal the files, as with 0.1.x.
+- **The key is not a passphrase.** Koppel has to start unattended after a power cut, so nothing asks for one at start. A key kept outside the volume is still a file that Koppel reads at start, and root on the machine can read that file, or the process's memory, as it can for any service.
+- **Memory.** Secrets are decrypted into memory while Koppel runs: the signing key, the certificate's private key, client secrets, the UI password hash. The values Koppel owns are wiped when they are dropped (`Secret`, and the buffers holding a decrypted file). That is best effort: the JSON parser's intermediate copies, the TLS stack's keys and the AES key schedule are not wiped, nothing is locked out of swap, and a core dump holds them. Turn core dumps off on a machine that matters (`LimitCORE=0` in the service, `--ulimit core=0` in Docker).
+- **Logs.** The config structs print `Secret(<redacted>)` for every secret, so a `{:?}` of one cannot leak it. A test holds that line. Koppel's own log messages do not carry secrets; a log line written by hand that formats a secret is the way one gets out, and the `Secret` type has no `Display` to make that easy.
+- **The 0.1.x key ring stays.** After a 0.1.x install is converted, its Data Protection key ring (`keys/aspnet`, plain XML on Linux) is left where it was, so the install can go back to 0.1.x. Until you delete it, it can decrypt whatever 0.1.x sealed. Keep it with the backup or delete it once you are sure.
+- **Client secrets can be read again.** Koppel keeps each client's secret inside the encrypted `secrets.json` so the admin can copy it again from the client's row. Anyone who can read the decrypted file can read them; see "Show-once client secrets" in `docs/decisions.md`.
 - The Linux container is privileged and runs as root, and the Windows service runs as LocalSystem. A flaw in Koppel is a flaw with that reach.

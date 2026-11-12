@@ -83,7 +83,7 @@ opens setup again). If a module will not load, the install says so; the fix is t
 
 - Config and keys live in `/var/lib/koppel`. An upgrade (`sudo apt install` of a newer `.deb`) and
   `sudo apt remove koppel` keep them; `sudo apt purge koppel` deletes them.
-- Settings go in `/etc/default/koppel` as environment variables, one per line, e.g. `Ui__AllowFrom=lan`.
+- Settings go in `/etc/default/koppel` as environment variables, one per line, e.g. `KOPPEL_UI_ALLOW_FROM=lan`.
   Then `sudo systemctl restart koppel`.
 - The service runs as root, as the container does, and restarts if it stops.
 
@@ -112,11 +112,11 @@ address under Configuration instead.
 
 | Port | What |
 |---|---|
-| 5240 TCP | The web UI, and everything other Koppel machines do: tokens, pairing, the device list and USB traffic. HTTPS with the server's own certificate. The UI needs the password and answers the local network only, this machine only on native Windows (`Ui:AllowFrom`) |
+| 5240 TCP | The web UI, and everything other Koppel machines do: tokens, pairing, the device list and USB traffic. HTTPS with the server's own certificate. The UI needs the password and answers the local network only, this machine only on native Windows (`KOPPEL_UI_ALLOW_FROM`) |
 | 5240 UDP | Finding servers on the local network |
 
-Koppel needs only 5240, TCP and UDP. `Ports:Network` puts what other machines do on a port of its own,
-and `Discovery:Port` moves discovery; see [docs/ports.md](docs/ports.md).
+Koppel needs only 5240, TCP and UDP. `KOPPEL_NETWORK_PORT` puts what other machines do on a port of its own,
+and `KOPPEL_DISCOVERY_PORT` moves discovery; see [docs/ports.md](docs/ports.md).
 
 A Windows client also has a port that never leaves the machine: a gateway on 127.0.0.1:3242 for
 usbip-win2's driver. The driver speaks plain USB/IP and cannot sign in, so it connects there and Koppel
@@ -127,10 +127,10 @@ The browser warns about Koppel's certificate the first time, because it is Koppe
 trust, check that its SHA-256 fingerprint is the one under Clients before you accept it. If you forget the password:
 
 ```sh
-docker compose run --rm koppel --reset-password
+docker compose run --rm koppel reset-password
 ```
 
-With the Linux package, run `sudo koppel --reset-password`. On Windows, from an elevated prompt, run `Koppel.exe --reset-password` from `C:\Program Files\Matumi\Koppel`. Then open
+With the Linux package, run `sudo koppel reset-password`. On Windows, from an elevated prompt, run `Koppel.exe reset-password` from `C:\Program Files\Matumi\Koppel`. Then open
 the UI within 10 minutes and set a new password.
 
 ## Help test Koppel

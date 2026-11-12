@@ -74,7 +74,7 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo test -p koppel-windows -- --ignored          # Windows: starts KoppelDesktop.exe's tray icon for a moment
-cargo run -p koppel                             # https://localhost:5240, Ctrl+C stops it; set Paths__Config and Paths__Keys to a folder of your own
+cargo run -p koppel                             # https://localhost:5240, Ctrl+C stops it; set KOPPEL_CONFIG_DIR and KOPPEL_KEYS_DIR to a folder of your own
 ```
 
 The same on Linux, in a container. The image has no clippy or rustfmt; add them with
@@ -205,7 +205,7 @@ own architecture, so nothing runs under emulation, and one build serves all thre
 - **Applications menu (#68):** `/usr/share/applications/koppel.desktop` with Koppel's icon in
   `/usr/share/icons/hicolor` (16 to 256 px and the SVG, rendered by `pnpm design:icons` into
   `src/installer/linux/icons`). It runs `/usr/lib/koppel/koppel-open`, which opens
-  `https://localhost:<port>/` through `xdg-open`, with the port from `Ports__Ui` in `/etc/default/koppel`, or
+  `https://localhost:<port>/` through `xdg-open`, with the port from `KOPPEL_UI_PORT` in `/etc/default/koppel`, or
   5240. The package only suggests `xdg-utils`, so a server without a desktop gets nothing extra.
 - **Watchdog (#71):** `WatchdogSec=30`. Koppel (`koppel/src/systemd.rs`, on the
   [sd-notify](https://crates.io/crates/sd-notify) crate) sends `READY=1` once its ports listen,
@@ -225,15 +225,16 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   nonroot user (65532), no shell and no libc, with Koppel at `/usr/local/bin/koppel` and the `/koppel`
   volume as in 0.1.x. distroless publishes arm only as `arm/v7`, but static holds no programs, so the
   `arm/v6` image takes those files as they are (its package list then says armhf).
-- **Health check (#100):** the image has no shell or curl, so `HEALTHCHECK` runs `koppel --healthcheck`
+- **Health check (#100):** the image has no shell or curl, so `HEALTHCHECK` runs `koppel healthcheck`
   (`koppel/src/healthcheck.rs`), as 0.1.x's image did, with the same timings (every
-  30 s, 10 s timeout, 40 s start period, 3 retries). It starts no server: it reads `Ports:Ui` and
-  `Ports:Address` as the server does, sends `GET /healthz` over HTTPS to that address (loopback for an
+  30 s, 10 s timeout, 40 s start period, 3 retries). It starts no server: it reads `KOPPEL_UI_PORT` and
+  `KOPPEL_LISTEN_ADDRESS` as the server does, sends `GET /healthz` over HTTPS to that address (loopback for an
   any-address), then to 127.0.0.1, and exits 0 on 200 and 1 otherwise. An address that cannot be reached
   passes to the next; one that takes the connection and does not answer within 5 s fails the check. The
   certificate is not checked, as in 0.1.x: it is Koppel's own self-signed one, the probe sends nothing
-  secret, and it only asks whether Koppel is up. The client is hyper's HTTP/1.1 half on the rustls the
-  server already carries, so no crate was added.
+  secret, and it only asks whether Koppel is up. The client is a TLS handshake on the rustls the server
+  already carries and one fixed request, read as far as the status line (no HTTP client; see "Settings and
+  commands" in decisions.md).
 - **Composes:** the ones in `src/installer/docker` name the released image,
   and the image name and run options did not change from 0.1.x. `deploy.sh` builds this
   Dockerfile.
@@ -256,7 +257,7 @@ its errors, sign-in with its cookie, lockout and limits, the guards on each port
 between two Koppels. They check status codes, field names and shapes and behaviour, not times or ids. The
 crate talks HTTP only and never links Koppel's own crates.
 
-- **Targets:** environment variables name the Koppels to test, one for most tests and a few more for states only one test may touch (a fresh machine, a closed setup window, `Ui:AllowFrom=local`, the rate limit). The crate's docs list them. Without them every test says it was skipped and passes, so `cargo test --workspace` needs no Koppel running.
+- **Targets:** environment variables name the Koppels to test, one for most tests and a few more for states only one test may touch (a fresh machine, a closed setup window, `KOPPEL_UI_ALLOW_FROM=local`, the rate limit). The crate's docs list them. Without them every test says it was skipped and passes, so `cargo test --workspace` needs no Koppel running.
 - **Never an install someone uses:** the tests change settings, the password, clients and the certificate.
 - **Certificate:** the first certificate a target presents is pinned for the run, and every later connection must present it or one a test pinned before switching. The name in it is not checked, since the tests reach the target as `localhost`.
 - **The live push:** `koppel_contract::push` lists the ten events with their payloads, and `tests/push.rs` checks each against the Rust build's Server-Sent Events, with the stream ending on a sign-out and on a password change elsewhere. Against 0.1.x, whose push was SignalR, those tests say they were skipped.
@@ -275,8 +276,8 @@ folder, on seven ports, 16240 to 16246 (the guarded target takes two; `KOPPEL_CO
 client target looks for servers on the main target's port, as the two 0.1.2 containers share one. On
 Windows the targets listen on 127.0.0.1 only, with discovery and the USB/IP gateway off, so no firewall
 prompt comes up and none takes port 3242 from an installed Koppel: the discovery tests and the
-`Ui:AllowFrom` test are skipped there, since every caller is loopback. Elsewhere the client finds the
-main target by broadcast and the script reaches the `Ui:AllowFrom` target at the machine's own address. `KOPPEL_CONTRACT_RELEASE=1` tests a release build.
+`KOPPEL_UI_ALLOW_FROM` test are skipped there, since every caller is loopback. Elsewhere the client finds the
+main target by broadcast and the script reaches the `KOPPEL_UI_ALLOW_FROM` target at the machine's own address. `KOPPEL_CONTRACT_RELEASE=1` tests a release build.
 
 Against Koppel 0.1.2, from the repo root with Docker running (Git Bash on Windows):
 

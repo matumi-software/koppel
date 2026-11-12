@@ -2,11 +2,11 @@
 # Build context = src/. Docker is all it needs.
 #
 #   Binaries, to <dir>/<arch>/koppel:
-#     docker buildx build -f koppel/Dockerfile --target binaries --output type=local,dest=<dir> .
+#     docker buildx build -f installer/docker/Dockerfile --target binaries --output type=local,dest=<dir> .
 #   The .deb files (installer/linux/build.ps1 runs this):
-#     docker buildx build -f koppel/Dockerfile --target linux-packages --output type=local,dest=<dir> .
+#     docker buildx build -f installer/docker/Dockerfile --target linux-packages --output type=local,dest=<dir> .
 #   The image (the last stage, so the default target):
-#     docker buildx build -f koppel/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 -t <name> .
+#     docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 -t <name> .
 #
 # Every image is pinned by tag and digest, so a rebuild does not move under us, and every tool by version,
 # Zig and PowerShell also by their checksums. To bump an image, `docker buildx imagetools inspect <image>:<tag>` prints the new

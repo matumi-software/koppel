@@ -1,5 +1,5 @@
 # nfpm config for Koppel's .deb from the Rust build. Built by the linux-packages target of
-# src/koppel/Dockerfile (see build.ps1), which sets VERSION from the workspace version in src/Cargo.toml,
+# src/installer/docker/Dockerfile (see build.ps1), which sets VERSION from the workspace version in src/Cargo.toml,
 # ARCH to amd64, arm64 or armhf, puts that architecture's static binary at /stage/koppel and the third-party
 # notices at /notices/THIRD-PARTY-NOTICES.txt.
 name: koppel

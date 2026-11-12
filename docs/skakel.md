@@ -76,7 +76,7 @@ at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`,
 - **Skakel on the web ports:** Skakel's server is started mounted (`start_mounted`): it binds no
   port of its own, and Koppel's web ports serve the UI, the plain HTTP redirect and the port and role
   rules on the same port as 0.1.x, with Skakel beside them. After the port and role check, the web
-  ports hand Skakel's service what is Skakel's: the gRPC calls (told by their content type; network
+  ports hand Skakel's service what is Skakel's: the gRPC calls (told by their path, a service under `skakel.` or `koppel.remote.v1.RemoteDevices`, never by their content type; network
   surface, server role), `/skakel/*` and `/api/remote/*`. Each request carries the caller's real
   address (`ConnectInfo`) from the accept loop. Skakel's calls run on the caller's own connection, so
   a client's USB streams keep a connection each and its calls end when it goes. Every connection is

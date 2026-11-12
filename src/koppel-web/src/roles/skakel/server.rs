@@ -41,6 +41,7 @@ use crate::roles::{
     Approval, ClientView, Fut, KeysView, NewClient, PairingOverview, PairingRequestView,
     PairingWindowView, RegisterError, RoleError, ServerRole, Switched,
 };
+use crate::surface::is_grpc_path;
 
 /// Skakel's app id for Koppel.
 pub(crate) const APP_ID: &str = "koppel";
@@ -124,7 +125,7 @@ impl SkakelServerRole {
             .as_ref()
             .map(|running| running.server.service());
         let Some(mut service) = service else {
-            return not_running(super::is_grpc(&request));
+            return not_running(is_grpc_path(request.uri().path()));
         };
         let Ok(response) = service.call(request).await;
         response

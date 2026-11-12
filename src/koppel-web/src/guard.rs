@@ -68,12 +68,9 @@ async fn check(app: &App, mut request: Request, next: Next) -> Response {
         .get::<LocalAddr>()
         .map_or(app.host.ui_port, |local| local.0.port());
 
-    // A gRPC call is Skakel's, or Koppel's own service beside it: other machines, a server's.
-    let surface = if crate::roles::skakel::is_grpc(&request) {
-        Surface::GRPC
-    } else {
-        Surface::of(&path)
-    };
+    // The surface is the path's, never the request's own word for what it is: a gRPC call is a path
+    // under one of the services this server runs (other machines, a server's).
+    let surface = Surface::of(&path);
     let port = match surface.listener {
         Listener::Ui => app.host.ui_port,
         Listener::Network => app.host.network_port,

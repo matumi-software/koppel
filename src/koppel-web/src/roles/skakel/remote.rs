@@ -27,6 +27,11 @@ pub mod proto {
 use proto::remote_devices_server::{RemoteDevices as RemoteDevicesService, RemoteDevicesServer};
 use proto::{DeviceList, InterfaceList, RemoteDevice, WatchDevicesRequest};
 
+/// The service's name as a gRPC path starts with it, `/koppel.remote.v1.RemoteDevices/Watch`: how the
+/// web ports tell a call to it from a request for the UI (see `surface.rs`).
+pub(crate) const SERVICE_NAME: &str =
+    <RemoteDevicesServer<Service> as tonic::server::NamedService>::NAME;
+
 /// The remote view as it changes, shared by every call and request.
 pub(crate) type Shared = watch::Receiver<Arc<RemoteDevices>>;
 

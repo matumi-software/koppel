@@ -32,12 +32,12 @@ use crate::guard::{self, RateLimit};
 use crate::host::Host;
 use crate::push::{self, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
-use crate::roles::skakel::{self, APP_ID, SecretsStore, ServerParts, SkakelLinks};
+use crate::roles::skakel::{APP_ID, SecretsStore, ServerParts, SkakelLinks};
 use crate::roles::{
     ClientRole, ServerRole, SkakelClientRole, SkakelServerRole, UsbActivity, UsbClient,
     UsbClientRole, UsbServer, UsbServerRole,
 };
-use crate::surface::starts_with_segments;
+use crate::surface::{is_grpc_path, starts_with_segments};
 use crate::tls::{self, Acceptors, CertificateSlot};
 
 /// What the app is started with.
@@ -438,7 +438,8 @@ impl App {
 /// signed-in GET of one with index.html. The guard in front already decided the request may reach
 /// what it asks for.
 async fn fallback(State(app): State<Arc<App>>, request: Request) -> Response {
-    if skakel::is_grpc(&request) || starts_with_segments(request.uri().path(), "/skakel") {
+    let path = request.uri().path();
+    if is_grpc_path(path) || starts_with_segments(path, "/skakel") {
         return forward(State(app), request).await;
     }
     if request.method() == Method::GET || request.method() == Method::HEAD {

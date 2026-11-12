@@ -1,8 +1,11 @@
 //! What is served where: the one table of path prefixes, the port each is on and the role that has
 //! it, as `Surface.Listed` in 0.1.x's `SurfaceGuard.cs`. A path not listed is the UI's, so a new
-//! route is never exposed to remote clients by accident.
+//! route is never exposed to remote clients by accident. The surface comes from the path and the port
+//! only, never from a header: a request that says it is gRPC is the UI's when its path is.
 
 use koppel_config::files::Role;
+
+use crate::roles::skakel::remote;
 
 /// Which port a surface is served on. Both are the same port unless `Ports:Network` is set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,8 +69,8 @@ const LISTED: &[Surface] = &[
 const ANONYMOUS: &[&str] = &["/api/auth/state", "/api/auth/setup", "/api/auth/login"];
 
 impl Surface {
-    /// A gRPC call, told by its content type: Skakel's control and stream services and Koppel's own
-    /// remote device list, for other machines.
+    /// A gRPC call, told by its path (see [`is_grpc_path`]): Skakel's control and stream services and
+    /// Koppel's own remote device list, for other machines.
     pub(crate) const GRPC: Surface = Surface {
         prefix: "/",
         listener: Listener::Network,
@@ -75,6 +78,9 @@ impl Surface {
     };
 
     pub(crate) fn of(path: &str) -> Surface {
+        if is_grpc_path(path) {
+            return Self::GRPC;
+        }
         LISTED
             .iter()
             .copied()
@@ -89,6 +95,18 @@ impl Surface {
             RoleScope::Any => true,
         }
     }
+}
+
+/// True for the path of a call to a gRPC service this server runs: `/<package>.<Service>/<Method>`,
+/// with a package under `skakel` (Skakel's own services) or Koppel's `koppel.remote.v1.RemoteDevices`.
+/// Exact and case sensitive, as gRPC routes it. No UI path has a dot in its first segment, so a UI
+/// path is never taken for one.
+pub(crate) fn is_grpc_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix('/') else {
+        return false;
+    };
+    let (service, method) = rest.split_once('/').unwrap_or((rest, ""));
+    !method.is_empty() && (service.starts_with("skakel.") || service == remote::SERVICE_NAME)
 }
 
 /// True when the path is the UI's API, the live push included, and not one of the anonymous paths.
@@ -123,6 +141,31 @@ mod tests {
         assert!(starts_with_segments("/API/Server/clients", "/api/server"));
         assert!(!starts_with_segments("/api/servers", "/api/server"));
         assert!(!starts_with_segments("/ap", "/api"));
+    }
+
+    #[test]
+    fn a_grpc_call_is_told_by_its_path() {
+        for path in [
+            "/skakel.v3.ControlService/Connect",
+            "/skakel.v3.StreamService/Open",
+            "/koppel.remote.v1.RemoteDevices/Watch",
+        ] {
+            assert!(is_grpc_path(path), "{path}");
+            assert_eq!(Surface::of(path), Surface::GRPC);
+        }
+        for path in [
+            "/",
+            "/api/auth/login",
+            "/skakel/info",
+            "/skakel.v3.ControlService",
+            "/Skakel.v3.ControlService/Connect",
+            "/koppel.remote.v1.RemoteDevices",
+            "/koppel.remote.v1.Other/Watch",
+            "/koppel.remote.v2.RemoteDevices/Watch",
+        ] {
+            assert!(!is_grpc_path(path), "{path}");
+        }
+        assert_eq!(Surface::of("/skakel/info").listener, Listener::Network);
     }
 
     #[test]

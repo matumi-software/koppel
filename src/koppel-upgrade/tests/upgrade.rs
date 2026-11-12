@@ -26,8 +26,7 @@ use koppel_config::files::{
 };
 use koppel_config::{KoppelPaths, SecretBox, ServerCertificate, open};
 use koppel_upgrade::{
-    Conversion, KOPPEL_PURPOSES, KeyRing, Reshaped, convert_0_1_secrets, pkcs12, reshape_secrets,
-    upgrade,
+    Conversion, KOPPEL_PURPOSES, KeyRing, Reshaped, pkcs12, reshape_secrets, upgrade,
 };
 
 const LINUX_012_FINGERPRINT: &str = "21:91:2B:41:C0:2D:38:79:4B:F9:D6:EA:17:EC:B9:33:20:1E:11:19:DD:62:08:E7:C1:62:F7:3E:14:19:BD:AA";
@@ -657,6 +656,7 @@ fn a_0_1_0_secrets_file_that_cannot_be_carried_over_is_kept_aside_and_the_start_
 #[cfg(windows)]
 #[tokio::test]
 async fn a_windows_0_1_install_with_a_dpapi_key_ring_is_converted() {
+    use koppel_upgrade::convert_0_1_secrets;
     let Some(source) = std::env::var_os("KOPPEL_WINDOWS_0_1_FIXTURE").map(PathBuf::from) else {
         eprintln!("skipped: KOPPEL_WINDOWS_0_1_FIXTURE is not set");
         return;

@@ -33,6 +33,7 @@ desktop.ini
 *.p12
 *.pem
 *.key
+!src/koppel-upgrade/tests/fixtures/**/*.key
 .env
 .env.*
 !.env.example

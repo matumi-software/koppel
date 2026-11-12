@@ -16,7 +16,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::api::client::ConnectionUpdate;
-use crate::push::{self, Push};
+use crate::push::{Event, Push};
 use crate::roles::{ConnectionTest, DiscoveredServer, Outcome, PairingState, PairingStatus};
 use crate::tasks::Tasks;
 
@@ -134,7 +134,7 @@ impl SkakelClientRole {
                 let Some(role) = weak.upgrade() else {
                     return;
                 };
-                role.push.send(push::SERVERS_DISCOVERED, &role.discovered());
+                role.push.send(Event::ServersDiscovered(&role.discovered()));
             }
         });
     }
@@ -165,7 +165,7 @@ impl SkakelClientRole {
             true
         });
         if changed {
-            self.push.send(push::PAIRING_STATUS_CHANGED, &pushed);
+            self.push.send(Event::PairingStatusChanged(&pushed));
         }
     }
 
@@ -324,7 +324,7 @@ impl SkakelClientRole {
         });
         if reset {
             self.push
-                .send(push::PAIRING_STATUS_CHANGED, &PairingStatus::idle());
+                .send(Event::PairingStatusChanged(&PairingStatus::idle()));
         }
     }
 }
@@ -541,10 +541,10 @@ impl SkakelClientRole {
         let Some(run) = started else {
             return;
         };
-        self.push.send(
-            push::PAIRING_STATUS_CHANGED,
-            &Self::status(&run, PairingState::Requesting),
-        );
+        self.push.send(Event::PairingStatusChanged(&Self::status(
+            &run,
+            PairingState::Requesting,
+        )));
         self.tasks.spawn(me.run(run));
     }
 
@@ -586,7 +586,7 @@ impl SkakelClientRole {
             pairings.reset();
         });
         self.push
-            .send(push::PAIRING_STATUS_CHANGED, &PairingStatus::idle());
+            .send(Event::PairingStatusChanged(&PairingStatus::idle()));
     }
 }
 

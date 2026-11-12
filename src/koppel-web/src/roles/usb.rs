@@ -11,7 +11,7 @@ use koppel_usb::{
 };
 
 use crate::activity::ActivityLog;
-use crate::push::{self, Push};
+use crate::push::{Event, Push};
 
 /// The server's USB side.
 pub struct UsbServerRole {
@@ -24,7 +24,7 @@ impl UsbServerRole {
     pub(crate) fn new(server: Server, platform: Platform, push: Push) -> Arc<Self> {
         server.on_changed(move |devices: Arc<ServerDevices>| {
             let push = push.clone();
-            async move { push.send(push::DEVICES_CHANGED, &*devices) }
+            async move { push.send(Event::DevicesChanged(&devices)) }
         });
         Arc::new(Self { server, platform })
     }
@@ -62,7 +62,7 @@ impl UsbClientRole {
     pub(crate) fn new(client: Client, platform: Platform, push: Push) -> Arc<Self> {
         client.on_changed(move |devices: Arc<ClientDevices>| {
             let push = push.clone();
-            async move { push.send(push::CLIENT_DEVICES_CHANGED, &*devices) }
+            async move { push.send(Event::ClientDevicesChanged(&devices)) }
         });
         Arc::new(Self { client, platform })
     }

@@ -23,7 +23,7 @@ use crate::api::client::ConnectionView;
 use crate::auth::UiAuth;
 use crate::guard::RateLimit;
 use crate::host::Host;
-use crate::push::{self, Push};
+use crate::push::{Event, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
 use crate::roles::skakel::{
     APP_ID, SecretsError, SecretsStore, ServerParts, ServerStartError, SkakelLinks,
@@ -208,14 +208,14 @@ impl App {
         {
             let push = push.clone();
             settings.subscribe(move |value| {
-                push.send(push::SETTINGS_CHANGED, &*value);
+                push.send(Event::SettingsChanged(&value));
                 async {}
             });
         }
         {
             let push = push.clone();
             connection.subscribe(move |value| {
-                push.send(push::CONNECTION_CHANGED, &ConnectionView::of(&value));
+                push.send(Event::ConnectionChanged(&ConnectionView::of(&value)));
                 async {}
             });
         }

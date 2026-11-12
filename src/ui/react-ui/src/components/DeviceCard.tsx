@@ -17,12 +17,12 @@ export interface DeviceCardBodyProps {
   footnote?: ReactNode;
 }
 
-/** What a device card shows. Used inside DeviceCards (selectable) or DeviceCard (plain). */
+/** What a device card shows, inside DeviceCards (selectable). */
 export function DeviceCardBody({ name, vendor, vidPid, busId, state, where, action, footnote }: DeviceCardBodyProps) {
   return (
     <>
       <div className="kp-device__head">
-        <div style={{ minWidth: 0 }}>
+        <div className="kp-device__title">
           <h3 className="kp-device__name">{name}</h3>
           {vendor && <span className="kp-device__vendor">{vendor}</span>}
         </div>
@@ -35,23 +35,10 @@ export function DeviceCardBody({ name, vendor, vidPid, busId, state, where, acti
       <p className="kp-device__where">{where}</p>
       {(action || footnote) && (
         <div className="kp-device__foot">
-          {footnote ? <span className="kp-switch__note" role="status">{footnote}</span> : <span />}
+          {footnote ? <span className="kp-switch__note">{footnote}</span> : <span />}
           {action}
         </div>
       )}
     </>
-  );
-}
-
-export interface DeviceCardProps extends DeviceCardBodyProps {
-  isSelected?: boolean;
-}
-
-/** One USB device on its own, outside a selectable grid. */
-export function DeviceCard({ isSelected, ...props }: DeviceCardProps) {
-  return (
-    <article className="kp-device" data-state={props.state} data-selected={isSelected ? 'true' : undefined}>
-      <DeviceCardBody {...props} />
-    </article>
   );
 }

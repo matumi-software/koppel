@@ -1,4 +1,5 @@
 import { hashKey, useQueryClient } from '@tanstack/react-query';
+import { useAnnounce } from '@koppel/react-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useActivity } from '@/activity/activity-context';
 import { pendingDomains } from './domains';
@@ -24,12 +25,16 @@ const newStores = (): PendingStores => ({
 export function PendingProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const activity = useActivity();
+  const announce = useAnnounce();
   const [stores] = useState(newStores);
 
   // Effects run before any change can be sent, so a store never logs to a stale activity API.
   useEffect(() => {
     for (const store of Object.values(stores)) store.attachActivity(activity);
   }, [stores, activity]);
+  useEffect(() => {
+    for (const store of Object.values(stores)) store.attachAnnouncer(announce);
+  }, [stores, announce]);
 
   useEffect(() => {
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {

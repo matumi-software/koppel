@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Button, CopyValue, DeviceCardBody, DeviceCards, DeviceGroup, type DeviceState } from '@koppel/react-ui';
+import { Button, Caption, CopyValue, DeviceCardBody, DeviceCards, DeviceGroup, Note, Row, Stack, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
 import type { ClientDeviceView } from '@/api/usb';
 import { Frame } from '@/shell/frame';
@@ -86,10 +86,10 @@ export function ClientDevicesPage() {
         <>
           {action(current)}
           {data?.gateway && !current.attachedHere && current.device.state === 'shared' && (
-            <div style={{ display: 'grid', gap: 6, marginTop: 12 }}>
-              <span className="kp-type-caption">Or attach it to the computer that runs this container, with usbip-win2:</span>
+            <Stack gap="sm">
+              <Caption>Or attach it to the computer that runs this container, with usbip-win2:</Caption>
               <CopyValue value={`usbip attach -r 127.0.0.1 -b ${current.device.busId}`} wrap />
-            </div>
+            </Stack>
           )}
         </>
       }
@@ -101,17 +101,17 @@ export function ClientDevicesPage() {
   return (
     <Frame title={`Devices on ${server}`} lede="Attach a device to use it here as if it were plugged in." aside={aside} asideKey={current?.device.busId}>
       {link === 'unconfigured' && (
-        <div className="kp-row">
-          <p className="kp-note">Set up the server connection to see its devices.</p>
+        <Row>
+          <Note>Set up the server connection to see its devices.</Note>
           <Button variant="secondary" onPress={() => goTo('configuration')}>
             Server connection
           </Button>
-        </div>
+        </Row>
       )}
-      {link === 'connecting' && <p className="kp-note">Connecting to {server}…</p>}
-      {link === 'error' && <p className="kp-error">Cannot reach {server}: {data?.linkMessage}</p>}
-      {data?.unavailable && <p className="kp-error">{data.unavailable}</p>}
-      {link === 'connected' && entries.length === 0 && <p className="kp-note">{server} is not sharing any devices.</p>}
+      {link === 'connecting' && <Note>Connecting to {server}…</Note>}
+      {link === 'error' && <Note tone="error">Cannot reach {server}: {data?.linkMessage}</Note>}
+      {data?.unavailable && <Note tone="error">{data.unavailable}</Note>}
+      {link === 'connected' && entries.length === 0 && <Note>{server} is not sharing any devices.</Note>}
       {groups
         .filter((g) => g.items.length > 0)
         .map((group) => (

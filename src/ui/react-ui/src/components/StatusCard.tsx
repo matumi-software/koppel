@@ -1,19 +1,18 @@
 import { Glyph } from './Activity';
 import { Button } from './Button';
-import type { LinkState } from './LinkBanner';
 
-/** A client's link to the server it attaches from, as the client reports it. */
-export type ServerLinkState = 'unconfigured' | 'connecting' | 'connected' | 'error';
+/** The UI's live link to the machine it runs on: up, coming back, or away through every retry. */
+export type LinkState = 'live' | 'reconnecting' | 'down';
 
 export interface StatusCardProps {
   /** The UI's live link to this machine. */
   state: LinkState;
   /** The machine this UI runs on, as the server reports it. */
   machineName: string;
-  /** The Koppel version it runs, such as 0.1.1. Left out until it is known. */
+  /** The Koppel version it runs, as it should read, such as v0.1.1. Left out until it is known. */
   version?: string;
-  /** For a client: the server it attaches from. Left out on a server. */
-  server?: { link: ServerLinkState; name?: string | null };
+  /** One more line about the machine, such as what a client is linked to. `pending` when it is not as it should be. */
+  detail?: { text: string; tone?: 'pending' };
   /** Shown as Retry while the link is down. */
   onRetry?: () => void;
   onSignOut: () => void;
@@ -26,21 +25,21 @@ const glyphs = { live: 'live', reconnecting: 'pending', down: 'fault' } as const
 
 /**
  * The card at the foot of the sidebar: whether the live link is up, this machine and the Koppel
- * version it runs, what a client is linked to, and Sign out.
+ * version it runs, one more line such as what a client is linked to, and Sign out. It is not a live
+ * region: link changes are announced once, by the Announcer.
  */
-export function StatusCard({ state, machineName, version, server, onRetry, onSignOut, signOutError }: StatusCardProps) {
+export function StatusCard({ state, machineName, version, detail, onRetry, onSignOut, signOutError }: StatusCardProps) {
   return (
     <div className="kp-status-card" data-state={state}>
       <div className="kp-status-card__head">
-        {/* Keyed by state so a screen reader hears the change, and the alert role only when the link is down. */}
-        <span key={state} className="kp-status-card__state" role={state === 'down' ? 'alert' : 'status'}>
+        <span className="kp-status-card__state">
           <Glyph state={glyphs[state]} />
           {words[state]}
         </span>
         {version && (
           <span className="kp-status-card__version">
             <span className="kp-sr-only">Koppel </span>
-            {/^\d/.test(version) ? `v${version}` : version}
+            {version}
           </span>
         )}
       </div>
@@ -59,13 +58,13 @@ export function StatusCard({ state, machineName, version, server, onRetry, onSig
             Check that {machineName} is running, then retry.
           </p>
         )}
-        {server && (
-          <p className="kp-status-card__line" data-tone={server.link === 'connected' ? undefined : 'pending'}>
-            {serverLine(server.link, server.name)}
+        {detail && (
+          <p className="kp-status-card__line" data-tone={detail.tone}>
+            {detail.text}
           </p>
         )}
         {signOutError && (
-          <p className="kp-status-card__line" data-tone="fault" role="status">
+          <p className="kp-status-card__line" data-tone="fault">
             Not signed out: {signOutError}
           </p>
         )}
@@ -90,15 +89,11 @@ export function StatusCard({ state, machineName, version, server, onRetry, onSig
   );
 }
 
-function serverLine(link: ServerLinkState, name: string | null | undefined) {
-  switch (link) {
-    case 'connected':
-      return `Linked to ${name ?? 'the server'}.`;
-    case 'unconfigured':
-      return 'No server connection yet.';
-    case 'connecting':
-      return `Connecting to ${name ?? 'the server'}…`;
-    default:
-      return `Cannot reach ${name ?? 'the server'}.`;
-  }
+/** The live link as a dot, for the phone top bar. The state is in words in its name. */
+export function LinkDot({ state }: { state: LinkState }) {
+  return (
+    <span className="kp-row" role="img" aria-label={words[state]}>
+      <Glyph state={glyphs[state]} />
+    </span>
+  );
 }

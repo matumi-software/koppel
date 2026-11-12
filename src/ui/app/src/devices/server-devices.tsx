@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DeviceCardBody, DeviceCards, DeviceGroup, Switch, type DeviceState } from '@koppel/react-ui';
+import { DeviceCardBody, DeviceCards, DeviceGroup, Note, Switch, type DeviceState } from '@koppel/react-ui';
 import { useQuery } from '@tanstack/react-query';
 import type { DeviceView } from '@/api/usb';
 import { Frame } from '@/shell/frame';
@@ -78,9 +78,9 @@ export function ServerDevicesPage() {
 
   return (
     <Frame title="Devices on this machine" lede={`Plug a device into ${host} to share it. Changes show once the server confirms them.`} aside={aside} asideKey={current?.busId}>
-      {data?.unavailable && <p className="kp-error">{data.unavailable}</p>}
-      {query.isPending && <p className="kp-note">Loading devices…</p>}
-      {data && devices.length === 0 && !data.unavailable && <p className="kp-note">No USB devices found on this machine.</p>}
+      {data?.unavailable && <Note tone="error">{data.unavailable}</Note>}
+      {query.isPending && <Note>Loading devices…</Note>}
+      {data && devices.length === 0 && !data.unavailable && <Note>No USB devices found on this machine.</Note>}
       {groups
         .filter((g) => g.items.length > 0)
         .map((group) => (

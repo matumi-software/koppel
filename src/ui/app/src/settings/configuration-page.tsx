@@ -1,4 +1,4 @@
-import { Panel, RoleCards, Setting, SettingList, Switch } from '@koppel/react-ui';
+import { Note, Panel, PanelBody, PanelNote, RoleCards, Setting, SettingList, Switch } from '@koppel/react-ui';
 import { ChangePassword } from './change-password';
 import { ConnectionSection } from '@/client/connection-section';
 import { Frame } from '@/shell/frame';
@@ -24,7 +24,7 @@ export function ConfigurationPage() {
   if (!query.data) {
     return (
       <Frame title="Configuration">
-        <p className="kp-note">{query.isError ? 'Could not load settings. Check that Koppel is running, then reload.' : 'Loading settings…'}</p>
+        <Note>{query.isError ? 'Could not load settings. Check that Koppel is running, then reload.' : 'Loading settings…'}</Note>
       </Frame>
     );
   }
@@ -57,9 +57,9 @@ export function ConfigurationPage() {
   return (
     <Frame title="Configuration" lede={`${host}: what it does on the network and how it starts.`}>
       <Panel title="Role" meta={<SavedNote status={role} />}>
-        <div className="kp-panel__body">
+        <PanelBody>
           {!roleOptions.some((o) => o.value === role.confirmed) && (
-            <p className="kp-note">This machine's role is {roleName(role.confirmed)}: this version of Koppel does not know it. Pick one below to replace it.</p>
+            <Note>This machine's role is {roleName(role.confirmed)}: this version of Koppel does not know it. Pick one below to replace it.</Note>
           )}
           <RoleCards
             label="Role"
@@ -69,7 +69,7 @@ export function ConfigurationPage() {
             isDisabled={locked}
             onChange={(value) => value !== role.confirmed && requestChange('role', value)}
           />
-        </div>
+        </PanelBody>
       </Panel>
 
       {isServerRole(role.confirmed) && (
@@ -117,18 +117,13 @@ export function ConfigurationPage() {
 
 /** Saving, Saved or why not, for a setting the panel holds. Nothing until the user changes it. */
 function SavedNote({ status }: { status: SettingStatus<'role'> }) {
-  // The live region stays in the page, empty, so a screen reader hears the text arrive.
   const [state, text] =
     status.pendingTarget !== undefined
-      ? ['pending', 'Saving…']
+      ? (['pending', 'Saving…'] as const)
       : status.failure
-        ? ['fault', `Not saved: ${status.failure}`]
+        ? (['fault', `Not saved: ${status.failure}`] as const)
         : status.saved
-          ? [undefined, 'Saved']
-          : [undefined, undefined];
-  return (
-    <span className="kp-panel__note" data-state={state} role="status">
-      {text}
-    </span>
-  );
+          ? ([undefined, 'Saved'] as const)
+          : ([undefined, undefined] as const);
+  return <PanelNote state={state}>{text}</PanelNote>;
 }

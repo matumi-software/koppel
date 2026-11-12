@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type Ref } from 'react';
 import { Button, Dialog, Link, Modal, ModalOverlay } from 'react-aria-components';
 import { KoppelMark } from './KoppelMark';
 
@@ -12,6 +12,11 @@ export interface AppShellProps {
    * the user sets by dragging its edge and its content never changes. Folds below the page at phone width.
    */
   aside?: ReactNode;
+  /**
+   * The aside's body, for a page that puts its own content in the side panel (a portal). Giving it
+   * makes the panel exist even while `aside` is empty.
+   */
+  asideRef?: Ref<HTMLDivElement>;
   /** The aside's width in pixels when the shell first shows, such as the width the user left it at. */
   defaultAsideWidth?: number;
   /** Called with the new width when the user finishes resizing the aside. */
@@ -29,7 +34,7 @@ export interface AppShellProps {
  * The app frame: sidebar navigation, the page, and an aside. At phone width the sidebar moves into
  * a menu behind a top-bar button and the aside folds below the page, so nothing scrolls sideways.
  */
-export function AppShell({ nav, navFoot, aside, defaultAsideWidth, onAsideWidthChange, title, status, isMenuOpen, onMenuOpenChange, children }: AppShellProps) {
+export function AppShell({ nav, navFoot, aside, asideRef, defaultAsideWidth, onAsideWidthChange, title, status, isMenuOpen, onMenuOpenChange, children }: AppShellProps) {
   const [asideWidth, setAsideWidth] = useState(() => clampAside(defaultAsideWidth ?? asideDefault));
   const [isResizing, setResizing] = useState(false);
   const brand = (
@@ -39,9 +44,21 @@ export function AppShell({ nav, navFoot, aside, defaultAsideWidth, onAsideWidthC
     </div>
   );
   const foot = navFoot && <div className="kp-shell__foot">{navFoot}</div>;
+  const main = useRef<HTMLElement>(null);
 
   return (
     <div className="kp-shell" data-resizing={isResizing ? 'true' : undefined}>
+      <a
+        className="kp-skip"
+        href="#main"
+        onClick={(event) => {
+          // A hash link would change the address, which is where the open page lives.
+          event.preventDefault();
+          main.current?.focus();
+        }}
+      >
+        Skip to the page
+      </a>
       <header className="kp-shell__top">
         <Button className="kp-button" data-variant="ghost" aria-label="Open menu" onPress={() => onMenuOpenChange(true)} style={{ minWidth: 44, minHeight: 44 }}>
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
@@ -73,9 +90,11 @@ export function AppShell({ nav, navFoot, aside, defaultAsideWidth, onAsideWidthC
         </Modal>
       </ModalOverlay>
 
-      <main className="kp-shell__main">{children}</main>
+      <main ref={main} id="main" tabIndex={-1} className="kp-shell__main">
+        {children}
+      </main>
 
-      {aside && (
+      {(aside || asideRef) && (
         <aside className="kp-shell__aside" aria-label="Details" style={{ '--kp-aside-width': `${asideWidth}px` } as CSSProperties}>
           <AsideResizer
             width={asideWidth}
@@ -84,7 +103,9 @@ export function AppShell({ nav, navFoot, aside, defaultAsideWidth, onAsideWidthC
             onResizingChange={setResizing}
             onDone={(width) => onAsideWidthChange?.(width)}
           />
-          <div className="kp-shell__aside-body">{aside}</div>
+          <div ref={asideRef} className="kp-shell__aside-body">
+            {aside}
+          </div>
         </aside>
       )}
     </div>
@@ -171,14 +192,17 @@ export interface NavItemProps {
   isCurrent?: boolean;
   count?: number | string;
   countTone?: 'pending';
-  onPress: () => void;
+  /** Where the link goes, such as #devices, so it opens in a new tab and takes a middle click. */
+  href: string;
+  /** Also called when the link is followed, such as to close the phone menu. */
+  onPress?: () => void;
   children: ReactNode;
 }
 
-/** One page in the navigation. A react-aria Link, marked with aria-current when open. */
-export function NavItem({ isCurrent, count, countTone, onPress, children }: NavItemProps) {
+/** One page in the navigation. A real link (react-aria Link), marked with aria-current when open. */
+export function NavItem({ isCurrent, count, countTone, href, onPress, children }: NavItemProps) {
   return (
-    <Link className="kp-nav__item" aria-current={isCurrent ? 'page' : undefined} onPress={onPress}>
+    <Link className="kp-nav__item" href={href} aria-current={isCurrent ? 'page' : undefined} onPress={onPress}>
       {children}
       {count !== undefined && (
         <span className="kp-nav__count" data-tone={countTone}>

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Button, CopyValue, MiniList, PairingCode, Panel, type MiniListItem } from '@koppel/react-ui';
+import { Button, Caption, CopyValue, MiniList, Note, PairingCode, Panel, PanelBody, Row, type MiniListItem } from '@koppel/react-ui';
 import type { DiscoveredServer } from '@/api/pairing';
 import { pairingKeys } from '@/pending/domains';
 import { hexOf, shortFingerprint } from '@/shared/fingerprint';
@@ -39,18 +39,13 @@ export function NearbyServers({ locked }: { locked: boolean }) {
         <>
           {server.address}
           {server.version ? `, Koppel ${server.version}` : ''}, fingerprint {shortFingerprint(server.fingerprint)}
-          {warning && (
-            <span className="app-error" role="alert">
-              {' '}
-              {warning}
-            </span>
-          )}
-          {failures[server.fingerprint] && <span className="app-error"> Not paired: {failures[server.fingerprint]}</span>}
+          {warning && <Caption tone="fault">{` ${warning}`}</Caption>}
+          {failures[server.fingerprint] && <Caption tone="fault">{` Not paired: ${failures[server.fingerprint]}`}</Caption>}
         </>
       ),
       end:
         linkedTo && hex(server.fingerprint) === linkedTo ? (
-          <span className="kp-type-caption">Connected</span>
+          <Caption>Connected</Caption>
         ) : (
           <Button
             variant="secondary"
@@ -66,45 +61,43 @@ export function NearbyServers({ locked }: { locked: boolean }) {
 
   return (
     <Panel title="Servers on your network">
-      <div className="kp-panel__body">
+      <PanelBody>
         {current?.state === 'waiting' && current.code ? (
           <>
-            <p className="kp-note">
+            <Note>
               Type this code on <b>{current.serverName}</b>: open Clients there and find <b>{me}</b> under Waiting to pair.
-            </p>
+            </Note>
             <PairingCode code={current.code} />
             {current.serverFingerprint && (
-              <p className="kp-note">
-                Server fingerprint {shortFingerprint(current.serverFingerprint)}. It should match the one on that server's Clients page.
-              </p>
+              <Note>Server fingerprint {shortFingerprint(current.serverFingerprint)}. It should match the one on that server's Clients page.</Note>
             )}
-            <div className="app-inline">
+            <Row>
               <Button variant="secondary" isSending={cancelKey in pending} isDisabled={locked || cancelKey in pending} onPress={() => request({ type: 'cancel' })}>
                 Cancel
               </Button>
-            </div>
+            </Row>
           </>
         ) : current?.state === 'requesting' ? (
-          <p className="kp-note">Asking {current.serverName} to pair…</p>
+          <Note>Asking {current.serverName} to pair…</Note>
         ) : current?.state === 'confirm' ? (
           <>
-            <p className="kp-note">
+            <Note>
               <b>{current.serverName}</b> approved this machine. {current.message}
-            </p>
+            </Note>
             {current.serverFingerprint && <CopyValue value={current.serverFingerprint} wrap />}
-            <p className="kp-note">Replace your connection only if this is the server you meant to pair with. Discarding leaves the connection as it is.</p>
-            <div className="app-inline">
+            <Note>Replace your connection only if this is the server you meant to pair with. Discarding leaves the connection as it is.</Note>
+            <Row>
               <Button variant="primary" isSending={confirmKey in pending} isDisabled={locked || confirmKey in pending || cancelKey in pending} onPress={() => request({ type: 'confirm' })}>
                 Replace connection
               </Button>
               <Button variant="secondary" isSending={cancelKey in pending} isDisabled={locked || confirmKey in pending || cancelKey in pending} onPress={() => request({ type: 'cancel' })}>
                 Discard
               </Button>
-            </div>
+            </Row>
           </>
         ) : (
           <>
-            <p className="kp-note">Pair with a server to attach its devices here. You type a code on the server to approve this machine.</p>
+            <Note>Pair with a server to attach its devices here. You type a code on the server to approve this machine.</Note>
             <MiniList
               items={items}
               empty="Looking for Koppel servers on this network. None found yet: a server in Docker needs host networking to be found, or enter its address below."
@@ -112,17 +105,11 @@ export function NearbyServers({ locked }: { locked: boolean }) {
           </>
         )}
         {current?.state === 'paired' && hex(connection.data?.serverFingerprint) === hex(current.serverFingerprint) && (
-          <p className="app-ok" role="status">
-            Paired with {current.serverName}. Its devices are under Devices.
-          </p>
+          <Note tone="ok">Paired with {current.serverName}. Its devices are under Devices.</Note>
         )}
-        {(current?.state === 'denied' || current?.state === 'expired' || current?.state === 'failed') && (
-          <p className="app-error" role="status">
-            Not paired: {current.message}
-          </p>
-        )}
-        {(failures[cancelKey] || failures[confirmKey]) && <p className="app-error">Not done: {failures[cancelKey] ?? failures[confirmKey]}</p>}
-      </div>
+        {(current?.state === 'denied' || current?.state === 'expired' || current?.state === 'failed') && <Note tone="error">Not paired: {current.message}</Note>}
+        {(failures[cancelKey] || failures[confirmKey]) && <Note tone="error">Not done: {failures[cancelKey] ?? failures[confirmKey]}</Note>}
+      </PanelBody>
     </Panel>
   );
 }

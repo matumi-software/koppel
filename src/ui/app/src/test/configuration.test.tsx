@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { KoppelSettings } from '@/api/settings';
 import { confirmTimeoutMs } from '@/pending/domains';
-import { accepted, json, mockFetch, renderApp } from './harness';
+import { accepted, announced, json, mockFetch, renderApp } from './harness';
 import { baseRoutes, configuration, connection, fingerprint, settings } from './fixtures';
 
 afterEach(() => {
@@ -22,16 +22,17 @@ describe('the role', () => {
     expect(screen.queryByText('Server connection')).toBeNull();
   });
 
-  it('announces Saving and Saved through a status region', async () => {
+  it('shows Saving and Saved, and says how the change ended through the live region', async () => {
     mockFetch({ ...baseRoutes, 'PATCH /api/settings': () => accepted() });
     const { live } = renderApp(configuration());
     await screen.findByText('Role');
 
     fireEvent.click(screen.getByRole('radio', { name: /Both/ }));
-    await waitFor(() => expect(screen.getByText('Saving…').getAttribute('role')).toBe('status'));
+    await screen.findByText('Saving…');
 
     await act(async () => live.emit('SettingsChanged', { ...settings, role: 'both' }));
-    await waitFor(() => expect(screen.getByText('Saved').getAttribute('role')).toBe('status'));
+    await screen.findByText('Saved');
+    expect(announced()).toBe('Role: both. Saved.');
   });
 });
 
@@ -100,9 +101,9 @@ describe('the server connection', () => {
     expect(calls.find((c) => c.key === 'PUT /api/client/connection')?.body).toMatchObject({ clientId: 'bench-2', clientSecret: 'hunter2' });
     await waitFor(() => expect(clientId().disabled).toBe(true));
 
-    // A push for some other connection does not confirm it.
+    // A push for some other connection does not confirm it: the save stays pending.
     await act(async () => live.emit('ConnectionChanged', { ...connection, clientId: 'someone-else' }));
-    await waitFor(() => expect(clientId().value).toBe('someone-else'));
+    expect(clientId().disabled).toBe(true);
     expect(screen.queryByText(/Not saved/)).toBeNull();
 
     await act(async () => live.emit('ConnectionChanged', { ...connection, clientId: 'bench-2' }));
@@ -173,7 +174,8 @@ describe('the server connection', () => {
 
     await userEvent.click(testButton());
 
-    expect((await screen.findByText('Failed to fetch')).getAttribute('role')).toBe('status');
+    await screen.findByText('Failed to fetch');
+    expect(announced()).toBe('Connection test: Failed to fetch');
     expect(testButton().disabled).toBe(false);
   });
 });

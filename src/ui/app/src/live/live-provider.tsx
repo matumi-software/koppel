@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { LinkState } from '@koppel/react-ui';
+import { useAnnounce, type LinkState } from '@koppel/react-ui';
 import { useAuth } from '@/auth/auth-context';
 import { LiveContext } from './live-context';
 import { applyPush, downAfterFailures, eventsUrl, pushEvents, retryDelay } from './push-table';
@@ -16,6 +16,7 @@ import { applyPush, downAfterFailures, eventsUrl, pushEvents, retryDelay } from 
 export function LiveProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { recheck } = useAuth();
+  const announce = useAnnounce();
   const [state, setState] = useState<LinkState>('reconnecting');
   // Bumped by retry, which starts the link afresh.
   const [start, setStart] = useState(0);
@@ -37,7 +38,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         const away = failures > 0;
         failures = 0;
         setState('live');
-        if (away) void queryClient.invalidateQueries();
+        if (away) {
+          announce('Live again. Changes can be saved.');
+          void queryClient.invalidateQueries();
+        }
       };
       current.onerror = () => {
         current.close();
@@ -46,6 +50,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // stream may be a session that ended during an outage: the gate shows the login screen if so.
         recheck();
         setState(failures >= downAfterFailures ? 'down' : 'reconnecting');
+        // Said when the link goes away and when it is called down, not on every retry.
+        if (failures === 0) announce('Reconnecting. Changes are paused until the link is back.');
+        else if (failures === downAfterFailures) announce('Disconnected. Check that Koppel is running, then retry.');
         timer = setTimeout(connect, retryDelay(failures++));
       };
     };
@@ -56,7 +63,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       clearTimeout(timer);
       source?.close();
     };
-  }, [queryClient, recheck, start]);
+  }, [queryClient, recheck, announce, start]);
 
   const retry = useCallback(() => {
     setState('reconnecting');

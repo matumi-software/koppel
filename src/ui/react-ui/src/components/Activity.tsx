@@ -21,13 +21,13 @@ export interface ActivityEntry {
   kind?: string;
 }
 
-/** Changes as the server confirms or rejects them, newest first. A live log for screen readers. */
+/** Changes as the server confirms or rejects them, newest first. The Announcer says what a screen reader needs to hear. */
 export function ActivityFeed({ entries, empty }: { entries: readonly ActivityEntry[]; empty?: ReactNode }) {
   if (entries.length === 0) {
     return <p className="kp-note">{empty ?? 'Nothing yet.'}</p>;
   }
   return (
-    <ol className="kp-feed" role="log" aria-live="polite">
+    <ol className="kp-feed">
       {entries.map((entry) => (
         <li key={entry.id} className="kp-feed__item" data-state={entry.state}>
           <Glyph state={entry.state} />
@@ -60,7 +60,7 @@ export function Facts({ title, facts }: FactsProps) {
       <h2>{title}</h2>
       <dl className="kp-kv">
         {facts.map((fact) => (
-          <div key={fact.label} style={{ display: 'contents' }}>
+          <div key={fact.label}>
             <dt>{fact.label}</dt>
             <dd className={fact.mono ? 'kp-type-mono-sm' : undefined}>{fact.value}</dd>
           </div>

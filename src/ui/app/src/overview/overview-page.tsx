@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Button, MiniList, Panel, StatusBadge, type MiniListItem } from '@koppel/react-ui';
+import { Button, Caption, MiniList, Mono, Panel, PanelGrid, StatusBadge, type MiniListItem } from '@koppel/react-ui';
 import { useActivity } from '@/activity/activity-context';
 import { hostOf, since, useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { isClientRole, isServerRole } from '@/settings/roles';
@@ -24,26 +24,26 @@ export function OverviewPage() {
 
   const needs: MiniListItem[] = [];
   for (const item of items.filter((i) => i.state === 'pending')) {
-    needs.push({ id: item.id, name: item.text, end: <StatusBadge state="pending" />, sub: <span className="kp-type-caption">Waiting for the server to confirm.</span> });
+    needs.push({ id: item.id, name: item.text, end: <StatusBadge state="pending" />, sub: <Caption>Waiting for the server to confirm.</Caption> });
   }
   for (const d of isServer ? (server.data?.devices ?? []) : []) {
     if (d.fault) {
-      needs.push({ id: `s-${d.busId}`, name: `${d.name} was not changed`, end: <Button variant="secondary" onPress={() => goTo('devices')}>Open</Button>, sub: <span style={{ color: 'var(--fault-text)' }}>{d.fault}</span> });
+      needs.push({ id: `s-${d.busId}`, name: `${d.name} was not changed`, end: <Button variant="secondary" onPress={() => goTo('devices')}>Open</Button>, sub: <Caption tone="fault">{d.fault}</Caption> });
     }
   }
   for (const e of isClient ? (client.data?.devices ?? []) : []) {
     if (e.fault) {
-      needs.push({ id: `c-${e.device.busId}`, name: `${e.device.name} on ${remote}`, end: <Button variant="secondary" onPress={() => goTo('attach')}>Open</Button>, sub: <span style={{ color: 'var(--fault-text)' }}>{e.fault}</span> });
+      needs.push({ id: `c-${e.device.busId}`, name: `${e.device.name} on ${remote}`, end: <Button variant="secondary" onPress={() => goTo('attach')}>Open</Button>, sub: <Caption tone="fault">{e.fault}</Caption> });
     }
   }
   if (isServer && server.data?.unavailable) {
-    needs.push({ id: 'share-unavailable', name: 'This machine cannot share devices', sub: <span style={{ color: 'var(--fault-text)' }}>{server.data.unavailable}</span> });
+    needs.push({ id: 'share-unavailable', name: 'This machine cannot share devices', sub: <Caption tone="fault">{server.data.unavailable}</Caption> });
   }
   if (isClient && client.data?.link === 'unconfigured') {
     needs.push({ id: 'no-connection', name: 'No server connection yet', end: <Button variant="secondary" onPress={() => goTo('configuration')}>Set up</Button>, sub: 'Add the server and the client ID and secret it gave you.' });
   }
   if (isClient && client.data?.link === 'error') {
-    needs.push({ id: 'link-error', name: `Cannot reach ${remote}`, sub: <span style={{ color: 'var(--fault-text)' }}>{client.data.linkMessage}</span> });
+    needs.push({ id: 'link-error', name: `Cannot reach ${remote}`, sub: <Caption tone="fault">{client.data.linkMessage}</Caption> });
   }
 
   const shared = (server.data?.devices ?? []).filter((d) => d.state !== 'local');
@@ -53,7 +53,7 @@ export function OverviewPage() {
     end: <StatusBadge state={d.state} />,
     sub: (
       <>
-        <span className="kp-type-mono-sm">{d.vidPid || d.busId}</span>
+        <Mono>{d.vidPid || d.busId}</Mono>
         <span>{d.state === 'attached' ? `${clientName(d.attachedTo)}${since(d.attachedSince)}` : d.state === 'offline' ? 'Unplugged' : 'Free'}</span>
       </>
     ),
@@ -64,7 +64,7 @@ export function OverviewPage() {
     end: <StatusBadge state={e.attachedHere ? 'attached' : e.device.state} detail={e.attachedHere ? 'here' : undefined} />,
     sub: (
       <>
-        <span className="kp-type-mono-sm">{e.device.vidPid}</span>
+        <Mono>{e.device.vidPid}</Mono>
         <span>{e.attachedHere ? `Virtual port ${e.port}${since(e.attachedSince)}` : e.device.state === 'attached' ? 'In use elsewhere' : 'Free to attach'}</span>
       </>
     ),
@@ -88,7 +88,7 @@ export function OverviewPage() {
           <MiniList items={needs} empty="" />
         </Panel>
       )}
-      <div className="kp-panels">
+      <PanelGrid>
         {isServer && (
           <Panel title={`Sharing from ${host}`} meta={`${shared.length} of ${server.data?.devices.length ?? 0}`} footer={<Button variant="ghost" onPress={() => goTo('devices')}>All devices</Button>}>
             <MiniList items={sharing} empty="Nothing shared yet. Open Devices and switch Share on." />
@@ -99,7 +99,7 @@ export function OverviewPage() {
             <MiniList items={attached} empty={client.data?.link === 'connected' ? `${remote} is not sharing any devices.` : 'Not connected to a server.'} />
           </Panel>
         )}
-      </div>
+      </PanelGrid>
     </Frame>
   );
 }

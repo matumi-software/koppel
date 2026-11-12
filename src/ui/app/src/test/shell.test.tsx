@@ -77,7 +77,7 @@ describe('the status card', () => {
 
     await waitFor(() => expect(within(card()).getByText('v1.0.0')).toBeTruthy());
     expect(within(card()).getByText('bench-pc')).toBeTruthy();
-    expect(within(card()).getByRole('status').textContent).toBe('Live');
+    expect(within(card()).getByText('Live')).toBeTruthy();
     expect(count('GET /api/system/info')).toBe(1);
   });
 
@@ -96,7 +96,7 @@ describe('the status card', () => {
     renderApp(appWithLink('down', retry));
 
     await waitFor(() => expect(card().dataset.state).toBe('down'));
-    expect(within(card()).getByRole('alert').textContent).toBe('Disconnected');
+    expect(within(card()).getByText('Disconnected')).toBeTruthy();
 
     await userEvent.click(within(card()).getByRole('button', { name: 'Retry' }));
 

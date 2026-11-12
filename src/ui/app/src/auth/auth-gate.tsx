@@ -1,11 +1,14 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { ErrorBoundary, Note } from '@koppel/react-ui';
 import { logout, type AuthState } from '@/api/auth';
 import { onUnauthorized } from '@/api/http';
 import { AuthContext } from './auth-context';
-import { LoginPage } from './login-page';
-import { SetPasswordPage } from './set-password-page';
-import { SetupClosedPage } from './setup-closed-page';
+
+// The signed-out screens load only for a browser that is not signed in: the app is most of the code.
+const LoginPage = lazy(() => import('./login-page'));
+const SetPasswordPage = lazy(() => import('./set-password-page'));
+const SetupClosedPage = lazy(() => import('./setup-closed-page'));
 import { authOptions } from '@/queries';
 
 const setupRecheckMs = 15_000;
@@ -59,20 +62,36 @@ export function AuthGate({ children }: { children: ReactNode }) {
     [recheck, queryClient],
   );
 
+  const loading = <Note isPadded>Loading…</Note>;
+
   if (!state.data) {
-    return <p className="kp-note" style={{ padding: 24 }}>{state.isError ? 'Could not reach Koppel. Check that it is running, then reload.' : 'Loading…'}</p>;
+    return state.isError ? <Note isPadded>Could not reach Koppel. Check that it is running, then reload.</Note> : loading;
   }
 
+  // A render error anywhere below must not leave a blank page: the boundary offers Reload, and
+  // under the app its own Sign out (see App).
   if (!state.data.passwordSet) {
-    return state.data.setupOpen ? (
-      <SetPasswordPage machineName={state.data.machineName} setupUntil={state.data.setupUntil} recheck={recheck} />
-    ) : (
-      <SetupClosedPage machineName={state.data.machineName} recheck={recheck} />
+    return (
+      <ErrorBoundary>
+        <Suspense fallback={loading}>
+          {state.data.setupOpen ? (
+            <SetPasswordPage machineName={state.data.machineName} setupUntil={state.data.setupUntil} recheck={recheck} />
+          ) : (
+            <SetupClosedPage machineName={state.data.machineName} recheck={recheck} />
+          )}
+        </Suspense>
+      </ErrorBoundary>
     );
   }
 
   if (!signedIn) {
-    return <LoginPage machineName={state.data.machineName} onSignedIn={recheck} />;
+    return (
+      <ErrorBoundary>
+        <Suspense fallback={loading}>
+          <LoginPage machineName={state.data.machineName} onSignedIn={recheck} />
+        </Suspense>
+      </ErrorBoundary>
+    );
   }
 
   return <AuthContext.Provider value={api}>{children}</AuthContext.Provider>;

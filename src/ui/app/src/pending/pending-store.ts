@@ -48,6 +48,7 @@ export class PendingStore<A, D, I = void> {
   private readonly sends = new Map<string, number>();
   private sendCount = 0;
   private activityApi?: ActivityApi;
+  private announcer?: (message: string) => void;
 
   readonly domain: PendingDomain<A, D, I>;
 
@@ -58,6 +59,11 @@ export class PendingStore<A, D, I = void> {
   /** The activity log to write to. The provider hands over the current one whenever it changes. */
   attachActivity(api: ActivityApi) {
     this.activityApi = api;
+  }
+
+  /** Where to say how a change ended, so a screen reader hears it: the app's one live region. */
+  attachAnnouncer(announce: (message: string) => void) {
+    this.announcer = announce;
   }
 
   subscribe = (listener: () => void) => {
@@ -94,6 +100,8 @@ export class PendingStore<A, D, I = void> {
       saved: failure ? this.snapshot.saved : this.confirmed(key),
       completed: failure ? this.snapshot.completed : { ...this.snapshot.completed, [key]: (this.snapshot.completed[key] ?? 0) + 1 },
     });
+    const text = this.domain.describe?.(action).text;
+    if (text) this.announcer?.(failure ? `${text} could not be saved: ${failure}` : `${text}. Saved.`);
     const logId = this.logIds.get(key);
     if (logId) {
       this.logIds.delete(key);

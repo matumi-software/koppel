@@ -1,5 +1,8 @@
-# The checks CLAUDE.md lists under Commands, run on every pull request and on main. All of them run from
-# src/ (the pnpm ones from src/ui/), and cargo runs with --locked so a stale Cargo.lock fails here.
+# The checks CLAUDE.md lists under Commands, run on every pull request and on main, plus the builds that ship:
+# the release program with the UI built in, and the Linux .deb files and image from the Dockerfile. The cargo
+# and pnpm checks run from src/ (the pnpm ones from src/ui/), and cargo runs with --locked so a stale
+# Cargo.lock fails here. Every action is pinned by commit SHA, with its version in a comment; update the SHA
+# and the comment together. Every job sets timeout-minutes so a hung job cannot run for six hours.
 name: CI
 
 on:
@@ -16,12 +19,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: "1.99.1"
 
 jobs:
   rust:
     name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -30,13 +33,14 @@ jobs:
       run:
         working-directory: src
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The toolchain, components and targets come from src/rust-toolchain.toml.
       - name: Install Rust
         shell: bash
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy --component rustfmt
-          rustup default "$RUST_VERSION"
-      - uses: Swatinem/rust-cache@v2
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src
       - run: cargo fmt --all --check
@@ -44,20 +48,92 @@ jobs:
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  # What ships is the release profile (fat LTO, opt-level z) with the built UI embedded; the debug build above
+  # never runs either, nor the build script's "release needs a built UI" path.
+  release:
+    name: Release build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+        with:
+          package_json_file: src/ui/package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version-file: src/ui/.nvmrc
+          cache: pnpm
+          cache-dependency-path: src/ui/pnpm-lock.yaml
+      - name: Build the UI
+        working-directory: src/ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter koppel.ui build
+      - name: Install Rust
+        working-directory: src
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: src
+          key: release
+      - name: Build the program
+        working-directory: src
+        run: cargo build --release --locked -p koppel
+
+  # The Linux packages and the image, built the way a release builds them (installer/docker/Dockerfile): the UI,
+  # the three static musl binaries with cargo-zigbuild, the third-party notices, the .deb files with nfpm and
+  # the image for all three platforms. This is also the check that the three musl targets build.
+  docker:
+    name: Linux packages and image
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the .deb files
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src
+          file: src/installer/docker/Dockerfile
+          target: linux-packages
+          outputs: type=local,dest=${{ runner.temp }}/packages
+          cache-from: type=gha,scope=koppel-docker
+          cache-to: type=gha,scope=koppel-docker,mode=max
+      - name: Check the packages
+        run: |
+          set -eu
+          ls -l "$RUNNER_TEMP/packages"
+          for arch in amd64 arm64 armhf; do
+            deb=$(ls "$RUNNER_TEMP/packages"/koppel_*_"$arch".deb)
+            dpkg-deb --info "$deb" | grep -E 'Package|Version|Architecture'
+          done
+      - name: Build the image for amd64, arm64 and arm/v6
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: src
+          file: src/installer/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64,linux/arm/v6
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=koppel-docker
+          cache-to: type=gha,scope=koppel-docker,mode=max
+
   ui:
     name: UI
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: src/ui
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           package_json_file: src/ui/package.json
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: 24
+          node-version-file: src/ui/.nvmrc
           cache: pnpm
           cache-dependency-path: src/ui/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -69,9 +145,20 @@ jobs:
   dependencies:
     name: Dependencies
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           manifest-path: src/Cargo.toml
           command: check
+
+  # One version, one place: the toolchain, Node and pnpm versions the Dockerfile, the docs and CI repeat, and
+  # the licence list deny.toml and about.toml share.
+  pins:
+    name: Pins
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: .github/scripts/check-pins.sh

@@ -18,6 +18,12 @@ authors = ["Matumi Software"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/matumi-software/koppel"
 
+[workspace.lints.rust]
+# For the crates that need no unsafe code: koppel and koppel-contract. They take this with
+# `[lints] workspace = true`. The crates that call the operating system (koppel-config, koppel-usb,
+# koppel-web, koppel-windows) have unsafe blocks and stay out until each one is narrowed to one module.
+unsafe_code = "forbid"
+
 [workspace.dependencies]
 koppel-web = { path = "koppel-web", version = "0.2.0" }
 koppel-config = { path = "koppel-config", version = "0.2.0" }

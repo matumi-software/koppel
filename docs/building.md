@@ -10,7 +10,9 @@ package versions are in `src/installer/windows/Directory.Packages.props`, and af
 ["Installer and Windows service"](installers.md#installer-and-windows-service), and the Linux binaries, packages and image in "Linux packages and
 the image in Rust" below.
 
-Every pull request runs `.github/workflows/ci.yml`, and its checks must pass before a merge: Rust (format, build, test and clippy with `--locked`) on Linux and Windows, the UI (typecheck, lint, tests) and `cargo deny check` against `src/deny.toml`, which allows the licences `src/installer/notices/about.toml` accepts and fails on an advisory or an unknown source. Dependencies are updated by hand; no bot proposes updates.
+Every pull request runs `.github/workflows/ci.yml`. The four checks the ruleset requires are Rust (format, build, test and clippy with `--locked`) on Linux and Windows, the UI (typecheck, lint, tests) and `cargo deny check` against `src/deny.toml`, which allows the licences `src/installer/notices/about.toml` accepts and fails on an advisory or an unknown source. Three more jobs run beside them: Release build (`pnpm build` of the UI, then `cargo build --release --locked -p koppel`, so the size profile and the embedded UI are built as shipped), Linux packages and image (the Dockerfile's `linux-packages` target and the image for the three platforms, which also builds the three musl targets) and Pins (`.github/scripts/check-pins.sh`: the Rust, Node and pnpm versions agree across `src/rust-toolchain.toml`, `src/ui/.nvmrc`, `package.json`, the Dockerfile and the docs, and `deny.toml` and `about.toml` list the same licences). Every action is pinned by commit SHA with its version in a comment, and every job has a `timeout-minutes`.
+
+The Rust version lives in `src/rust-toolchain.toml` and Node in `src/ui/.nvmrc`; change them there, and then in the places `check-pins.sh` names. `.github/workflows/advisories.yml` runs every Monday: `cargo deny check advisories`, `pnpm audit --prod`, and a check for a newer Skakel tag, which opens an issue. A failed run emails the repository's Actions watchers. Dependencies are updated by hand; no bot proposes updates.
 
 To release:
 
@@ -36,7 +38,7 @@ To release:
 Koppel 0.2.0 is a rewrite in Rust (milestone v0.2.0, #82 to #92) of the C# Koppel 0.1.x, whose source
 stays at tag `v0.1.2`. `src/` is the Cargo workspace: `src/Cargo.toml`, the committed `src/Cargo.lock`,
 and the build output in `src/target/`. It follows Skakel's: edition 2024, Rust 1.99, and every
-third-party crate pinned in `[workspace.dependencies]` with a note on its licence.
+third-party crate pinned in `[workspace.dependencies]` with a note on its licence. `[workspace.lints]` forbids `unsafe_code`; `koppel` and `koppel-contract` take it with `[lints] workspace = true`, and the crates that call the operating system (`koppel-config`, `koppel-usb`, `koppel-web`, `koppel-windows`) do not yet, because each has unsafe blocks.
 
 | Crate | What |
 |---|---|

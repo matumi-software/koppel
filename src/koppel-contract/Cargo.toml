@@ -11,6 +11,9 @@ publish = false
 
 # Tests only: the library is the harness the tests in tests/ share. It talks HTTP to a target and
 # never links Koppel's own crates, so it checks what a browser or another machine sees.
+[lints]
+workspace = true
+
 [dependencies]
 tokio = { workspace = true }
 reqwest.workspace = true

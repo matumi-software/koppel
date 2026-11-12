@@ -9,7 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-koppel-config.workspace = true
+koppel-secrets.workspace = true
 indexmap.workspace = true
 tokio = { workspace = true, features = ["io-util", "process"] }
 tokio-util.workspace = true
@@ -31,6 +31,8 @@ libc.workspace = true
 windows.workspace = true
 
 [dev-dependencies]
+# The tests save through real config files, behind the store traits.
+koppel-config.workspace = true
 # The tests of this crate use the test doubles too.
 koppel-usb = { path = ".", features = ["test-util"] }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }

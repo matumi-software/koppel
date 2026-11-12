@@ -4,6 +4,7 @@ resolver = "3"
 members = [
     "koppel",
     "koppel-config",
+    "koppel-secrets",
     "koppel-upgrade",
     "koppel-usb",
     "koppel-web",
@@ -27,6 +28,7 @@ unsafe_code = "forbid"
 [workspace.dependencies]
 koppel-web = { path = "koppel-web", version = "0.2.0" }
 koppel-config = { path = "koppel-config", version = "0.2.0" }
+koppel-secrets = { path = "koppel-secrets", version = "0.2.0" }
 koppel-upgrade = { path = "koppel-upgrade", version = "0.2.0" }
 koppel-usb = { path = "koppel-usb", version = "0.2.0" }
 koppel-windows = { path = "koppel-windows", version = "0.2.0" }

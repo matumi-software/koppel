@@ -28,6 +28,7 @@ use super::remote::proto::WatchDevicesRequest;
 use super::remote::proto::remote_devices_client::RemoteDevicesClient;
 use super::streams::open_usb;
 use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
+use crate::roles::usb_store::file_connection;
 use crate::sync::Unpoisoned;
 use crate::tasks::Tasks;
 
@@ -60,7 +61,8 @@ impl SkakelLinks {
 }
 
 impl Links for SkakelLinks {
-    fn connect(&self, connection: &ClientConnection, events: LinkEvents) -> Arc<dyn Link> {
+    fn connect(&self, connection: &koppel_usb::Connection, events: LinkEvents) -> Arc<dyn Link> {
+        let connection = &file_connection(connection);
         let made = make(connection, self.browser.clone());
         let shared = Arc::new(Shared {
             saved: self.connection.clone(),

@@ -11,6 +11,7 @@
 
 pub mod skakel;
 mod usb;
+pub(crate) mod usb_store;
 
 use serde::Serialize;
 use time::OffsetDateTime;

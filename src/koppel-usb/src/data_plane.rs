@@ -5,15 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use koppel_config::files::{KoppelSettings, Role};
-use koppel_config::{ConfigFile, Subscription};
 use tokio::io::AsyncWriteExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::tasks::lock;
 use crate::{
     ActivityOutcome, ActivityReason, ActivitySink, BusId, CloseReason, DeviceStream, EntityRef,
-    ExportStatus, UsbServer, protocol,
+    ExportStatus, Observed, Subscription, UsbServer, UsbSettings, protocol,
 };
 
 /// Time for a client to ask for the device list or an import once its stream is open.
@@ -45,7 +43,7 @@ pub struct UsbDataPlane {
 struct Inner {
     server: UsbServer,
     activity: Arc<dyn ActivitySink>,
-    settings: ConfigFile<KoppelSettings>,
+    settings: Arc<dyn Observed<UsbSettings>>,
     sessions: Mutex<HashMap<u64, Session>>,
     next_session: AtomicU64,
     /// One lock per bus ID for the status check, the reset and the start of an export.
@@ -106,15 +104,11 @@ impl Drop for BusGuard<'_> {
     }
 }
 
-fn serves(role: Role) -> bool {
-    matches!(role, Role::Server | Role::Both)
-}
-
 impl UsbDataPlane {
     pub fn new(
         server: UsbServer,
         activity: Arc<dyn ActivitySink>,
-        settings: ConfigFile<KoppelSettings>,
+        settings: Arc<dyn Observed<UsbSettings>>,
     ) -> Self {
         Self {
             inner: Arc::new(Inner {
@@ -133,24 +127,22 @@ impl UsbDataPlane {
     /// Starts following the role: a machine that stops being a server ends what it serves.
     pub fn start(&self) {
         let weak = Arc::downgrade(&self.inner);
-        let subscription = self.inner.settings.subscribe(move |next| {
+        let subscription = self.inner.settings.subscribe(Box::new(move |next| {
             let weak = weak.clone();
-            async move {
+            Box::pin(async move {
                 if let Some(inner) = weak.upgrade()
-                    && !serves(next.role)
+                    && !next.role.serves()
                 {
                     inner.end_serving().await;
                 }
-            }
-        });
+            })
+        }));
         *lock(&self.inner.subscription) = Some(subscription);
     }
 
     /// Ends every session and stops following the role.
     pub async fn stop(&self) {
-        if let Some(subscription) = lock(&self.inner.subscription).take() {
-            self.inner.settings.unsubscribe(subscription);
-        }
+        drop(lock(&self.inner.subscription).take());
         self.inner.end_serving().await;
     }
 

@@ -26,6 +26,7 @@ pub mod peer_check;
 pub mod protocol;
 mod relay;
 mod server;
+pub mod store;
 pub mod stream;
 mod tasks;
 mod upstream;
@@ -46,6 +47,10 @@ pub use data_plane::{RemoteClient, UsbDataPlane};
 pub use gateway::{GatewayOptions, UsbIpGateway};
 pub use host::{Capabilities, Export, HostKind, Platform, UsbAttacher, UsbHost, UsbIpDriver};
 pub use server::{ServerDeps, UsbServer};
+pub use store::{
+    AttachedDevices, Connection, Handler, Observed, Role, SharedDevices, Store, StoreError,
+    Subscription, UsbSettings,
+};
 pub use stream::{BoxFuture, CloseReason, DeviceStream, OpenError, StreamOpener};
 pub use upstream::{UpstreamAddress, UsbIpUpstreamHost};
 pub use views::{

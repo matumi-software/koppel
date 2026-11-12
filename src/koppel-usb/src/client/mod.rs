@@ -19,8 +19,6 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use koppel_config::files::{AttachedDevices, ClientConnection, KoppelSettings};
-use koppel_config::{ConfigFile, ConfigFileError, Subscription};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
@@ -28,8 +26,9 @@ use tokio_util::sync::CancellationToken;
 use self::slots::{AttachKey, Attachment, DriverHold, Outcome, RegisterError};
 use crate::tasks::{Listener, Tasks, listen, lock};
 use crate::{
-    ActivitySink, BoxFuture, BusId, ClientDevices, Clock, DeviceView, Platform, RemoteDevices,
-    StreamOpener, UsbDevice,
+    ActivitySink, AttachedDevices, BoxFuture, BusId, ClientDevices, Clock, Connection, DeviceView,
+    Handler, Observed, Platform, RemoteDevices, Store, StoreError, StreamOpener, Subscription,
+    UsbDevice, UsbSettings,
 };
 
 /// How long stopping waits for the driver to let go of every device. The driver's own command
@@ -62,10 +61,10 @@ impl Default for ClientOptions {
 
 /// What a [`UsbClient`] is made from.
 pub struct Deps {
-    pub settings: ConfigFile<KoppelSettings>,
-    pub connection: ConfigFile<ClientConnection>,
-    /// `attached.json`, opened with [`koppel_config::open::attached`].
-    pub remembered: ConfigFile<AttachedDevices>,
+    pub settings: Arc<dyn Observed<UsbSettings>>,
+    pub connection: Arc<dyn Observed<Connection>>,
+    /// `attached.json`.
+    pub remembered: Arc<dyn Store<AttachedDevices>>,
     /// What attaches on this machine: this kernel, or a USB/IP driver.
     pub platform: Platform,
     /// Makes the link to the server.
@@ -89,7 +88,7 @@ pub enum LinkStatus {
 pub trait Links: Send + Sync {
     /// A link to the server in `connection`, not started yet. It reports through `events` once
     /// started, and never before.
-    fn connect(&self, connection: &ClientConnection, events: LinkEvents) -> Arc<dyn Link>;
+    fn connect(&self, connection: &Connection, events: LinkEvents) -> Arc<dyn Link>;
 }
 
 /// The link to one saved server: it keeps the server's device list coming and opens a stream for
@@ -145,7 +144,7 @@ pub enum BeginAttachError {
     InvalidBusId,
     /// `attached.json` could not be written.
     #[error("{0}")]
-    Save(ConfigFileError),
+    Save(StoreError),
 }
 
 /// A server's answer to an import is for another device than the one asked for.
@@ -343,9 +342,9 @@ pub(crate) enum Command {
 
 /// What the actor, its workers and the public methods share.
 pub(crate) struct Shared {
-    settings: ConfigFile<KoppelSettings>,
-    connection: ConfigFile<ClientConnection>,
-    remembered: ConfigFile<AttachedDevices>,
+    settings: Arc<dyn Observed<UsbSettings>>,
+    connection: Arc<dyn Observed<Connection>>,
+    remembered: Arc<dyn Store<AttachedDevices>>,
     platform: Platform,
     links: Arc<dyn Links>,
     activity: Arc<dyn ActivitySink>,
@@ -409,11 +408,11 @@ impl Shared {
     }
 
     /// Adds the device to `attached.json`, or takes it out.
-    async fn remember(&self, bus_id: &BusId, attached: bool) -> Result<(), ConfigFileError> {
+    async fn remember(&self, bus_id: &BusId, attached: bool) -> Result<(), StoreError> {
         let fingerprint = self.connection.current().server_fingerprint.clone();
         let vid_pid = self.offered(bus_id).map(|d| d.vid_pid);
         self.remembered
-            .update(|current| {
+            .update(Box::new(|current| {
                 let mut next = if current.server_fingerprint != fingerprint {
                     AttachedDevices {
                         server_fingerprint: fingerprint.clone(),
@@ -439,9 +438,8 @@ impl Shared {
                     }
                 }
                 next
-            })
+            }))
             .await
-            .map(|_| ())
     }
 
     /// The attach deadline around `work`; running out of time is a readable failure.
@@ -560,7 +558,7 @@ impl UsbClient {
 
     /// Loads `attached.json`, follows the settings and the saved connection, makes the link, and
     /// tries the remembered devices again every few seconds while it is up.
-    pub async fn start(&self) -> Result<(), ConfigFileError> {
+    pub async fn start(&self) -> Result<(), StoreError> {
         let shared = &self.shared;
         shared.remembered.start().await?;
         let Some(actor) = lock(&self.run).take() else {
@@ -568,21 +566,19 @@ impl UsbClient {
         };
         *lock(&self.actor) = Some(tokio::spawn(actor.run()));
 
-        let changed = |shared: &Arc<Shared>| {
+        fn changed<T>(shared: &Arc<Shared>) -> Handler<T> {
             let weak = Arc::downgrade(shared);
-            move || {
+            Box::new(move |_| {
                 let weak = weak.clone();
-                async move {
+                Box::pin(async move {
                     if let Some(shared) = weak.upgrade() {
                         shared.on_changed().await;
                     }
-                }
-            }
-        };
-        let on_settings = changed(shared);
-        let on_connection = changed(shared);
-        let settings = shared.settings.subscribe(move |_| on_settings());
-        let connection = shared.connection.subscribe(move |_| on_connection());
+                })
+            })
+        }
+        let settings = shared.settings.subscribe(changed(shared));
+        let connection = shared.connection.subscribe(changed(shared));
         *lock(&self.settings_subscription) = Some(settings);
         *lock(&self.connection_subscription) = Some(connection);
         Ok(())
@@ -595,12 +591,8 @@ impl UsbClient {
     /// their devices at the same time, and stopping waits for them up to a limit.
     pub async fn stop(&self) {
         let shared = &self.shared;
-        if let Some(subscription) = lock(&self.settings_subscription).take() {
-            shared.settings.unsubscribe(subscription);
-        }
-        if let Some(subscription) = lock(&self.connection_subscription).take() {
-            shared.connection.unsubscribe(subscription);
-        }
+        drop(lock(&self.settings_subscription).take());
+        drop(lock(&self.connection_subscription).take());
         shared.remembered.stop();
 
         let (reply, done) = oneshot::channel();

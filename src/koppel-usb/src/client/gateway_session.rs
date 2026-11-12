@@ -3,7 +3,6 @@
 
 use std::net::{IpAddr, SocketAddr};
 
-use koppel_config::files::Role;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::oneshot;
@@ -144,7 +143,7 @@ impl Shared {
     }
 
     fn ensure_client(&self) -> Result<(), Failure> {
-        if self.settings.current().role == Role::Server {
+        if !self.settings.current().role.links() {
             Err(AttachError::ServerRole.into())
         } else {
             Ok(())

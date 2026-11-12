@@ -13,8 +13,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use koppel_config::files::{KoppelSettings, Role, SharedDevices};
-use koppel_config::{ConfigFile, ConfigFileError, Subscription};
 use time::OffsetDateTime;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -24,8 +22,8 @@ use tokio_util::sync::CancellationToken;
 use crate::tasks::{Backoff, Listener, Tasks, listen, lock};
 use crate::{
     ActivityOutcome, ActivityReason, ActivitySink, BusId, Clock, DeviceState, DeviceView,
-    EntityRef, ExportStatus, ServerDevices, UsbDevice, UsbError, UsbHost, interface_class_name,
-    speed_label,
+    EntityRef, ExportStatus, Observed, Role, ServerDevices, SharedDevices, Store, StoreError,
+    Subscription, UsbDevice, UsbError, UsbHost, UsbSettings, interface_class_name, speed_label,
 };
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -50,10 +48,6 @@ fn saved_contains(shared: &SharedDevices, bus_id: &BusId) -> bool {
     shared.bus_ids.iter().any(|b| b == bus_id.as_str())
 }
 
-fn serves(role: Role) -> bool {
-    matches!(role, Role::Server | Role::Both)
-}
-
 /// Why a share choice was not taken.
 #[derive(Debug, thiserror::Error)]
 pub enum SetSharedError {
@@ -66,7 +60,7 @@ pub enum SetSharedError {
     /// The kernel took the change, but `devices.json` could not be written, so the change was
     /// undone.
     #[error("{0}")]
-    Save(#[source] ConfigFileError),
+    Save(#[source] StoreError),
     /// The server stopped before it could answer.
     #[error("The USB server is not running.")]
     Stopped,
@@ -98,8 +92,8 @@ enum Command {
 
 struct Shared {
     host: Arc<dyn UsbHost>,
-    shared: ConfigFile<SharedDevices>,
-    settings: ConfigFile<KoppelSettings>,
+    shared: Arc<dyn Store<SharedDevices>>,
+    settings: Arc<dyn Observed<UsbSettings>>,
     activity: Arc<dyn ActivitySink>,
     clock: Arc<dyn Clock>,
     commands: mpsc::UnboundedSender<Command>,
@@ -123,9 +117,9 @@ impl Shared {
 /// What a [`UsbServer`] is made from.
 pub struct ServerDeps {
     pub host: Arc<dyn UsbHost>,
-    /// `devices.json`, opened with [`koppel_config::open::devices`].
-    pub shared: ConfigFile<SharedDevices>,
-    pub settings: ConfigFile<KoppelSettings>,
+    /// `devices.json`.
+    pub shared: Arc<dyn Store<SharedDevices>>,
+    pub settings: Arc<dyn Observed<UsbSettings>>,
     pub activity: Arc<dyn ActivitySink>,
     pub clock: Arc<dyn Clock>,
 }
@@ -228,7 +222,7 @@ impl UsbServer {
     /// Loads `devices.json`, shares what was saved and unbinds strays, takes the first look,
     /// then starts the poll. A host error here is logged and does not stop the start: the poll
     /// applies the saved shares on its next pass.
-    pub async fn start(&self) -> Result<(), ConfigFileError> {
+    pub async fn start(&self) -> Result<(), StoreError> {
         let shared = &self.shared;
         shared.shared.start().await?;
         let Some(actor) = lock(&self.run).take() else {
@@ -241,9 +235,9 @@ impl UsbServer {
         let _ = ready.await;
 
         let weak = Arc::downgrade(shared);
-        let subscription = shared.settings.subscribe(move |next| {
+        let subscription = shared.settings.subscribe(Box::new(move |next| {
             let weak = weak.clone();
-            async move {
+            Box::pin(async move {
                 if let Some(shared) = weak.upgrade() {
                     let (reply, applied) = oneshot::channel();
                     shared.send(Command::SettingsChanged {
@@ -252,8 +246,8 @@ impl UsbServer {
                     });
                     let _ = applied.await;
                 }
-            }
-        });
+            })
+        }));
         *lock(&self.subscription) = Some(subscription);
         Ok(())
     }
@@ -261,9 +255,7 @@ impl UsbServer {
     /// Stops the poll and the listeners, and waits a moment for background work.
     pub async fn stop(&self) {
         let shared = &self.shared;
-        if let Some(subscription) = lock(&self.subscription).take() {
-            shared.settings.unsubscribe(subscription);
-        }
+        drop(lock(&self.subscription).take());
         shared.shared.stop();
         let (reply, stopped) = oneshot::channel();
         shared.send(Command::Stop { reply });
@@ -397,7 +389,7 @@ impl Actor {
         }
         let pass = async {
             let mut devices = self.shared.host.list_devices().await?;
-            if serves(self.role) && self.apply_intent(&devices, false).await {
+            if self.role.serves() && self.apply_intent(&devices, false).await {
                 devices = self.shared.host.list_devices().await?;
             }
             self.refresh(&devices, false).await
@@ -429,9 +421,9 @@ impl Actor {
     /// match. The settings update does not wait for giving every device back, which can take a
     /// while.
     async fn on_settings(&mut self, role: Role, reply: oneshot::Sender<()>) {
-        let was = serves(self.role);
+        let was = self.role.serves();
         self.role = role;
-        if was == serves(role) {
+        if was == role.serves() {
             let _ = reply.send(());
             return;
         }
@@ -522,10 +514,10 @@ impl Actor {
 
     /// Makes the saved shares the ones Koppel means to have, when this machine is a server that
     /// re-shares on start.
-    fn activate_saved(&mut self, settings: &KoppelSettings) {
+    fn activate_saved(&mut self, settings: &UsbSettings) {
         let saved = self.shared.shared.current();
         self.active.clear();
-        if !serves(settings.role) || !settings.share_on_startup {
+        if !settings.role.serves() || !settings.share_on_startup {
             return;
         }
         for bus_id in &saved.bus_ids {
@@ -628,12 +620,12 @@ impl Actor {
         bus_id: &BusId,
         share: bool,
         device: Option<&UsbDevice>,
-    ) -> Result<(), ConfigFileError> {
+    ) -> Result<(), StoreError> {
         let vid_pid = device.map(UsbDevice::vid_pid);
         let saved = self
             .shared
             .shared
-            .update(|current| {
+            .update(Box::new(|current| {
                 let mut next = current.clone();
                 if share {
                     if !next.bus_ids.iter().any(|b| b == bus_id.as_str()) {
@@ -652,7 +644,7 @@ impl Actor {
                     }
                 }
                 next
-            })
+            }))
             .await;
         if let Err(e) = saved {
             let can_undo = if share {

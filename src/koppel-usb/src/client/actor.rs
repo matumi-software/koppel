@@ -5,7 +5,6 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-use koppel_config::files::{ClientConnection, Role};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, MissedTickBehavior};
 use tokio_util::sync::CancellationToken;
@@ -17,15 +16,15 @@ use super::url::{authority, continues, url_host};
 use super::{Command, Deps, Epoch, Link, LinkEvent, LinkEvents, LinkStatus, Shared, View, attach};
 use crate::tasks::Tasks;
 use crate::{
-    ActivityOutcome, ActivityReason, BusId, ClientDeviceView, ClientDevices, DeviceState,
-    EntityRef, LinkState, RemoteDevices,
+    ActivityOutcome, ActivityReason, AttachedDevices, BusId, ClientDeviceView, ClientDevices,
+    Connection, DeviceState, EntityRef, LinkState, RemoteDevices,
 };
 
 /// What a change of settings or connection amounted to.
 pub(crate) enum Changed {
     Nothing,
     /// The same server, with `was` as the connection before.
-    SameServer(Box<ClientConnection>),
+    SameServer(Box<Connection>),
     /// A new server, new credentials or a role that is no longer client: everything was released.
     Released,
 }
@@ -45,7 +44,7 @@ struct CurrentLink {
     id: u64,
     link: Arc<dyn Link>,
     /// The connection it was made for, which moves on as the link learns.
-    connection: ClientConnection,
+    connection: Connection,
 }
 
 pub(crate) struct Actor {
@@ -64,7 +63,7 @@ pub(crate) struct Actor {
     listed: bool,
     link_state: LinkState,
     link_message: Option<String>,
-    applied: (bool, ClientConnection),
+    applied: (bool, Connection),
     gateway_port: Option<u16>,
     gateway_fault: Option<String>,
     /// Cancelled once every release a change started is done. A new attach waits for it.
@@ -141,7 +140,7 @@ pub(crate) fn build(deps: Deps) -> (Arc<Shared>, Actor) {
         listed: false,
         link_state: LinkState::Unconfigured,
         link_message: None,
-        applied: (false, ClientConnection::default()),
+        applied: (false, Connection::default()),
         gateway_port: None,
         gateway_fault: None,
         release_done: released,
@@ -171,7 +170,7 @@ impl Shared {
     /// The server switched to its next certificate: the devices remembered for it stay
     /// remembered under the new fingerprint, so they attach again after a restart. Nothing to do
     /// when only the next one changed.
-    async fn carry_over_remembered(&self, before: &ClientConnection) {
+    async fn carry_over_remembered(&self, before: &Connection) {
         let after = self.connection.current().server_fingerprint.clone();
         let Some(after) = after else {
             return;
@@ -182,13 +181,13 @@ impl Shared {
         let old = before.server_fingerprint.clone();
         let carried = self
             .remembered
-            .update(|r| {
+            .update(Box::new(|r| {
                 let mut next = r.clone();
                 if r.server_fingerprint == old {
                     next.server_fingerprint = Some(after.clone());
                 }
                 next
-            })
+            }))
             .await;
         if let Err(e) = carried {
             tracing::error!("Could not apply a change of connection or role: {e}");
@@ -224,9 +223,9 @@ impl Actor {
         }
     }
 
-    fn settled(&self) -> (bool, ClientConnection) {
+    fn settled(&self) -> (bool, Connection) {
         (
-            self.shared.settings.current().role != Role::Server,
+            self.shared.settings.current().role.links(),
             (*self.shared.connection.current()).clone(),
         )
     }
@@ -428,7 +427,7 @@ impl Actor {
     /// the link's own handlers, and one of them may be the save that led here.
     fn apply_link(&mut self) {
         let connection = (*self.shared.connection.current()).clone();
-        let wanted = self.shared.settings.current().role != Role::Server
+        let wanted = self.shared.settings.current().role.links()
             && connection.is_complete()
             && !self.stopping;
         if wanted
@@ -805,10 +804,7 @@ impl Actor {
     }
 }
 
-fn attached_expects(
-    remembered: &koppel_config::files::AttachedDevices,
-    device: &crate::DeviceView,
-) -> bool {
+fn attached_expects(remembered: &AttachedDevices, device: &crate::DeviceView) -> bool {
     remembered
         .bus_ids
         .iter()

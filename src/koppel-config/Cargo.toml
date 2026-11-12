@@ -9,6 +9,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+koppel-secrets.workspace = true
 serde.workspace = true
 ts-rs.workspace = true
 serde_json.workspace = true

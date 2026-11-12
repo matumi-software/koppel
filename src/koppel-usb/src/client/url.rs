@@ -1,7 +1,8 @@
 //! Comparing the addresses and certificates the saved connection names.
 
 use http::Uri;
-use koppel_config::files::ClientConnection;
+
+use crate::Connection;
 
 /// The URL as an `http::Uri`, with `https` assumed when there is no scheme.
 fn parse(url: &str) -> Option<Uri> {
@@ -58,7 +59,7 @@ fn same_fingerprint(a: Option<&str>, b: Option<&str>) -> bool {
 
 /// The same server and credentials as `previous`: the same client ID and secret, and a
 /// certificate that is either the one pinned before or the one the server said it would switch to.
-pub(super) fn continues(now: &ClientConnection, previous: &ClientConnection) -> bool {
+pub(super) fn continues(now: &Connection, previous: &Connection) -> bool {
     now.client_id == previous.client_id
         && now.client_secret == previous.client_secret
         && now.server_fingerprint.is_some()
@@ -77,19 +78,19 @@ mod tests {
 
     #[test]
     fn the_same_server_and_credentials_continue_across_a_certificate_switch() {
-        let before = ClientConnection {
+        let before = Connection {
             server_url: Some("https://server:5240".into()),
             server_fingerprint: Some("AA:BB".into()),
             client_id: Some("c1".into()),
             client_secret: Some("s".into()),
             next_server_fingerprint: Some("CC:DD".into()),
         };
-        let switched = ClientConnection {
+        let switched = Connection {
             server_fingerprint: Some("ccdd".into()),
             next_server_fingerprint: None,
             ..before.clone()
         };
-        let other = ClientConnection {
+        let other = Connection {
             client_secret: Some("t".into()),
             ..before.clone()
         };

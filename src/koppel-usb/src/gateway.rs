@@ -5,16 +5,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use koppel_config::files::{KoppelSettings, Role};
-use koppel_config::{ConfigFile, Subscription};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::UsbClient;
 use crate::peer_check::{AnyPeer, GatewayPeerCheck};
 use crate::tasks::{Backoff, Tasks, lock};
+use crate::{Observed, Subscription, UsbClient, UsbSettings};
 
 const STOP_WAIT: Duration = Duration::from_secs(5);
 const MIN_BACKOFF: Duration = Duration::from_secs(5);
@@ -76,7 +74,7 @@ pub struct UsbIpGateway {
 
 struct Inner {
     client: UsbClient,
-    settings: ConfigFile<KoppelSettings>,
+    settings: Arc<dyn Observed<UsbSettings>>,
     options: GatewayOptions,
     peer_check: Mutex<Option<Arc<dyn GatewayPeerCheck>>>,
     stopping: CancellationToken,
@@ -93,7 +91,7 @@ impl UsbIpGateway {
     /// the kernel check on native Windows with a loopback address, and serves everyone elsewhere.
     pub fn new(
         client: UsbClient,
-        settings: ConfigFile<KoppelSettings>,
+        settings: Arc<dyn Observed<UsbSettings>>,
         options: GatewayOptions,
         peer_check: Option<Arc<dyn GatewayPeerCheck>>,
     ) -> Self {
@@ -147,9 +145,9 @@ impl UsbIpGateway {
         };
 
         let weak = Arc::downgrade(inner);
-        let subscription = inner.settings.subscribe(move |_| {
+        let subscription = inner.settings.subscribe(Box::new(move |_| {
             let weak = weak.clone();
-            async move {
+            Box::pin(async move {
                 // Wake the loop when the role starts or stops wanting the gateway.
                 if let Some(inner) = weak.upgrade()
                     && inner.wanted() != inner.running.load(Ordering::SeqCst)
@@ -157,8 +155,8 @@ impl UsbIpGateway {
                     let next = inner.stopping.child_token();
                     std::mem::replace(&mut *lock(&inner.role_changed), next).cancel();
                 }
-            }
-        });
+            })
+        }));
         *lock(&inner.subscription) = Some(subscription);
 
         let slots = Arc::new(Semaphore::new(inner.options.max_sessions.max(1)));
@@ -170,9 +168,7 @@ impl UsbIpGateway {
     /// Stops listening and ends the sessions.
     pub async fn stop(&self) {
         let inner = &self.inner;
-        if let Some(subscription) = lock(&inner.subscription).take() {
-            inner.settings.unsubscribe(subscription);
-        }
+        drop(lock(&inner.subscription).take());
         inner.stopping.cancel();
         let run = lock(&inner.run).take();
         if let Some(mut run) = run {
@@ -210,7 +206,7 @@ fn choose_peer_check(address: IpAddr) -> Arc<dyn GatewayPeerCheck> {
 
 impl Inner {
     fn wanted(&self) -> bool {
-        self.settings.current().role != Role::Server
+        self.settings.current().role.links()
     }
 
     async fn run(

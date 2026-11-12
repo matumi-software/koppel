@@ -28,6 +28,7 @@ use crate::roles::skakel::announcer::{Announcement, Announcer};
 use crate::roles::skakel::{
     APP_ID, SecretsError, SecretsStore, ServerParts, ServerStartError, SkakelLinks,
 };
+use crate::roles::usb_store;
 use crate::roles::{SkakelClientRole, SkakelServerRole, UsbActivity, UsbClientRole, UsbServerRole};
 use crate::routes::Routers;
 use crate::tasks::{STOP_WAIT, Tasks};
@@ -110,6 +111,9 @@ impl UsbOptions {
 pub enum StartError {
     #[error(transparent)]
     File(#[from] ConfigFileError),
+    /// `devices.json` or `attached.json`, as koppel-usb loads them.
+    #[error(transparent)]
+    Usb(#[from] koppel_usb::StoreError),
     /// `secrets.json` held nothing the server could start from.
     #[error(transparent)]
     Secrets(#[from] SecretsError),
@@ -231,13 +235,16 @@ impl App {
         let own_acceptor = tls::acceptor(certificate.clone())?;
         let usb_server = koppel_usb::UsbServer::new(koppel_usb::ServerDeps {
             host: usb.platform.host.clone(),
-            shared: devices.clone(),
-            settings: settings.clone(),
+            shared: usb_store::shared(&devices),
+            settings: usb_store::settings(&settings),
             activity: usb_activity.clone(),
             clock: clock.clone(),
         });
-        let data_plane =
-            UsbDataPlane::new(usb_server.clone(), usb_activity.clone(), settings.clone());
+        let data_plane = UsbDataPlane::new(
+            usb_server.clone(),
+            usb_activity.clone(),
+            usb_store::settings(&settings),
+        );
         let (remote, remote_view) = watch::channel(Arc::new(usb_server.current().for_remote()));
         usb_server.on_changed(move |devices| {
             remote.send_replace(Arc::new(devices.for_remote()));
@@ -301,16 +308,21 @@ impl App {
             tasks.clone(),
         );
         let usb_client = koppel_usb::UsbClient::new(koppel_usb::Deps {
-            settings: settings.clone(),
-            connection: connection.clone(),
-            remembered: attached.clone(),
+            settings: usb_store::settings(&settings),
+            connection: usb_store::connection(&connection),
+            remembered: usb_store::attached(&attached),
             platform: usb.platform.clone(),
             links,
             activity: usb_activity.clone(),
             clock,
             options: usb.client,
         });
-        let gateway = UsbIpGateway::new(usb_client.clone(), settings.clone(), usb.gateway, None);
+        let gateway = UsbIpGateway::new(
+            usb_client.clone(),
+            usb_store::settings(&settings),
+            usb.gateway,
+            None,
+        );
         let client = SkakelClientRole::new(
             connection.clone(),
             push.clone(),

@@ -1072,6 +1072,7 @@ version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "indexmap",
+ "koppel-secrets",
  "koppel-web",
  "libc",
  "proptest",
@@ -1086,6 +1087,15 @@ dependencies = [
  "tracing",
  "ts-rs",
  "windows",
+ "zeroize",
+]
+
+[[package]]
+name = "koppel-secrets"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "zeroize",
 ]
 
@@ -1118,6 +1128,7 @@ dependencies = [
  "http",
  "indexmap",
  "koppel-config",
+ "koppel-secrets",
  "koppel-usb",
  "libc",
  "proptest",

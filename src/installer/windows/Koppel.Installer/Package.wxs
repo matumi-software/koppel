@@ -1,7 +1,8 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
      xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
-  <Package Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="1CFA893C-6A76-421E-B40E-86B0F6A16154" Scope="perMachine">
+  <Package Name="Koppel" Manufacturer="Matumi (Pty) Ltd" Version="$(var.Version)" UpgradeCode="1CFA893C-6A76-421E-B40E-86B0F6A16154" Scope="perMachine">
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/matumi-software/koppel" />
     <!-- Same-version upgrades keep a rebuilt dev installer from installing next to the last one
          (ICE61 warns about that and is suppressed in the wixproj). -->
     <MajorUpgrade DowngradeErrorMessage="A newer version of Koppel is already installed." AllowSameVersionUpgrades="yes" />
@@ -14,7 +15,7 @@
     <StandardDirectory Id="ProgramMenuFolder" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="CompanyFolder" Name="Matumi">
+      <Directory Id="CompanyFolder" Name="Matumi (Pty) Ltd">
         <Directory Id="INSTALLFOLDER" Name="Koppel" />
       </Directory>
     </StandardDirectory>

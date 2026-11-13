@@ -31,7 +31,7 @@ default-members = [
 version = "0.2.1"
 edition = "2024"
 rust-version = "1.99"
-authors = ["Matumi Software"]
+authors = ["Matumi (Pty) Ltd"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/matumi-software/koppel"
 

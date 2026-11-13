@@ -29,6 +29,8 @@ fn main() {
             .set_icon(icon)
             .set("FileDescription", "Koppel")
             .set("ProductName", "Koppel")
+            .set("CompanyName", "Matumi (Pty) Ltd")
+            .set("LegalCopyright", "Copyright (C) 2026 Matumi (Pty) Ltd")
             .append_rc_content(&format!(
                 "1 MESSAGETABLE \"{}\"",
                 table.display().to_string().replace('\\', "/")

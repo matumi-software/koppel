@@ -12,6 +12,8 @@ fn main() {
             .set_icon(icon)
             .set("FileDescription", "Koppel")
             .set("ProductName", "Koppel")
+            .set("CompanyName", "Matumi (Pty) Ltd")
+            .set("LegalCopyright", "Copyright (C) 2026 Matumi (Pty) Ltd")
             .set_manifest_file("desktop.manifest")
             .compile()
             .expect("the Windows resource compiler embeds the icon and the manifest");

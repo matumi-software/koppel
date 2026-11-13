@@ -41,7 +41,7 @@ use crate::api::ApiError;
 use crate::auth::session::{clear_cookie, from_request};
 use crate::auth::{SignedIn, UiAuth};
 use crate::surface::{RoleScope, is_network_path};
-use crate::sync::Unpoisoned;
+use koppel_app::sync::Unpoisoned;
 
 /// The header every change to the UI's API carries.
 pub(crate) const UI_HEADER: &str = "x-koppel-ui";

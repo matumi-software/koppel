@@ -5,7 +5,7 @@
 //! - `{"type":"state","tip":"Koppel: ...","attention":false}`
 //! - `{"type":"notice","title":"...","text":"...","page":"#clients"}`
 
-use koppel_web::tray::{MAX_TEXT, MAX_TIP, MAX_TITLE, TrayNotice, TrayState, cut};
+use koppel_app::tray::{MAX_TEXT, MAX_TIP, MAX_TITLE, TrayNotice, TrayState, cut};
 use serde::Deserialize;
 use serde_json::json;
 

@@ -10,16 +10,17 @@
 //! | `client` | [`SkakelClientRole`]: the connection test, discovery and pairing |
 //! | `links` | The link to the saved server as koppel-usb's `Links`, and what it saves |
 
-pub(crate) mod announcer;
+pub mod announcer;
 mod client;
 mod links;
-pub(crate) mod remote;
+pub mod remote;
 mod server;
 mod store;
 mod streams;
 
 pub use client::SkakelClientRole;
-pub(crate) use links::SkakelLinks;
+pub use links::SkakelLinks;
+pub use remote::is_grpc_path;
 pub use server::SkakelServerRole;
-pub(crate) use server::{APP_ID, ServerParts, ServerStartError};
-pub(crate) use store::{SecretsError, SecretsStore};
+pub use server::{APP_ID, ServerParts, ServerStartError};
+pub use store::{SecretsError, SecretsStore};

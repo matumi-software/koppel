@@ -90,7 +90,7 @@ sections describe the behaviour; this one says where it lives in Rust and what d
 - **Settings and files:** the crate names no config file. The server, the data plane, the client and
   the gateway follow the settings (`Observed<UsbSettings>`) and the saved connection
   (`Observed<Connection>`), and save the shares and the attached devices into a `Store<SharedDevices>`
-  and a `Store<AttachedDevices>`. `koppel-web/src/roles/usb_store.rs` puts those on `settings.json`,
+  and a `Store<AttachedDevices>`. `koppel-app/src/roles/usb_store.rs` puts those on `settings.json`,
   `connection.json`, `devices.json` and `attached.json`, through `koppel-config`'s `ConfigFile`. A change
   is delivered through the file as before, so a settings update still returns once the roles have applied
   it. `KOPPEL_USB_ATTACH_TIMEOUT_SECONDS` and the `Gateway:` settings come in as

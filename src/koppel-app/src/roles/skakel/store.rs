@@ -17,7 +17,7 @@ use serde_json::json;
 use skakel_server::{CertificateRecord, SkakelStore, StoreFuture};
 use time::{Duration, OffsetDateTime};
 
-use crate::tls::CertificateSlot;
+use crate::certificate::CertificateSlot;
 
 /// `secrets.json` held nothing the server could start from. The source stays for the log; the
 /// message names the file.
@@ -38,7 +38,7 @@ pub enum SecretsError {
 const CERTIFICATE_LIFETIME: Duration = Duration::days(3650);
 
 /// `secrets.json`, read and written as skakel-server's state.
-pub(crate) struct SecretsStore {
+pub struct SecretsStore {
     file: ConfigFile<ServerSecrets>,
     slot: Arc<CertificateSlot>,
 }
@@ -48,7 +48,7 @@ impl SecretsStore {
     /// use: a file with nothing in it gets a new certificate. A file from an older Koppel was
     /// rewritten before this by `koppel-upgrade`. A token signing key that file may still hold
     /// is dropped by Skakel's server on its first save, since Skakel 0.3.0 does not sign tokens.
-    pub(crate) async fn open(
+    pub async fn open(
         file: ConfigFile<ServerSecrets>,
         host_name: &str,
     ) -> Result<Arc<Self>, SecretsError> {
@@ -75,7 +75,7 @@ impl SecretsStore {
     }
 
     /// What the web ports present. A save that switches the certificate replaces it.
-    pub(crate) fn slot(&self) -> Arc<CertificateSlot> {
+    pub fn slot(&self) -> Arc<CertificateSlot> {
         self.slot.clone()
     }
 

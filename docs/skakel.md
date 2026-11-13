@@ -26,7 +26,7 @@ Discovery, following a server that moved, and the pairing exchange with its code
 limits are Skakel's; see "Discovery", "Following a server" and "Pairing" in Skakel's
 [`docs/protocol.md`](https://github.com/matumi-software/skakel/blob/main/docs/protocol.md). What Koppel adds:
 
-- **Discovery:** a client browses with skakel-client's `Browser` on its discovery port (`KOPPEL_DISCOVERY_PORT`, the HTTPS port number 5240 unless changed), keeps only servers whose app id is `koppel`, and lists them under Configuration, Servers on your network, leaving out itself. When other addresses answer with the same fingerprint, the row says so: a machine on more than one network does that, and so does one copying another server's fingerprint. A server answers probes only while its role is server or both. Koppel answers them itself (`koppel-web/src/roles/skakel/announcer.rs`), in Skakel's format, so the answers follow the role. `KOPPEL_DISCOVERY_ENABLED=false` turns both sides off. A client probes over IPv4 broadcast and, on each network with a routable IPv6 address, the all-nodes group `ff02::1` (skakel-client 0.3.0 does that itself; the setting is the only switch). A server on IPv6 only, or a dual-stack LAN, is found. Broadcasts and the group stay on the local network, so a server elsewhere is entered by address.
+- **Discovery:** a client browses with skakel-client's `Browser` on its discovery port (`KOPPEL_DISCOVERY_PORT`, the HTTPS port number 5240 unless changed), keeps only servers whose app id is `koppel`, and lists them under Configuration, Servers on your network, leaving out itself. When other addresses answer with the same fingerprint, the row says so: a machine on more than one network does that, and so does one copying another server's fingerprint. A server answers probes only while its role is server or both. Koppel answers them itself (`koppel-app/src/roles/skakel/announcer.rs`), in Skakel's format, so the answers follow the role. `KOPPEL_DISCOVERY_ENABLED=false` turns both sides off. A client probes over IPv4 broadcast and, on each network with a routable IPv6 address, the all-nodes group `ff02::1` (skakel-client 0.3.0 does that itself; the setting is the only switch). A server on IPv6 only, or a dual-stack LAN, is found. Broadcasts and the group stay on the local network, so a server elsewhere is entered by address.
 - **Why not multicast DNS:** it worked, but it needs UDP 5353 as well, and Koppel's aim is one port number between machines.
 - **Following a moved server:** the link follows its server when the saved address stops answering and discovery hears it, with a certificate it trusts, at another address. Koppel saves the new address through `ConnectionStore` like any other write, unless the person saved another connection meanwhile, so the UI hears `ConnectionChanged` and the activity log gets a `serverMoved` entry. The attached devices carry on. With `KOPPEL_DISCOVERY_ENABLED=false`, or a server outside broadcast reach, nothing moves.
 - **Pairing:** instead of copying a client ID and secret, a person allows pairing on the server's Clients page (the pairing window, below), the client shows an eight-digit code, and the person types it on the server, under Waiting to pair, as with Moonlight and Sunshine. The code is made from the server's certificate, both sides' nonces and the client's name, so a man in the middle that shows another name gets a code that does not match. On a match the server registers the client and Skakel hands it its credentials; they go straight into `connection.json`, and `ConnectionChanged` confirms it as for any saved connection. Approve answers 202 and is confirmed by `PairingRequestsChanged` and `ClientsChanged`; a wrong code is a 400 at once. Approvals and refusals go to the activity log.
@@ -61,7 +61,7 @@ moves, and what shows while the other has not:
 
 The server and client roles run on Skakel 0.3.0 (protocol version 3, gRPC), taken as git dependencies
 at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`, which replaces
-`skakel-protocol`, `skakel-discovery` and `skakel-pairing`). The code is in `koppel-web/src/roles/skakel/`.
+`skakel-protocol`, `skakel-discovery` and `skakel-pairing`). The code is in `koppel-app/src/roles/skakel/`.
 
 | Module | What |
 |---|---|
@@ -118,7 +118,7 @@ at the release tag `v0.3.0` (`skakel-server`, `skakel-client` and `skakel-wire`,
   browses with skakel-client's `Browser`
   while the role is client or both, leaves out its own certificate, and lists servers as 0.1.x did.
 - **Remote device list:** Koppel's own gRPC service `koppel.remote.v1.RemoteDevices`
-  (`koppel-web/proto/koppel/remote/v1/devices.proto`), beside Skakel's on the same port and
+  (`koppel-app/proto/koppel/remote/v1/devices.proto`), beside Skakel's on the same port and
   connection. `Watch` sends the remote view (the shared devices, without who holds them) at once and
   again on each change, in place of 0.1.x's hub message `DevicesChanged`. The client calls it again
   each time its link is connected after it was not, and after a list that ended while the link stayed

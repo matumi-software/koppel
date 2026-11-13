@@ -279,10 +279,20 @@ impl NoticeRules {
     }
 }
 
+/// What the tray needs of the sign-in: whether a password is set, whether the setup window is open,
+/// and a signal when either changes. The web server's sign-in provides it.
+pub trait SignInState: Send + Sync {
+    fn has_password(&self) -> bool;
+    fn setup_open(&self) -> bool;
+    /// A signal when the password or the setup window changed.
+    fn changes(&self) -> broadcast::Receiver<()>;
+}
+
 /// The feed one tray launcher reads: the state now, the notices since it last asked, and a wait that
 /// ends when something the state is made from may have changed.
 pub struct TrayFeed {
     app: Arc<App>,
+    auth_state: Arc<dyn SignInState>,
     pushes: broadcast::Receiver<Arc<Pushed>>,
     /// The password or the setup window changed.
     auth: broadcast::Receiver<()>,
@@ -293,7 +303,7 @@ pub struct TrayFeed {
 impl TrayFeed {
     /// Starts listening now. The pairing requests already waiting are not told; a request is told
     /// when it arrives.
-    pub fn new(app: &Arc<App>) -> Self {
+    pub fn new(app: &Arc<App>, auth: Arc<dyn SignInState>) -> Self {
         let mut rules = NoticeRules::default();
         let quiet = KoppelSettings {
             notify_pairing: false,
@@ -302,8 +312,9 @@ impl TrayFeed {
         rules.from_pairing(&app.server.pairing().requests, &quiet);
         Self {
             app: app.clone(),
+            auth: auth.changes(),
+            auth_state: auth,
             pushes: app.push.subscribe(),
-            auth: app.auth.changes(),
             activity: app.activity.watch(),
             rules,
         }
@@ -318,8 +329,8 @@ impl TrayFeed {
         let app = &self.app;
         TrayFacts {
             role: app.settings.current().role,
-            password_set: app.auth.has_password(),
-            setup_open: app.auth.setup_open(),
+            password_set: self.auth_state.has_password(),
+            setup_open: self.auth_state.setup_open(),
             client: app.usb_client.current(),
             server_host: app
                 .connection

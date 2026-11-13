@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
-use koppel_web::tray::TrayFeed;
+use koppel_app::tray::TrayFeed;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use windows::Win32::Foundation::{

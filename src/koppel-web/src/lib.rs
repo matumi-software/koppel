@@ -5,30 +5,23 @@
 //! - [`App`]: everything the UI's server side holds, started from the config files, and
 //!   [`App::routers`], one router for each surface (the UI and the network), each with its guards.
 //! - [`serve`]: the accept loop for one listener, and [`bind`] to make one.
-//! - [`roles`]: the server and client roles on Skakel, and the USB layer behind the UI.
+//! - `koppel-app`: the server and client roles on Skakel, and the USB layer behind the UI.
 //! - [`push`]: the live push, Server-Sent Events at `/api/v1/events`.
-//! - [`tray`]: what the Windows service tells its tray icons.
 
 mod access;
-mod activity;
 mod api;
 mod app;
 mod auth;
 mod guard;
-mod host;
 mod json;
 pub mod push;
 mod ready;
 mod redirect;
-pub mod roles;
 mod routes;
 mod server;
 mod state;
 mod surface;
-mod sync;
-mod tasks;
 pub mod tls;
-pub mod tray;
 mod ui;
 #[cfg(test)]
 mod wire;
@@ -37,13 +30,14 @@ use axum::Router;
 use axum::routing::get;
 
 pub use access::UiReach;
-pub use activity::{ActivityEvent, ActivityLog, ActivityOutcome, ActivityReason, EntityRef};
 pub use app::{App, AppOptions, NetworkOptions, StartError, UsbOptions};
 pub use auth::reset_password;
-pub use host::{Host, machine_name, os_label};
+pub use koppel_app::{
+    ActivityEvent, ActivityLog, ActivityOutcome, ActivityReason, EntityRef, Host, Tasks,
+    machine_name, os_label,
+};
 pub use routes::Routers;
 pub use server::{bind, serve};
-pub use tasks::Tasks;
 pub use tls::CertificateSlot;
 
 /// The routes that need nothing of the app: `/healthz` for health checks, and the UI for everything

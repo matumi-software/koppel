@@ -78,6 +78,7 @@ WORKDIR /build
 # Every member of the workspace, since Cargo reads them all. A new crate goes here too.
 COPY Cargo.toml Cargo.lock ./
 COPY koppel ./koppel
+COPY koppel-app ./koppel-app
 COPY koppel-config ./koppel-config
 COPY koppel-secrets ./koppel-secrets
 COPY koppel-upgrade ./koppel-upgrade

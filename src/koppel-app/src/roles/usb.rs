@@ -21,7 +21,7 @@ pub struct UsbServerRole {
 
 impl UsbServerRole {
     /// Pushes each new device list as `DevicesChanged`.
-    pub(crate) fn new(server: Server, platform: Platform, push: Push) -> Arc<Self> {
+    pub fn new(server: Server, platform: Platform, push: Push) -> Arc<Self> {
         server.on_changed(move |devices: Arc<ServerDevices>| {
             let push = push.clone();
             async move { push.send(Event::DevicesChanged(&devices)) }
@@ -59,7 +59,7 @@ pub struct UsbClientRole {
 
 impl UsbClientRole {
     /// Pushes what the UI shows as `ClientDevicesChanged` each time it may have changed.
-    pub(crate) fn new(client: Client, platform: Platform, push: Push) -> Arc<Self> {
+    pub fn new(client: Client, platform: Platform, push: Push) -> Arc<Self> {
         client.on_changed(move |devices: Arc<ClientDevices>| {
             let push = push.clone();
             async move { push.send(Event::ClientDevicesChanged(&devices)) }
@@ -95,7 +95,7 @@ impl UsbClientRole {
 }
 
 /// koppel-usb's activity into the log.
-pub(crate) struct UsbActivity(pub Arc<ActivityLog>);
+pub struct UsbActivity(pub Arc<ActivityLog>);
 
 impl ActivitySink for UsbActivity {
     fn record(

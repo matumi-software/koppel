@@ -43,7 +43,7 @@ against the program (`koppel/tests/contract/push.rs`); the UI has its own tests 
 
 ## Activity
 
-The server keeps an activity log in memory (`koppel-web/src/activity.rs`):
+The server keeps an activity log in memory (`koppel-app/src/activity.rs`):
 sharing, plugging and unplugging, attaches and releases, client changes, settings changes, certificate
 changes, and failed sign-ins, each with an outcome and, when it failed, the reason. The UI loads it from `GET /api/v1/activity`
 and follows `ActivityRecorded` over the live push, so it is the same after a reload and on every device. A subscriber that fails is logged and does not fail the code that recorded the event. It

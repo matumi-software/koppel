@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 
 use koppel_config::files::UiCredentials;
 use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, Secret, SecretBox};
-use ring::rand::{SecureRandom, SystemRandom};
 use time::OffsetDateTime;
 use tokio::sync::{Semaphore, broadcast};
 
@@ -19,18 +18,25 @@ use session::Sessions;
 pub(crate) use session::SignedIn;
 use throttle::{Reservation, Throttle};
 
-use crate::sync::Unpoisoned;
+use koppel_app::sync::Unpoisoned;
 
 /// Password hashes that may run at once, for the whole server.
 const HASH_SLOTS: usize = 2;
 
-/// `bytes` random bytes.
-pub(crate) fn random_bytes<const N: usize>() -> [u8; N] {
-    let mut bytes = [0u8; N];
-    SystemRandom::new()
-        .fill(&mut bytes)
-        .expect("the system has random bytes");
-    bytes
+pub(crate) use koppel_app::random::random_bytes;
+
+impl koppel_app::tray::SignInState for UiAuth {
+    fn has_password(&self) -> bool {
+        UiAuth::has_password(self)
+    }
+
+    fn setup_open(&self) -> bool {
+        UiAuth::setup_open(self)
+    }
+
+    fn changes(&self) -> broadcast::Receiver<()> {
+        UiAuth::changes(self)
+    }
 }
 
 /// Why a password could not be set.
@@ -289,7 +295,7 @@ impl UiAuth {
                 .format(&time::format_description::well_known::Rfc3339)
                 .unwrap_or_default();
             if self.setup_token_required {
-                let token = crate::activity::hex(&random_bytes::<16>());
+                let token = koppel_app::random::hex(&random_bytes::<16>());
                 *self.setup_token.locked() = Some(token.clone());
                 tracing::warn!(
                     "Koppel is waiting for its first password. Open {} and set it before {} (UTC). The setup token is {token}: the page asks for it, and it works once. After that time, restart Koppel to set it.",
@@ -382,7 +388,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!(
             "koppel-auth-{}-{}",
             std::process::id(),
-            crate::activity::hex(&random_bytes::<8>())
+            koppel_app::random::hex(&random_bytes::<8>())
         ));
         let (config, keys) = (root.join("config"), root.join("keys"));
         std::fs::create_dir_all(&config).unwrap();

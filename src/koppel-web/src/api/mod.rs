@@ -48,7 +48,7 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
     let role = |scope| {
         from_fn_with_state(
             RoleGate {
-                settings: app.settings.clone(),
+                settings: app.core.settings.clone(),
                 scope,
             },
             guard::role_gate,

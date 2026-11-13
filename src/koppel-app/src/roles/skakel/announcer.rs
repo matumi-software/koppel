@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use crate::sync::Unpoisoned;
 
 /// What the answers say, but the fingerprint.
-pub(crate) struct Announcement {
+pub struct Announcement {
     pub name: String,
     pub port: u16,
     pub app: SkakelApp,
@@ -40,7 +40,7 @@ struct Answering {
 }
 
 /// Answers on one UDP port while the role serves.
-pub(crate) struct Announcer {
+pub struct Announcer {
     /// The first socket, which must open, then the other family's, which may not.
     binds: Vec<IpAddr>,
     port: u16,
@@ -55,7 +55,7 @@ impl Announcer {
     /// the unspecified address of one family, or none at all (the web ports' default, `::`, which
     /// serves both), is answered on every address of the families the web ports serve, which
     /// receiving broadcasts and the all-nodes group takes.
-    pub(crate) fn new(
+    pub fn new(
         address: Option<IpAddr>,
         port: u16,
         announcement: Announcement,
@@ -83,7 +83,7 @@ impl Announcer {
 
     /// The addresses answering now, with their ports.
     #[cfg(test)]
-    pub(crate) fn addresses(&self) -> Vec<SocketAddr> {
+    pub fn addresses(&self) -> Vec<SocketAddr> {
         self.running
             .locked()
             .as_ref()
@@ -92,7 +92,7 @@ impl Announcer {
     }
 
     /// Follows the role: answers while it is server or both.
-    pub(crate) async fn follow(self: &Arc<Self>, settings: &ConfigFile<KoppelSettings>) {
+    pub async fn follow(self: &Arc<Self>, settings: &ConfigFile<KoppelSettings>) {
         self.apply(settings.current().role).await;
         let weak = Arc::downgrade(self);
         settings.subscribe(move |value| {
@@ -176,7 +176,7 @@ impl Announcer {
     }
 
     /// Stops answering, and returns once the UDP port is free again.
-    pub(crate) async fn stop(&self) {
+    pub async fn stop(&self) {
         let running = self.running.locked().take();
         if let Some(answering) = running {
             answering.stop.cancel();

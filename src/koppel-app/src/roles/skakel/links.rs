@@ -37,7 +37,7 @@ use crate::tasks::Tasks;
 const RESUBSCRIBE: Duration = Duration::from_secs(2);
 
 /// Makes the links, over `connection.json` and the browser the links follow a moved server with.
-pub(crate) struct SkakelLinks {
+pub struct SkakelLinks {
     connection: ConfigFile<ClientConnection>,
     browser: Option<Browser>,
     activity: Arc<ActivityLog>,
@@ -45,7 +45,7 @@ pub(crate) struct SkakelLinks {
 }
 
 impl SkakelLinks {
-    pub(crate) fn new(
+    pub fn new(
         connection: ConfigFile<ClientConnection>,
         browser: Option<Browser>,
         activity: Arc<ActivityLog>,

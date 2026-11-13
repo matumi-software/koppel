@@ -16,7 +16,7 @@ use std::collections::VecDeque;
 use std::io::BufRead;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use koppel_web::tray::{TrayNotice, TrayState};
+use koppel_app::tray::{TrayNotice, TrayState};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{

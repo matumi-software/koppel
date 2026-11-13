@@ -1,5 +1,4 @@
-//! Gzips the built UI into OUT_DIR, where `ui.rs` embeds it, and generates the code for Koppel's own
-//! gRPC service from `proto/`.
+//! Gzips the built UI into OUT_DIR, where `ui.rs` embeds it.
 //!
 //! Each file lands in `ui/gzip` when gzip makes it at least 5% smaller, otherwise as it is in `ui/raw`
 //! (the fonts, which are compressed already). Only one copy of each file goes into the program.
@@ -7,8 +6,6 @@
 //! Without a built UI, a debug build (cargo build, test, clippy) gets a placeholder page and a warning,
 //! so working on the Rust side needs no Node. A release build stops with an error instead, so a
 //! program without its UI is never shipped by accident.
-//!
-//! The `.proto` files compile with protox, in Rust, so no `protoc` is needed, as in Skakel.
 
 use std::env;
 use std::fs;
@@ -24,13 +21,9 @@ const UI_DIST: &str = "ui/app/dist";
 
 const PLACEHOLDER: &str = "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\"><title>Koppel</title></head>\n<body>\n<p>This Koppel was built without its UI. Build the UI and then Koppel again, from <code>src/</code>:</p>\n<pre>pnpm install\npnpm --filter koppel.ui build\ncargo build</pre>\n</body>\n</html>\n";
 
-/// Koppel's own `.proto` files, under `proto/` in this crate.
-const PROTO_FILES: &[&str] = &["koppel/remote/v1/devices.proto"];
-
 fn main() {
     let manifest =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
-    generate_grpc(&manifest.join("proto"));
     let src = manifest.parent().expect("the crate sits in src/");
     let dist = UI_DIST
         .split('/')
@@ -63,21 +56,6 @@ fn main() {
              run `pnpm install` and `pnpm --filter koppel.ui build` in src/ui/"
         ));
     }
-}
-
-/// The messages, the tonic server for the server role and the tonic client for the client role. No
-/// tonic transport: Skakel brings the connections, pinned to the server's certificate.
-fn generate_grpc(root: &Path) {
-    println!("cargo::rerun-if-changed={}", root.display());
-    for file in PROTO_FILES {
-        println!("cargo::rerun-if-changed={}", root.join(file).display());
-    }
-    let descriptors = protox::compile(PROTO_FILES, [root])
-        .unwrap_or_else(|e| fail(&format!("the .proto files do not compile: {e:?}")));
-    tonic_prost_build::configure()
-        .build_transport(false)
-        .compile_fds(descriptors)
-        .unwrap_or_else(|e| fail(&format!("the gRPC code could not be generated: {e}")));
 }
 
 fn add_folder(root: &Path, folder: &Path, raw: &Path, gzip: &Path) {

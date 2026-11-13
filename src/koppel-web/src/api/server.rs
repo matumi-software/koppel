@@ -10,10 +10,12 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use super::{ApiError, ApiResult, Created, accepted};
-use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::JsonBody;
-use crate::roles::{Approval, ClientView, KeysView, NewClient, PairingOverview, RegisterError};
 use crate::state::ServerApi;
+use koppel_app::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
+use koppel_app::roles::{
+    Approval, ClientView, KeysView, NewClient, PairingOverview, RegisterError,
+};
 
 #[derive(Serialize, TS)]
 #[cfg_attr(test, derive(serde::Deserialize))]

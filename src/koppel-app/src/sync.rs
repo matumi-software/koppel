@@ -5,7 +5,7 @@
 use std::sync::{Mutex, MutexGuard, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// `lock` that takes the guard of a poisoned mutex instead of failing.
-pub(crate) trait Unpoisoned<T> {
+pub trait Unpoisoned<T> {
     fn locked(&self) -> MutexGuard<'_, T>;
 }
 
@@ -16,7 +16,7 @@ impl<T> Unpoisoned<T> for Mutex<T> {
 }
 
 /// The same for a read-write lock, which has two guards.
-pub(crate) trait UnpoisonedRw<T> {
+pub trait UnpoisonedRw<T> {
     fn read_locked(&self) -> RwLockReadGuard<'_, T>;
     fn write_locked(&self) -> RwLockWriteGuard<'_, T>;
 }

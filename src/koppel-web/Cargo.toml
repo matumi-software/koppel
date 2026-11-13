@@ -9,18 +9,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+koppel-app.workspace = true
 koppel-config.workspace = true
-indexmap.workspace = true
 koppel-usb.workspace = true
+indexmap.workspace = true
 skakel-server.workspace = true
-skakel-client.workspace = true
-skakel-wire.workspace = true
-prost.workspace = true
-tonic = { workspace = true, features = ["codegen"] }
-tonic-prost.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tokio-util.workspace = true
-bytes.workspace = true
 axum.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
@@ -45,15 +40,12 @@ socket2.workspace = true
 if-addrs.workspace = true
 thiserror.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-windows.workspace = true
-
 [build-dependencies]
 flate2.workspace = true
-protox.workspace = true
-tonic-prost-build.workspace = true
 
 [dev-dependencies]
+# The role tests make a pairing commitment as a client does.
+skakel-wire.workspace = true
 # Paused time (`start_paused`), for the session and shutdown tests.
 tokio = { workspace = true, features = ["test-util"] }
 hyper = { workspace = true, features = ["client", "http1", "http2"] }
@@ -61,5 +53,7 @@ hyper = { workspace = true, features = ["client", "http1", "http2"] }
 tower.workspace = true
 # The role tests drive two Koppels over HTTPS as the UI does.
 reqwest.workspace = true
+# The wire types read back, for the API tests.
+koppel-app = { workspace = true, features = ["test-util"] }
 # The role tests put a fake kernel behind koppel-usb's host and attacher traits.
 koppel-usb = { workspace = true, features = ["test-util"] }

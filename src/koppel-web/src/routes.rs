@@ -37,10 +37,10 @@ use tower_service::Service;
 
 use crate::app::App;
 use crate::guard::{self, RoleGate};
-use crate::roles::SkakelServerRole;
 use crate::state::ReadyApi;
 use crate::surface::{RoleScope, is_grpc_path, is_network_path, starts_with_segments};
 use crate::{api, ui};
+use koppel_app::roles::SkakelServerRole;
 
 /// How long a UI handler may take to answer before the caller gets 408.
 const UI_TIMEOUT: Duration = Duration::from_secs(30);
@@ -135,7 +135,7 @@ async fn files(request: Request) -> Response {
 
 /// The network surface's router. See the module docs.
 pub(crate) fn network(app: &Arc<App>) -> Router {
-    let skakel = app.skakel();
+    let skakel = app.core.skakel();
     // Skakel's paths are not routes: a route with a parameter would leave it on the request, where
     // Skakel's own router would count it among the parameters of its routes.
     let router = Router::new()
@@ -144,7 +144,7 @@ pub(crate) fn network(app: &Arc<App>) -> Router {
         .with_state(skakel)
         .layer(from_fn_with_state(
             RoleGate {
-                settings: app.settings.clone(),
+                settings: app.core.settings.clone(),
                 scope: RoleScope::Server,
             },
             guard::role_gate,

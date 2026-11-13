@@ -20,7 +20,7 @@ use cookie::{Cookie, SameSite};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::sync::Unpoisoned;
+use koppel_app::sync::Unpoisoned;
 
 /// The cookie's name. The `__Host-` prefix makes a browser take it only from a secure origin, with
 /// `Path=/` and no `Domain`, so a sibling host cannot set it. It is not the name 0.1.x used

@@ -29,20 +29,19 @@ use proto::{DeviceList, InterfaceList, RemoteDevice, WatchDevicesRequest};
 
 /// The service's name as a gRPC path starts with it, `/koppel.remote.v1.RemoteDevices/Watch`: how the
 /// web ports tell a call to it from a request for the UI (see `surface.rs`).
-pub(crate) const SERVICE_NAME: &str =
-    <RemoteDevicesServer<Service> as tonic::server::NamedService>::NAME;
+pub const SERVICE_NAME: &str = <RemoteDevicesServer<Service> as tonic::server::NamedService>::NAME;
 
 /// The remote view as it changes, shared by every call and request.
-pub(crate) type Shared = watch::Receiver<Arc<RemoteDevices>>;
+pub type Shared = watch::Receiver<Arc<RemoteDevices>>;
 
 /// The service Skakel's server runs for its clients.
 #[derive(Clone)]
-pub(crate) struct Service {
+pub struct Service {
     devices: Shared,
 }
 
 impl Service {
-    pub(crate) fn server(devices: Shared) -> RemoteDevicesServer<Self> {
+    pub fn server(devices: Shared) -> RemoteDevicesServer<Self> {
         RemoteDevicesServer::new(Self { devices })
     }
 }
@@ -72,7 +71,7 @@ impl RemoteDevicesService for Service {
 
 /// `GET /api/remote/devices`, for other Koppel machines with a token from Skakel's token endpoint,
 /// answered as 0.1.x answered it: 401 with `WWW-Authenticate: Bearer` without a current token.
-pub(crate) fn routes(devices: Shared) -> Router {
+pub fn routes(devices: Shared) -> Router {
     Router::new().route(
         "/api/remote/devices",
         get(move |caller: Result<ClientPrincipal, Response>| {
@@ -93,7 +92,7 @@ pub(crate) fn routes(devices: Shared) -> Router {
 }
 
 /// The remote view as the service sends it.
-pub(crate) fn to_proto(devices: &RemoteDevices) -> DeviceList {
+pub fn to_proto(devices: &RemoteDevices) -> DeviceList {
     DeviceList {
         devices: devices
             .devices
@@ -114,7 +113,7 @@ pub(crate) fn to_proto(devices: &RemoteDevices) -> DeviceList {
 }
 
 /// A list the service sent, as the client's USB layer takes it.
-pub(crate) fn from_proto(list: DeviceList) -> RemoteDevices {
+pub fn from_proto(list: DeviceList) -> RemoteDevices {
     RemoteDevices {
         // A row whose bus ID is not one is left out.
         devices: list
@@ -133,6 +132,18 @@ pub(crate) fn from_proto(list: DeviceList) -> RemoteDevices {
             })
             .collect(),
     }
+}
+
+/// True for the path of a call to a gRPC service this server runs: `/<package>.<Service>/<Method>`,
+/// with a package under `skakel` (Skakel's own services) or Koppel's `koppel.remote.v1.RemoteDevices`.
+/// A request that only says it is gRPC, by a content type, is not one. No UI path has a dot in its
+/// first segment, so a UI path is never taken for one.
+pub fn is_grpc_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix('/') else {
+        return false;
+    };
+    let (service, method) = rest.split_once('/').unwrap_or((rest, ""));
+    !method.is_empty() && (service.starts_with("skakel.") || service == SERVICE_NAME)
 }
 
 #[cfg(test)]

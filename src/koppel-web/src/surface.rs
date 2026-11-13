@@ -9,7 +9,7 @@
 
 use koppel_config::files::Role;
 
-use crate::roles::skakel::remote;
+pub(crate) use koppel_app::roles::skakel::is_grpc_path;
 
 /// Which role a surface or a group of routes belongs to. A machine that is both serves both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,18 +33,6 @@ pub(crate) fn is_network_path(path: &str) -> bool {
     starts_with_segments(path, "/skakel")
         || starts_with_segments(path, "/api/remote")
         || is_grpc_path(path)
-}
-
-/// True for the path of a call to a gRPC service this server runs: `/<package>.<Service>/<Method>`,
-/// with a package under `skakel` (Skakel's own services) or Koppel's `koppel.remote.v1.RemoteDevices`.
-/// A request that only says it is gRPC, by a content type, is not one. No UI path has a dot in its
-/// first segment, so a UI path is never taken for one.
-pub(crate) fn is_grpc_path(path: &str) -> bool {
-    let Some(rest) = path.strip_prefix('/') else {
-        return false;
-    };
-    let (service, method) = rest.split_once('/').unwrap_or((rest, ""));
-    !method.is_empty() && (service.starts_with("skakel.") || service == remote::SERVICE_NAME)
 }
 
 /// `prefix` is the whole path or is followed by `/`. Case sensitive: a router that is case

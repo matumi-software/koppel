@@ -33,6 +33,7 @@ use tokio_rustls::TlsAcceptor;
 use tower_service::Service;
 
 use super::remote;
+use super::remote::is_grpc_path;
 use super::store::SecretsStore;
 use super::streams::{USB_STREAM, usb_handler};
 use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
@@ -41,12 +42,11 @@ use crate::roles::{
     Approval, ClientView, KeysView, NewClient, PairingOverview, PairingRequestView,
     PairingWindowView, RegisterError, RequestState, RoleError, Switched,
 };
-use crate::surface::is_grpc_path;
 use crate::sync::Unpoisoned;
 use crate::tasks::Tasks;
 
 /// Skakel's app id for Koppel.
-pub(crate) const APP_ID: &str = "koppel";
+pub const APP_ID: &str = "koppel";
 
 /// Skakel's server did not start.
 #[derive(Debug, thiserror::Error)]
@@ -54,7 +54,7 @@ pub(crate) const APP_ID: &str = "koppel";
 pub struct ServerStartError(#[source] skakel_server::ServerError);
 
 /// What the server is made with.
-pub(crate) struct ServerParts {
+pub struct ServerParts {
     pub name: String,
     pub version: String,
     pub store: Arc<SecretsStore>,
@@ -106,7 +106,7 @@ pub struct SkakelServerRole {
 
 impl SkakelServerRole {
     /// Starts Skakel's server over `secrets.json`, mounted on the web ports.
-    pub(crate) async fn start(parts: ServerParts) -> Result<Arc<Self>, ServerStartError> {
+    pub async fn start(parts: ServerParts) -> Result<Arc<Self>, ServerStartError> {
         let wiring = Arc::new(Wiring {
             push: parts.push.clone(),
             activity: parts.activity.clone(),
@@ -126,7 +126,7 @@ impl SkakelServerRole {
     /// call, a path under `/skakel` or `/api/remote`. The request carries the caller's address
     /// (`ConnectInfo`), which Skakel's per-address limits and a pairing request's address use. The
     /// server that runs now answers it, so after a restart new requests reach the new one.
-    pub(crate) async fn serve(&self, request: Request) -> Response {
+    pub async fn serve(&self, request: Request) -> Response {
         let service = self
             .running
             .locked()
@@ -143,7 +143,7 @@ impl SkakelServerRole {
     /// from the next connection on and a prepared certificate never shows before it, ALPN `h2` and
     /// `http/1.1`, and no session resumption. Built from the server that runs now, so a restart
     /// moves new connections to the new server's.
-    pub(crate) fn acceptor(&self) -> Option<TlsAcceptor> {
+    pub fn acceptor(&self) -> Option<TlsAcceptor> {
         self.running
             .locked()
             .as_ref()
@@ -152,7 +152,7 @@ impl SkakelServerRole {
 
     /// Starts Skakel's server again whenever the role leaves the server side, which ends what its
     /// clients have open.
-    pub(crate) fn follow(self: &Arc<Self>, settings: &ConfigFile<KoppelSettings>) {
+    pub fn follow(self: &Arc<Self>, settings: &ConfigFile<KoppelSettings>) {
         let weak = Arc::downgrade(self);
         let serving = Mutex::new(settings.current().role != Role::Client);
         settings.subscribe(move |value| {
@@ -194,7 +194,7 @@ impl SkakelServerRole {
     }
 
     /// Stops Skakel's server, telling the clients it is stopping.
-    pub(crate) async fn stop(&self) {
+    pub async fn stop(&self) {
         let old = self.running.locked().take();
         if let Some(old) = old {
             old.shut_down().await;

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-Builds the Rust Koppel's Linux packages, bin\koppel_<version>_{amd64,arm64,armhf}.deb, and on request the
-multi-platform image, kept on this machine.
+Builds the Rust Koppel's Linux packages, bin\koppel_<version>_{amd64,arm64,armhf}.deb and .tar.gz, and on request
+the multi-platform image, kept on this machine.
 
 .DESCRIPTION
 Runs src\installer\docker\Dockerfile, so it needs Docker and nothing else. The linux-packages target builds the UI,
@@ -43,6 +43,7 @@ if ($LASTEXITCODE -ne 0) { $commit = '' }
 
 Invoke-Docker @('buildx', 'build', '-f', $dockerfile, '--build-arg', "KOPPEL_GIT_COMMIT=$commit", '--target', 'linux-packages', '--output', "type=local,dest=$out", $src)
 $debs = Get-ChildItem $out -Filter 'koppel_*.deb'
+$debs += Get-ChildItem $out -Filter 'koppel_*.tar.gz'
 $debs | ForEach-Object { Write-Host "Built $($_.FullName)" }
 
 if ($Image) {

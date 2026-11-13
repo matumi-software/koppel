@@ -7,7 +7,7 @@
 #   src/installer/release-versions.sh write [<version>]   rewrite the version strings, then check
 #
 # Without <version> it takes the workspace version from src/Cargo.toml. The strings are the image tag
-# (`matumisoftware/koppel:<version>`), the .deb file names and release download path in the README, and the
+# (`matumisoftware/koppel:<version>`), the .deb and .tar.gz file names and release download path in the README, and the
 # README's "version <version> is the latest release". Prose such as "a 0.2.0 machine" is not touched: it
 # names a version on purpose. `check` also needs a `## <version>` heading in CHANGELOG.md and a first `koppel (<version>)` entry in
 # src/installer/linux/changelog (the .deb's changelog), and fails when a
@@ -25,7 +25,7 @@ files="README.md docs/windows.md docs/installers.md src/installer/docker/docker-
 src/installer/docker/docker-compose.windows-client.yml src/installer/docker/docker-compose.windows-server.yml"
 patterns=(
   "matumisoftware/koppel:$ver"
-  "koppel_${ver}_(amd64|arm64|armhf)\.deb"
+  "koppel_${ver}_(amd64|arm64|armhf)\.(deb|tar\.gz)"
   "releases/download/v$ver/"
   "version $ver is the latest release"
 )
@@ -34,7 +34,7 @@ if [ "$mode" = write ]; then
   for f in $files; do
     sed -E -i \
       -e "s#(matumisoftware/koppel:)$ver#\1$version#g" \
-      -e "s#(koppel_)${ver}(_(amd64|arm64|armhf)\.deb)#\1$version\3#g" \
+      -e "s#(koppel_)${ver}(_(amd64|arm64|armhf)\.(deb|tar\.gz))#\1$version\3#g" \
       -e "s#(releases/download/v)$ver/#\1$version/#g" \
       -e "s#(version )$ver( is the latest release)#\1$version\3#g" \
       "$f"

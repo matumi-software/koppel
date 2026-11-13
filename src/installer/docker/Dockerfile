@@ -3,7 +3,7 @@
 #
 #   Binaries, to <dir>/<arch>/koppel:
 #     docker buildx build -f installer/docker/Dockerfile --target binaries --output type=local,dest=<dir> .
-#   The .deb files (installer/linux/build.ps1 runs this):
+#   The .deb files and the .tar.gz files (installer/linux/build.ps1 runs this):
 #     docker buildx build -f installer/docker/Dockerfile --target linux-packages --output type=local,dest=<dir> .
 #   The image (the last stage, so the default target):
 #     docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 -t <name> .
@@ -174,8 +174,32 @@ RUN set -eu; \
       ARCH="${pair%%:*}" nfpm package --config nfpm.yaml --packager deb --target /packages/; \
     done
 
+# -------- The tarballs (not part of the image) ------------------------------------------
+# For Linux machines that do not install a .deb: koppel_<version>_<arch>.tar.gz holds the static binary, the unit,
+# the module list, the man page, the licence and notices, and install.sh and uninstall.sh (installer/linux/tarball).
+# The architecture names are the .deb's, so the two kinds of file pair up in a release.
+FROM build AS tarball
+COPY --from=notices /notices/THIRD-PARTY-NOTICES.txt /tmp/THIRD-PARTY-NOTICES.txt
+COPY installer/linux /build/installer/linux
+WORKDIR /build/installer/linux
+# A Windows checkout gives every file in the build context mode 0755, so each file's mode is set here.
+RUN set -eu; \
+    VERSION="$(cat /out/version)"; \
+    mkdir -p /tarballs; \
+    for pair in amd64:amd64 arm64:arm64 armhf:arm; do \
+      dir="koppel_${VERSION}_${pair%%:*}"; \
+      rm -rf "/tmp/$dir"; mkdir "/tmp/$dir"; \
+      install -m 0755 "/out/${pair#*:}/koppel" "/tmp/$dir/koppel"; \
+      install -m 0755 tarball/install.sh tarball/uninstall.sh "/tmp/$dir/"; \
+      install -m 0644 tarball/README.txt koppel.service modules-load.conf koppel.1 "/tmp/$dir/"; \
+      install -m 0644 /usr/share/common-licenses/GPL-3 "/tmp/$dir/LICENSE"; \
+      install -m 0644 /tmp/THIRD-PARTY-NOTICES.txt "/tmp/$dir/THIRD-PARTY-NOTICES.txt"; \
+      tar -C /tmp --owner=0 --group=0 --numeric-owner --sort=name -cf - "$dir" | gzip -9n > "/tarballs/$dir.tar.gz"; \
+    done
+
 FROM scratch AS linux-packages
 COPY --from=deb /packages/ /
+COPY --from=tarball /tarballs/ /
 
 # -------- The image ------------------------------------------------------------
 # distroless/static: root certificates, time zone data, /etc/passwd with a nonroot user (65532), no shell

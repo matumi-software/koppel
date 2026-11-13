@@ -28,7 +28,7 @@ To release, by hand and from this machine. Work from a clean checkout of `main`:
 5. Check the pins and the licence lists agree: `.github/scripts/check-pins.sh` (Rust, Node and pnpm versions across `src/rust-toolchain.toml`, `src/ui/.nvmrc`, `package.json`, the Dockerfile and the docs; `deny.toml` against `about.toml`).
 6. Build and test what ships. From `src/ui/`: `pnpm install --frozen-lockfile`, then `pnpm --filter koppel.ui build`. From `src/`: `cargo build --release --locked -p koppel` (the release profile with the built UI embedded), `cargo test --workspace --locked` in a Linux container (see "The Rust workspace"), `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo fmt --all --check` and `cargo deny check`.
 7. Merge to `main`, then build the artifacts from the merge commit:
-   - The `.deb` files: `src/installer/linux/build.ps1` (the Dockerfile's `linux-packages` target; it writes `src/installer/linux/bin/koppel_<version>_{amd64,arm64,armhf}.deb`).
+   - The `.deb` files and the tarballs: `src/installer/linux/build.ps1` (the Dockerfile's `linux-packages` target; it writes `src/installer/linux/bin/koppel_<version>_{amd64,arm64,armhf}.deb` and `.tar.gz`).
    - The image, from `src/`, pushed with the version and `latest`:
 
      ```sh
@@ -36,14 +36,14 @@ To release, by hand and from this machine. Work from a clean checkout of `main`:
        -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
      ```
    - `Koppel-Setup.exe`: `src/installer/windows/build.ps1`.
-8. Checksums, from the folder holding the files: `sha256sum koppel_*.deb Koppel-Setup.exe > SHA256SUMS`.
+8. Checksums, from the folder holding the files: `sha256sum koppel_*.deb koppel_*.tar.gz Koppel-Setup.exe > SHA256SUMS`.
 9. Tag the merge commit with an annotated tag that equals the workspace version, and push it (a tag is never moved, the release tags ruleset forbids it):
 
    ```sh
    git tag -a v<version> -m "Koppel <version>"
    git push origin v<version>
    ```
-10. Publish the release on GitHub with the `CHANGELOG.md` section as its notes and the `.deb` files, `Koppel-Setup.exe` (not code signed, say so) and `SHA256SUMS` attached, and record the image size per platform in the notes.
+10. Publish the release on GitHub with the `CHANGELOG.md` section as its notes and the `.deb` and `.tar.gz` files, `Koppel-Setup.exe` (not code signed, say so) and `SHA256SUMS` attached, and record the image size per platform in the notes.
 
 ## The Rust workspace
 
@@ -177,7 +177,7 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   Docker, and its last release is from 2023. Per-target gcc toolchains mean a musl cross compiler for each
   target to fetch and pin; Debian has none for ARMv6. One Zig covers every target.
 - **Targets:** `--target binaries` writes `<arch>/koppel` (amd64, arm64, and arm for ARMv6),
-  `--target linux-packages` the `.deb` files, and the last stage is the image. Cargo's registry, Zig's
+  `--target linux-packages` the `.deb` and `.tar.gz` files, and the last stage is the image. Cargo's registry, Zig's
   cache and `target/` are cache mounts, kept between builds.
 - **Packages:** `src/installer/linux/build.ps1` builds `koppel_<version>_amd64.deb`, `_arm64.deb` and
   `_armhf.deb` (the ARMv6 binary, which is what 32-bit Raspberry Pi OS installs) into
@@ -185,6 +185,15 @@ own architecture, so nothing runs under emulation, and one build serves all thre
   `src/Cargo.toml`. `-Image` also builds the image for `linux/amd64`, `linux/arm64` and `linux/arm/v6` and
   loads it into this machine's image store (Docker's containerd store, the default since Engine 29). It
   never pushes.
+- **Tarballs:** `koppel_<version>_{amd64,arm64,armhf}.tar.gz`, built by the Dockerfile's `tarball` stage beside
+  the `.deb` files, for distributions that do not install a `.deb`. Each unpacks to `koppel_<version>_<arch>/` with
+  the static binary, `koppel.service`, `modules-load.conf`, the man page, `LICENSE`, `THIRD-PARTY-NOTICES.txt`
+  and `install.sh` and `uninstall.sh` (`src/installer/linux/tarball`). `install.sh` puts the files where the
+  `.deb` does, except the unit in `/etc/systemd/system`, the link in `/usr/local/bin` and the man page in
+  `/usr/local/share/man`, which are the places for files no package manager owns. It refuses to run beside an
+  installed `.deb`, enables and starts the unit on a first install, and on an upgrade keeps a disabled unit
+  disabled and does `try-restart`. It has no applications menu entry or icons: a tarball is for servers.
+  `src/installer/linux/tarball/test-install.sh` runs it in a container (command in its header).
 - **What a .deb holds:** the layout of 0.1.x, so an upgrade from it replaces 0.1.x's files and keeps
   `/var/lib/koppel` (the first start converts the 0.1.x secret files, see ["Config files in Rust"](config.md#config-files-in-rust)):
   `/usr/lib/koppel/koppel` with `/usr/bin/koppel` linked to it, `koppel.service`,

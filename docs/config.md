@@ -94,7 +94,16 @@ upgrade from 0.1.x" there). `Paths:KeyCertificate`, which protected that key rin
 Data folder hardening. Before anything is written, Koppel restricts the config and keys directories:
 
 - **Windows:** the owner becomes Administrators and the ACL is protected (no inherited access) with full control for SYSTEM and Administrators only. A directory that is a junction or a symbolic link is refused. A process that is not elevated, such as a developer running from a console, cannot take ownership, so it also keeps its own access.
-- **Linux:** a symbolic link is refused, as on Windows, and so is a directory owned by anyone but the user Koppel runs as (its owner could swap what is in it). Then `chmod 700`. A bind-mounted config directory that the process cannot chmod makes start-up fail.
+- **Linux:** a symbolic link is refused, as on Windows, and so is a directory owned by anyone but the user Koppel runs as (its owner could swap what is in it). Then `chmod 700`. A bind-mounted config directory that the process cannot chmod makes start-up fail. The one exception: when Koppel runs as root and the directory belongs to uid 1654 (the user the 0.1.x Docker image ran as, so a volume that began on 0.1.x), the directory and everything in it is given to root and one INFO line says so.
+  The refusal message names the fix. In Docker, stop the container, give the volume to the user Koppel runs as, and start it again (the compose runs Koppel as root, so `0:0`):
+
+  ```sh
+  docker compose stop
+  docker run --rm -v <volume>:/data alpine chown -R 0:0 /data
+  docker compose up -d
+  ```
+
+  `<volume>` is the volume's name, see `docker volume ls`. For a folder on the host: `sudo chown -R <user> <path>`, where `<user>` is the user Koppel runs as.
 
 Where the config directory is:
 

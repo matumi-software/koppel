@@ -19,6 +19,11 @@ from Docker Hub.
 
 The image is built for this machine's architecture; the script stops if the target's differs.
 
+A volume that began on a 0.1.x image keeps working: its folders belong to uid 1654, the old image's user, and Koppel
+running as root takes them over at start (one INFO line says so). A folder owned by any other user is refused; the
+error gives the fix: `docker compose stop`, `docker run --rm -v <volume>:/data alpine chown -R 0:0 /data`,
+`docker compose up -d`. See [config.md](config.md#config-on-disk).
+
 The key that seals the secret files sits in the `koppel` volume by default, beside the files it protects.
 `docker-compose.yml` has the commented lines to keep it outside the volume as a Docker secret named
 `koppel-key`, with the `openssl` commands that make one (see "Keeping the key outside the volume" in

@@ -102,7 +102,12 @@ attached the same way.
   as version 1, and a file with a newer version stops the start and is left alone. Writes are flushed, replaced and
   the directory flushed, so a power cut cannot bring an old file back. Temp files are `0600`.
 - A `settings.json` that leaves out `shareOnStartup` now means true (it was false).
-- On Linux a symlinked or foreign-owned config or keys directory is refused at start.
+- On Linux a symlinked or foreign-owned config or keys directory is refused at start. **One case is taken over, not
+  refused:** when Koppel runs as root and the folder belongs to uid 1654 (the user the 0.1.x Docker image ran as, so a
+  volume that began on 0.1.x), Koppel gives the folder and everything in it to root and logs one line saying so. Any
+  other owner is still refused, and the message now carries the fix. Docker: `docker compose stop`, then
+  `docker run --rm -v <volume>:/data alpine chown -R <uid>:<gid> /data` (the message names the uid and gid Koppel runs
+  as, `0:0` for the shipped compose), then `docker compose up -d`. A host path: `sudo chown -R <user> <path>`.
 - `keys/ui-session.key` is deleted. **The 0.1.x key ring (`key-*.xml` in `keys/`) is left where it is.** Koppel never
   deletes it; once you have a backup, delete the files by hand. There is no command.
 - New on Windows: `%ProgramData%\Koppel\logs\koppel.log` (rotated at 5 MiB, five files, administrators only), and the

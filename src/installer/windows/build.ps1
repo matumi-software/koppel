@@ -133,7 +133,7 @@ $usbip = Join-Path $staging 'usbip'
 New-Item -ItemType Directory -Force -Path (Join-Path $usbip 'drivers') | Out-Null
 Copy-Item (Join-Path $usbipWin2.FullName 'tools\*') $usbip
 Copy-Item (Join-Path $usbipWin2.FullName 'usbip2_ude'), (Join-Path $usbipWin2.FullName 'usbip2_filter') (Join-Path $usbip 'drivers') -Recurse
-Copy-Item (Join-Path $installer 'driver.ps1'), (Join-Path $installer 'data-folder.ps1') $usbip
+Copy-Item (Join-Path $installer 'driver.ps1') $usbip
 
 # The notices for what Koppel's programs carry (Rust crates, npm) are in staging; add the Windows-only ones.
 $windowsNotices = @(

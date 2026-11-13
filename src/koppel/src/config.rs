@@ -2,7 +2,7 @@
 //!
 //! A setting is a command line option (`--ui-port 5250`) or an environment variable (`KOPPEL_UI_PORT`),
 //! the option winning. The commands are `serve` (the default), `reset-password`, `healthcheck` and
-//! `diagnostics`.
+//! `diagnostics` and `prepare-data-folder`.
 //!
 //! 0.1.x's spellings keep working, as a deprecated alias that is logged once: `Ports__Ui` in the
 //! environment and `--Ports:Ui=5250` or `/Ports:Ui 5250` on the command line, matched without regard
@@ -78,6 +78,16 @@ pub enum Command {
     Diagnostics {
         /// The file to write. Standard output unless given.
         file: Option<String>,
+    },
+    /// Windows only: make the data folder (%ProgramData%\Koppel unless a path is given) usable by SYSTEM
+    /// and administrators only, or with --check only verify it. The installer runs this as SYSTEM.
+    /// Exits 0 when the folder is safe, 1 when it is not or the call fails.
+    PrepareDataFolder {
+        /// Only verify the folder and change nothing.
+        #[arg(long)]
+        check: bool,
+        /// The folder. %ProgramData%\Koppel unless given.
+        path: Option<String>,
     },
 }
 
@@ -688,6 +698,20 @@ mod tests {
         );
         assert_eq!(ok(&[], &["--HealthCheck"]).command, Command::Healthcheck);
         assert_eq!(ok(&[], &["healthcheck"]).command, Command::Healthcheck);
+        assert_eq!(
+            ok(&[], &["prepare-data-folder", "--check", "some/data"]).command,
+            Command::PrepareDataFolder {
+                check: true,
+                path: Some("some/data".to_owned())
+            }
+        );
+        assert_eq!(
+            ok(&[], &["prepare-data-folder"]).command,
+            Command::PrepareDataFolder {
+                check: false,
+                path: None
+            }
+        );
         assert_eq!(ok(&[], &["serve"]).command, Command::Serve);
         assert_eq!(ok(&[], &[]).command, Command::Serve);
     }

@@ -6,6 +6,7 @@
 //! `secrets.json`. The server and client roles run on Skakel, with the USB layer behind them.
 //!
 //! `koppel reset-password` clears the UI password and ends every session, then exits.
+//! `koppel prepare-data-folder` makes the Windows data folder safe, for the installer.
 //! `koppel healthcheck` asks a running Koppel's `/healthz` and exits 0 when it answers, 1 when it
 //! does not: the image's health check.
 //!
@@ -13,6 +14,7 @@
 //! icons and the event log (`koppel-windows`).
 
 mod config;
+mod data_folder;
 mod diagnostics;
 mod healthcheck;
 mod systemd;
@@ -62,6 +64,8 @@ fn main() -> ExitCode {
         // It stays quiet about how the settings were spelt, as it runs every 30 seconds.
         Command::Healthcheck => healthcheck::run(&loaded.settings),
         Command::Diagnostics { ref file } => diagnostics::run(&loaded.settings, file.as_deref()),
+        // What the Windows installer runs as SYSTEM; it needs none of the settings and writes no log.
+        Command::PrepareDataFolder { check, ref path } => data_folder::run(check, path.as_deref()),
         Command::ResetPassword => {
             let _log = init_logging(false);
             loaded.log_notes();

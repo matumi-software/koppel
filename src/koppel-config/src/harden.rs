@@ -56,21 +56,31 @@ pub(crate) mod windows_acl {
     use std::path::Path;
 
     use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree, WIN32_ERROR};
+    use windows::Win32::NetworkManagement::NetManagement::{
+        LG_INCLUDE_INDIRECT, LOCALGROUP_MEMBERS_INFO_0, LOCALGROUP_USERS_INFO_0,
+        MAX_PREFERRED_LENGTH, NetApiBufferFree, NetLocalGroupGetMembers, NetUserGetLocalGroups,
+    };
     use windows::Win32::Security::Authorization::{
-        EXPLICIT_ACCESS_W, NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
-        SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+        ConvertSidToStringSidW, ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GetNamedSecurityInfoW,
+        NO_MULTIPLE_TRUSTEE, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW, SetNamedSecurityInfoW,
+        TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
     };
     use windows::Win32::Security::{
-        ACL, CheckTokenMembership, CreateWellKnownSid, DACL_SECURITY_INFORMATION,
-        GetTokenInformation, OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSID, SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY,
-        TOKEN_USER, TokenUser, WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+        ACE_FLAGS, ACL, CheckTokenMembership, CreateWellKnownSid, DACL_SECURITY_INFORMATION,
+        GetTokenInformation, LookupAccountNameW, LookupAccountSidW, NO_INHERITANCE,
+        OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SID_NAME_USE,
+        SUB_CONTAINERS_AND_OBJECTS_INHERIT, TOKEN_QUERY, TOKEN_USER, TokenUser,
+        WELL_KNOWN_SID_TYPE, WinBuiltinAdministratorsSid, WinLocalSystemSid,
     };
     use windows::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
     use windows::core::{BOOL, PCWSTR, PWSTR};
 
+    use crate::data_folder::Kind;
+
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 
     /// A SID in a buffer of its own.
     pub(crate) struct Sid(Vec<u8>);
@@ -162,11 +172,11 @@ pub(crate) mod windows_acl {
         }
     }
 
-    fn full_control(sid: &Sid) -> EXPLICIT_ACCESS_W {
+    fn full_control(sid: &Sid, inheritance: ACE_FLAGS) -> EXPLICIT_ACCESS_W {
         EXPLICIT_ACCESS_W {
             grfAccessPermissions: FILE_ALL_ACCESS.0,
             grfAccessMode: SET_ACCESS,
-            grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+            grfInheritance: inheritance,
             Trustee: TRUSTEE_W {
                 pMultipleTrustee: std::ptr::null_mut(),
                 MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
@@ -177,27 +187,57 @@ pub(crate) mod windows_acl {
         }
     }
 
-    pub(crate) fn harden(directory: &Path) -> io::Result<()> {
-        let metadata = std::fs::symlink_metadata(directory)?;
-        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-            || metadata.file_type().is_symlink()
-        {
-            return Err(io::Error::other(format!(
-                "{} is a junction or symbolic link. Koppel will not keep its files behind a link: point Paths:Config and Paths:Keys at a real directory.",
-                directory.display()
-            )));
-        }
+    fn wide(path: &Path) -> Vec<u16> {
+        path.as_os_str().encode_wide().chain([0]).collect()
+    }
 
+    fn wide_str(text: &str) -> Vec<u16> {
+        text.encode_utf16().chain([0]).collect()
+    }
+
+    /// Whether this process is SYSTEM or an elevated administrator, which can give an owner away.
+    /// .NET's `IsSystem || IsInRole(Administrator)`: membership counts only when it is in force, so
+    /// an unelevated administrator is not privileged.
+    pub(crate) fn is_privileged() -> io::Result<bool> {
+        Ok(is_member(&Sid::system()?) || is_member(&Sid::administrators()?))
+    }
+
+    /// What a path is, without following it: a reparse point (a junction, a symbolic link, a mount
+    /// point) is a link.
+    pub(crate) fn kind_of(metadata: &std::fs::Metadata) -> Kind {
+        let attributes = metadata.file_attributes();
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 || metadata.file_type().is_symlink() {
+            Kind::Link {
+                folder: attributes & FILE_ATTRIBUTE_DIRECTORY != 0,
+            }
+        } else if metadata.is_dir() {
+            Kind::Folder
+        } else {
+            Kind::File
+        }
+    }
+
+    /// Replaces the ACL of `path` with a protected one for SYSTEM and Administrators, full control,
+    /// and when `privileged` gives the owner to Administrators. An unprivileged process cannot give
+    /// the owner away and would lock itself out, so it also gets full control and the owner is left
+    /// alone: that is a developer at a console, while the service runs as LocalSystem. A folder's
+    /// entries are inherited by what is in it.
+    pub(crate) fn protect(path: &Path, container: bool, privileged: bool) -> io::Result<()> {
         let system = Sid::system()?;
         let administrators = Sid::administrators()?;
         let user = Sid::current_user()?;
-        // .NET's `IsSystem || IsInRole(Administrator)`: membership counts only when it is in force,
-        // so an unelevated administrator is not privileged.
-        let privileged = is_member(&system) || is_member(&administrators);
+        let inheritance = if container {
+            SUB_CONTAINERS_AND_OBJECTS_INHERIT
+        } else {
+            NO_INHERITANCE
+        };
 
-        let mut entries = vec![full_control(&system), full_control(&administrators)];
+        let mut entries = vec![
+            full_control(&system, inheritance),
+            full_control(&administrators, inheritance),
+        ];
         if !privileged {
-            entries.push(full_control(&user));
+            entries.push(full_control(&user, inheritance));
         }
         let mut acl: *mut ACL = std::ptr::null_mut();
         // SAFETY: the entries point at SIDs that live until the end of this function.
@@ -208,7 +248,7 @@ pub(crate) mod windows_acl {
         if privileged {
             information |= OWNER_SECURITY_INFORMATION;
         }
-        let wide: Vec<u16> = directory.as_os_str().encode_wide().chain([0]).collect();
+        let wide = wide(path);
         // SAFETY: `wide` is a terminated path, and the ACL and SID are valid for the call.
         let result = check(unsafe {
             SetNamedSecurityInfoW(
@@ -224,6 +264,241 @@ pub(crate) mod windows_acl {
         // SAFETY: SetEntriesInAclW allocated the ACL with LocalAlloc.
         unsafe { LocalFree(Some(HLOCAL(acl.cast()))) };
         result
+    }
+
+    /// The text form of a SID (`S-1-5-18`).
+    pub(crate) fn sid_text(sid: PSID) -> io::Result<String> {
+        let mut text = PWSTR::null();
+        // SAFETY: `sid` is a valid SID; the string is read once and freed with LocalFree.
+        unsafe { ConvertSidToStringSidW(sid, &mut text) }.map_err(io::Error::other)?;
+        // SAFETY: the call returned a terminated string.
+        let result = unsafe { text.to_string() }.map_err(io::Error::other);
+        // SAFETY: ConvertSidToStringSidW allocated the string with LocalAlloc.
+        unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+        result
+    }
+
+    /// A SID read from its text form, in a buffer of its own.
+    fn sid_from_text(text: &str) -> io::Result<Sid> {
+        let wide = wide_str(text);
+        let mut sid = PSID::default();
+        // SAFETY: `wide` is a terminated string; the SID is copied out and freed below.
+        unsafe { ConvertStringSidToSidW(PCWSTR(wide.as_ptr()), &mut sid) }
+            .map_err(io::Error::other)?;
+        // SAFETY: a valid SID's length is 8 bytes plus 4 per sub-authority.
+        let length = 8 + 4 * usize::from(unsafe { *(sid.0 as *const u8).add(1) });
+        // SAFETY: the SID is `length` bytes long.
+        let bytes = unsafe { std::slice::from_raw_parts(sid.0 as *const u8, length) }.to_vec();
+        // SAFETY: ConvertStringSidToSidW allocated the SID with LocalAlloc.
+        unsafe { LocalFree(Some(HLOCAL(sid.0.cast()))) };
+        Ok(Sid(bytes))
+    }
+
+    /// The SID of the owner of `path`, in text form. A link is not followed.
+    pub(crate) fn owner(path: &Path) -> io::Result<String> {
+        let wide = wide(path);
+        let mut owner = PSID::default();
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: `wide` is a terminated path; the owner points into the descriptor, which is
+        // freed after the text is made.
+        check(unsafe {
+            GetNamedSecurityInfoW(
+                PCWSTR(wide.as_ptr()),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                Some(&mut owner),
+                None,
+                None,
+                None,
+                &mut descriptor,
+            )
+        })?;
+        let text = if owner.0.is_null() {
+            Err(io::Error::other("the path has no owner"))
+        } else {
+            sid_text(owner)
+        };
+        // SAFETY: GetNamedSecurityInfoW allocated the descriptor with LocalAlloc.
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+        text
+    }
+
+    /// `DOMAIN\name` for a SID in text form, when Windows knows it.
+    pub(crate) fn name_of(sid: &str) -> Option<String> {
+        let sid = sid_from_text(sid).ok()?;
+        let (name, domain) = account_name(&sid)?;
+        Some(if domain.is_empty() {
+            name
+        } else {
+            format!("{domain}\\{name}")
+        })
+    }
+
+    /// The name and the domain of an account.
+    pub(crate) fn account_name(sid: &Sid) -> Option<(String, String)> {
+        let (mut name_len, mut domain_len) = (0u32, 0u32);
+        let mut usage = SID_NAME_USE::default();
+        // SAFETY: the first call only asks for the lengths and fails with an insufficient buffer.
+        let _ = unsafe {
+            LookupAccountSidW(
+                PCWSTR::null(),
+                sid.psid(),
+                None,
+                &mut name_len,
+                None,
+                &mut domain_len,
+                &mut usage,
+            )
+        };
+        if name_len == 0 {
+            return None;
+        }
+        let mut name = vec![0u16; name_len as usize];
+        let mut domain = vec![0u16; domain_len.max(1) as usize];
+        // SAFETY: the buffers are as long as the lengths say.
+        unsafe {
+            LookupAccountSidW(
+                PCWSTR::null(),
+                sid.psid(),
+                Some(PWSTR(name.as_mut_ptr())),
+                &mut name_len,
+                Some(PWSTR(domain.as_mut_ptr())),
+                &mut domain_len,
+                &mut usage,
+            )
+        }
+        .ok()?;
+        Some((
+            String::from_utf16_lossy(&name[..name_len as usize]),
+            String::from_utf16_lossy(&domain[..domain_len as usize]),
+        ))
+    }
+
+    /// The SID, in text form, of an account or group named `name`.
+    fn sid_of_name(name: &str) -> Option<String> {
+        let wide = wide_str(name);
+        let (mut sid_len, mut domain_len) = (0u32, 0u32);
+        let mut usage = SID_NAME_USE::default();
+        // SAFETY: the first call only asks for the lengths.
+        let _ = unsafe {
+            LookupAccountNameW(
+                PCWSTR::null(),
+                PCWSTR(wide.as_ptr()),
+                None,
+                &mut sid_len,
+                None,
+                &mut domain_len,
+                &mut usage,
+            )
+        };
+        if sid_len == 0 {
+            return None;
+        }
+        let mut sid = vec![0u8; sid_len as usize];
+        let mut domain = vec![0u16; domain_len.max(1) as usize];
+        // SAFETY: the buffers are as long as the lengths say.
+        unsafe {
+            LookupAccountNameW(
+                PCWSTR::null(),
+                PCWSTR(wide.as_ptr()),
+                Some(PSID(sid.as_mut_ptr().cast())),
+                &mut sid_len,
+                Some(PWSTR(domain.as_mut_ptr())),
+                &mut domain_len,
+                &mut usage,
+            )
+        }
+        .ok()?;
+        sid_text(PSID(sid.as_mut_ptr().cast())).ok()
+    }
+
+    /// The accounts and groups directly in the local Administrators group, by SID. The group's name
+    /// is looked up from its well-known SID, as it is localized. The SIDs are read as they are, so
+    /// an AzureAD or domain member that has no name here is listed all the same.
+    pub(crate) fn administrator_members() -> io::Result<Vec<String>> {
+        let (name, _) = account_name(&Sid::administrators()?)
+            .ok_or_else(|| io::Error::other("the Administrators group has no name"))?;
+        let name = wide_str(&name);
+        let mut buffer: *mut u8 = std::ptr::null_mut();
+        let (mut read, mut total) = (0u32, 0u32);
+        // SAFETY: the buffer the call allocates is read below and freed with NetApiBufferFree.
+        let code = unsafe {
+            NetLocalGroupGetMembers(
+                PCWSTR::null(),
+                PCWSTR(name.as_ptr()),
+                0,
+                &mut buffer,
+                MAX_PREFERRED_LENGTH,
+                &mut read,
+                &mut total,
+                None,
+            )
+        };
+        if code != 0 {
+            return Err(io::Error::from_raw_os_error(code as i32));
+        }
+        // SAFETY: at level 0 the buffer holds `read` LOCALGROUP_MEMBERS_INFO_0 entries.
+        let entries = unsafe {
+            std::slice::from_raw_parts(buffer as *const LOCALGROUP_MEMBERS_INFO_0, read as usize)
+        };
+        let members = entries.iter().map(|e| sid_text(e.lgrmi0_sid)).collect();
+        // SAFETY: the buffer came from NetLocalGroupGetMembers.
+        unsafe { NetApiBufferFree(Some(buffer as *const _)) };
+        members
+    }
+
+    /// The SIDs of the local groups an account belongs to, directly or through other groups.
+    pub(crate) fn groups_of(sid: &str) -> io::Result<Vec<String>> {
+        let (name, domain) = account_name(&sid_from_text(sid)?)
+            .ok_or_else(|| io::Error::other("the account has no name"))?;
+        let account = if domain.is_empty() {
+            name
+        } else {
+            format!("{domain}\\{name}")
+        };
+        let account = wide_str(&account);
+        let mut buffer: *mut u8 = std::ptr::null_mut();
+        let (mut read, mut total) = (0u32, 0u32);
+        // SAFETY: the buffer the call allocates is read below and freed with NetApiBufferFree.
+        let code = unsafe {
+            NetUserGetLocalGroups(
+                PCWSTR::null(),
+                PCWSTR(account.as_ptr()),
+                0,
+                LG_INCLUDE_INDIRECT,
+                &mut buffer,
+                MAX_PREFERRED_LENGTH,
+                &mut read,
+                &mut total,
+            )
+        };
+        if code != 0 {
+            return Err(io::Error::from_raw_os_error(code as i32));
+        }
+        // SAFETY: at level 0 the buffer holds `read` LOCALGROUP_USERS_INFO_0 entries.
+        let entries = unsafe {
+            std::slice::from_raw_parts(buffer as *const LOCALGROUP_USERS_INFO_0, read as usize)
+        };
+        let groups = entries
+            .iter()
+            // SAFETY: each name is a terminated string inside the buffer.
+            .filter_map(|e| unsafe { e.lgrui0_name.to_string() }.ok())
+            .filter_map(|name| sid_of_name(&name))
+            .collect();
+        // SAFETY: the buffer came from NetUserGetLocalGroups.
+        unsafe { NetApiBufferFree(Some(buffer as *const _)) };
+        Ok(groups)
+    }
+
+    pub(crate) fn harden(directory: &Path) -> io::Result<()> {
+        let metadata = std::fs::symlink_metadata(directory)?;
+        if matches!(kind_of(&metadata), Kind::Link { .. }) {
+            return Err(io::Error::other(format!(
+                "{} is a junction or symbolic link. Koppel will not keep its files behind a link: point Paths:Config and Paths:Keys at a real directory.",
+                directory.display()
+            )));
+        }
+        protect(directory, true, is_privileged()?)
     }
 }
 

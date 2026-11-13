@@ -68,10 +68,12 @@
     </ComponentGroup>
 
     <!-- The data folder is made safe first, then the driver goes in after the files and before the service starts.
-         The driver comes out before the files go, but not when an upgrade is replacing this version: the new
-         version's install updates the same driver in place. -->
+         `Koppel.exe prepare-data-folder` (koppel-config's data_folder module) does it, as SYSTEM: it fails the install with a
+         message that says what to do when the folder is a file, a link or owned by a standard user. The driver comes out
+         before the files go, but not when an upgrade is replacing this version: the new version's install updates the same
+         driver in place. -->
     <SetProperty Id="PrepareDataFolder" Sequence="execute" Before="PrepareDataFolder"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]usbip\data-folder.ps1&quot;" />
+                 Value="&quot;[INSTALLFOLDER]Koppel.exe&quot; prepare-data-folder" />
     <CustomAction Id="PrepareDataFolder" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="check" />
 
     <SetProperty Id="InstallUsbDriver" Sequence="execute" Before="InstallUsbDriver"
@@ -106,6 +108,15 @@
                  Value="&quot;[System64Folder]sc.exe&quot; sidtype Koppel unrestricted" />
     <CustomAction Id="SetServiceSid" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
 
+    <!-- Keeps only the privileges the service uses in its token. LocalSystem starts with about thirty; the list and the reason for
+         each is in docs/decisions.md ("The service keeps eight privileges"). util:ServiceConfig in WiX 5.0.2 has no attribute for it
+         (nothing named Privilege is in the extension), so this is sc privs, as SetServiceSid is. It takes effect when the service
+         starts, which is after this action (StartServices follows InstallServices). Not vital, so Return="ignore": if it fails the
+         service runs with the privileges it has always had, and WixQuietExec logs why. -->
+    <SetProperty Id="SetServicePrivileges" Sequence="execute" Before="SetServicePrivileges"
+                 Value="&quot;[System64Folder]sc.exe&quot; privs Koppel SeAssignPrimaryTokenPrivilege/SeIncreaseQuotaPrivilege/SeTcbPrivilege/SeChangeNotifyPrivilege/SeImpersonatePrivilege/SeCreateGlobalPrivilege/SeRestorePrivilege/SeTakeOwnershipPrivilege" />
+    <CustomAction Id="SetServicePrivileges" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
+
     <!-- pnputil can answer 3010 (a restart finishes the driver install or removal). WixQuietExec reads that as a failure, so
          driver.ps1 leaves a registry value and restart-flag.js (kept to one line, the Target column is short)
          turns it into the DRIVER_RESTART property, which ScheduleReboot acts on. Return="ignore": it is after InstallFinalize,
@@ -119,6 +130,7 @@
       <Custom Action="RemoveUsbDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="SetServiceFailureFlag" After="InstallServices" Condition="NOT REMOVE" />
       <Custom Action="SetServiceSid" After="SetServiceFailureFlag" Condition="NOT REMOVE" />
+      <Custom Action="SetServicePrivileges" After="SetServiceSid" Condition="NOT REMOVE" />
       <Custom Action="ReadDriverRestart" After="InstallFinalize" />
       <ScheduleReboot After="ReadDriverRestart" Condition="DRIVER_RESTART" />
     </InstallExecuteSequence>

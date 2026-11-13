@@ -9,7 +9,7 @@ export function useMachineName(): string {
   return useSystemInfo().data?.name ?? window.location.hostname;
 }
 
-/** The Koppel version the server runs, such as 0.1.1, without a commit hash. Undefined until it loads. */
+/** The Koppel version the server runs, such as 0.2.1, without a commit hash. Undefined until it loads. */
 export function useKoppelVersion(): string | undefined {
   return useSystemInfo().data?.version;
 }

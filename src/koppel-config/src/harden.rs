@@ -8,8 +8,10 @@
 //!   lock itself out, so it also gets full control and the owner is left alone: that is a developer
 //!   at a console, while the service runs as LocalSystem.
 //! - **Elsewhere:** a symbolic link is refused as on Windows, and so is a directory owned by
-//!   anyone but the user Koppel runs as, since its owner could swap what is in it. Then `chmod 700`.
-//!   A directory that cannot be changed, such as a bind mount owned by someone else, is an error.
+//!   anyone but the user Koppel runs as, since its owner could swap what is in it, and the error
+//!   says how to fix it. The one exception: root takes over a directory owned by uid 1654, the user
+//!   the 0.1.x Docker image ran as (`decide_owner`), with one INFO line. Then `chmod 700`. A
+//!   directory that cannot be changed, such as a bind mount owned by someone else, is an error.
 
 use std::io;
 use std::path::Path;
@@ -36,16 +38,79 @@ fn harden_unix(directory: &Path) -> io::Result<()> {
             directory.display()
         )));
     }
-    // SAFETY: geteuid takes no arguments and cannot fail.
-    let user = unsafe { libc::geteuid() };
-    if metadata.uid() != user {
-        return Err(io::Error::other(format!(
-            "{} belongs to user {}, not to user {user}, which Koppel runs as. Its owner could swap what is in it: give it to the user Koppel runs as.",
-            directory.display(),
-            metadata.uid()
-        )));
+    // SAFETY: geteuid and getegid take no arguments and cannot fail.
+    let (user, group) = unsafe { (libc::geteuid(), libc::getegid()) };
+    match decide_owner(metadata.uid(), user) {
+        OwnerDecision::Accept => {}
+        OwnerDecision::TakeOver => {
+            give_away_tree(directory, user, group)?;
+            tracing::info!(
+                "Took over {} from user {OLD_IMAGE_USER}, the user the 0.1.x Docker image ran as: it and everything in it now belong to root, which runs this Koppel.",
+                directory.display()
+            );
+        }
+        OwnerDecision::Refuse => {
+            return Err(io::Error::other(refusal(
+                directory,
+                metadata.uid(),
+                user,
+                group,
+            )));
+        }
     }
     std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
+}
+
+/// The user the 0.1.x Docker image ran Koppel as (`app`, from the .NET base image). A volume made
+/// by that image has its folders owned by this uid.
+#[cfg(not(windows))]
+const OLD_IMAGE_USER: u32 = 1654;
+
+/// What to do with a config or keys folder, given who owns it and who runs Koppel.
+#[cfg(not(windows))]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum OwnerDecision {
+    /// The owner is the user Koppel runs as.
+    Accept,
+    /// Root runs Koppel and the old image's user owns the folder: give it to root.
+    TakeOver,
+    /// Anyone else.
+    Refuse,
+}
+
+/// Decides on the owner's uid and the running uid alone, so every branch can be tested without
+/// owning anything. Only root takes over, and only from [`OLD_IMAGE_USER`].
+#[cfg(not(windows))]
+pub(crate) fn decide_owner(owner: u32, running: u32) -> OwnerDecision {
+    if owner == running {
+        OwnerDecision::Accept
+    } else if running == 0 && owner == OLD_IMAGE_USER {
+        OwnerDecision::TakeOver
+    } else {
+        OwnerDecision::Refuse
+    }
+}
+
+/// The error for a folder owned by someone else, with the commands that fix it.
+#[cfg(not(windows))]
+fn refusal(directory: &Path, owner: u32, user: u32, group: u32) -> String {
+    format!(
+        "{} belongs to user {owner}, not to user {user}, which Koppel runs as. Its owner could swap what is in it, so Koppel will not use it. Give it to user {user}. In Docker: run `docker compose stop`, then `docker run --rm -v <volume>:/data alpine chown -R {user}:{group} /data` (<volume> is the volume's name, see `docker volume ls`), then `docker compose up -d`. For a folder on the host: `sudo chown -R {user} {}`.",
+        directory.display(),
+        directory.display()
+    )
+}
+
+/// Gives `path` and everything under it to `user` and `group`. Links are changed, never followed.
+#[cfg(not(windows))]
+fn give_away_tree(path: &Path, user: u32, group: u32) -> io::Result<()> {
+    std::os::unix::fs::lchown(path, Some(user), Some(group))?;
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            give_away_tree(&entry?.path(), user, group)?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -555,8 +620,82 @@ mod tests {
             refused.to_string().contains("belongs to user 12345"),
             "{refused}"
         );
+        assert!(
+            refused.to_string().contains("docker compose stop"),
+            "{refused}"
+        );
         std::os::unix::fs::chown(&dir, Some(0), None).unwrap();
         harden_directory(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_owner_decision_covers_every_branch() {
+        use OwnerDecision::*;
+        assert_eq!(decide_owner(0, 0), Accept);
+        assert_eq!(decide_owner(1000, 1000), Accept);
+        assert_eq!(decide_owner(1654, 1654), Accept);
+        assert_eq!(decide_owner(1654, 0), TakeOver);
+        assert_eq!(decide_owner(4242, 0), Refuse);
+        assert_eq!(decide_owner(0, 1654), Refuse);
+        assert_eq!(decide_owner(1654, 1000), Refuse);
+        assert_eq!(decide_owner(1000, 0), Refuse);
+        assert_eq!(decide_owner(0, 1000), Refuse);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_refusal_names_the_fix_for_docker_and_for_a_host_path() {
+        let message = refusal(Path::new("/koppel/config"), 4242, 0, 0);
+        assert!(
+            message.contains("belongs to user 4242, not to user 0"),
+            "{message}"
+        );
+        assert!(message.contains("docker compose stop"), "{message}");
+        assert!(
+            message.contains("docker run --rm -v <volume>:/data alpine chown -R 0:0 /data"),
+            "{message}"
+        );
+        assert!(message.contains("docker compose up -d"), "{message}");
+        assert!(
+            message.contains("sudo chown -R 0 /koppel/config"),
+            "{message}"
+        );
+    }
+
+    /// Needs root to give a directory away, which the test container is.
+    #[cfg(unix)]
+    #[test]
+    fn root_takes_over_a_directory_of_the_old_image_user_and_what_is_in_it() {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: geteuid takes no arguments and cannot fail.
+        if unsafe { libc::geteuid() } != 0 {
+            return;
+        }
+        let dir = temp_dir("takeover");
+        let inner = dir.join("inner");
+        std::fs::create_dir(&inner).unwrap();
+        std::fs::write(inner.join("file"), b"x").unwrap();
+        std::os::unix::fs::symlink("/nonexistent", dir.join("link")).unwrap();
+        for path in [&dir, &inner, &inner.join("file")] {
+            std::os::unix::fs::chown(path, Some(1654), Some(1654)).unwrap();
+        }
+        std::os::unix::fs::lchown(dir.join("link"), Some(1654), Some(1654)).unwrap();
+        harden_directory(&dir).unwrap();
+        for path in [&dir, &inner, &inner.join("file")] {
+            let metadata = std::fs::metadata(path).unwrap();
+            assert_eq!(
+                (metadata.uid(), metadata.gid()),
+                (0, 0),
+                "{}",
+                path.display()
+            );
+        }
+        assert_eq!(
+            std::fs::symlink_metadata(dir.join("link")).unwrap().uid(),
+            0
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

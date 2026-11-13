@@ -142,6 +142,12 @@ attached the same way.
 - Navigation links open in a new tab, each page sets its title and takes focus on its heading, there is a skip link
   and one screen reader voice, and the password forms say what to fix.
 - A tray line with a known type and a field of the wrong kind is skipped whole.
+- The Windows installer no longer ships `data-folder.ps1`. `Koppel.exe prepare-data-folder [--check] [PATH]` does the same
+  job with the same rules (it refuses a file or a link, takes over a folder an administrator owns, renames aside what a
+  standard user owns, and `--check` changes nothing), and the installer runs it.
+- The service keeps eight privileges (`sc privs`): the three the tray launch needs, SeChangeNotify, and four kept until
+  a test on a real machine says they can go (the reasons are in `docs/decisions.md`). Delete the `RequiredPrivileges`
+  value under the service key to undo it.
 
 ### Developer-facing
 
@@ -170,7 +176,8 @@ What the tests cover is listed in the pull requests. A person has not run these 
   hardware, with 0.2.0 (2026-11-09). A Linux client, a Windows server through usbipd-win and a Raspberry Pi are open
   under #115.
 - The Windows installer: install, upgrade from 0.2.0, uninstall, the tray, the new log file and the service SID
-  (`NT SERVICE\Koppel`).
+  (`NT SERVICE\Koppel`). The new `prepare-data-folder` command and the reduced service
+  privileges have never run as a service (the checklist is in `docs/installers.md`, #154).
 - systemd credentials (`LoadCredential=koppel-key:...`) with the `.deb`'s unit, and the key outside the volume with a
   Docker secret.
 - IPv6 multicast discovery (`ff02::1`) between two machines. The tests use unicast probes to `::1`.

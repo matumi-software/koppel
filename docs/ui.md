@@ -74,21 +74,26 @@ validation problem (400, `code: validation`), `errors`: each field with its mess
 and a fixed sentence; the cause and its whole chain go to the log. The wire types of the body are
 `Problem` in `generated/wire.ts`. Dates are RFC 3339 (`time::serde::rfc3339`, `Z` form) everywhere.
 
-| Module | What |
+| Module (`koppel-web/src/`) | What |
 |---|---|
-| `app.rs` | `App`: opens every config file as 0.1.x does, makes the certificate on a first start, wires the pushes, builds the routers |
+| `app.rs` | `App`: the roles of `koppel-app` with the sign-in and the access rules on top, and the routers built from it |
 | `routes.rs` | One router per surface (the UI and the network), each with its layers, and the dispatcher for one shared port |
 | `guard.rs` | The guards as layers: security headers, the caller address check, `KOPPEL_UI_ALLOW_FROM` (403), Origin and `X-Koppel-UI` (403), the sign-in rate limit (429), the session (401) and the role gate (404) |
 | `state.rs` | The state each group of handlers takes (`AuthApi`, `SettingsApi`, `ServerApi`, `ClientApi`, `PushApi`), made from the app with `FromRef` |
 | `surface.rs`, `access.rs` | Which paths are the network surface's, and which role a group needs; who `KOPPEL_UI_ALLOW_FROM` takes |
-| `auth/` | `ui-auth.json`, the setup window, password rules and hashes, the lockout, the hash slots, the session cookie, sign-out and the password change, `reset-password` |
-| `api/` | The REST endpoints: settings, activity, system, server, client and USB |
-| `activity.rs` | The activity log, in memory, 500 entries |
-| `api/error.rs` | `ApiError` and the problem JSON it writes |
-| `push.rs` | The live push |
+| `auth/` | `ui-auth.json`, the setup window and token, password rules and hashes, the lockout and global budget (`throttle.rs`), the hash slots, the in-memory sessions and the cookie (`session.rs`), sign-out and the password change, `reset-password` |
+| `api/` | The REST endpoints: `settings.rs` (settings, activity, system info and checks), `server.rs` and `client.rs` (the role's own routes), and `error.rs`, `ApiError` and the problem JSON it writes |
+| `json.rs` | The JSON request body, refused with 400 or 415 as problem JSON |
+| `push.rs` | The live push's stream |
+| `ready.rs` | `/readyz` |
+| `tls.rs`, `redirect.rs`, `server.rs` | The certificate the ports present, plain HTTP answered with a 301 from the first byte, then TLS, and the dual-stack listener |
+| `ui.rs` | The built UI, embedded at compile time |
 | `wire.rs` | Test only: writes the TypeScript types of the wire (`src/ui/app/src/api/generated/wire.ts`) from the Rust types, fails when the checked-in file differs, and reads the JSON fixtures in `src/ui/app/src/test/wire/` through the Rust types; see "Wire types generated from the Rust DTOs" in `decisions.md` |
-| `roles/` | The seams the endpoints talk to, the server and client roles on Skakel (`roles/skakel/`) and the USB layer behind them (`roles/usb.rs`); see ["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust) |
-| `redirect.rs`, `server.rs` | Plain HTTP answered with a 301 from the first byte, then TLS, and the dual-stack listener |
+
+What the routes talk to is `koppel-app`, below the web server: the activity log (500 entries, in memory,
+`activity.rs`), the push bus (`push.rs`), the certificate slot, and the roles in `roles/`, the server and
+client roles on Skakel (`roles/skakel/`) and the USB layer behind them (`roles/usb.rs`); see
+["The roles on Skakel in Rust"](skakel.md#the-roles-on-skakel-in-rust).
 
 - **Settings:** one typed `Settings` struct in `koppel/src/config.rs`, built once at start by clap from options and `KOPPEL_` environment variables, with 0.1.x's names kept as deprecated aliases. A value that is not valid, an unknown option, and a misspelt setting are all caught before anything starts (see "Settings" in [config.md](config.md)). Log levels come from `RUST_LOG`. The commands are `serve` (the default), `reset-password` and `healthcheck`, and `koppel --version` names the git commit and the build date.
 - **Start:** the folders are prepared, 0.1.x's secrets converted, the config files opened (start-up still stops on an unusable one), then the UI port and, when set apart, the network port listen. With no `KOPPEL_LISTEN_ADDRESS` a port is one dual-stack socket, or IPv4 alone where there is no IPv6.

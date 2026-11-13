@@ -9,8 +9,9 @@ Closes #
 Commands from the Commands section of [CLAUDE.md](../CLAUDE.md), with what you ran (pnpm from `src/ui/`, cargo from `src/`):
 
 - [ ] `pnpm --filter koppel.ui typecheck`, `lint`, `test` and `build`, and `pnpm --filter @koppel/react-ui test`, if the UI changed
-- [ ] `cargo build --workspace` and `cargo test --workspace`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check`
+- [ ] `cargo build --workspace --locked`, and `cargo test --workspace --locked` in a Linux container (there is no CI)
+- [ ] `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --all --check`
+- [ ] `cargo deny check` and `.github/scripts/check-pins.sh`, if dependencies, licences or toolchain versions changed
 - [ ] Not run, and why:
 
 ## Docs and changelog

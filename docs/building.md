@@ -50,7 +50,7 @@ To release, by hand and from this machine. Work from a clean checkout of `main`:
 Koppel 0.2.0 is a rewrite in Rust (milestone v0.2.0, #82 to #92) of the C# Koppel 0.1.x, whose source
 stays at tag `v0.1.2`. `src/` is the Cargo workspace: `src/Cargo.toml`, the committed `src/Cargo.lock`,
 and the build output in `src/target/`. It follows Skakel's: edition 2024, Rust 1.99, and every
-third-party crate pinned in `[workspace.dependencies]` with a note on its licence. `[workspace.lints]` forbids `unsafe_code`; `koppel` takes it with `[lints] workspace = true`, and the crates that call the operating system (`koppel-config`, `koppel-usb`, `koppel-web`, `koppel-windows`) do not yet, because each has unsafe blocks.
+third-party crate pinned in `[workspace.dependencies]` with a note on its licence. `[workspace.lints]` forbids `unsafe_code`; `koppel`, `koppel-secrets`, `koppel-upgrade` and `usbip` take it with `[lints] workspace = true`, and the crates that call the operating system (`koppel-app`, `koppel-config`, `koppel-usb`, `koppel-web`, `koppel-windows`) do not yet, because each has unsafe blocks.
 
 | Crate | What |
 |---|---|

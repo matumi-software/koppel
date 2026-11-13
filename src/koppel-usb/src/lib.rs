@@ -74,10 +74,15 @@ macro_rules! test_util {
 pub use {
     activity::NoActivity,
     client::{BeginAttachError, ImportMismatch, check_import},
-    error::Module,
     server::{SetSharedError, shared_expects},
     tasks::Listener,
 };
+
+// Only Linux's sysfs host and VHCI name a kernel module.
+#[cfg(feature = "test-util")]
+pub use error::Module;
+#[cfg(all(not(feature = "test-util"), target_os = "linux"))]
+pub(crate) use error::Module;
 
 // Only Linux's sysfs host makes a loopback pair itself; the client goes through `relay::kernel_pair`.
 #[cfg(feature = "test-util")]

@@ -16,7 +16,7 @@
     <!-- The last page's Launch button runs what Koppel in the Start menu runs: it waits for the UI and opens it in the user's
          browser, so the first password is set within the setup window. Setup's own window runs as the user, not elevated,
          so the browser is the user's. -->
-    <Variable Name="LaunchTarget" Value="[ProgramFiles64Folder]Matumi\Koppel\KoppelDesktop.exe" />
+    <Variable Name="LaunchTarget" Value="[ProgramFiles64Folder]Matumi (Pty) Ltd\Koppel\KoppelDesktop.exe" />
     <Variable Name="LaunchArguments" Value="--open" />
 
     <!-- Skip the runtime when this build of it, or a newer one, is already installed. -->

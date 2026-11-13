@@ -159,7 +159,7 @@ image yourself, see "Building and releasing" in [docs/building.md](docs/building
 
 ## License
 
-Copyright (C) 2026 Matumi Software. Koppel is free software under the GNU General Public License,
+Copyright (C) 2026 Matumi (Pty) Ltd. Koppel is free software under the GNU General Public License,
 version 3 or (at your option) any later version (GPL-3.0-or-later), see [LICENSE](LICENSE).
 Releases up to and including 0.1.0 were published under the MIT licence and stay under it.
 

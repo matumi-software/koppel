@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Koppel
-Upstream-Contact: Matumi Software <https://github.com/matumi-software/koppel>
+Upstream-Contact: Matumi (Pty) Ltd <https://github.com/matumi-software/koppel>
 Source: https://github.com/matumi-software/koppel
 Comment: /usr/lib/koppel/koppel is a static program that also carries the Rust
  crates and the UI's npm packages it is built from. Each of them, with its
@@ -9,7 +9,7 @@ Comment: /usr/lib/koppel/koppel is a static program that also carries the Rust
  crates and packages themselves.
 
 Files: *
-Copyright: 2026 Matumi Software
+Copyright: 2026 Matumi (Pty) Ltd
 License: GPL-3.0-or-later
 
 License: GPL-3.0-or-later

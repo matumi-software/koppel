@@ -2,7 +2,7 @@
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <!-- The bundle is what the Apps list shows, so its icon is the one people see there. -->
-  <Bundle Name="Koppel" Manufacturer="Matumi Software" Version="$(var.Version)" UpgradeCode="5B42E92B-C631-47B4-A17F-9692A0871516"
+  <Bundle Name="Koppel" Manufacturer="Matumi (Pty) Ltd" Version="$(var.Version)" UpgradeCode="5B42E92B-C631-47B4-A17F-9692A0871516"
           IconSourceFile="$(var.Logos)\koppel-app-icon.ico">
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" ThemeFile="KoppelTheme.xml" LocalizationFile="KoppelTheme.wxl"

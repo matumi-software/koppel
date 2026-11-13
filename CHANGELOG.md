@@ -137,6 +137,9 @@ attached the same way.
 - The Windows installer sets `KOPPEL_UI_ALLOW_FROM=local` for the service (it was `Ui__AllowFrom`), and an upgrade
   keeps the service's state.
 - The `.deb` no longer enables a unit the administrator disabled, and no longer restarts a stopped service on upgrade.
+- New: `koppel_<version>_{amd64,arm64,armhf}.tar.gz` beside the `.deb` files, for Linux distributions that do not
+  install a `.deb`. It holds the static binary, the unit, the man page and an `install.sh` that sets up the service
+  the way the `.deb` does; `uninstall.sh` removes it. The README says how.
 - The embedded UI is about 240 KB smaller (Latin fonts only: Cyrillic, Greek or Vietnamese text in a monospace field
   now uses the system font). The UI recovers by itself after a first connect that failed.
 - Navigation links open in a new tab, each page sets its title and takes focus on its heading, there is a skip link

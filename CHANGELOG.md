@@ -145,6 +145,10 @@ attached the same way.
 - Navigation links open in a new tab, each page sets its title and takes focus on its heading, there is a skip link
   and one screen reader voice, and the password forms say what to fix.
 - A tray line with a known type and a field of the wrong kind is skipped whole.
+- The Windows install folder is now `C:\Program Files\Matumi (Pty) Ltd\Koppel` (it was `C:\Program Files\Matumi\Koppel`).
+  The upgrade replaces a 0.2.0 install and the service points at the new folder. Change any script, shortcut or
+  firewall rule of your own that names the old path. `HKLM\SOFTWARE\Matumi\Koppel` and the data folder
+  `C:\ProgramData\Koppel` do not move.
 - The Windows installer no longer ships `data-folder.ps1`. `Koppel.exe prepare-data-folder [--check] [PATH]` does the same
   job with the same rules (it refuses a file or a link, takes over a folder an administrator owns, renames aside what a
   standard user owns, and `--check` changes nothing), and the installer runs it.

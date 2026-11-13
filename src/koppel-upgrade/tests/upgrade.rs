@@ -332,7 +332,10 @@ async fn a_0_2_0_install_is_read_and_rewritten_with_everything_it_had() {
         old_text.contains("certificatePfx"),
         "the fixture is in 0.2.0's shape"
     );
-    assert!(old_text.contains("\"version\""), "0.2.0 wrote the version");
+    assert!(
+        !old_text.contains("\"version\""),
+        "0.2.0 wrote no version, which reads as version 1"
+    );
     assert!(
         serde_json::from_str::<ServerSecrets>(&old_text).is_err(),
         "the current type does not read 0.2.0's shape"

@@ -12,6 +12,20 @@ members = [
     "koppel-windows",
     "usbip",
 ]
+# What a plain `cargo build` and `cargo test` take: everything except the Windows app, which builds
+# to an empty library and a program that does nothing on Linux. `--workspace` and `-p koppel-windows`
+# still build it, as the Windows installer script and the checks in CLAUDE.md do, and `koppel` pulls
+# its library in on Windows.
+default-members = [
+    "koppel",
+    "koppel-app",
+    "koppel-config",
+    "koppel-secrets",
+    "koppel-upgrade",
+    "koppel-usb",
+    "koppel-web",
+    "usbip",
+]
 
 [workspace.package]
 version = "0.2.0"

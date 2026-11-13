@@ -1,4 +1,4 @@
-//! The REST API of the UI, under `/api/v1/v1`. A change answers 202 with no body (or 201 or 200 where it
+//! The REST API of the UI, under `/api/v1`. A change answers 202 with no body (or 201 or 200 where it
 //! gives something back), and the confirmed state follows over the live push. A refusal is problem
 //! JSON (see [`ApiError`]).
 //!
@@ -7,7 +7,7 @@
 //! `attachment`, the pairing window is opened with `PUT` and closed with `DELETE`, and the server
 //! switches to its prepared certificate with `PUT` on `current-certificate`.
 //!
-//! [`router`] is the whole `/api/v1/v1` tree, nested there by the UI router, in four kinds of routes:
+//! [`router`] is the whole `/api/v1` tree, nested there by the UI router, in four kinds of routes:
 //!
 //! - **anonymous:** `/auth/state`, the first password and login, which work signed out (the state
 //!   says whether the caller is signed in). Setup and login sit behind the sign-in rate limit.

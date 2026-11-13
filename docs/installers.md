@@ -19,14 +19,15 @@ from Docker Hub.
 
 The image is built for this machine's architecture; the script stops if the target's differs.
 
-`Paths__KeyCertificate`: by default the key ring sits as plain files in the `koppel` volume.
-`docker-compose.yml` has the commented lines to keep a PFX outside the volume and mount it as
-a secret instead, with the `openssl` commands that make one. The setting is deprecated: 0.2.0 drops it, and an
-install that uses it pairs again after that upgrade (see the changelog). Do not start using it.
+The key that seals the secret files sits in the `koppel` volume by default, beside the files it protects.
+`docker-compose.yml` has the commented lines to keep it outside the volume as a Docker secret named
+`koppel-key`, with the `openssl` commands that make one (see "Keeping the key outside the volume" in
+[security.md](security.md#keeping-the-key-outside-the-volume)). `Paths__KeyCertificate` of 0.1.x is not read any more: an install
+that used it paired again at the upgrade to 0.2.0 (see the changelog). Do not start using it.
 
 ## Installer and Windows service
 
-`src/installer/windows` builds `Koppel-Setup.exe`, which ships the Rust build (0.2.0, `koppel-windows`
+`src/installer/windows` builds `Koppel-Setup.exe`, which ships the Rust build (`koppel-windows`
 below): an MSI inside a bootstrapper that installs the Visual C++ runtime first. `build.ps1` takes the
 version from `[workspace.package]` in `src/Cargo.toml`, checks the vendored usbip-win2 files against
 `usbip-win2/<version>/SHA256SUMS` and their Authenticode signers (and fails on any mismatch), builds the

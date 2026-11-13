@@ -88,8 +88,8 @@ How a file is read and written:
 The encrypted files are sealed with a key in a separate keys directory (`KOPPEL_KEYS_DIR`): machine DPAPI on
 Windows, and on Linux AES-256-GCM with a key file that is plain on disk (see "Secret files" in "Config
 files in Rust"). 0.1.x used a Data Protection key ring there, which Koppel converts from once (see "The
-upgrade from 0.1.x" there). `Paths:KeyCertificate`, which protected that key ring on Linux, is deprecated
-and goes in 0.2.0, which cannot read a key ring protected with it.
+upgrade from 0.1.x" there). `Paths:KeyCertificate`, which protected that key ring on Linux, is no longer read (see
+"The upgrade" below for what happens to files it protected).
 
 Data folder hardening. Before anything is written, Koppel restricts the config and keys directories:
 

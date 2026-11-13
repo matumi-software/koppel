@@ -44,10 +44,11 @@ armhf `.deb` below is the simpler way.
    docker compose up -d
    ```
 
-3. Within 10 minutes, open `https://<machine>:5240`, set the password and choose the role. Whoever
-   opens the UI first sets the password, so do it straight away. If the 10 minutes pass, the UI says
-   so: run `docker compose restart` and open it again. The browser warns about the certificate the
-   first time, because it is Koppel's own; accept it to go on.
+3. Within 10 minutes, open `https://<machine>:5240`, set the password and choose the role. Koppel
+   prints a one-time setup token in its log, and the first-run screen asks for it: read it with
+   `docker compose logs koppel`. If the 10 minutes pass, the UI says so: run `docker compose restart`,
+   read the new token and open the UI again. The browser warns about the certificate the first
+   time, because it is Koppel's own; accept it to go on.
 
 The container uses the host's network so clients can find it. It restarts after a crash, and comes
 back at the next reboot even if someone stopped it by hand. The image has a health check, but plain Docker only reports an unhealthy container and does not restart it.
@@ -78,8 +79,8 @@ On 64-bit Raspberry Pi OS, take `koppel_0.2.0_arm64.deb` instead, and on 32-bit 
 the Zero included, `koppel_0.2.0_armhf.deb`.
 
 The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Open
-`https://<machine>:5240` within 10 minutes and set the password (after that, `sudo systemctl restart koppel`
-opens setup again). If a module will not load, the install says so; the fix is the same as above.
+`https://<machine>:5240` within 10 minutes and set the password, with the setup token that
+`sudo journalctl -u koppel` shows (after that, `sudo systemctl restart koppel` opens setup again with a new token). If a module will not load, the install says so; the fix is the same as above.
 
 - Config and keys live in `/var/lib/koppel`. An upgrade (`sudo apt install` of a newer `.deb`) and
   `sudo apt remove koppel` keep them; `sudo apt purge koppel` deletes them.
@@ -131,7 +132,7 @@ docker compose run --rm koppel reset-password
 ```
 
 With the Linux package, run `sudo koppel reset-password`. On Windows, from an elevated prompt, run `Koppel.exe reset-password` from `C:\Program Files\Matumi\Koppel`. Then open
-the UI within 10 minutes and set a new password.
+the UI within 10 minutes and set a new password (on Linux and in Docker, with the new setup token from the log).
 
 ## Help test Koppel
 

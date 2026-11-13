@@ -48,11 +48,11 @@ pnpm --filter koppel.ui build                        # the UI the program embeds
 pnpm --filter koppel.ui dev                          # https://localhost:61040, /api proxied to KOPPEL_UI_URL (https://127.0.0.1:5240)
 
 # from src/
-cargo build --workspace
-cargo test --workspace                              # runs the contract tests too: each starts koppel on a free port
+cargo build --workspace --locked
+cargo test --workspace --locked                            # runs the contract tests too: each starts koppel on a free port
 cargo test -p koppel --test contract                # just the contract tests
 KOPPEL_WRITE_WIRE=1 cargo test -p koppel-web wire    # after changing a type the API sends or reads: rewrites ui/app/src/api/generated/wire.ts
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all --check
 cargo deny check                                    # licences, advisories and sources, before a pull request (cargo install cargo-deny)
 cargo run -p koppel                                  # https://localhost:5240; set KOPPEL_CONFIG_DIR and KOPPEL_KEYS_DIR to a folder of your own

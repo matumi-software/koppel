@@ -101,3 +101,98 @@ fn healthcheck_reads_the_new_and_the_old_names() {
         );
     }
 }
+
+fn scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("koppel-cli-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// What the installer relies on: `prepare-data-folder --check` exits 1 and says why on standard
+/// error, whatever is where the folder should be, and changes nothing. (Other systems answer that
+/// the command is for Windows, with the same exit code.)
+#[test]
+fn prepare_data_folder_check_fails_with_a_reason_and_changes_nothing() {
+    let base = scratch("prepare-check");
+    let missing = base.join("Koppel");
+    let out = koppel(
+        &["prepare-data-folder", "--check", missing.to_str().unwrap()],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let said = text(&out.stderr);
+    if cfg!(windows) {
+        assert!(said.contains("does not exist."), "{said}");
+    } else {
+        assert!(said.contains("is for Windows"), "{said}");
+    }
+    assert!(!missing.exists(), "--check made the folder");
+
+    let file = base.join("file");
+    std::fs::write(&file, b"x").unwrap();
+    let out = koppel(
+        &["prepare-data-folder", "--check", file.to_str().unwrap()],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    if cfg!(windows) {
+        assert!(text(&out.stderr).contains("is a file. Koppel needs a folder there."));
+    }
+    assert_eq!(std::fs::read(&file).unwrap(), b"x");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[cfg(windows)]
+#[test]
+fn prepare_data_folder_refuses_a_junction_and_leaves_its_target_alone() {
+    let base = scratch("prepare-junction");
+    let target = base.join("target");
+    std::fs::create_dir(&target).unwrap();
+    std::fs::write(target.join("keep.txt"), b"keep").unwrap();
+    let link = base.join("Koppel");
+    let made = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&link)
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    for args in [
+        vec!["prepare-data-folder", "--check", link.to_str().unwrap()],
+        vec!["prepare-data-folder", link.to_str().unwrap()],
+    ] {
+        let out = koppel(&args, &[]);
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let said = text(&out.stderr);
+        // Without elevation the second call stops earlier, which is also a refusal.
+        assert!(
+            said.contains("junction or symbolic link")
+                || said.contains("run this as an administrator"),
+            "{said}"
+        );
+    }
+    assert_eq!(std::fs::read(target.join("keep.txt")).unwrap(), b"keep");
+    let _ = std::fs::remove_dir(&link);
+    let _ = std::fs::remove_dir_all(base);
+}
+
+/// Not elevated, the preparing call stops before it touches anything.
+#[cfg(windows)]
+#[test]
+fn prepare_data_folder_without_elevation_changes_nothing() {
+    let elevated = Command::new("net")
+        .arg("session")
+        .output()
+        .is_ok_and(|out| out.status.success());
+    if elevated {
+        return;
+    }
+    let base = scratch("prepare-unelevated");
+    let folder = base.join("Koppel");
+    let out = koppel(&["prepare-data-folder", folder.to_str().unwrap()], &[]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("run this as an administrator"));
+    assert!(!folder.exists());
+    let _ = std::fs::remove_dir_all(base);
+}

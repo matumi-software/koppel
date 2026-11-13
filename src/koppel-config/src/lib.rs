@@ -12,6 +12,7 @@
 //! - [`ServerCertificate`]: the server certificate from `secrets.json`, as rustls presents it.
 
 mod certificate;
+mod data_folder;
 pub mod diagnostics;
 #[cfg(windows)]
 pub mod dpapi;
@@ -26,6 +27,11 @@ use std::sync::Arc;
 use ring::rand::{SecureRandom, SystemRandom};
 
 pub use certificate::{CertificateError, ServerCertificate};
+pub use data_folder::{
+    DataFolderError, check as check_data_folder, prepare as prepare_data_folder,
+};
+#[cfg(windows)]
+pub use data_folder::{SystemAccounts, SystemFiles};
 pub use file::{
     CodecError, ConfigErrorKind, ConfigFile, ConfigFileError, FileCodec, Options, PlainText,
     Subscription, ValidateFn, Validator, encode_json, replace_file, utc_stamp,

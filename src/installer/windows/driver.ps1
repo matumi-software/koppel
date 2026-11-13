@@ -106,9 +106,12 @@ function Get-StandaloneUsbip {
 
 function Test-DataFolder {
     # Write-Host, not Write-Output: the result of this function is the boolean, a message in the output would make it always true.
-    # The state file is read and written only in a folder that data-folder.ps1 accepts.
-    try { & (Join-Path $here 'data-folder.ps1') -Check; $true }
-    catch { Write-Host "The data folder is not safe to use: $_"; $false }
+    # The state file is read and written only in a folder that `koppel prepare-data-folder --check` accepts. It says why
+    # on standard error when it does not, which the MSI log captures; the exit code is the answer.
+    & (Join-Path (Split-Path $here) 'Koppel.exe') prepare-data-folder --check | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $true }
+    Write-Host 'The data folder is not safe to use (see the line above).'
+    $false
 }
 
 function Test-StateFile {

@@ -1,5 +1,183 @@
 # Changelog
 
+## 0.2.1 (2026-11-13)
+
+Koppel 0.2.1 is the first release after the 0.2.0 review. It closes a hole in the UI's guards, keeps UI sessions in
+memory, moves the machine-to-machine protocol to Skakel 3, versions the UI's REST API, and tidies how Koppel is
+configured and how it keeps its secrets. What Koppel does for a person is the same: the same devices are shared and
+attached the same way.
+
+**Read this before you upgrade:**
+
+- **Skakel 3 does not talk to 0.2.0.** A 0.2.1 machine and a 0.2.0 machine cannot link (each shows Skakel's version
+  message), and neither can a 0.2.1 machine and a 0.1.x one. Update both ends of a link together. A client keeps its
+  saved connection and links again once its server runs 0.2.1 too; nobody pairs again.
+- **Everyone signs in again.** Sessions are kept in memory under a new cookie, so the first start of 0.2.1 ends every
+  session, and so does every restart from now on.
+- **Back up the data folder before the first start.** `secrets.json` is rewritten into a new shape at that start,
+  and there is no downgrade: 0.2.0 cannot read the new file. Copy `/var/lib/koppel` (the `.deb`), the `koppel` volume
+  (Docker) or `%ProgramData%\Koppel` (Windows) first if you may go back.
+- **On Linux and in Docker, the first password needs a setup token.** When `KOPPEL_UI_ALLOW_FROM` is `lan` (the
+  default) or `any`, Koppel prints a one-time token in its log, and the first-run screen asks for it:
+  `docker compose logs koppel` or `sudo journalctl -u koppel`. An install that already has a password is not
+  affected; after `reset-password`, setup needs a new token. Windows has none: the installer sets `local`.
+- **The UI's REST API is under `/api/v1`, with renamed verbs.** The unversioned `/api/...` paths answer 404. Only
+  the UI uses them, and the UI and the program move together, so this matters to a script of your own only.
+- **Settings are `KOPPEL_*` variables and `--options`.** The 0.1.x names (`Ports__Ui`, `Paths__Config`, `--Ports:Ui`,
+  `--reset-password` and the rest) still work and are logged once at Warning as deprecated. Rename them when it suits
+  you; the table is in `docs/config.md`.
+
+### Security
+
+- **Fixed: the UI's access rules could be skipped.** A request that sent an `application/grpc+...` Content-Type was
+  handed to the network side without the check of `KOPPEL_UI_ALLOW_FROM`, so on the default single port a caller
+  outside the allowed networks could reach the UI's routes (the sign-in limit still applied, and protected routes
+  still asked for a session and answered 401). The surface is now chosen from the path and the port only, never from
+  a header. Update if the UI is reachable from a network you do not fully trust.
+- Each route is protected by the router it sits on, not by a table of prefixes: a path no route has answers 401
+  signed out and 404 signed in, paths are matched as written (`/API/settings` is the UI's page, not data), and a
+  request that reaches a router without a caller address is refused. `KOPPEL_UI_ALLOW_FROM` now answers before the
+  role gate, so a refused address sees 403 for every UI path where it used to see 404 for some.
+- **First-visitor setup** is limited by the setup window (10 minutes, `KOPPEL_UI_SETUP_WINDOW_MINUTES`) and, on
+  Linux and in Docker, by the setup token above. `GET /api/v1/auth/state` has a new field `setupTokenRequired`, and
+  `POST /api/v1/auth/setup` takes an optional `setupToken` and answers 403 without the right one.
+- **Sign-in is harder to guess at.** An IPv6 /64 counts as one caller for the lock, and a global budget of 30 tries
+  in 10 minutes applies to all callers together; past it every caller gets 429 until the window is over. A locked
+  administrator uses `reset-password`.
+- **Sessions are in memory,** with an opaque 256-bit id in the cookie `__Host-koppel-session` (it was `koppel.ui`;
+  the old cookie is ignored). A session lasts 12 hours without use and 7 days at most. `keys/ui-session.key` is
+  deleted at the first start, and `ui-auth.json` keeps the password hash only (its `securityStamp` and
+  `revokedSessions` are read and dropped).
+- **Pairing only while a person has opened the window.** A server takes no pairing requests until an administrator
+  presses Allow pairing on the Clients page (10 minutes, 1 to 60). Outside it a request gets 403.
+- **Secrets stay out of logs and mostly out of memory.** The secret fields print as `Secret(<redacted>)`, and the
+  values Koppel owns are wiped when dropped. This is best effort: see the threat model in `docs/security.md`.
+- **The key can live outside the volume** (see Settings). On Linux and in Docker the default key still sits beside
+  the files it protects. The threat model now says so, and says that the 0.1.x key ring left in `keys/` after the
+  upgrade can still open whatever 0.1.x sealed.
+- Every answer under `/api` carries `Cache-Control: no-store`, and the UI's `Content-Security-Policy` is a full
+  policy (`default-src 'self'`, no framing) where it was only `frame-ancestors 'none'`. `X-Forwarded-Proto` no longer
+  changes the origin check; the browser's `Sec-Fetch-Site` decides.
+- At most 512 connections per listener are served at once, a UI request body that stalls for 10 seconds is cut, and
+  Koppel stops at once with a UI tab open instead of waiting out the grace period.
+- UI files carry an `ETag`, so a browser revalidates and gets 304.
+
+### Wire and REST
+
+- **Skakel protocol 3** (`/skakel/v3`, package `skakel.v3`, TLS 1.3 only, eight-digit pairing codes bound to the
+  client name, fingerprints as bytes).
+- **`/api/v1`.** The UI's REST API moved from `/api/...` to `/api/v1/...`; `/api/remote/*` (other Koppels) did not.
+  Renamed or re-methoded endpoints:
+  - `POST /server/clients/{id}/rotate` is `POST /server/clients/{id}/secret`
+  - `POST /client/devices/{bus}/attach` is `PUT /client/devices/{bus}/attachment`, and `.../detach` is `DELETE` on it
+  - `POST /server/pairing/window` is `PUT` (closing stays `DELETE`)
+  - `POST /server/pairing/{id}/approve` is `POST /server/pairing/requests/{id}/approval`, and `.../{id}/deny` is
+    `DELETE /server/pairing/requests/{id}`
+  - `POST /client/pairing/confirm` is `POST /client/pairing/confirmation`
+  - `POST /server/keys/next-certificate/switch` is `PUT /server/keys/current-certificate`
+  - removed: `POST /server/keys/signing-key/rotate` (Skakel 3 tokens are not signed)
+- **Refusals are problem JSON** (`application/problem+json`, RFC 9457) with a stable `code`. The sign-in endpoints'
+  `{ "error": "..." }` is now `detail`, a wrong or weak password in the password change is a validation problem on
+  `current` or `next`, and the origin check (403), the sign-in limit (429, now with `Retry-After: 60`), a missing
+  session (401), an unknown API path (404), an unreadable body (400) and a wrong media type (415) have bodies where
+  they had none. A failed approval save answers 500, not 404. JSON answers are `application/json` without
+  `; charset=utf-8`, dates are written with `Z` instead of `+00:00`, and request bodies are read with camelCase names.
+- **Pairing window:** `PUT` and `DELETE /api/v1/server/pairing/window`; `window` is added to the pairing overview and
+  to `PairingRequestsChanged`. The keys view and `ServerKeysChanged` no longer carry `signingKeyId`,
+  `signingKeySince` or `retiredKeysUntil`.
+- **The live push opens with the state** of each resource the machine's role has, as the same events under the same
+  names, so the UI fetches only what the snapshot does not cover after a reconnect. No new event name or payload.
+- **New:** `GET /readyz` (the gateway, the certificate and the link to the server, as states only), and
+  `/api/v1/system/info` gains `commit` and `built`.
+- A server also answers discovery probes over IPv6 now, on the same UDP port, on a socket of its own.
+
+### Upgrade and on-disk
+
+- **`secrets.json` is rewritten once, at the first start** of 0.2.1, from 0.1.x's or 0.2.0's shape into Skakel's own
+  state: the certificate as DER and a PKCS#8 key (no PKCS#12), no token signing keys, no null keys. The DER is the
+  same, so pinned clients keep their pin, and the clients, the next certificate and the connection carry over.
+  `koppel-upgrade` does this, and the 0.1.x Data Protection conversion, before any file is opened. Other files are
+  read as they are and take the new shape when next written. **There is no downgrade.**
+- Every config file written by 0.2.1 ends with `"version": 1`, which older builds ignore; a file without it is read
+  as version 1, and a file with a newer version stops the start and is left alone. Writes are flushed, replaced and
+  the directory flushed, so a power cut cannot bring an old file back. Temp files are `0600`.
+- A `settings.json` that leaves out `shareOnStartup` now means true (it was false).
+- On Linux a symlinked or foreign-owned config or keys directory is refused at start.
+- `keys/ui-session.key` is deleted. **The 0.1.x key ring (`key-*.xml` in `keys/`) is left where it is.** Koppel never
+  deletes it; once you have a backup, delete the files by hand. There is no command.
+- New on Windows: `%ProgramData%\Koppel\logs\koppel.log` (rotated at 5 MiB, five files, administrators only), and the
+  service has its own SID, `NT SERVICE\Koppel`.
+- New command: `koppel diagnostics [file]` writes one report to attach to a support request (the encrypted files and
+  keys are never read, and values named like a secret are removed).
+
+### Settings
+
+- **`KOPPEL_*` settings and `--option` forms for every setting,** built once at start (`koppel --help` lists them),
+  plus the commands `serve` (the default), `reset-password` and `healthcheck`, and `koppel --version` with the commit
+  and the build date.
+- **Deprecated, still working, logged once:** `Ports__*`, `Paths__*`, `Ui__*`, `Usb__*`, `Gateway__*`, `Discovery__*`,
+  `RateLimits__*`, `--Section:Key`, `ASPNETCORE_ENVIRONMENT`, `--reset-password` and `--healthcheck`. When both names
+  are set, the new one wins. A compose file, `/etc/default/koppel` or a service registry value that uses the old
+  names needs no change to keep working; the compose files and installers here use the new ones.
+- **Stricter:** an unknown command line option or an invalid value stops the start (exit 2) and names the option,
+  where it used to be skipped. An unknown `KOPPEL_` or `Section__Key` variable is warned about, with the nearest known
+  name.
+- **New:** `KOPPEL_KEY_FILE` (Linux and Docker), a systemd credential named `koppel-key` and a Docker secret named
+  `koppel-key` keep the key that seals the secret files outside the volume, tried in that order. To move an install
+  over, set the source, start, wait for the log line that the files were sealed again, then move `koppel-secrets.key`
+  out of the keys directory, and keep the outside key: **the files cannot be read without it.**
+  `koppel-secrets.<anything>.key` files in `keys/` are read as older keys. The `.deb`'s unit and `docker-compose.yml`
+  carry the commented examples.
+- `Paths:KeyCertificate` has not been read since 0.2.0; setting it logs a warning.
+
+### Packaging and installers
+
+- The image's health check runs `koppel healthcheck`, and the image sets `KOPPEL_CONFIG_DIR` and `KOPPEL_KEYS_DIR`.
+  The Docker composes limit the container's log to three files of 10 MB.
+- The Windows installer sets `KOPPEL_UI_ALLOW_FROM=local` for the service (it was `Ui__AllowFrom`), and an upgrade
+  keeps the service's state.
+- The `.deb` no longer enables a unit the administrator disabled, and no longer restarts a stopped service on upgrade.
+- The embedded UI is about 240 KB smaller (Latin fonts only: Cyrillic, Greek or Vietnamese text in a monospace field
+  now uses the system font). The UI recovers by itself after a first connect that failed.
+- Navigation links open in a new tab, each page sets its title and takes focus on its heading, there is a skip link
+  and one screen reader voice, and the password forms say what to fix.
+- A tray line with a known type and a field of the wrong kind is skipped whole.
+
+### Developer-facing
+
+- There is no CI and no bot: no workflow runs on a hosted runner, Dependabot is gone, and the release is a checklist
+  run by hand ("To release" in `docs/building.md`). Run `cargo fmt --all --check`, `cargo build`, `cargo clippy` and
+  `cargo deny check` with `--locked`, the tests in a Linux container, and `.github/scripts/check-pins.sh`.
+  `rustup` reads `src/rust-toolchain.toml` and installs Rust 1.99.1 on the first cargo run from `src/`.
+- **Crate layout:** `koppel` (wiring) over `koppel-windows` and `koppel-web` over `koppel-app` over `koppel-usb` over
+  `usbip`, with `koppel-config`, `koppel-secrets` and `koppel-upgrade` beside them. `koppel-app` is new (the roles,
+  the activity log, the push bus, the tray rules), `usbip` is new (the USB/IP protocol with no Koppel in it),
+  `koppel-secrets` is new (`Secret<T>`), and `koppel-usb` names no config file. `koppel-windows` is out of the
+  default members. None of these crates is published.
+- The wire types of the UI are generated from the Rust types: after changing a type the API sends or reads, run
+  `KOPPEL_WRITE_WIRE=1 cargo test -p koppel-web wire` and commit `generated/wire.ts`. New dependency: ts-rs 12.0.1
+  (MIT). A connection test whose request itself failed reports `unexpectedAnswer` in the UI.
+- The contract tests run in the cargo workspace, each starting `koppel` on a free port (no scripts, no Docker).
+- Public API changes inside the workspace: `UsbClient::new` and `UsbServer::new` take `Deps` and `ServerDeps`;
+  koppel-config's `SecretBox` gained `with_sources`, `source`, `keys_read` and `reseal`, and the secret fields of its
+  file structs became `Secret<String>`.
+
+### Not tested on real hardware or by hand
+
+What the tests cover is listed in the pull requests. A person has not run these on the real thing:
+
+- Real USB hardware with 0.2.1. Only a Debian 13 server in Docker sharing to a native Windows 11 client has run on
+  hardware, with 0.2.0 (2026-11-09). A Linux client, a Windows server through usbipd-win and a Raspberry Pi are open
+  under #115.
+- The Windows installer: install, upgrade from 0.2.0, uninstall, the tray, the new log file and the service SID
+  (`NT SERVICE\Koppel`).
+- systemd credentials (`LoadCredential=koppel-key:...`) with the `.deb`'s unit, and the key outside the volume with a
+  Docker secret.
+- IPv6 multicast discovery (`ff02::1`) between two machines. The tests use unicast probes to `::1`.
+- The Debian package: install, upgrade from 0.2.0 (the new unit rules) and purge.
+- The setup token on a real Linux or Docker first run through a browser, and the 0.2.0 to 0.2.1 `secrets.json`
+  upgrade on a real install (it is tested on fixtures of 0.1.x and 0.2.0 files).
+
 ## 0.2.0 (2026-11-09)
 
 Koppel 0.2.0 is a rewrite in Rust, with the same web UI and features, small enough for a Raspberry Pi Zero.

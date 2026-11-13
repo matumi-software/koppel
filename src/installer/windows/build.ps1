@@ -14,7 +14,7 @@ Builds Koppel's Windows installer: bin\Koppel-Setup.exe.
 3. Builds the MSI, then setup.exe, which installs the VC++ runtime first: usbip-win2's tools link it
    dynamically, though Koppel's own programs do not need it.
 
-Run from anywhere: .\build.ps1 [-Version 0.2.0]. Without -Version it uses the workspace version in src\Cargo.toml.
+Run from anywhere: .\build.ps1 [-Version 0.2.1]. Without -Version it uses the workspace version in src\Cargo.toml.
 The Rust toolchain (cargo) must be on PATH, with CARGO_HOME and RUSTUP_HOME set if they are not the defaults.
 #>
 [CmdletBinding()]

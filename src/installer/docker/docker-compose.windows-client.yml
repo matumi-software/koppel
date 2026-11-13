@@ -10,7 +10,7 @@ name: koppel
 
 services:
   koppel:
-    image: matumisoftware/koppel:0.2.0
+    image: matumisoftware/koppel:0.2.1
     hostname: ${KOPPEL_HOSTNAME:-${COMPUTERNAME:-koppel}}
     environment:
       # Plain USB/IP with no login. Published on the host's 127.0.0.1 only, so only this machine reaches it.

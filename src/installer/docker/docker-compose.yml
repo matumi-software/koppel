@@ -10,7 +10,7 @@ name: koppel
 
 services:
   koppel:
-    image: matumisoftware/koppel:0.2.0
+    image: matumisoftware/koppel:0.2.1
     # An image already here (one deploy.sh copied, or one you built) is used as it is and is never
     # replaced by a pull from Docker Hub. Only a missing image is pulled.
     pull_policy: missing

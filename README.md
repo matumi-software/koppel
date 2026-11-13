@@ -88,6 +88,25 @@ The install loads the USB/IP modules now and at every boot, then starts the `kop
   Then `sudo systemctl restart koppel`.
 - The service runs as root, as the container does, and restarts if it stops.
 
+### Other Linux distributions
+
+On a distribution that does not install a `.deb` (Fedora, Arch, openSUSE and others), take the tarball for the
+machine from the same release: `koppel_0.2.1_amd64.tar.gz`, `koppel_0.2.1_arm64.tar.gz` or
+`koppel_0.2.1_armhf.tar.gz`. The program is one static binary, so it needs no libraries from the system. It
+needs a kernel that has the `usbip-host` and `vhci-hcd` modules, and systemd for the service.
+
+```sh
+wget https://github.com/matumi-software/koppel/releases/download/v0.2.1/koppel_0.2.1_amd64.tar.gz
+tar -xzf koppel_0.2.1_amd64.tar.gz
+cd koppel_0.2.1_amd64
+sudo ./install.sh
+```
+
+`install.sh` does what the `.deb` does and prints the same first-run steps. Run the new tarball's `install.sh`
+to upgrade; config and keys in `/var/lib/koppel` are never touched. `sudo ./uninstall.sh` removes Koppel and
+keeps them, `sudo ./uninstall.sh --purge` deletes them too. Without systemd the script installs the files and
+leaves the service to you.
+
 ## Run it on Windows
 
 Download `Koppel-Setup.exe` from the [latest release](https://github.com/matumi-software/koppel/releases/latest)

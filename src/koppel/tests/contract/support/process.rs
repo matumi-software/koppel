@@ -7,8 +7,8 @@
 
 use std::fs::File;
 #[cfg(target_os = "linux")]
-use std::net::{IpAddr, UdpSocket};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::IpAddr;
+use std::net::{TcpListener, TcpStream, ToSocketAddrs, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -83,11 +83,25 @@ impl Drop for TempDir {
 
 /// A free port: asks the system for one and lets go of it. Another process can take it before the
 /// program binds it, so a start that loses that race tries again with another.
+///
+/// The port is free for UDP too. A server answers discovery on the UDP port that has its TCP
+/// port's number, and the system hands out ephemeral UDP ports to other sockets (other instances'
+/// probes, DNS) from the same range, so a port that is only free for TCP is sometimes taken for
+/// UDP: the server then logs that it cannot announce and the client never finds it.
 fn free_port() -> u16 {
-    let listener = TcpListener::bind(("::", 0))
-        .or_else(|_| TcpListener::bind(("0.0.0.0", 0)))
-        .expect("a free port");
-    listener.local_addr().expect("an address").port()
+    for _ in 0..100 {
+        let listener = TcpListener::bind(("::", 0))
+            .or_else(|_| TcpListener::bind(("0.0.0.0", 0)))
+            .expect("a free port");
+        let port = listener.local_addr().expect("an address").port();
+        // A wildcard IPv6 socket conflicts with an IPv4 one on the same port here, so it is the
+        // one check; an IPv4-only machine has only the second.
+        let udp = UdpSocket::bind(("::", port)).or_else(|_| UdpSocket::bind(("0.0.0.0", port)));
+        if udp.is_ok() {
+            return port;
+        }
+    }
+    panic!("no port that is free for both TCP and UDP");
 }
 
 /// A running `koppel`. Dropping it stops the program and removes its folders.

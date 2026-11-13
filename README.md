@@ -150,7 +150,7 @@ trust, check that its SHA-256 fingerprint is the one under Clients before you ac
 docker compose run --rm koppel reset-password
 ```
 
-With the Linux package, run `sudo koppel reset-password`. On Windows, from an elevated prompt, run `Koppel.exe reset-password` from `C:\Program Files\Matumi\Koppel`. Then open
+With the Linux package, run `sudo koppel reset-password`. On Windows, from an elevated prompt, run `Koppel.exe reset-password` from `C:\Program Files\Matumi (Pty) Ltd\Koppel`. Then open
 the UI within 10 minutes and set a new password (on Linux and in Docker, with the new setup token from the log).
 
 ## Help test Koppel

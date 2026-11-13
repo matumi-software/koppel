@@ -49,7 +49,7 @@ The UI on port 5240 (HTTPS) needs a password. There is one admin password and no
 
   ```powershell
   # elevated prompt
-  & "C:\Program Files\Matumi\Koppel\Koppel.exe" reset-password
+  & "C:\Program Files\Matumi (Pty) Ltd\Koppel\Koppel.exe" reset-password
   ```
 
 ### Keeping the key outside the volume

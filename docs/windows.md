@@ -120,7 +120,7 @@ set a new one in the UI within 10 minutes:
 
 ```powershell
 # native install, elevated prompt
-& "C:\Program Files\Matumi\Koppel\Koppel.exe" reset-password
+& "C:\Program Files\Matumi (Pty) Ltd\Koppel\Koppel.exe" reset-password
 
 # Docker Desktop
 docker compose run --rm koppel reset-password

@@ -157,9 +157,9 @@ attached the same way.
 - The Windows installer no longer ships `data-folder.ps1`. `Koppel.exe prepare-data-folder [--check] [PATH]` does the same
   job with the same rules (it refuses a file or a link, takes over a folder an administrator owns, renames aside what a
   standard user owns, and `--check` changes nothing), and the installer runs it.
-- The service keeps eight privileges (`sc privs`): the three the tray launch needs, SeChangeNotify, and four kept until
-  a test on a real machine says they can go (the reasons are in `docs/decisions.md`). Delete the `RequiredPrivileges`
-  value under the service key to undo it.
+- The service keeps six privileges (`sc privs`): the three the tray launch needs, SeChangeNotify, and SeRestore and
+  SeTakeOwnership for the data folder hardening (the reasons are in `docs/decisions.md`). A token holds about thirty
+  otherwise. Delete the `RequiredPrivileges` value under the service key to undo it.
 
 ### Developer-facing
 

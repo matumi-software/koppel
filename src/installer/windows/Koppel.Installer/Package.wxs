@@ -109,12 +109,12 @@
     <CustomAction Id="SetServiceSid" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Keeps only the privileges the service uses in its token. LocalSystem starts with about thirty; the list and the reason for
-         each is in docs/decisions.md ("The service keeps eight privileges"). util:ServiceConfig in WiX 5.0.2 has no attribute for it
+         each is in docs/decisions.md ("The service keeps six privileges"). util:ServiceConfig in WiX 5.0.2 has no attribute for it
          (nothing named Privilege is in the extension), so this is sc privs, as SetServiceSid is. It takes effect when the service
          starts, which is after this action (StartServices follows InstallServices). Not vital, so Return="ignore": if it fails the
          service runs with the privileges it has always had, and WixQuietExec logs why. -->
     <SetProperty Id="SetServicePrivileges" Sequence="execute" Before="SetServicePrivileges"
-                 Value="&quot;[System64Folder]sc.exe&quot; privs Koppel SeAssignPrimaryTokenPrivilege/SeIncreaseQuotaPrivilege/SeTcbPrivilege/SeChangeNotifyPrivilege/SeImpersonatePrivilege/SeCreateGlobalPrivilege/SeRestorePrivilege/SeTakeOwnershipPrivilege" />
+                 Value="&quot;[System64Folder]sc.exe&quot; privs Koppel SeAssignPrimaryTokenPrivilege/SeIncreaseQuotaPrivilege/SeTcbPrivilege/SeChangeNotifyPrivilege/SeRestorePrivilege/SeTakeOwnershipPrivilege" />
     <CustomAction Id="SetServicePrivileges" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- pnputil can answer 3010 (a restart finishes the driver install or removal). WixQuietExec reads that as a failure, so

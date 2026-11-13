@@ -30,7 +30,5 @@ libc.workspace = true
 windows.workspace = true
 
 [dev-dependencies]
-koppel-web.workspace = true
-tokio-rustls.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }

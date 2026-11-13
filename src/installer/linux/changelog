@@ -1,3 +1,22 @@
+koppel (0.2.1) unstable; urgency=medium
+
+  * Fixes a gap in the UI's access rules: a request with a gRPC content type
+    skipped the check of KOPPEL_UI_ALLOW_FROM.
+  * The UI keeps sessions in memory, so everyone signs in again once. On Linux
+    and in Docker the first password needs the setup token from the log
+    (journalctl -u koppel).
+  * Koppel machines talk Skakel protocol 3: a 0.2.1 machine does not link with
+    a 0.2.0 one, so update both ends. The first start rewrites secrets.json and
+    there is no way back, so back up /var/lib/koppel first.
+  * Settings are KOPPEL_* variables and --options; the 0.1.x names still work
+    and are logged as deprecated. The key can be kept outside the data folder
+    (KOPPEL_KEY_FILE or the koppel-key systemd credential).
+  * An upgrade no longer enables a unit the administrator disabled or
+    restarts a stopped service. The full notes are in CHANGELOG.md in the
+    repository.
+
+ -- Matumi Software <70009674+RikusVanRensburg@users.noreply.github.com>  Fri, 13 Nov 2026 12:00:00 +0000
+
 koppel (0.2.0) unstable; urgency=medium
 
   * Koppel is rewritten in Rust, with the same web UI and features, small

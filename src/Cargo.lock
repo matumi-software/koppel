@@ -1043,7 +1043,7 @@ dependencies = [
 
 [[package]]
 name = "koppel"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "clap",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "koppel-app"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1104,7 +1104,7 @@ dependencies = [
 
 [[package]]
 name = "koppel-config"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.23.1",
  "indexmap",
@@ -1126,7 +1126,7 @@ dependencies = [
 
 [[package]]
 name = "koppel-secrets"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1135,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "koppel-upgrade"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "aes",
  "base64 0.23.1",
@@ -1157,7 +1157,7 @@ dependencies = [
 
 [[package]]
 name = "koppel-usb"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "http",
  "indexmap",
@@ -1181,7 +1181,7 @@ dependencies = [
 
 [[package]]
 name = "koppel-web"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -1220,7 +1220,7 @@ dependencies = [
 
 [[package]]
 name = "koppel-windows"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "koppel-app",
  "serde",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "usbip"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proptest",
  "serde",

@@ -7,7 +7,7 @@
 1. Copy `prepare-host.sh` to the machine and run it once with `sudo bash prepare-host.sh`. It installs Docker from Docker's signed apt repository, loads `usbip-host` and `vhci-hcd` and keeps them loaded at boot. If `modprobe` fails (Ubuntu cloud and minimal kernels), it prints the hint to install `linux-modules-extra-<kernel>`.
 2. Copy `docker-compose.yml` there and run `docker compose up -d`. It pulls `matumisoftware/koppel` from Docker Hub.
 
-The compose files pin the image tag (`matumisoftware/koppel:0.2.0`). To upgrade, edit the tag to the
+The compose files pin the image tag (`matumisoftware/koppel:0.2.1`). To upgrade, edit the tag to the
 new version, then `docker compose pull && docker compose up -d`. Config and keys stay in the `koppel`
 volume.
 

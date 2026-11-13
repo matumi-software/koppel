@@ -9,9 +9,9 @@ use time::OffsetDateTime;
 use ts_rs::TS;
 
 use super::{ApiError, ApiResult, accepted};
-use crate::activity::{ActivityEvent, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::json::JsonBody;
 use crate::state::SettingsApi;
+use koppel_app::activity::{ActivityEvent, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 
 /// A partial change to the settings. A field left out or null stays as it is.
 #[derive(Debug, Default, Deserialize, TS)]

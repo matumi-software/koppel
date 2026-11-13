@@ -15,7 +15,7 @@ use time::OffsetDateTime;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use crate::api::client::ConnectionUpdate;
+use crate::connection::ConnectionUpdate;
 use crate::push::{Event, Push};
 use crate::roles::{ConnectionTest, DiscoveredServer, Outcome, PairingState, PairingStatus};
 use crate::tasks::Tasks;
@@ -84,7 +84,7 @@ struct Run {
 }
 
 impl SkakelClientRole {
-    pub(crate) fn new(
+    pub fn new(
         connection: ConfigFile<ClientConnection>,
         push: Push,
         browser: Option<Browser>,
@@ -115,7 +115,7 @@ impl SkakelClientRole {
     }
 
     /// Looks for servers while this machine can be a client, and pushes the list as it changes.
-    pub(crate) async fn follow(self: &Arc<Self>, settings: &ConfigFile<KoppelSettings>) {
+    pub async fn follow(self: &Arc<Self>, settings: &ConfigFile<KoppelSettings>) {
         let Some(browser) = self.browser.clone() else {
             return;
         };
@@ -524,7 +524,7 @@ impl SkakelClientRole {
             let run = Arc::new(Run {
                 id: pairings.next,
                 server_url: server_url.to_owned(),
-                fingerprint: crate::api::client::normalize(fingerprint),
+                fingerprint: crate::connection::normalize(fingerprint),
                 server_name,
                 stop: CancellationToken::new(),
             });

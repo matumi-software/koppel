@@ -16,13 +16,13 @@ use std::path::PathBuf;
 
 use ts_rs::{Config, TS};
 
-use crate::activity::ActivityEvent;
 use crate::api::Problem;
-use crate::api::client::{ConnectionUpdate, ConnectionView, PairStart};
 use crate::api::server::{Approve, ClientSecret, CreateClient, OpenPairing, ServerIdentity};
 use crate::api::settings::{SettingsPatch, SystemInfo};
 use crate::auth::endpoints::{AuthState, ChangeRequest, PasswordRequest};
-use crate::roles::{
+use koppel_app::activity::ActivityEvent;
+use koppel_app::connection::{ConnectionUpdate, ConnectionView, PairStart};
+use koppel_app::roles::{
     ClientView, ConnectionTest, DiscoveredServer, KeysView, NewClient, Outcome, PairingOverview,
     PairingRequestView, PairingState, PairingStatus, PairingWindowView, RequestState,
 };

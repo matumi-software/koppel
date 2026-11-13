@@ -23,7 +23,7 @@ impl<T> FileValue for T where
 }
 
 /// `settings.json` as koppel-usb follows it.
-pub(crate) fn settings(file: &ConfigFile<KoppelSettings>) -> Arc<dyn Observed<UsbSettings>> {
+pub fn settings(file: &ConfigFile<KoppelSettings>) -> Arc<dyn Observed<UsbSettings>> {
     Arc::new(Mapped {
         file: file.clone(),
         to: usb_settings,
@@ -31,7 +31,7 @@ pub(crate) fn settings(file: &ConfigFile<KoppelSettings>) -> Arc<dyn Observed<Us
 }
 
 /// `connection.json` as koppel-usb follows it.
-pub(crate) fn connection(file: &ConfigFile<ClientConnection>) -> Arc<dyn Observed<Connection>> {
+pub fn connection(file: &ConfigFile<ClientConnection>) -> Arc<dyn Observed<Connection>> {
     Arc::new(Mapped {
         file: file.clone(),
         to: usb_connection,
@@ -39,7 +39,7 @@ pub(crate) fn connection(file: &ConfigFile<ClientConnection>) -> Arc<dyn Observe
 }
 
 /// `devices.json` as koppel-usb saves it.
-pub(crate) fn shared(file: &ConfigFile<files::SharedDevices>) -> Arc<dyn Store<SharedDevices>> {
+pub fn shared(file: &ConfigFile<files::SharedDevices>) -> Arc<dyn Store<SharedDevices>> {
     Arc::new(Persisted {
         file: file.clone(),
         to: usb_shared,
@@ -48,9 +48,7 @@ pub(crate) fn shared(file: &ConfigFile<files::SharedDevices>) -> Arc<dyn Store<S
 }
 
 /// `attached.json` as koppel-usb saves it.
-pub(crate) fn attached(
-    file: &ConfigFile<files::AttachedDevices>,
-) -> Arc<dyn Store<AttachedDevices>> {
+pub fn attached(file: &ConfigFile<files::AttachedDevices>) -> Arc<dyn Store<AttachedDevices>> {
     Arc::new(Persisted {
         file: file.clone(),
         to: usb_attached,
@@ -59,7 +57,7 @@ pub(crate) fn attached(
 }
 
 /// The connection koppel-usb hands to the transport, as the file holds it.
-pub(crate) fn file_connection(connection: &Connection) -> ClientConnection {
+pub fn file_connection(connection: &Connection) -> ClientConnection {
     ClientConnection {
         server_url: connection.server_url.clone(),
         server_fingerprint: connection.server_fingerprint.clone(),

@@ -12,6 +12,7 @@ use ts_rs::TS;
 use tokio::sync::broadcast;
 
 use crate::push::{Event, Push};
+use crate::random::hex;
 use crate::sync::Unpoisoned;
 
 /// How many entries the log keeps.
@@ -25,7 +26,7 @@ pub use koppel_usb::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 /// One thing that happened. `summary` is the sentence the UI shows; `detail` carries the reason when
 /// it failed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct ActivityEvent {
     pub id: String,
@@ -108,17 +109,13 @@ impl ActivityLog {
 /// milliseconds, the version, then random bits.
 fn time_ordered_id(now: OffsetDateTime) -> String {
     let millis = (now.unix_timestamp_nanos() / 1_000_000) as u64 & 0xFFFF_FFFF_FFFF;
-    let random = crate::auth::random_bytes::<10>();
+    let random = crate::random::random_bytes::<10>();
     let mut bytes = [0u8; 16];
     bytes[..6].copy_from_slice(&millis.to_be_bytes()[2..]);
     bytes[6..].copy_from_slice(&random);
     bytes[6] = 0x70 | (bytes[6] & 0x0F);
     bytes[8] = 0x80 | (bytes[8] & 0x3F);
     hex(&bytes)
-}
-
-pub(crate) fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]

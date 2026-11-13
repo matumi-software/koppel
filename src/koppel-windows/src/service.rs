@@ -20,8 +20,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use koppel_web::App;
-use koppel_web::tray::TrayFeed;
+use koppel_app::tray::TrayFeed;
 use tokio::sync::watch;
 use windows::Win32::Foundation::ERROR_FAILED_SERVICE_CONTROLLER_CONNECT;
 use windows::Win32::System::Threading::CREATE_NO_WINDOW;
@@ -107,7 +106,7 @@ impl Service {
 
     /// Says the service runs, publishes the UI's address for the Start menu entry, and starts the
     /// tray icons. Call it once the ports listen; close the trays when stopping.
-    pub fn started(&self, app: &Arc<App>, address: Option<IpAddr>, ui_port: u16) -> Trays {
+    pub fn started(&self, feed: TrayFeed, address: Option<IpAddr>, ui_port: u16) -> Trays {
         self.status.report(
             ServiceState::Running,
             ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
@@ -119,7 +118,7 @@ impl Service {
             "Koppel {} started. The UI is at {url}",
             env!("CARGO_PKG_VERSION")
         );
-        launcher::start(url, TrayFeed::new(app))
+        launcher::start(url, feed)
     }
 }
 

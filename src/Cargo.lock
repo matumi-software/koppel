@@ -1067,6 +1067,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "koppel-app"
+version = "0.2.0"
+dependencies = [
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "futures-util",
+ "http",
+ "koppel-config",
+ "koppel-usb",
+ "prost",
+ "protox",
+ "rcgen",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "skakel-client",
+ "skakel-server",
+ "skakel-wire",
+ "socket2",
+ "thiserror",
+ "time",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tonic",
+ "tonic-prost",
+ "tonic-prost-build",
+ "tower-service",
+ "tracing",
+ "ts-rs",
+ "windows",
+]
+
+[[package]]
 name = "koppel-config"
 version = "0.2.0"
 dependencies = [
@@ -1151,7 +1187,6 @@ version = "0.2.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
- "bytes",
  "cookie",
  "flate2",
  "futures-util",
@@ -1160,10 +1195,9 @@ dependencies = [
  "hyper-util",
  "if-addrs",
  "indexmap",
+ "koppel-app",
  "koppel-config",
  "koppel-usb",
- "prost",
- "protox",
  "rcgen",
  "reqwest",
  "ring",
@@ -1171,7 +1205,6 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "skakel-client",
  "skakel-server",
  "skakel-wire",
  "socket2",
@@ -1180,22 +1213,18 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-util",
- "tonic",
- "tonic-prost",
- "tonic-prost-build",
  "tower",
  "tower-http",
  "tower-service",
  "tracing",
  "ts-rs",
- "windows",
 ]
 
 [[package]]
 name = "koppel-windows"
 version = "0.2.0"
 dependencies = [
- "koppel-web",
+ "koppel-app",
  "serde",
  "serde_json",
  "tokio",

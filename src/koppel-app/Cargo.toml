@@ -1,0 +1,53 @@
+[package]
+name = "koppel-app"
+description = "Koppel's roles: the server and client on Skakel, the USB layer behind them, the activity log, the live push bus and what the Windows tray shows"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Lets the wire types be read back as well as written, for the web crate's tests of the API.
+test-util = []
+
+[dependencies]
+koppel-config.workspace = true
+koppel-usb.workspace = true
+skakel-server.workspace = true
+skakel-client.workspace = true
+skakel-wire.workspace = true
+prost.workspace = true
+tonic = { workspace = true, features = ["codegen"] }
+tonic-prost.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+tokio-util.workspace = true
+bytes.workspace = true
+axum.workspace = true
+tower-service.workspace = true
+tokio-rustls.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+tracing.workspace = true
+serde.workspace = true
+ts-rs.workspace = true
+serde_json.workspace = true
+time.workspace = true
+ring.workspace = true
+base64.workspace = true
+futures-util.workspace = true
+socket2.workspace = true
+thiserror.workspace = true
+http.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
+[build-dependencies]
+protox.workspace = true
+tonic-prost-build.workspace = true
+
+[dev-dependencies]
+# Paused time (`start_paused`).
+tokio = { workspace = true, features = ["test-util"] }

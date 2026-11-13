@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use crate::tasks::Tasks;
 
 /// Koppel's stream type for one USB device.
-pub(crate) const USB_STREAM: &str = "usb";
+pub const USB_STREAM: &str = "usb";
 
 /// The most bytes one data frame carries.
 const CHUNK: usize = 64 * 1024;
@@ -43,7 +43,7 @@ const FAILED: &str = "FAILED";
 
 /// Opens `usb` streams on the server and hands each to the data plane, with the client Skakel
 /// checked.
-pub(crate) fn usb_handler(data_plane: UsbDataPlane, tasks: Tasks) -> impl StreamHandler {
+pub fn usb_handler(data_plane: UsbDataPlane, tasks: Tasks) -> impl StreamHandler {
     move |request: StreamRequest| {
         let data_plane = data_plane.clone();
         let tasks = tasks.clone();
@@ -64,10 +64,7 @@ pub(crate) fn usb_handler(data_plane: UsbDataPlane, tasks: Tasks) -> impl Stream
 }
 
 /// Opens a `usb` stream on `link`, on a connection of its own, as koppel-usb's client asks.
-pub(crate) async fn open_usb(
-    link: &Link,
-    tasks: &Tasks,
-) -> Result<Box<dyn DeviceStream>, OpenError> {
+pub async fn open_usb(link: &Link, tasks: &Tasks) -> Result<Box<dyn DeviceStream>, OpenError> {
     match link.open_stream(USB_STREAM, &[]).await {
         Ok(OpenResult::Opened(stream)) => {
             Ok(Box::new(Bridged::start(ClientEnd(Arc::new(stream)), tasks)))

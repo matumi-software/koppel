@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::sync::Unpoisoned;
+use koppel_app::sync::Unpoisoned;
 
 /// Who may use the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

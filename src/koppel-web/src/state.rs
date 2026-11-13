@@ -8,13 +8,13 @@ use axum::extract::FromRef;
 use koppel_config::ConfigFile;
 use koppel_config::files::{ClientConnection, KoppelSettings};
 
-use crate::activity::ActivityLog;
 use crate::app::App;
 use crate::auth::UiAuth;
-use crate::host::Host;
-use crate::push::Push;
-use crate::roles::{SkakelClientRole, SkakelServerRole, UsbClientRole, UsbServerRole};
 use crate::tls::CertificateSlot;
+use koppel_app::activity::ActivityLog;
+use koppel_app::host::Host;
+use koppel_app::push::Push;
+use koppel_app::roles::{SkakelClientRole, SkakelServerRole, UsbClientRole, UsbServerRole};
 
 /// `/api/v1/auth/*`: sign-in and the password.
 #[derive(Clone)]
@@ -76,8 +76,8 @@ impl FromRef<Arc<App>> for AuthApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
             auth: app.auth.clone(),
-            activity: app.activity.clone(),
-            host: app.host.clone(),
+            activity: app.core.activity.clone(),
+            host: app.core.host.clone(),
         }
     }
 }
@@ -85,12 +85,12 @@ impl FromRef<Arc<App>> for AuthApi {
 impl FromRef<Arc<App>> for SettingsApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
-            settings: app.settings.clone(),
-            activity: app.activity.clone(),
-            host: app.host.clone(),
-            server: app.server.clone(),
-            usb_server: app.usb_server.clone(),
-            usb_client: app.usb_client.clone(),
+            settings: app.core.settings.clone(),
+            activity: app.core.activity.clone(),
+            host: app.core.host.clone(),
+            server: app.core.server.clone(),
+            usb_server: app.core.usb_server.clone(),
+            usb_client: app.core.usb_client.clone(),
         }
     }
 }
@@ -98,10 +98,10 @@ impl FromRef<Arc<App>> for SettingsApi {
 impl FromRef<Arc<App>> for ServerApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
-            server: app.server.clone(),
-            usb_server: app.usb_server.clone(),
-            activity: app.activity.clone(),
-            host: app.host.clone(),
+            server: app.core.server.clone(),
+            usb_server: app.core.usb_server.clone(),
+            activity: app.core.activity.clone(),
+            host: app.core.host.clone(),
         }
     }
 }
@@ -109,9 +109,9 @@ impl FromRef<Arc<App>> for ServerApi {
 impl FromRef<Arc<App>> for ClientApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
-            client: app.client.clone(),
-            connection: app.connection.clone(),
-            usb_client: app.usb_client.clone(),
+            client: app.core.client.clone(),
+            connection: app.core.connection.clone(),
+            usb_client: app.core.usb_client.clone(),
         }
     }
 }
@@ -119,8 +119,8 @@ impl FromRef<Arc<App>> for ClientApi {
 impl FromRef<Arc<App>> for ReadyApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
-            usb_client: app.usb_client.clone(),
-            certificate: app.certificate(),
+            usb_client: app.core.usb_client.clone(),
+            certificate: app.core.certificate(),
         }
     }
 }
@@ -128,13 +128,13 @@ impl FromRef<Arc<App>> for ReadyApi {
 impl FromRef<Arc<App>> for PushApi {
     fn from_ref(app: &Arc<App>) -> Self {
         Self {
-            push: app.push.clone(),
-            settings: app.settings.clone(),
-            connection: app.connection.clone(),
-            server: app.server.clone(),
-            usb_server: app.usb_server.clone(),
-            client: app.client.clone(),
-            usb_client: app.usb_client.clone(),
+            push: app.core.push.clone(),
+            settings: app.core.settings.clone(),
+            connection: app.core.connection.clone(),
+            server: app.core.server.clone(),
+            usb_server: app.core.usb_server.clone(),
+            client: app.core.client.clone(),
+            usb_client: app.core.usb_client.clone(),
         }
     }
 }

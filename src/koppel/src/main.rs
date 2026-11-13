@@ -200,7 +200,7 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
     #[cfg(windows)]
     let trays = service
         .as_ref()
-        .map(|service| service.started(&app, address, ui_port));
+        .map(|service| service.started(app.tray_feed(), address, ui_port));
 
     #[cfg(windows)]
     if let Some(service) = &service {

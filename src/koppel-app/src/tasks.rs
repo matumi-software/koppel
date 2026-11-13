@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 /// How long a stop waits for the tasks that did not end when asked to.
-pub(crate) const STOP_WAIT: Duration = Duration::from_secs(5);
+pub const STOP_WAIT: Duration = Duration::from_secs(5);
 
 /// A handle on the app's tasks. Cheap to clone; every clone is the same set.
 #[derive(Clone, Default)]

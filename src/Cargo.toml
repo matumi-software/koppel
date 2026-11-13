@@ -3,6 +3,7 @@
 resolver = "3"
 members = [
     "koppel",
+    "koppel-app",
     "koppel-config",
     "koppel-secrets",
     "koppel-upgrade",
@@ -28,6 +29,7 @@ unsafe_code = "forbid"
 
 [workspace.dependencies]
 koppel-web = { path = "koppel-web", version = "0.2.0" }
+koppel-app = { path = "koppel-app", version = "0.2.0" }
 koppel-config = { path = "koppel-config", version = "0.2.0" }
 koppel-secrets = { path = "koppel-secrets", version = "0.2.0" }
 koppel-upgrade = { path = "koppel-upgrade", version = "0.2.0" }

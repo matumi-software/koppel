@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use koppel_web::tray::TrayState;
+use koppel_app::tray::TrayState;
 use koppel_windows::launcher::TrayProcess;
 use koppel_windows::wire;
 

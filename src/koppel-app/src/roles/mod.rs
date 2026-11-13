@@ -11,14 +11,14 @@
 
 pub mod skakel;
 mod usb;
-pub(crate) mod usb_store;
+pub mod usb_store;
 
 use serde::Serialize;
 use time::OffsetDateTime;
 use ts_rs::TS;
 
 pub use skakel::{SkakelClientRole, SkakelServerRole};
-pub(crate) use usb::UsbActivity;
+pub use usb::UsbActivity;
 pub use usb::{UsbClientRole, UsbServerRole};
 
 /// A change that could not be saved. The caller gets 500 and the log gets the whole chain.
@@ -34,7 +34,7 @@ pub enum RoleError {
 
 /// One registered client, as the server's UI lists it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct ClientView {
     pub id: String,
@@ -53,7 +53,7 @@ pub struct ClientView {
 
 /// A client just added, with its secret.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct NewClient {
     pub client_id: String,
@@ -63,7 +63,7 @@ pub struct NewClient {
 
 /// The server's certificate, and the next one while a handover is under way.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct KeysView {
     pub fingerprint: String,
@@ -84,7 +84,7 @@ pub struct Switched {
 /// Whether the server takes new pairing requests. Skakel 0.3.0 takes them only while a person at
 /// the server has opened a window.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingWindowView {
     pub open: bool,
@@ -109,7 +109,7 @@ impl PairingWindowView {
 
 /// The pairing window and the requests waiting on the server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingOverview {
     pub requests: Vec<PairingRequestView>,
@@ -131,7 +131,7 @@ impl PairingOverview {
 
 /// One pairing request on the server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingRequestView {
     pub id: String,
@@ -149,7 +149,7 @@ pub struct PairingRequestView {
 
 /// Where a pairing request on the server stands. Skakel 0.3.0 words it as `waiting` or `denied`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum RequestState {
     Waiting,
@@ -189,7 +189,7 @@ pub enum RegisterError {
 
 /// How a connection test ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum Outcome {
     Ok,
@@ -236,7 +236,7 @@ impl Outcome {
 
 /// How a connection test ended: a fixed set, with fixed wording.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionTest {
     pub ok: bool,
@@ -262,7 +262,7 @@ impl ConnectionTest {
 
 /// A server found on the local network.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredServer {
     pub name: String,
@@ -277,7 +277,7 @@ pub struct DiscoveredServer {
 
 /// Where the client's pairing stands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub struct PairingStatus {
     pub state: PairingState,
@@ -293,7 +293,7 @@ pub struct PairingStatus {
 
 /// Where the client's pairing stands.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
-#[cfg_attr(test, derive(serde::Deserialize))]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
 pub enum PairingState {
     #[default]

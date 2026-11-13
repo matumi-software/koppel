@@ -20,10 +20,10 @@ use super::session::clear_cookie;
 use super::throttle::Reservation;
 use super::{SetupOutcome, SignedIn, password};
 use crate::access::{address_key, throttle_key};
-use crate::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::api::{ApiError, ApiResult};
 use crate::json::JsonBody;
 use crate::state::AuthApi;
+use koppel_app::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 
 #[derive(Serialize, TS)]
 #[cfg_attr(test, derive(serde::Deserialize))]

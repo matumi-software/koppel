@@ -1,38 +1,23 @@
-//! Everything the UI's server side holds, started from the config files as 0.1.x starts them, with
-//! the server and client roles on Skakel and the USB layer behind them.
+//! The web server's app: the roles of `koppel-app` with the sign-in, the access rules, the rate limit
+//! and the TLS ports on top of them, and the routers that serve it all.
 
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use koppel_config::files::{
-    AttachedDevices, ClientConnection, KoppelSettings, Role, ServerSecrets, SharedDevices,
-    UiCredentials,
-};
+use koppel_app::tray::TrayFeed;
+use koppel_app::{CertificateSlot, Host};
+use koppel_config::files::{Role, UiCredentials};
 use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox, open};
-use koppel_usb::{ActivitySink, GatewayOptions, Platform, SystemClock, UsbDataPlane, UsbIpGateway};
-use skakel_client::{Browser, BrowserOptions};
-use skakel_wire::SkakelApp;
-use tokio::sync::watch;
 
 use crate::WebError;
 use crate::access::{UiAccess, UiReach};
-use crate::activity::ActivityLog;
-use crate::api::client::ConnectionView;
 use crate::auth::UiAuth;
 use crate::guard::RateLimit;
-use crate::host::Host;
-use crate::push::{Event, Push};
-use crate::roles::skakel::announcer::{Announcement, Announcer};
-use crate::roles::skakel::{
-    APP_ID, SecretsError, SecretsStore, ServerParts, ServerStartError, SkakelLinks,
-};
-use crate::roles::usb_store;
-use crate::roles::{SkakelClientRole, SkakelServerRole, UsbActivity, UsbClientRole, UsbServerRole};
 use crate::routes::Routers;
-use crate::tasks::{STOP_WAIT, Tasks};
-use crate::tls::{self, Acceptors, CertificateSlot};
+use crate::tls::{self, Acceptors};
+
+pub use koppel_app::{NetworkOptions, UsbOptions};
 
 /// What the app is started with.
 pub struct AppOptions {
@@ -51,131 +36,28 @@ pub struct AppOptions {
     pub usb: UsbOptions,
 }
 
-/// Discovery and the limits on Skakel's token and pairing calls.
-#[derive(Debug, Clone)]
-pub struct NetworkOptions {
-    /// `Ports:Address`: the address the web ports bind to. Discovery answers there too when it is
-    /// an IPv4 address.
-    pub address: Option<IpAddr>,
-    /// `Discovery:Enabled`.
-    pub discovery: bool,
-    /// `Discovery:Port`: the UDP port a server answers probes on and a client sends them to.
-    pub discovery_port: u16,
-    /// Where a client sends its probes instead of broadcasting, such as loopback in a test.
-    pub probe_targets: Option<Vec<SocketAddr>>,
-    /// `RateLimits:TokenPerMinute`.
-    pub token_per_minute: u32,
-    /// `RateLimits:PairPerMinute`.
-    pub pair_per_minute: u32,
-}
-
-impl NetworkOptions {
-    /// 0.1.x's defaults for a machine whose network port is `port`.
-    pub fn defaults(port: u16) -> Self {
-        Self {
-            address: None,
-            discovery: true,
-            discovery_port: port,
-            probe_targets: None,
-            token_per_minute: 60,
-            pair_per_minute: 120,
-        }
-    }
-}
-
-/// What shares and attaches USB devices on this machine, and the client's timings.
-pub struct UsbOptions {
-    /// What shares and attaches: the Linux kernel, a USB/IP server such as usbipd-win, a USB/IP
-    /// driver such as usbip-win2, or none of them.
-    pub platform: Platform,
-    pub client: koppel_usb::ClientOptions,
-    pub gateway: GatewayOptions,
-}
-
-impl UsbOptions {
-    /// No USB at all, and why, as on a platform Koppel cannot drive.
-    pub fn unsupported(reason: &str) -> Self {
-        Self {
-            platform: Platform::unsupported(reason),
-            client: koppel_usb::ClientOptions::default(),
-            gateway: GatewayOptions {
-                port: 0,
-                ..GatewayOptions::default()
-            },
-        }
-    }
-}
-
 /// Why the app could not start. The message names the file or the setting and what to do.
 #[derive(Debug, thiserror::Error)]
 pub enum StartError {
     #[error(transparent)]
     File(#[from] ConfigFileError),
-    /// `devices.json` or `attached.json`, as koppel-usb loads them.
+    /// The roles could not start.
     #[error(transparent)]
-    Usb(#[from] koppel_usb::StoreError),
-    /// `secrets.json` held nothing the server could start from.
-    #[error(transparent)]
-    Secrets(#[from] SecretsError),
+    Roles(#[from] koppel_app::StartError),
     #[error(transparent)]
     Tls(#[from] WebError),
-    #[error(transparent)]
-    Skakel(#[from] ServerStartError),
 }
 
-/// The config files the app opened, which stop watching their folders when Koppel stops.
-struct Files {
-    settings: ConfigFile<KoppelSettings>,
-    ui_auth: ConfigFile<UiCredentials>,
-    server_secrets: ConfigFile<ServerSecrets>,
-    connection: ConfigFile<ClientConnection>,
-    devices: ConfigFile<SharedDevices>,
-    attached: ConfigFile<AttachedDevices>,
-}
-
-impl Files {
-    fn stop(&self) {
-        self.settings.stop();
-        self.ui_auth.stop();
-        self.server_secrets.stop();
-        self.connection.stop();
-        self.devices.stop();
-        self.attached.stop();
-    }
-}
-
-/// What runs behind the roles, stopped in order when Koppel stops.
-struct Running {
-    skakel: Arc<SkakelServerRole>,
-    announcer: Option<Arc<Announcer>>,
-    browser: Option<Browser>,
-    usb_server: koppel_usb::UsbServer,
-    data_plane: UsbDataPlane,
-    usb_client: koppel_usb::UsbClient,
-    gateway: UsbIpGateway,
-}
-
-/// The UI's server side: the config files, sign-in, the activity log, the push and the roles.
+/// The UI's server side: the roles, sign-in, and the TLS ports.
 pub struct App {
-    pub(crate) host: Host,
-    pub(crate) settings: ConfigFile<KoppelSettings>,
-    pub(crate) connection: ConfigFile<ClientConnection>,
+    pub(crate) core: Arc<koppel_app::App>,
     pub(crate) auth: Arc<UiAuth>,
     pub(crate) access: Arc<UiAccess>,
     pub(crate) auth_limit: Arc<RateLimit>,
-    pub(crate) activity: Arc<ActivityLog>,
-    pub(crate) push: Push,
-    pub(crate) server: Arc<SkakelServerRole>,
-    pub(crate) client: Arc<SkakelClientRole>,
-    pub(crate) usb_server: Arc<UsbServerRole>,
-    pub(crate) usb_client: Arc<UsbClientRole>,
-    certificate: Arc<CertificateSlot>,
     /// The web ports' acceptor while Skakel's server does not present the certificate.
     own_acceptor: tokio_rustls::TlsAcceptor,
-    running: Running,
-    /// The config files, stopped last.
-    files: Files,
-    tasks: Tasks,
+    /// `ui-auth.json`, stopped with the roles' files.
+    ui_auth_file: ConfigFile<UiCredentials>,
 }
 
 impl App {
@@ -193,154 +75,32 @@ impl App {
             network,
             usb,
         } = options;
-        let push = Push::new();
-        let tasks = Tasks::new();
-
-        let settings = open::settings(&paths);
-        settings.start().await?;
         let ui_auth = open::ui_auth(&paths, &secrets);
         ui_auth.start().await?;
         delete_old_setup_code(&paths);
-        let server_secrets = open::server_secrets(&paths, &secrets);
-        server_secrets.start().await?;
-        let connection = open::connection(&paths, &secrets);
-        connection.start().await?;
-        // koppel-usb starts these two itself.
-        let devices = open::devices(&paths);
-        let attached = open::attached(&paths);
-
-        {
-            let push = push.clone();
-            settings.subscribe(move |value| {
-                push.send(Event::SettingsChanged(&value));
-                async {}
-            });
-        }
-        {
-            let push = push.clone();
-            connection.subscribe(move |value| {
-                push.send(Event::ConnectionChanged(&ConnectionView::of(&value)));
-                async {}
-            });
-        }
-
-        let activity = Arc::new(ActivityLog::new(push.clone()));
-        let usb_activity: Arc<dyn ActivitySink> = Arc::new(UsbActivity(activity.clone()));
-        let clock = Arc::new(SystemClock);
-
-        // The server side: USB, then Skakel's server over secrets.json with the USB streams and the
-        // remote device list.
-        let store = SecretsStore::open(server_secrets.clone(), &host.name).await?;
-        let certificate = store.slot();
-        let own_acceptor = tls::acceptor(certificate.clone())?;
-        let usb_server = koppel_usb::UsbServer::new(koppel_usb::ServerDeps {
-            host: usb.platform.host.clone(),
-            shared: usb_store::shared(&devices),
-            settings: usb_store::settings(&settings),
-            activity: usb_activity.clone(),
-            clock: clock.clone(),
-        });
-        let data_plane = UsbDataPlane::new(
-            usb_server.clone(),
-            usb_activity.clone(),
-            usb_store::settings(&settings),
-        );
-        let (remote, remote_view) = watch::channel(Arc::new(usb_server.current().for_remote()));
-        usb_server.on_changed(move |devices| {
-            remote.send_replace(Arc::new(devices.for_remote()));
-            async {}
-        });
-        let skakel = SkakelServerRole::start(ServerParts {
-            name: host.name.clone(),
-            version: host.version.clone(),
-            store,
-            devices: remote_view,
-            data_plane: data_plane.clone(),
-            push: push.clone(),
-            activity: activity.clone(),
-            listen: SocketAddr::new(
-                network.address.unwrap_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
-                host.network_port,
-            ),
-            token_per_minute: network.token_per_minute,
-            pair_per_minute: network.pair_per_minute,
-            tasks: tasks.clone(),
+        let core = koppel_app::App::start(koppel_app::AppOptions {
+            paths: paths.clone(),
+            secrets,
+            host: host.clone(),
+            network,
+            usb,
         })
-        .await?;
-        skakel.follow(&settings);
-        let own_fingerprint: Arc<dyn Fn() -> String + Send + Sync> = {
-            let skakel = skakel.clone();
-            Arc::new(move || skakel.fingerprint())
-        };
-        let announcer = if network.discovery {
-            let announcer = Announcer::new(
-                network.address,
-                network.discovery_port,
-                Announcement {
-                    name: host.name.clone(),
-                    port: host.network_port,
-                    app: SkakelApp {
-                        id: APP_ID.to_owned(),
-                        version: host.version.clone(),
-                    },
-                },
-                own_fingerprint.clone(),
-            );
-            announcer.follow(&settings).await;
-            Some(announcer)
-        } else {
-            None
-        };
-
-        // The client side: the browser, the link on Skakel's client, USB, the gateway.
-        let browser = network.discovery.then(|| {
-            let mut options =
-                BrowserOptions::new(network.discovery_port).app_ids(vec![APP_ID.to_owned()]);
-            if let Some(targets) = network.probe_targets.clone() {
-                options = options.probe_targets(targets);
+        .await;
+        let core = match core {
+            Ok(core) => core,
+            Err(e) => {
+                ui_auth.stop();
+                return Err(e.into());
             }
-            Browser::new(options)
-        });
-        let links = SkakelLinks::new(
-            connection.clone(),
-            browser.clone(),
-            activity.clone(),
-            tasks.clone(),
-        );
-        let usb_client = koppel_usb::UsbClient::new(koppel_usb::Deps {
-            settings: usb_store::settings(&settings),
-            connection: usb_store::connection(&connection),
-            remembered: usb_store::attached(&attached),
-            platform: usb.platform.clone(),
-            links,
-            activity: usb_activity.clone(),
-            clock,
-            options: usb.client,
-        });
-        let gateway = UsbIpGateway::new(
-            usb_client.clone(),
-            usb_store::settings(&settings),
-            usb.gateway,
-            None,
-        );
-        let client = SkakelClientRole::new(
-            connection.clone(),
-            push.clone(),
-            browser.clone(),
-            own_fingerprint,
-            host.name.clone(),
-            tasks.clone(),
-        );
-        client.follow(&settings).await;
-
-        let usb_server_role =
-            UsbServerRole::new(usb_server.clone(), usb.platform.clone(), push.clone());
-        let usb_client_role =
-            UsbClientRole::new(usb_client.clone(), usb.platform.clone(), push.clone());
-        usb_server.start().await?;
-        data_plane.start();
-        usb_client.start().await?;
-        gateway.start().await;
+        };
+        let own_acceptor = match tls::acceptor(core.certificate()) {
+            Ok(acceptor) => acceptor,
+            Err(e) => {
+                core.stop().await;
+                ui_auth.stop();
+                return Err(e.into());
+            }
+        };
 
         crate::auth::remove_session_key(&paths.keys);
         let address = format!("https://{}:{}", host.name, host.ui_port);
@@ -349,47 +109,24 @@ impl App {
         let setup_token_required = !cfg!(windows) && reach != UiReach::Local;
         let auth = UiAuth::new(ui_auth.clone(), setup_window, address, setup_token_required);
 
-        let files = Files {
-            settings: settings.clone(),
-            ui_auth,
-            server_secrets,
-            connection: connection.clone(),
-            devices,
-            attached,
-        };
-
         Ok(Arc::new(Self {
-            host,
+            core,
             access: Arc::new(UiAccess::new(reach)),
             auth_limit: Arc::new(RateLimit::per_minute(auth_per_minute)),
-            activity,
-            server: skakel.clone(),
-            client,
-            usb_server: usb_server_role,
-            usb_client: usb_client_role,
-            settings,
-            connection,
             auth,
-            push,
-            certificate,
             own_acceptor,
-            running: Running {
-                skakel,
-                announcer,
-                browser,
-                usb_server,
-                data_plane,
-                usb_client,
-                gateway,
-            },
-            files,
-            tasks,
+            ui_auth_file: ui_auth,
         }))
+    }
+
+    /// The roles under the web server.
+    pub fn roles(&self) -> &Arc<koppel_app::App> {
+        &self.core
     }
 
     /// The certificate the web ports present, which a certificate switch replaces.
     pub fn certificate(&self) -> Arc<CertificateSlot> {
-        self.certificate.clone()
+        self.core.certificate()
     }
 
     /// What the web ports shake hands with, picked for each new connection. While the role is
@@ -398,12 +135,11 @@ impl App {
     /// server side), the new server's. Otherwise Koppel's own acceptor on [`App::certificate`],
     /// which a save of `secrets.json` keeps on the same certificate.
     pub fn tls(&self) -> Acceptors {
-        let settings = self.settings.clone();
-        let skakel = self.running.skakel.clone();
+        let core = self.core.clone();
         let own = self.own_acceptor.clone();
         Acceptors::new(move || {
-            if settings.current().role != Role::Client
-                && let Some(acceptor) = skakel.acceptor()
+            if core.settings.current().role != Role::Client
+                && let Some(acceptor) = core.skakel_acceptor()
             {
                 return acceptor;
             }
@@ -411,9 +147,9 @@ impl App {
         })
     }
 
-    /// Skakel's server, which the network router hands its requests to.
-    pub(crate) fn skakel(&self) -> Arc<SkakelServerRole> {
-        self.running.skakel.clone()
+    /// The feed the Windows service reads for its trays: the roles' state and the sign-in's.
+    pub fn tray_feed(&self) -> TrayFeed {
+        TrayFeed::new(&self.core, self.auth.clone())
     }
 
     /// The router of each surface, with its guards. When `Ports:Network` sets the network port apart,
@@ -427,25 +163,11 @@ impl App {
         self.routers().merged()
     }
 
-    /// Stops everything in the reverse of the order it started: the client's link and devices
-    /// (they stay remembered), the data plane and the server's polling, discovery, and Skakel's
-    /// server, which tells its clients it is stopping. Then stops watching the config files.
+    /// Stops the roles in the reverse of the order they started (see `koppel_app::App::stop`), then
+    /// stops watching `ui-auth.json`.
     pub async fn stop(&self) {
-        let running = &self.running;
-        running.gateway.stop().await;
-        running.usb_client.stop().await;
-        running.data_plane.stop().await;
-        running.usb_server.stop().await;
-        if let Some(announcer) = &running.announcer {
-            announcer.stop().await;
-        }
-        if let Some(browser) = &running.browser {
-            browser.stop();
-        }
-        running.skakel.stop().await;
-        // Whatever Koppel's own tasks still hold ends here, within a limit.
-        self.tasks.shutdown(STOP_WAIT).await;
-        self.files.stop();
+        self.core.stop().await;
+        self.ui_auth_file.stop();
     }
 }
 

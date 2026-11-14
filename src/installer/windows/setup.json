@@ -5,9 +5,11 @@
   "version": "0.0.0",
   "publisher": "Matumi (Pty) Ltd",
   "tagline": "Share and attach USB devices over the network.",
+  "welcomeNote": "It runs as a Windows service and installs the USB driver it needs.\nThe web interface opens at https://localhost:5240 on this computer.",
   "mark": "mark.png",
   "windowTitle": "Koppel Setup",
-  "launch": { "target": "[ProgramFiles64Folder]Matumi (Pty) Ltd\\Koppel\\KoppelDesktop.exe", "arguments": "--open" },
+  "launch": { "target": "[ProgramFiles64Folder]Matumi (Pty) Ltd\\Koppel\\KoppelDesktop.exe", "arguments": "--open", "on": ["install", "update"] },
   "screens": ["welcome"],
+  "restartNote": "The USB driver is not ready until then, so shared and attached devices may not work.",
   "uninstallNote": "Your pairings, keys and settings stay in %ProgramData%\\Koppel. Delete that folder to remove them."
 }

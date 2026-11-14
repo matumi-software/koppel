@@ -128,7 +128,7 @@ docker compose run --rm koppel reset-password
 
 ## The native install
 
-`Koppel-Setup.exe` comes with each [release](https://github.com/matumi-software/koppel/releases/latest). It installs Koppel as a Windows
+`Koppel-<version>-setup.exe` comes with each [release](https://github.com/matumi-software/koppel/releases/latest). It installs Koppel as a Windows
 service (LocalSystem, starts at boot, restarts after a crash or an error stop), the usbip-win2 driver, and the Visual C++
 runtime, which usbip-win2's tools need (Koppel's own programs do not). From 0.2.0 it installs the Rust build: `Koppel.exe`, the service, and
 `KoppelDesktop.exe`, the tray icon and the Start menu entry, about 11 MB in all. The service logs warnings, errors, and its

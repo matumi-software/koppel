@@ -39,7 +39,7 @@ pub fn open(url: Option<&str>) -> u8 {
         Err(Query::NotInstalled) => {
             shell::show(
                 None,
-                "The Koppel service is not installed. Run Koppel-Setup.exe again to repair it.",
+                "The Koppel service is not installed. Run the Koppel setup again to repair it.",
                 Icon::Error,
             );
             return 1;

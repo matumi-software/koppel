@@ -86,7 +86,7 @@ pub fn start(ui_url: String, feed: TrayFeed) -> Trays {
 async fn run(ui_url: String, mut feed: TrayFeed, mut stopped: oneshot::Receiver<()>) {
     let Some(exe) = desktop_exe() else {
         tracing::warn!(
-            "KoppelDesktop.exe is not next to Koppel.exe, so there is no tray icon. Run Koppel-Setup.exe again to repair it."
+            "KoppelDesktop.exe is not next to Koppel.exe, so there is no tray icon. Run the Koppel setup again to repair it."
         );
         return;
     };

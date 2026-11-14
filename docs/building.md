@@ -35,15 +35,15 @@ To release, by hand and from this machine. Work from a clean checkout of `main`:
      docker buildx build -f installer/docker/Dockerfile --platform linux/amd64,linux/arm64,linux/arm/v6 \
        -t matumisoftware/koppel:<version> -t matumisoftware/koppel:latest --push .
      ```
-   - `Koppel-Setup.exe`: `src/installer/windows/build.ps1`.
-8. Checksums, from the folder holding the files: `sha256sum koppel_*.deb koppel_*.tar.gz Koppel-Setup.exe > SHA256SUMS`.
+   - `Koppel-<version>-setup.exe` and `Koppel-<version>.msi`: `src/installer/windows/build.ps1`, with `HEARTWOOD_INSTALLER_DIR` set to the folder that Heartwood's `src/installer/bootstrapper/build.ps1` writes. They land in `artifacts/installer` at the repo root, with a `SHA256SUMS` that lists both.
+8. Checksums, from the folder holding the files: `sha256sum koppel_*.deb koppel_*.tar.gz Koppel-<version>-setup.exe Koppel-<version>.msi > SHA256SUMS`. (`build.ps1` also writes one for the two Windows files alone, in `artifacts/installer`: do not upload that one if the release has the other packages too.)
 9. Tag the merge commit with an annotated tag that equals the workspace version, and push it (a tag is never moved, the release tags ruleset forbids it):
 
    ```sh
    git tag -a v<version> -m "Koppel <version>"
    git push origin v<version>
    ```
-10. Publish the release on GitHub with the `CHANGELOG.md` section as its notes and the `.deb` and `.tar.gz` files, `Koppel-Setup.exe` (not code signed, say so) and `SHA256SUMS` attached, and record the image size per platform in the notes.
+10. Publish the release on GitHub with the `CHANGELOG.md` section as its notes and the `.deb` and `.tar.gz` files, `Koppel-<version>-setup.exe` and `Koppel-<version>.msi` (not code signed, say so) and `SHA256SUMS` attached, and record the image size per platform in the notes.
 
 ## The Rust workspace
 
@@ -142,7 +142,7 @@ as 31.9 MB there):
 | `Koppel.exe` | | 17.3 MB | 8.4 MB |
 | `KoppelDesktop.exe` | | 0.76 MB | 0.34 MB |
 | Installed (the programs, usbip-win2, the notices) | 117 MB | 21.0 MB | 11.7 MB |
-| `Koppel-Setup.exe` (25.6 MB of it the Visual C++ runtime) | 69 MB | 33.4 MB | 31.0 MB |
+| `Koppel-<version>-setup.exe` (25.6 MB of it the Visual C++ runtime) | 69 MB | 33.4 MB | 31.0 MB |
 | Linux binary, amd64 | | 14.7 MB | 6.7 MB |
 | Linux binary, arm64 | | 13.8 MB | 5.9 MB |
 | Linux binary, armv6 | | 13.1 MB | 5.7 MB |

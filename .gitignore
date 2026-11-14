@@ -37,3 +37,6 @@ desktop.ini
 .env
 .env.*
 !.env.example
+
+# WiX extensions that the shared installer module adds locally when a build runs
+.wix/

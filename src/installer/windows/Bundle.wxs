@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Burn bundle for Koppel: one setup.exe with the shared Matumi window (Heartwood's src/installer) around the MSI.
+     build.ps1 and Heartwood.Installer.psm1 (Invoke-HeartwoodBundle) define: Version, MsiFile, Icon, HeartwoodBootstrapperDir,
+     HeartwoodSetupDir and HeartwoodMark, and build.ps1 adds VCRedist and VCRedistBuild. Nothing here is a path on a build machine.
+     Standard: .github repo, docs/release-packages.md. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <!-- The bundle is what the Apps list shows. The UpgradeCode is the one the WixStdBA bundle had, so this replaces it. -->
+  <Bundle Name="Koppel" Manufacturer="Matumi (Pty) Ltd" Version="$(Version)" UpgradeCode="5B42E92B-C631-47B4-A17F-9692A0871516"
+          IconSourceFile="$(Icon)"
+          AboutUrl="https://github.com/matumi-software/koppel" HelpUrl="https://github.com/matumi-software/koppel" UpdateUrl="https://github.com/matumi-software/koppel/releases">
+
+    <!-- The shared bootstrapper: the window, the theme, the fonts and setup.json. -->
+    <?include $(HeartwoodBootstrapperDir)\Heartwood.Bootstrapper.wxi?>
+
+    <!-- Koppel has no options, so no variables. The Finish screen's launch step is in setup.json (KoppelDesktop.exe with the open argument,
+         what Koppel in the Start menu runs: it waits for the UI and opens it in the user's browser, so the first password is
+         set from the setup window). The window runs as the user, not elevated, so the browser is the user's. -->
+
+    <!-- Skip the runtime when this build of it, or a newer one, is already installed. -->
+    <util:RegistrySearch Root="HKLM" Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" Value="Bld" Variable="VCRuntimeBuild" Bitness="always64" />
+
+    <Chain>
+      <!-- .NET Framework 4.7.2 for the window. Windows 10 1803 and later have it, so this downloads only on older builds. -->
+      <PackageGroupRef Id="NetFx472WebAsPrereq" />
+      <!-- The runtime usbip-win2's tools need. An MSI cannot install it itself, because its installer is an MSI too. -->
+      <ExePackage Id="VCRedist" SourceFile="$(VCRedist)" DisplayName="Microsoft Visual C++ Runtime"
+                  DetectCondition="VCRuntimeBuild &gt;= $(VCRedistBuild)"
+                  InstallArguments="/install /quiet /norestart" Permanent="yes" Vital="yes" PerMachine="yes">
+        <!-- 1638: a newer runtime is already there. -->
+        <ExitCode Value="1638" Behavior="success" />
+        <ExitCode Value="3010" Behavior="scheduleReboot" />
+      </ExePackage>
+      <MsiPackage Id="Product" SourceFile="$(MsiFile)" Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>

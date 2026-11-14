@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Builds Koppel's Windows installer: bin\Koppel-Setup.exe.
+Builds Koppel's Windows installer: Koppel-<version>-setup.exe, Koppel-<version>.msi and SHA256SUMS in artifacts\installer.
 
 .DESCRIPTION
 0. Checks the vendored usbip-win2 files against SHA256SUMS, the signer certificates pinned in this script and the pinned hashes of the unsigned DLLs, and fails on any mismatch.
@@ -11,35 +11,45 @@ Builds Koppel's Windows installer: bin\Koppel-Setup.exe.
 2. Adds usbip-win2's driver and tools (from usbip-win2\<version>, see export-usbip-win2.ps1),
    the install scripts and the third-party notices (..\notices\new-notices.ps1, which needs
    cargo-about; the Linux build uses the same script).
-3. Builds the MSI, then setup.exe, which installs the VC++ runtime first: usbip-win2's tools link it
-   dynamically, though Koppel's own programs do not need it.
+3. Builds the MSI (Koppel.Installer, the WiX 5 SDK, unchanged), then setup.exe: the shared Matumi bootstrapper
+   window (Heartwood's src\installer) around the Visual C++ runtime, which usbip-win2's tools link dynamically
+   (Koppel's own programs do not need it), and then the MSI. Bundle.wxs and setup.json are in this folder.
+4. Writes SHA256SUMS for both files.
 
-Run from anywhere: .\build.ps1 [-Version 0.2.1]. Without -Version it uses the workspace version in src\Cargo.toml.
-The Rust toolchain (cargo) must be on PATH, with CARGO_HOME and RUSTUP_HOME set if they are not the defaults.
+Run from anywhere: .\build.ps1 [-Version 0.2.1] [-OutDir <dir>] [-SkipBuild] [-Sign]. Without -Version it uses the
+workspace version in src\Cargo.toml. -SkipBuild stages from the existing UI and release builds instead of building them.
+-Sign signs with the matumi tool (not exercised: there is no certificate yet); without it nothing is signed.
+The Rust toolchain (cargo) must be on PATH, with CARGO_HOME and RUSTUP_HOME set if they are not the defaults, and
+CARGO_TARGET_DIR if the build output goes elsewhere. HEARTWOOD_INSTALLER_DIR must name the folder that Heartwood's
+src\installer\bootstrapper\build.ps1 writes. Standard: .github repo, docs/release-packages.md.
 #>
 [CmdletBinding()]
 param(
-    [string]$Version
+    [string]$Version,
+    [string]$OutDir,
+    [switch]$SkipBuild,
+    [switch]$Sign
 )
 
 $ErrorActionPreference = 'Stop'
-$installer = $PSScriptRoot
-# src\installer\windows: two folders up is src\.
-$src = Split-Path (Split-Path $installer)
-$ui = Join-Path $src 'ui'
-$staging = Join-Path $installer 'obj\staging'
-$cache = Join-Path $installer 'obj\cache'
-$out = Join-Path $installer 'bin'
+if (-not $env:HEARTWOOD_INSTALLER_DIR) { throw 'HEARTWOOD_INSTALLER_DIR is not set. Build Heartwood''s src/installer/bootstrapper first and point this at its output folder.' }
+Import-Module (Join-Path $env:HEARTWOOD_INSTALLER_DIR 'Heartwood.Installer.psm1') -Force
 
-if (-not $Version) {
-    # The first version line after [workspace.package] in src\Cargo.toml.
-    $inPackage = $false
-    foreach ($line in Get-Content (Join-Path $src 'Cargo.toml')) {
-        if ($line -match '^\s*\[') { $inPackage = $line -match '^\s*\[workspace\.package\]' ; continue }
-        if ($inPackage -and $line -match '^\s*version\s*=\s*"([^"]+)"') { $Version = $Matches[1]; break }
-    }
-    if (-not $Version) { throw 'No version under [workspace.package] in src\Cargo.toml. Pass -Version.' }
-}
+$installer = $PSScriptRoot
+# src\installer\windows: two folders up is src\, and the repo root is above that.
+$src = Split-Path (Split-Path $installer)
+$root = Split-Path $src
+$ui = Join-Path $src 'ui'
+if (-not $OutDir) { $OutDir = Join-Path $root 'artifacts\installer' }
+New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+$out = (Resolve-Path $OutDir).Path
+# Staging and intermediate files go next to the output folder, as the standard says (installer-stage, installer-msi).
+$work = Split-Path $out
+$staging = Join-Path $work 'installer-stage'
+$msiOut = Join-Path $work 'installer-msi'
+$cache = Join-Path $installer 'obj\cache'
+
+if (-not $Version) { $Version = Get-WorkspaceVersion (Join-Path $src 'Cargo.toml') }
 Write-Host "Version $Version"
 
 function Invoke-Checked([scriptblock]$command) {
@@ -108,16 +118,22 @@ function Test-UsbipWin2([string]$folder, [string]$version) {
 Remove-Item $staging -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $staging, $cache, $out | Out-Null
 
-Write-Host 'Building the UI...'
-Invoke-Checked { pnpm --dir $ui install --frozen-lockfile }
-Invoke-Checked { pnpm --dir $ui --filter koppel.ui build }
+if ($SkipBuild) {
+    Write-Host 'Skipping the UI and Koppel builds (-SkipBuild): staging from the existing release build.'
+} else {
+    Write-Host 'Building the UI...'
+    Invoke-Checked { pnpm --dir $ui install --frozen-lockfile }
+    Invoke-Checked { pnpm --dir $ui --filter koppel.ui build }
 
-Write-Host 'Building Koppel...'
-# Koppel.exe stays a console program, for the service and for commands such as reset-password;
-# KoppelDesktop.exe is built as a Windows program (windows_subsystem), so neither the tray nor the Start
-# menu entry opens a console window.
-Invoke-Checked { cargo build --manifest-path (Join-Path $src 'Cargo.toml') --release --locked -p koppel -p koppel-windows }
-$release = Join-Path $src 'target\release'
+    Write-Host 'Building Koppel...'
+    # Koppel.exe stays a console program, for the service and for commands such as reset-password;
+    # KoppelDesktop.exe is built as a Windows program (windows_subsystem), so neither the tray nor the Start
+    # menu entry opens a console window.
+    Invoke-Checked { cargo build --manifest-path (Join-Path $src 'Cargo.toml') --release --locked -p koppel -p koppel-windows }
+}
+# CARGO_TARGET_DIR moves the build output off the source drive.
+$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $src 'target' }
+$release = Join-Path $targetDir 'release'
 Copy-Item (Join-Path $release 'koppel.exe') (Join-Path $staging 'Koppel.exe')
 Copy-Item (Join-Path $release 'koppel-desktop.exe') (Join-Path $staging 'KoppelDesktop.exe')
 
@@ -147,7 +163,7 @@ $windowsNotices = @(
     ''
     (Get-Content (Join-Path $usbipWin2.FullName 'CLI11-LICENSE.txt') -Raw)
     '== Microsoft Visual C++ Redistributable =='
-    'Installed by Koppel-Setup.exe under Microsoft''s own licence terms, which it shows when run on its own.'
+    'Installed by Koppel''s setup.exe under Microsoft''s own licence terms, which it shows when run on its own.'
     ''
 )
 Add-Content -Path (Join-Path $staging 'THIRD-PARTY-NOTICES.txt') -Value ($windowsNotices -join "`r`n") -Encoding utf8
@@ -164,11 +180,33 @@ if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notm
 $vcRedistBuild = (Get-Item $vcRedist).VersionInfo.FileBuildPart
 
 Write-Host 'Building the MSI...'
-$msiOut = Join-Path $installer 'obj\msi'
+# The MSI is the install engine and is built as it always was (Koppel.Installer, the WiX 5 SDK). The shared module's own
+# MSI build is WiX 4.0.6, which has no Files element and would renumber the component GUIDs of a released product.
+if (Test-Path $msiOut) { Remove-Item $msiOut -Recurse -Force }
 Invoke-Checked { dotnet build (Join-Path $installer 'Koppel.Installer\Koppel.Installer.wixproj') -c Release -nologo -v q -o $msiOut -p:RestoreLockedMode=true -p:StagingDir=$staging -p:Version=$Version }
 
 Write-Host 'Building setup.exe...'
-Invoke-Checked { dotnet build (Join-Path $installer 'Koppel.Setup\Koppel.Setup.wixproj') -c Release -nologo -v q -o $out -p:RestoreLockedMode=true -p:Version=$Version -p:Msi=$(Join-Path $msiOut 'Koppel.msi') -p:Notices=$(Join-Path $staging 'THIRD-PARTY-NOTICES.txt') -p:VCRedist=$vcRedist -p:VCRedistBuild=$vcRedistBuild }
+# The window's mark is the app icon at 256 px: the Linux package's icon, rendered from the design system's SVG by pnpm design:icons.
+$resources = Join-Path $work 'installer-resources'
+New-Item -ItemType Directory -Force -Path $resources | Out-Null
+Copy-Item (Join-Path $installer '..\linux\icons\koppel-256.png') (Join-Path $resources 'mark.png') -Force
+$icon = Join-Path $root 'resources\design-system\assets\Logos\koppel-app-icon.ico'
 
-$setup = Join-Path $out 'Koppel-Setup.exe'
-Write-Host "Built $setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)"
+Assert-InstallerVersion $Version
+Assert-Staging -Root $staging -Required @('Koppel.exe', 'KoppelDesktop.exe', 'THIRD-PARTY-NOTICES.txt', 'usbip\driver.ps1') -Forbidden @('*.pdb', '*.log', '*.tmp')
+
+$msi = Join-Path $out "Koppel-$Version.msi"
+$exe = Join-Path $out "Koppel-$Version-setup.exe"
+foreach ($old in $msi, $exe, (Join-Path $out 'SHA256SUMS')) { if (Test-Path $old) { Remove-Item $old -Force } }
+Copy-Item (Join-Path $msiOut 'Koppel.msi') $msi
+
+$setup = Publish-SetupFolder -SetupJson (Join-Path $installer 'setup.json') -ResourcesDir $resources -Destination (Join-Path $work 'installer-setup') -Version $Version
+Invoke-HeartwoodBundle -Wxs (Join-Path $installer 'Bundle.wxs') -Output $exe -Version $Version -MsiFile $msi -Setup $setup -Icon $icon `
+    -Defines @{ VCRedist = $vcRedist; VCRedistBuild = $vcRedistBuild }
+Invoke-HeartwoodSign -Files @($msi) -Bundles @($exe) -Sign:$Sign
+$sums = New-Checksums -Dir $out
+
+Write-Host ''
+Write-Host "Setup:     $exe ($([math]::Round((Get-Item $exe).Length / 1MB, 1)) MB)"
+Write-Host "MSI:       $msi"
+Write-Host "Checksums: $sums"

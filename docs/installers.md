@@ -30,24 +30,44 @@ The key that seals the secret files sits in the `koppel` volume by default, besi
 [security.md](security.md#keeping-the-key-outside-the-volume)). `Paths__KeyCertificate` of 0.1.x is not read any more: an install
 that used it paired again at the upgrade to 0.2.0 (see the changelog). Do not start using it.
 
-## Installer and Windows service
+## What it ships
 
-`src/installer/windows` builds `Koppel-Setup.exe`, which ships the Rust build (`koppel-windows`
-below): an MSI inside a bootstrapper that installs the Visual C++ runtime first. `build.ps1` takes the
-version from `[workspace.package]` in `src/Cargo.toml`, checks the vendored usbip-win2 files against
-`usbip-win2/<version>/SHA256SUMS` and their Authenticode signers (and fails on any mismatch), builds the
-UI from the pnpm lock file, builds `Koppel.exe` and `KoppelDesktop.exe` with `cargo build --release
---locked`, writes the notices and appends the Windows-only ones. Koppel's own programs link the C
-runtime statically (`src/.cargo/config.toml`, as in Skakel), so they need no Visual C++ runtime; the
-bundle still installs it because usbip-win2's `usbip.exe`, `devnode.exe` and `libusbip.dll` import
-`vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` and `msvcp140_atomic_wait.dll`. 0.1.2's setup was
-69 MB and installed 117 MB; the Rust build's setup is 31.0 MB (25.6 MB of it the Visual C++ runtime) and it
-installs 11.7 MB (see ["Release profile and sizes"](building.md#release-profile-and-sizes)).
+`src/installer/windows/build.ps1` writes three files to `artifacts/installer`, and only these:
+
+| File | For |
+|---|---|
+| `Koppel-<version>-setup.exe` | People. A Burn bundle: Matumi's shared setup window (Heartwood's `src/installer`) around the Visual C++ runtime and the MSI |
+| `Koppel-<version>.msi` | Managed deployment: Group Policy and `msiexec`, no window |
+| `SHA256SUMS` | Both files |
+
+The standard these follow is `docs/release-packages.md` in the `.github` repo, and the window's design is `docs/ui/installers.md` there. Both are unsigned until a certificate exists: Windows warns before they run (`build.ps1 -Sign` runs the `matumi` signing tool and has not been exercised).
+
+How `build.ps1` goes about it:
+
+- It takes the version from `[workspace.package]` in `src/Cargo.toml`, checks the vendored usbip-win2 files against `usbip-win2/<version>/SHA256SUMS` and their Authenticode signers (and fails on any mismatch), builds the UI from the pnpm lock file, builds `Koppel.exe` and `KoppelDesktop.exe` with `cargo build --release --locked` (into `CARGO_TARGET_DIR` when it is set), writes the notices and appends the Windows-only ones. `-SkipBuild` stages from the existing release build instead.
+- It builds the MSI with `Koppel.Installer` (the WiX 5 SDK, as before), copies it to `Koppel-<version>.msi`, then builds the bundle with the shared module's `Invoke-HeartwoodBundle` (WiX 4.0.6, `wix` on `PATH`; its extensions are installed locally by the module, never with `-g`). It finds the shared parts through `HEARTWOOD_INSTALLER_DIR`, the folder that Heartwood's `src/installer/bootstrapper/build.ps1` writes.
+- Staging and intermediate files are in `artifacts/installer-stage`, `installer-msi`, `installer-setup` and `installer-resources`, next to `artifacts/installer`. Nothing under `artifacts` is committed.
+- The bundle (`Bundle.wxs`) chains .NET Framework 4.7.2 for the window (a no-op on Windows 10 1803 and later), the Visual C++ runtime (`ExePackage`, skipped when this build or a newer one is installed, exit code 1638 counts as success, 3010 schedules a restart) and the MSI. `setup.json` is what the shared window reads: Koppel's name, mark, tagline, the launch step and the note shown after an uninstall. The bundle keeps the UpgradeCode of the WixStdBA setup it replaces.
+
+Koppel's own programs link the C runtime statically (`src/.cargo/config.toml`, as in Skakel), so they need no Visual C++ runtime; the bundle still installs it because usbip-win2's `usbip.exe`, `devnode.exe` and `libusbip.dll` import `vcruntime140.dll`, `vcruntime140_1.dll`, `msvcp140.dll` and `msvcp140_atomic_wait.dll`. The MSI on its own does not install the runtime: install it first when you deploy the MSI by hand. 0.1.2's setup was 69 MB and installed 117 MB; the Rust build's setup was 31.0 MB with the WixStdBA window (25.6 MB of it the Visual C++ runtime) and it installs 11.7 MB (see ["Release profile and sizes"](building.md#release-profile-and-sizes)).
+
+## Scope
+
+Per machine. Koppel installs under Program Files, runs as a Windows service under LocalSystem, installs a kernel driver (usbip-win2) and adds firewall rules, so the setup asks for administrator rights (the UAC prompt) and the MSI installs for all users. The window itself runs as the user, which is why the browser it opens afterwards is the user's.
+
+## What the installer does
+
+- **Window:** Welcome (the product name, mark and one sentence), Progress, then Finish. There is no licence page and no options page: Koppel is GPL-3.0-or-later and the notices ship in the install folder (`THIRD-PARTY-NOTICES.txt`, Koppel's licence first). Installing over an older Koppel shows the Update page, and an installed Koppel shows Repair and Uninstall. A restart request (see Driver below) shows the Restart page, with Restart now and Restart later.
+- **Installs to:** `C:\Program Files\Matumi (Pty) Ltd\Koppel`. The folder is fixed.
+- **Shortcuts:** one, Koppel in the all-users Start menu (see "Start menu entry" below).
+- **Closes the running app:** the MSI stops the service before replacing files (`ServiceControl`), and the tray goes with it. It does not start the app again by itself: the service starts at the end of the install, and the Finish page offers to open the UI.
+- **Uninstall keeps:** `%ProgramData%\Koppel` (the config, the keys and the pairings, the logs, `driver-state.json`). Delete that folder by hand to remove them. The Finish page of an uninstall says so.
+- **Apps entry:** one, from the bundle: Koppel, Matumi (Pty) Ltd, the version, Koppel's icon, and links for About, Help and Update.
 
 - **Service:** Koppel runs as a Windows service under LocalSystem, set to start at boot. It is configured to restart after the first, second and third failure, after 5 seconds, and the count resets after a day without one. `sc failureflag \Koppel 1` (the `SetServiceFailureFlag` action) makes a stop with a non-zero exit code count as a failure too. `koppel-windows/src/service.rs` runs it on the `windows-service` crate: `Koppel.exe` asks to connect to the service manager, and when it was not started as a service (error 1063) it runs as a console program. As a service it starts in its own folder (relative `Paths:*` are read from there, as 0.1.x did), reports Running once the ports listen, stops on Stop or Shutdown, and ends with exit code 0, or 1 when the start failed, which recovery acts on. The installer sets the service's environment to `KOPPEL_UI_ALLOW_FROM=local`, so the UI answers on this machine only. `sc sidtype Koppel unrestricted` (the `SetServiceSid` action) gives the service its own SID, `NT SERVICE\Koppel`, in its token: it can be named in an ACL, and nothing it may do changes. `sc privs Koppel ...` (the `SetServicePrivileges` action) cuts the token to six privileges, which takes effect when the service starts; "The service keeps six privileges" in `decisions.md` has the list and the reason for each, and the install test below checks them with `sc qprivs Koppel`. **Log file:** as a service, Koppel also writes `%ProgramData%\Koppel\logs\koppel.log` (`koppel-windows/src/log_file.rs`), at the console's levels (Info, or `RUST_LOG`), through `tracing-appender`'s non-blocking writer. It rotates at 5 MiB and keeps five files (`koppel.1.log` to `koppel.4.log`), 25 MiB at most. The folder is created and restricted to administrators at start, like the config folder. **`koppel diagnostics [file]`** (from an elevated prompt, or as root) writes one text report to attach to a support request: version, OS, folders, the config files by name and size, `settings.json`, `devices.json` and `attached.json` with every value under a name like password, secret, token or key removed, the USB/IP driver state and the end of the log. The encrypted files and the keys folder are never read (`koppel-config/src/diagnostics.rs`).
 - **Tray icon:** modelled on Apollo, whose LocalSystem service launches its tray into the user's session. As a service, Koppel (`koppel-windows/src/launcher.rs`) starts `KoppelDesktop.exe --tray <ui url>` in every active session and starts it again if it ends (after a minute if it ended within 30 seconds). It runs with the session user's token from `WTSQueryUserToken`, not as LocalSystem, so the browser it opens is the user's and no LocalSystem window sits on the user's desktop. Its standard input is the read end of a pipe from the service, passed through `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` so it inherits nothing else. When the service stops or dies, the pipe closes and the tray removes its icon and exits; the service ends any tray still running after 3 seconds. `tray/mod.rs` is plain Win32 on Microsoft's `windows` crate (`Shell_NotifyIcon`, `NOTIFYICON_VERSION_4`) and adds the icon again when Explorer restarts (`TaskbarCreated`). **Shut down Koppel** sends user-defined control 200: the default service DACL gives interactive users `SERVICE_USER_DEFINED_CONTROL` but not `SERVICE_STOP`, so the service stops itself, with exit code 0, so the recovery actions do not restart it. **Restart Koppel** sends control 201: the service starts `Koppel.exe --restart-service`, which runs on as LocalSystem, waits for the service to stop and starts it; then the service stops itself the same clean way. If the helper does not start, the service logs it and keeps running. **Event log:** `event_log.rs` is a `tracing` layer that writes to the Application log under the source `Koppel`: warnings and errors from everything, and information from `koppel_windows::service` (started, stopping and why, stopped), as 0.1.x's `Logging:EventLog` did. The MSI registers the source (`util:EventSource`) with `Koppel.exe` as its message file; `koppel/build.rs` gives `Koppel.exe` a message table whose messages 1 to 3 (error, warning, information) are `%1`, so Event Viewer shows each entry's text. **State:** the service writes one JSON object per line to each tray's pipe (`wire.rs`, the same lines as 0.1.x's `TrayWire`), so the tray needs no sign-in and opens no port. A `state` line carries the tooltip and whether the icon needs attention; `koppel_app::tray::TrayFeed` builds it from the settings, the UI password and setup window, the USB client and server and the connection, names and counts only. The launcher sends it when it changes (it wakes on every push the UI gets, on a session ending, and on a 5 second round that catches the setup window closing) and to each new tray. A tray skips a line it cannot read and a type it does not know, so a newer service can add messages. The attention icon is Koppel's icon with an amber dot drawn on at run time (`tray/attention.rs`). The pipe has a 64 KB buffer. **Notifications:** a `notice` line carries a title, a text and the UI page a click opens (`#clients`, `#attach`); the tray accepts only `#` and lower-case letters there, so a line cannot send the browser elsewhere. `koppel_app::tray::NoticeRules` makes them from the activity log (a lost link once until it is back, its return only after a loss was told, a failed attach as the client records it, once per reason) and from the pairing requests (each waiting request once; the ones waiting at start are not told). `KoppelSettings` has `NotifyPairing`, `NotifyLink` and `NotifyAttachFailures`, all on unless set, and `/api/v1/system/info` says `tray: true` when Koppel runs as the service, so the UI shows them. The tray shows each with `NIF_INFO` and `NIIF_RESPECT_QUIET_TIME`, and `NIN_BALLOONUSERCLICK` opens the page. No tray runs outside the Windows service (a console, Docker, Linux).
 - **Start menu entry:** `KoppelDesktop.exe --open` (`opener.rs`). `KoppelDesktop.exe` is built with `#![windows_subsystem = "windows"]`, so the shortcut and the tray open no console window, and `Koppel.exe` stays a console program for the service and for commands such as `reset-password`. The service writes its UI address to `HKLM\SOFTWARE\Matumi\Koppel` (`UiUrl`, `ui_url.rs`), which every user can read, so the entry opens a moved port too; uninstall deletes the key. If the service is stopped, the entry asks, then runs itself again elevated as `--start-service` (UAC), which starts the service. It waits up to a minute for `/healthz` to answer, asked through WinHTTP with the certificate unchecked (`health.rs`), before it opens the browser. `--open <url>` opens another address, for trying it against a Koppel on another port. ICE43 and ICE57 are suppressed: they want an HKCU key path, which only a per-user shortcut needs.
-- **Launch on the last page:** the bundle sets `LaunchTarget` to `KoppelDesktop.exe` and `LaunchArguments` to `--open`. WixStdBA shows Launch after an install, modify or repair; `KoppelTheme.xml` limits it to an install (`WixBundleAction = 6`), upgrades included. The bundle's window runs unelevated, so the browser it opens is the user's.
+- **Launch on the last page:** `setup.json` sets the launch step to `[ProgramFiles64Folder]Matumi (Pty) Ltd\Koppel\KoppelDesktop.exe` with `--open`, the same as the old bundle's `LaunchTarget` and `LaunchArguments`. The old setup showed Launch only after an install (upgrades included). The shared window offers it after a repair and a modify too, because its contract has no "install only" setting yet. The window runs unelevated, so the browser it opens is the user's. It is not offered when a restart is needed: the Restart page comes first.
 - **Firewall:** the MSI adds inbound rules for `Koppel.exe` through the WiX Firewall extension: TCP (HTTPS) and UDP (discovery answers), scoped to the program and not a port, so they follow a changed `Ports:*` setting. Private and Domain profiles only, never Public. The extension takes one profile per rule, so there are four rules (TCP and UDP, each for Private and Domain). They belong to the service's component: removed on uninstall, kept on repair and upgrade. This is safe on a client: the installer sets `KOPPEL_UI_ALLOW_FROM=local`, and the server routes answer 404 in the client role.
 - **Data folder:** `Koppel.exe prepare-data-folder` (the `PrepareDataFolder` action; the rules are in `koppel-config/src/data_folder.rs`) runs as SYSTEM after the files are in. `prepare-data-folder --check [PATH]` only verifies and changes nothing: `driver.ps1` runs it before it reads or writes its state file. Both exit 0 when the folder is safe and 1 when it is not, with the reason on standard error, and they take the folder as an argument for tests (the installer gives none, so it is `%ProgramData%Koppel`). It creates `%ProgramData%\Koppel` with owner Administrators and a protected ACL (SYSTEM and Administrators). An existing folder that is a file or a link, or owned by an account that is not an administrator, fails the install with a message that says what to do (rename or delete the folder, copying keys out first if you need them). An existing folder owned by an administrator (SYSTEM, Administrators, TrustedInstaller, or an account in the local Administrators group) is taken over: its owner and ACL are reset, recursively, any link inside it is deleted (the link only, never what it points to), and a file or folder inside that no administrator owns is renamed aside (`not-admin-owned-<time>`) instead of being taken over. At start Koppel (`KoppelPaths::prepare` in koppel-config) protects `%ProgramData%\Koppel` itself the same way, when the config and keys folders are in it. A machine where the folder is owned by an ordinary user needs it renamed or deleted once.
 - **Driver:** `driver.ps1` installs usbip-win2's driver after the files and before the service starts. Its output goes to the MSI log (`msiexec /l*v`), not to a file on disk. pnputil may say a restart finishes the driver install: the installer then asks for a restart. It records the packages and the device node it installed in `%ProgramData%\Koppel\driver-state.json`, and uninstall removes only those, and only the ones Windows still lists with an original name of `usbip2_*.inf` (it reads the driver store through `pnputil /enum-drivers /format xml`, then `Get-WindowsDriver`, so a non-English Windows works). The record is used only if an administrator owns it and nobody else can write to it. A restart that pnputil asks for on uninstall is reported to the MSI too.
@@ -55,13 +75,34 @@ installs 11.7 MB (see ["Release profile and sizes"](building.md#release-profile-
 - **Failure and upgrade:** a fresh install that fails after the driver went in removes the driver again. An upgrade keeps the driver and updates it in place; the driver removal is skipped when an upgrade replaces the product. A same-version MSI replaces the installed one, which keeps a rebuilt dev installer from installing next to the last. A driver that will not come out never blocks an uninstall: the script prints a `WARNING:` with the manual `pnputil` command, and the MSI log has the output. An upgrade from an installer older than this one still runs that old installer's uninstall once, and it removes the driver by name.
 - **Notices:** `src/installer/notices/new-notices.ps1 -Target x86_64-pc-windows-msvc` writes `THIRD-PARTY-NOTICES.txt` into the staging folder: Koppel's licence, every Rust crate in the two programs for `x86_64-pc-windows-msvc` from cargo-about (`src/installer/notices/about.toml` lists the licences it accepts, and any other stops the build) with the licence texts found in each crate, and the npm packages the UI bundles. `build.ps1` appends usbip-win2's, CLI11's and the Visual C++ runtime's. It ships in the MSI and behind the bundle's licence link. The Linux build uses the same script and `about.toml` (see ["Linux packages and the image in Rust"](building.md#linux-packages-and-the-image-in-rust)).
 
+## Options and properties
+
+Koppel has no options: the setup window asks for nothing, and the install folder is fixed. There is no property to set on the
+command line, for the setup or for the MSI. (`INSTALLFOLDER` is the MSI's folder id, not an option: a different folder is not offered and was not tested.)
+`HeartwoodColourVision=1` on the setup's command line selects the colour vision theme of the window.
+
+```
+Koppel-<version>-setup.exe /quiet /log setup.log
+Koppel-<version>-setup.exe /uninstall /quiet
+msiexec /i Koppel-<version>.msi /qn /l*v msi.log
+msiexec /x Koppel-<version>.msi /qn
+```
+
+Run them elevated. The MSI alone installs no Visual C++ runtime (the setup does): install `vc_redist.x64.exe` first. The MSI sets one property of its own, `DRIVER_RESTART`, from a registry value `driver.ps1` leaves when the driver install or removal needs a restart; `ScheduleReboot` acts on it.
+
+## Exit codes
+
+- `0` success.
+- `3010` success, restart needed. The driver install or removal (pnputil) can ask for it. The setup window then shows the Restart page.
+- Anything else is a failure and the install rolls back. The log path is on the Failure page, or pass `/log file.log`. The MSI log (`msiexec /l*v`) has the output of `driver.ps1` and of the other actions.
+
 ## Install test for the reduced service privileges and the data folder command
 
 Run this on the PC that has Koppel 0.2.0 installed, once, before #154 is closed. Nothing in it needs the source tree. It settles what the automated tests cannot: that the service, the tray and USB still work with six privileges, that setup calls `Koppel.exe prepare-data-folder`, and that an upgrade keeps the data folder. Tick each box, and note the output where it says so. Run the commands in an elevated PowerShell unless it says otherwise.
 
 Before you start:
 
-- [ ] Build the installer from `main` (`./installer/windows/build.ps1` from `src`, in a PowerShell, without redirecting the output). It is `src\installer\windows\bin\Koppel-Setup.exe`, and it should say 0.2.1.
+- [ ] Build the installer from `main` (`./installer/windows/build.ps1` from `src`, in a PowerShell, without redirecting the output). It is `artifacts\installer\Koppel-0.2.1-setup.exe` (at the repo root, next to `src`), and it should say 0.2.1.
 - [ ] Take a copy of `C:\ProgramData\Koppel` to `D:\backups\koppel-before-0.2.1` (`Copy-Item -Recurse`). It holds the pairings and the keys.
 - [ ] Note how it is now, to compare after:
   - `sc qprivs Koppel` (the 0.2.0 service lists nothing: it has the full set of its account)
@@ -72,8 +113,8 @@ Before you start:
 
 Upgrade over 0.2.0:
 
-- [ ] Run `Koppel-Setup.exe` and click Yes at the UAC prompt. Click Install. It finishes without an error, and Launch opens the UI.
-- [ ] If it fails, nothing is lost: it rolls back. Run it again with a log, `Koppel-Setup.exe /log setup.log`, and look in the log for `PrepareDataFolder`, `SetServicePrivileges` and `InstallUsbDriver`. A failure at `PrepareDataFolder` prints the reason, which is one of the sentences in `data_folder.rs` (a file or link where the folder should be, or an owner who is not an administrator).
+- [ ] Run `Koppel-0.2.1-setup.exe` and click Yes at the UAC prompt. Click Install. It finishes without an error, and Launch opens the UI.
+- [ ] If it fails, nothing is lost: it rolls back. Run it again with a log, `Koppel-0.2.1-setup.exe /log setup.log`, and look in the log for `PrepareDataFolder`, `SetServicePrivileges` and `InstallUsbDriver`. A failure at `PrepareDataFolder` prints the reason, which is one of the sentences in `data_folder.rs` (a file or link where the folder should be, or an owner who is not an administrator).
 - [ ] `sc query Koppel` says RUNNING.
 - [ ] `sc qprivs Koppel` lists exactly these six: SeAssignPrimaryTokenPrivilege, SeIncreaseQuotaPrivilege, SeTcbPrivilege, SeChangeNotifyPrivilege, SeRestorePrivilege, SeTakeOwnershipPrivilege. If it lists nothing, the `SetServicePrivileges` action failed (it is not vital); the setup log says why. Note which.
 - [ ] `sc qsidtype Koppel` says UNRESTRICTED.
@@ -94,10 +135,22 @@ What the reduced token has to keep doing (each is a place a missing privilege wo
 
 Repair and uninstall:
 
-- [ ] Apps, Koppel, Modify or Repair (or run `Koppel-Setup.exe` again): it finishes, and the data folder and the pairings are as before.
+- [ ] Apps, Koppel, Modify or Repair (or run `Koppel-0.2.1-setup.exe` again): it finishes, and the data folder and the pairings are as before.
 - [ ] Uninstall from Apps. The service is gone (`sc query Koppel` says 1060), the Start menu entry and the firewall rules are gone, and `C:\ProgramData\Koppel` is still there with its owner and ACL as above (uninstall is not meant to delete the data). The driver Koppel installed is removed, and one you installed yourself is left alone.
-- [ ] Install again from `Koppel-Setup.exe` over the left-over data folder: it takes the folder over without complaint, and the pairings are still there.
+- [ ] Install again from `Koppel-0.2.1-setup.exe` over the left-over data folder: it takes the folder over without complaint, and the pairings are still there.
 
 If the tray does not come up, Restart does not work, the service does not start or a USB attach fails after the upgrade, a privilege was cut that is needed. Write down which step, collect `Koppel.exe diagnostics` and the setup log, and put the privilege back by deleting the `RequiredPrivileges` value under `HKLM\SYSTEM\CurrentControlSet\Services\Koppel` and restarting the service (the Microsoft documentation says the account's own privileges apply again; this was not run). Then say so on #154 with the step that failed.
 
 A second round was run on 2026-11-13 on the PC that had the first list of eight: each of SeImpersonatePrivilege, SeCreateGlobalPrivilege, SeRestorePrivilege and SeTakeOwnershipPrivilege was dropped alone, and the first two together, with a service restart and the tray's Restart, the tray, `healthcheck`, `/readyz` and a USB attach checked each time; all passed, and the first two were taken out of `Package.wxs`. The last two stay until a start over a folder or item that a standard user created first (the case they are for) is tried with both dropped: put such a folder under a copy of the data folder, start the service with `Paths:Config` pointing at it, and see whether the start takes it over or renames it aside.
+
+## Install test
+
+The standard checklist (`docs/release-packages.md` in the `.github` repo), for the setup window and the MSI. Tick it on a real machine or in a virtual machine, elevated, with the owner clicking the UAC prompt, and note the date and version. The longer test above covers the privileges and the data folder and is not repeated here.
+
+- [ ] install: files in place under `C:\Program Files\Matumi (Pty) Ltd\Koppel`, one Apps entry (Koppel, Matumi (Pty) Ltd, the version, the icon), the Start menu entry, the service running, and Launch on the Finish page opens the UI
+- [ ] an upgrade over the previous version keeps the data (over 0.2.1 installed by the old `Koppel-Setup.exe`, and over a build of the same version)
+- [ ] repair, then uninstall: the program, the service, the Start menu entry, the firewall rules and the driver Koppel installed are gone, and `C:\ProgramData\Koppel` stays
+- [ ] a silent install and a silent uninstall (`/quiet`), and the MSI alone with `msiexec /qn`
+- [ ] a failing install rolls back: nothing is left, and a first install that fails after the driver went in has the driver removed
+- [ ] a driver that asks for a restart shows the Restart page, and exit code 3010 with `/quiet`
+- [ ] the same, in a virtual machine, with the owner clicking any UAC prompt

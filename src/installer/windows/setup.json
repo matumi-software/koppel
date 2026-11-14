@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "matumi.koppel",
+  "name": "Koppel",
+  "version": "0.0.0",
+  "publisher": "Matumi (Pty) Ltd",
+  "tagline": "Share and attach USB devices over the network.",
+  "mark": "mark.png",
+  "windowTitle": "Koppel Setup",
+  "launch": { "target": "[ProgramFiles64Folder]Matumi (Pty) Ltd\\Koppel\\KoppelDesktop.exe", "arguments": "--open" },
+  "screens": ["welcome"],
+  "uninstallNote": "Your pairings, keys and settings stay in %ProgramData%\\Koppel. Delete that folder to remove them."
+}

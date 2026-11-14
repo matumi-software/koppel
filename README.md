@@ -109,7 +109,7 @@ leaves the service to you.
 
 ## Run it on Windows
 
-Download `Koppel-Setup.exe` from the [latest release](https://github.com/matumi-software/koppel/releases/latest)
+Download `Koppel-<version>-setup.exe` from the [latest release](https://github.com/matumi-software/koppel/releases/latest)
 and run it. It installs Koppel as a Windows service, usbip-win2's signed
 driver and the Visual C++ runtime. It also adds an inbound firewall rule for the Koppel program on Private and Domain networks, so a Windows server can be reached without one added by hand. Open
 https://localhost:5240 afterwards, accept the browser's certificate warning and set the password within 10 minutes
@@ -186,6 +186,5 @@ Koppel's transport between machines is [Skakel](https://github.com/matumi-softwa
 set of Rust crates; its notice is in `THIRD-PARTY-NOTICES.txt` with the other crates'.
 
 The Windows installer bundles usbip-win2 (BSD-2-Clause); its notices ship as `THIRD-PARTY-NOTICES.txt`,
-which the setup window's licence link opens. The setup window's theme files
-(`src/installer/windows/Koppel.Setup/KoppelTheme.*`) are adapted from WiX and stay under the Microsoft Reciprocal
-License; they only style the installer and are not part of Koppel.
+which is installed with Koppel. The setup window is Matumi's shared installer window (from the Heartwood repository), which
+the setup.exe carries; it only draws the installer and is not part of Koppel.

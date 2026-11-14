@@ -16,7 +16,7 @@ folder per crate, the UI and the installers.
 | `src/koppel-*/` | The library crates: `koppel-config`, `koppel-secrets`, `koppel-upgrade`, `koppel-app`, `koppel-web`, `koppel-usb` and `koppel-windows` |
 | `src/usbip/` | The USB/IP protocol crate: the device model, bus ID, messages and relay, with no Koppel in it |
 | `src/ui/` | The UI, one pnpm workspace (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`): the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
-| `src/installer/` | The installers: `windows/` (WiX, `Koppel-Setup.exe`, with usbip-win2 vendored), `linux/` (nfpm, the `.deb` files), `docker/` (the `Dockerfile`, which builds the Linux binaries, the `.deb` files and the image, the compose files, `prepare-host.sh` and `deploy.sh`) and `notices/` (the third-party notices script and cargo-about's licence policy, shared by the Windows and Linux builds) |
+| `src/installer/` | The installers: `windows/` (WiX: the MSI, and the setup.exe bundle around it with the shared Matumi window from Heartwood, with usbip-win2 vendored), `linux/` (nfpm, the `.deb` files), `docker/` (the `Dockerfile`, which builds the Linux binaries, the `.deb` files and the image, the compose files, `prepare-host.sh` and `deploy.sh`) and `notices/` (the third-party notices script and cargo-about's licence policy, shared by the Windows and Linux builds) |
 | `src/ui/tools/` | The design system scripts behind `pnpm design:sync` and `pnpm design:icons` |
 
 ## Rules
@@ -56,7 +56,7 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all --check
 cargo deny check                                    # licences, advisories and sources, before a pull request (cargo install cargo-deny)
 cargo run -p koppel                                  # https://localhost:5240; set KOPPEL_CONFIG_DIR and KOPPEL_KEYS_DIR to a folder of your own
-./installer/windows/build.ps1                        # PowerShell: Koppel-Setup.exe
+./installer/windows/build.ps1                        # PowerShell: artifacts/installer/Koppel-<version>-setup.exe, the MSI and SHA256SUMS (needs HEARTWOOD_INSTALLER_DIR)
 ./installer/linux/build.ps1 -Image                   # PowerShell: the .deb files and the image, loaded here, never pushed
 ```
 

@@ -17,14 +17,17 @@ use std::path::PathBuf;
 use ts_rs::{Config, TS};
 
 use crate::api::Problem;
-use crate::api::server::{Approve, ClientSecret, CreateClient, OpenPairing, ServerIdentity};
+use crate::api::server::{
+    Approve, ClientSecret, CreateClient, OpenEnrollmentCode, OpenPairing, ServerIdentity,
+};
 use crate::api::settings::{SettingsPatch, SystemInfo};
 use crate::auth::endpoints::{AuthState, ChangeRequest, PasswordRequest};
 use koppel_app::activity::ActivityEvent;
 use koppel_app::connection::{ConnectionUpdate, ConnectionView, PairStart};
 use koppel_app::roles::{
-    ClientView, ConnectionTest, DiscoveredServer, KeysView, NewClient, Outcome, PairingOverview,
-    PairingRequestView, PairingState, PairingStatus, PairingWindowView, RequestState,
+    ClientView, ConnectionTest, DiscoveredServer, EnrollmentCodeView, EnrollmentKey,
+    EnrollmentView, KeysView, NewClient, Outcome, PairingOverview, PairingRequestView,
+    PairingState, PairingStatus, PairingWindowView, RequestState,
 };
 use koppel_config::files::{KoppelSettings, Role};
 use koppel_usb::{ActivityOutcome, ActivityReason, EntityKind, EntityRef, SystemCheck};
@@ -72,6 +75,9 @@ fn decls() -> String {
         LinkState,
         NewClient,
         Outcome,
+        EnrollmentCodeView,
+        EnrollmentKey,
+        EnrollmentView,
         PairingOverview,
         PairingRequestView,
         PairingState,
@@ -89,6 +95,7 @@ fn decls() -> String {
         ChangeRequest,
         ConnectionUpdate,
         CreateClient,
+        OpenEnrollmentCode,
         OpenPairing,
         PairStart,
         PasswordRequest,
@@ -165,6 +172,8 @@ mod fixtures {
         "clients.json" => Vec<ClientView>,
         "connection-test.json" => ConnectionTest,
         "connection-view.json" => ConnectionView,
+        "enrollment-key.json" => EnrollmentKey,
+        "enrollment-view.json" => EnrollmentView,
         "discovered-servers.json" => Vec<DiscoveredServer>,
         "keys-view.json" => KeysView,
         "new-client.json" => NewClient,

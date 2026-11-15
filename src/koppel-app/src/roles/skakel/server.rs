@@ -39,8 +39,8 @@ use super::streams::{USB_STREAM, usb_handler};
 use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::push::{Event, Push};
 use crate::roles::{
-    Approval, ClientView, KeysView, NewClient, PairingOverview, PairingRequestView,
-    PairingWindowView, RegisterError, RequestState, RoleError, Switched,
+    Approval, ClientView, EnrollmentCodeView, EnrollmentView, KeysView, NewClient, PairingOverview,
+    PairingRequestView, PairingWindowView, RegisterError, RequestState, RoleError, Switched,
 };
 use crate::sync::Unpoisoned;
 use crate::tasks::Tasks;
@@ -77,6 +77,10 @@ struct Wiring {
     push: Push,
     activity: Arc<ActivityLog>,
     overview: Mutex<PairingOverview>,
+    /// The running server's enrolment, for the pairing code and the server key.
+    enrollment: Mutex<Option<skakel_server::Enrollment>>,
+    /// What the UI was last told about the code and the key.
+    enrolled: Mutex<EnrollmentView>,
     /// The requests a person here refused. 0.1.x's server dropped them from the list at once;
     /// Skakel 0.2.0 shows them as refused for a few seconds, as it does after three wrong codes.
     refused: Mutex<HashSet<String>>,
@@ -111,6 +115,8 @@ impl SkakelServerRole {
             push: parts.push.clone(),
             activity: parts.activity.clone(),
             overview: Mutex::new(PairingOverview::empty()),
+            enrollment: Mutex::new(None),
+            enrolled: Mutex::new(EnrollmentView::empty()),
             refused: Mutex::new(HashSet::new()),
         });
         let running = build(&parts, &wiring).await?;
@@ -187,6 +193,8 @@ impl SkakelServerRole {
         let empty = PairingOverview::empty();
         *self.wiring.overview.locked() = empty.clone();
         self.wiring.push.send(Event::PairingRequestsChanged(&empty));
+        // The new server shows no pairing code either.
+        self.wiring.sync_enrollment();
         if let Some(old) = old {
             old.shut_down().await;
         }
@@ -254,6 +262,7 @@ async fn build(parts: &ServerParts, wiring: &Arc<Wiring>) -> Result<Running, Ser
         .start_mounted(parts.listen)
         .await
         .map_err(ServerStartError)?;
+    *wiring.enrollment.locked() = Some(server.enrollment());
     let events = parts
         .tasks
         .spawn(read_events(server.subscribe(), Arc::downgrade(wiring)));
@@ -326,6 +335,8 @@ impl Wiring {
             ServerEvent::Clients(clients) => {
                 let list: Vec<ClientView> = clients.iter().map(client_view).collect();
                 self.push.send(Event::ClientsChanged(&list));
+                // A client that enrolled with the code spent it.
+                self.sync_enrollment();
             }
             ServerEvent::Certificates(certificates) => {
                 self.push
@@ -334,6 +345,39 @@ impl Wiring {
             // Events a later Skakel adds say nothing the UI shows.
             _ => {}
         }
+    }
+
+    /// Tells the UI when the pairing code that is showing is not the one it last heard of: a new
+    /// one, one that was closed, ran out or was spent.
+    fn sync_enrollment(&self) {
+        let code = self
+            .enrollment
+            .locked()
+            .as_ref()
+            .and_then(skakel_server::Enrollment::code)
+            .map(|opened| EnrollmentCodeView {
+                code: opened.code,
+                expires_at: opened.expires_at,
+            });
+        let view = {
+            let mut shown = self.enrolled.locked();
+            if shown.code == code {
+                return;
+            }
+            shown.code = code;
+            shown.clone()
+        };
+        self.push.send(Event::EnrollmentChanged(&view));
+    }
+
+    /// The server key was rotated: the UI sees the revision move.
+    fn key_rotated(&self) {
+        let view = {
+            let mut shown = self.enrolled.locked();
+            shown.key_revision += 1;
+            shown.clone()
+        };
+        self.push.send(Event::EnrollmentChanged(&view));
     }
 
     fn current_window(&self) -> PairingWindowView {
@@ -379,6 +423,7 @@ fn client_view(client: &skakel_server::ClientView) -> ClientView {
         last_seen: client.last_seen,
         has_next_certificate: client.has_next_certificate,
         has_secret: client.has_secret,
+        linked_with: client.linked_with.clone(),
     }
 }
 
@@ -510,6 +555,70 @@ impl SkakelServerRole {
 
     pub fn pairing(&self) -> PairingOverview {
         self.wiring.overview.locked().clone()
+    }
+
+    /// The pairing code that is showing, if one is, and the key's revision.
+    pub fn enrollment(&self) -> EnrollmentView {
+        self.wiring.sync_enrollment();
+        self.wiring.enrolled.locked().clone()
+    }
+
+    /// Shows a new pairing code for `duration` (Skakel holds it to between 30 seconds and five
+    /// minutes), replacing one that is showing. It shows in `EnrollmentChanged`, and goes again when it
+    /// ends, is closed or is spent by a client that enrols.
+    pub fn open_enrollment_code(&self, duration: Duration) -> Result<(), RoleError> {
+        let enrollment = self
+            .wiring
+            .enrollment
+            .locked()
+            .clone()
+            .ok_or(RoleError::NotRunning)?;
+        enrollment.open_code(duration)?;
+        self.wiring.sync_enrollment();
+        // One look after the code would have ended, so the UI hears it did, as no event of
+        // Skakel's says so.
+        let wiring = Arc::downgrade(&self.wiring);
+        let wait = duration.clamp(Duration::from_secs(30), Duration::from_secs(300))
+            + Duration::from_secs(1);
+        self.parts.tasks.spawn(async move {
+            tokio::time::sleep(wait).await;
+            if let Some(wiring) = wiring.upgrade() {
+                wiring.sync_enrollment();
+            }
+        });
+        Ok(())
+    }
+
+    /// Closes the pairing code that is showing.
+    pub fn close_enrollment_code(&self) {
+        if let Some(enrollment) = self.wiring.enrollment.locked().clone() {
+            enrollment.close_code();
+        }
+        self.wiring.sync_enrollment();
+    }
+
+    /// The server key as text, made the first time it is asked for.
+    pub async fn enrollment_key(&self) -> Result<String, RoleError> {
+        let enrollment = self
+            .wiring
+            .enrollment
+            .locked()
+            .clone()
+            .ok_or(RoleError::NotRunning)?;
+        Ok(enrollment.key().await?)
+    }
+
+    /// A new server key; the old one stops working. Clients already enrolled are not affected.
+    pub async fn rotate_enrollment_key(&self) -> Result<String, RoleError> {
+        let enrollment = self
+            .wiring
+            .enrollment
+            .locked()
+            .clone()
+            .ok_or(RoleError::NotRunning)?;
+        let key = enrollment.rotate_key().await?;
+        self.wiring.key_rotated();
+        Ok(key)
     }
 
     pub fn open_pairing(&self, duration: Duration) {

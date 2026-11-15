@@ -49,6 +49,49 @@ pub struct ClientView {
     pub has_next_certificate: bool,
     /// Its secret is kept, so it can be copied again.
     pub has_secret: bool,
+    /// How it was linked: `pairing`, `code` or `key`. Empty for a client made before that was kept.
+    #[serde(default)]
+    pub linked_with: Option<String>,
+}
+
+/// A pairing code the server is showing: eight digits that work once, until `expires_at`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentCodeView {
+    pub code: String,
+    #[serde(with = "time::serde::rfc3339")]
+    #[ts(type = "string")]
+    pub expires_at: OffsetDateTime,
+}
+
+/// What the server shows for enrolling a client without approving it: the pairing code, if one is
+/// showing, and how many times the server key has been rotated since the server started, so the UI
+/// can tell a rotation it asked for has happened. The key itself is not pushed: the UI asks for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentView {
+    pub code: Option<EnrollmentCodeView>,
+    pub key_revision: u32,
+}
+
+impl EnrollmentView {
+    /// No code showing: a server that has just started.
+    pub fn empty() -> Self {
+        Self {
+            code: None,
+            key_revision: 0,
+        }
+    }
+}
+
+/// The server key, as the text a person copies to another computer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollmentKey {
+    pub key: String,
 }
 
 /// A client just added, with its secret.

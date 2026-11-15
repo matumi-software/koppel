@@ -42,15 +42,17 @@ impl PushApi {
         let settings = self.settings.current();
         let mut events = vec![Event::SettingsChanged(&settings)];
         // Held here so the borrows in `events` outlive the loop below.
-        let (clients, keys, requests, devices);
+        let (clients, keys, requests, enrollment, devices);
         if RoleScope::Server.served_to(settings.role) {
             clients = self.server.clients();
             keys = self.server.keys();
             requests = self.server.pairing();
+            enrollment = self.server.enrollment();
             devices = self.usb_server.current();
             events.push(Event::ClientsChanged(&clients));
             events.push(Event::ServerKeysChanged(&keys));
             events.push(Event::PairingRequestsChanged(&requests));
+            events.push(Event::EnrollmentChanged(&enrollment));
             events.push(Event::DevicesChanged(&devices));
         }
         let (connection, found, pairing, attached);

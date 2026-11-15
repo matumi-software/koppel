@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The server can show a **pairing code** that works once, and keeps a **server key** that adds a computer at any time, with nothing to approve on the server (Skakel 0.3.1, which this takes). New routes under `/api/v1/server/enrollment`, a new push `EnrollmentChanged`, and a client's list entry says how it was linked (`linkedWith`: `pairing`, `code` or `key`). Today's pairing is unchanged. Adding a server on a client with a code or key follows with the client side.
+
 ## 0.2.1 (2026-11-13)
 
 Koppel 0.2.1 is the first release after the 0.2.0 review. It closes a hole in the UI's guards, keeps UI sessions in

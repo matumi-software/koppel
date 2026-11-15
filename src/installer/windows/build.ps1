@@ -190,6 +190,11 @@ Write-Host 'Building setup.exe...'
 $resources = Join-Path $work 'installer-resources'
 New-Item -ItemType Directory -Force -Path $resources | Out-Null
 Copy-Item (Join-Path $installer '..\linux\icons\koppel-256.png') (Join-Path $resources 'mark.png') -Force
+# The licence page shows Koppel's own licence (GPL-3.0-or-later, the LICENSE file) and asks for it to be accepted (setup.json).
+# The third-party notices are generated and far too long for a page; they ship in the install folder.
+$licenceText = Join-Path $root 'LICENSE'
+if (-not (Test-Path $licenceText) -or (Get-Item $licenceText).Length -lt 1000) { throw "$licenceText is missing or empty: the setup window's licence page needs it." }
+Copy-Item $licenceText (Join-Path $resources 'licence.txt') -Force
 $icon = Join-Path $root 'resources\design-system\assets\Logos\koppel-app-icon.ico'
 
 Assert-InstallerVersion $Version

@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@koppel/react-ui": "workspace:*",
+    "@matumi/tokens": "file:../vendor/heartwood/matumi-tokens-0.1.0.tgz",
+    "@matumi/ui": "file:../vendor/heartwood/matumi-ui-0.1.0.tgz",
     "@tanstack/react-query": "^5.105.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

@@ -466,7 +466,7 @@ async fn the_session_guards_every_api_route_that_is_not_anonymous() {
         (Method::POST, "/api/v1/auth/logout"),
         (Method::POST, "/api/v1/auth/password"),
         (Method::GET, "/api/v1/server/identity"),
-        (Method::GET, "/api/v1/client/connection"),
+        (Method::GET, "/api/v1/client/servers"),
         (Method::GET, "/api/v1/not-a-route-yet"),
         (Method::DELETE, "/api/v1/not/a/route/either"),
     ] {
@@ -563,7 +563,7 @@ async fn the_role_gate_answers_before_the_session_and_follows_the_role() {
 
     // A server: its own routes need the session, the client's are not found, signed in or not.
     let identity = "/api/v1/server/identity";
-    let connection = "/api/v1/client/connection";
+    let connection = "/api/v1/client/servers";
     assert_eq!(
         Call::get(identity, LOCAL).status(&ui).await,
         StatusCode::UNAUTHORIZED
@@ -677,7 +677,7 @@ async fn every_answer_carries_the_security_headers() {
             &routers.ui,
             Call::get("/api/v1/settings", LOCAL).cookie(&cookie),
         ),
-        (&routers.ui, Call::get("/api/v1/client/connection", LOCAL)),
+        (&routers.ui, Call::get("/api/v1/client/servers", LOCAL)),
         (&routers.ui, Call::get("/healthz", STRANGER)),
         (&routers.ui, Call::get("/skakel/info", LOCAL)),
         (&routers.network, Call::get("/skakel/info", STRANGER)),

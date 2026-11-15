@@ -41,17 +41,21 @@ const SERVER_ROUTES: &[(&str, &str)] = &[
 
 /// The UI's routes a client serves.
 const CLIENT_ROUTES: &[(&str, &str)] = &[
-    ("GET", "/api/v1/client/connection"),
-    ("PUT", "/api/v1/client/connection"),
-    ("POST", "/api/v1/client/connection/test"),
+    ("GET", "/api/v1/client/servers"),
+    ("POST", "/api/v1/client/servers"),
+    ("PATCH", "/api/v1/client/servers/server-0"),
+    ("DELETE", "/api/v1/client/servers/server-0"),
+    ("POST", "/api/v1/client/servers/server-0/test"),
     ("GET", "/api/v1/client/discovery"),
-    ("GET", "/api/v1/client/pairing"),
-    ("POST", "/api/v1/client/pairing"),
-    ("POST", "/api/v1/client/pairing/confirmation"),
-    ("DELETE", "/api/v1/client/pairing"),
     ("GET", "/api/v1/client/devices"),
-    ("PUT", "/api/v1/client/devices/1-1/attachment"),
-    ("DELETE", "/api/v1/client/devices/1-1/attachment"),
+    (
+        "PUT",
+        "/api/v1/client/servers/server-0/devices/1-1/attachment",
+    ),
+    (
+        "DELETE",
+        "/api/v1/client/servers/server-0/devices/1-1/attachment",
+    ),
 ];
 
 async fn call(session: &Session, method: &str, path: &str) -> u16 {

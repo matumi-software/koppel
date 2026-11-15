@@ -137,22 +137,23 @@ async fn settings_clients_the_certificate_and_the_password_survive_a_restart_and
 }
 
 #[tokio::test]
-async fn a_clients_connection_survives_a_restart_without_showing_its_secret() {
+async fn a_clients_servers_survive_a_restart_without_showing_their_secrets() {
     let mut pair = Pair::get().await;
-    let (_, secret) = pair.connect().await;
+    let linked = pair.connect().await;
+    let secret = linked.secret;
     let before = pair
         .client_admin
-        .get("/api/v1/client/connection")
+        .get("/api/v1/client/servers")
         .await
         .expect(200)
         .json();
-    assert_eq!(before["hasSecret"], json!(true));
+    assert_eq!(before["servers"][0]["hasSecret"], json!(true));
 
     pair.client_instance.restart().await;
 
     let client = pair.client.sign_in().await;
     let after = client
-        .get("/api/v1/client/connection")
+        .get("/api/v1/client/servers")
         .await
         .expect(200)
         .json();
@@ -165,10 +166,17 @@ async fn a_clients_connection_survives_a_restart_without_showing_its_secret() {
             .await
             .expect(200)
             .json();
-        (devices["link"] == json!("connected")).then_some(devices)
+        (devices["servers"][0]["link"] == json!("connected")).then_some(devices)
     })
     .await;
     shape::fields(&linked, shape::CLIENT_DEVICES, "GET /api/v1/client/devices");
+    shape::each(&linked["servers"], "client servers", |server| {
+        shape::fields(
+            server,
+            shape::CLIENT_SERVER_DEVICES,
+            "a server of GET /api/v1/client/devices",
+        );
+    });
 }
 
 #[tokio::test]

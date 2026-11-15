@@ -47,9 +47,9 @@ pub const EVENTS: &[Event] = &[
         payload: Payload::Object(shape::KEYS),
     },
     Event {
-        name: "ConnectionChanged",
-        when: "client: connection.json was written, by a PUT, a pairing or a server that moved",
-        payload: Payload::Object(shape::CONNECTION),
+        name: "ServersChanged",
+        when: "client: connection.json was written, by a server added, changed or removed, or one that moved",
+        payload: Payload::Object(shape::CLIENT_SERVERS),
     },
     Event {
         name: "DevicesChanged",
@@ -58,7 +58,7 @@ pub const EVENTS: &[Event] = &[
     },
     Event {
         name: "ClientDevicesChanged",
-        when: "client: the link changed, or the server's devices or what is attached here did",
+        when: "client: the link to a server changed, or a server's devices or what is attached here did",
         payload: Payload::Object(shape::CLIENT_DEVICES),
     },
     Event {
@@ -70,11 +70,6 @@ pub const EVENTS: &[Event] = &[
         name: "ServersDiscovered",
         when: "client: the list of servers found on the network changed",
         payload: Payload::List(shape::DISCOVERED_SERVER),
-    },
-    Event {
-        name: "PairingStatusChanged",
-        when: "client: pairing moved on (requesting, waiting with its code, confirm, paired, denied, expired, failed, idle)",
-        payload: Payload::Object(shape::PAIRING_STATUS),
     },
     Event {
         name: "PairingRequestsChanged",

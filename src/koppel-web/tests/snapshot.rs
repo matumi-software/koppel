@@ -47,7 +47,7 @@ async fn first_events(node: &Node, count: usize) -> Vec<(String, Value)> {
 async fn a_stream_opens_with_the_state_of_each_resource_the_role_has() {
     let dir = TempDir::new("snapshot-both");
     let node = Node::start(dir.path(), "both", None, FakeKernel::new()).await;
-    let events = first_events(&node, 9).await;
+    let events = first_events(&node, 10).await;
     let names: Vec<&str> = events.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
         names,
@@ -56,10 +56,10 @@ async fn a_stream_opens_with_the_state_of_each_resource_the_role_has() {
             "ClientsChanged",
             "ServerKeysChanged",
             "PairingRequestsChanged",
+            "EnrollmentChanged",
             "DevicesChanged",
-            "ConnectionChanged",
+            "ServersChanged",
             "ServersDiscovered",
-            "PairingStatusChanged",
             "ClientDevicesChanged",
         ]
     );
@@ -68,10 +68,10 @@ async fn a_stream_opens_with_the_state_of_each_resource_the_role_has() {
         ("ClientsChanged", "/api/v1/server/clients"),
         ("ServerKeysChanged", "/api/v1/server/keys"),
         ("PairingRequestsChanged", "/api/v1/server/pairing"),
+        ("EnrollmentChanged", "/api/v1/server/enrollment"),
         ("DevicesChanged", "/api/v1/server/devices"),
-        ("ConnectionChanged", "/api/v1/client/connection"),
+        ("ServersChanged", "/api/v1/client/servers"),
         ("ServersDiscovered", "/api/v1/client/discovery"),
-        ("PairingStatusChanged", "/api/v1/client/pairing"),
         ("ClientDevicesChanged", "/api/v1/client/devices"),
     ] {
         let pushed = &events.iter().find(|(n, _)| n == name).unwrap().1;
@@ -84,7 +84,7 @@ async fn a_stream_opens_with_the_state_of_each_resource_the_role_has() {
 async fn a_server_only_machine_gets_no_client_state() {
     let dir = TempDir::new("snapshot-server");
     let node = Node::start(dir.path(), "server", None, FakeKernel::new()).await;
-    let events = first_events(&node, 5).await;
+    let events = first_events(&node, 6).await;
     let names: Vec<&str> = events.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
         names,
@@ -93,6 +93,7 @@ async fn a_server_only_machine_gets_no_client_state() {
             "ClientsChanged",
             "ServerKeysChanged",
             "PairingRequestsChanged",
+            "EnrollmentChanged",
             "DevicesChanged",
         ]
     );

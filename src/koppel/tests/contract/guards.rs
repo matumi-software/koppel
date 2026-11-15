@@ -42,11 +42,7 @@ async fn every_answer_carries_the_security_headers() {
         "a 401",
     );
     security_headers(
-        &main
-            .admin
-            .get("/api/v1/client/connection")
-            .await
-            .expect(404),
+        &main.admin.get("/api/v1/client/servers").await.expect(404),
         "a 404",
     );
     security_headers(
@@ -199,7 +195,7 @@ async fn each_role_serves_its_own_surfaces_from_the_next_request() {
     let table: &[(&str, u16, u16, u16)] = &[
         ("/api/v1/server/identity", 200, 404, 200),
         ("/api/v1/server/clients", 200, 404, 200),
-        ("/api/v1/client/connection", 404, 200, 200),
+        ("/api/v1/client/servers", 404, 200, 200),
         ("/api/v1/client/devices", 404, 200, 200),
         ("/api/v1/settings", 200, 200, 200),
         ("/api/v1/system/info", 200, 200, 200),

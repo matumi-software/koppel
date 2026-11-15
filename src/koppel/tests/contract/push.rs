@@ -17,12 +17,11 @@ const TESTED: &[&str] = &[
     "SettingsChanged",
     "ClientsChanged",
     "ServerKeysChanged",
-    "ConnectionChanged",
+    "ServersChanged",
     "DevicesChanged",
     "ClientDevicesChanged",
     "ActivityRecorded",
     "ServersDiscovered",
-    "PairingStatusChanged",
     "PairingRequestsChanged",
     "EnrollmentChanged",
 ];
@@ -200,46 +199,52 @@ async fn server_keys_changed_carries_the_keys_after_a_certificate_is_prepared() 
 }
 
 #[tokio::test]
-async fn connection_changed_carries_the_connection_without_its_secret() {
-    let main = Main::get().await;
-    let admin = &main.admin;
-    admin
-        .patch("/api/v1/settings", json!({ "role": "both" }))
-        .await
-        .expect(202);
+async fn servers_changed_carries_the_servers_without_their_secrets() {
+    let pair = Pair::get().await;
+    let admin = &pair.client_admin;
     let mut events = open(admin).await;
-    let fingerprint = admin
-        .get("/api/v1/server/identity")
-        .await
-        .expect(200)
-        .json()["fingerprint"]
-        .clone();
-    let id = unique("client-push");
-    let secret = unique("secret");
+
+    // Adding a server by its pairing code, then renaming it and removing it.
+    let linked = pair.connect().await;
+    let pushed = expect(&mut events, "ServersChanged", |c| {
+        c["servers"]
+            .as_array()
+            .is_some_and(|l| l.iter().any(|s| s["clientId"] == json!(linked.client_id)))
+    })
+    .await;
+    payload("ServersChanged", &pushed);
+    shape::each(&pushed["servers"], "ServersChanged servers", |server| {
+        shape::fields(server, shape::CLIENT_SERVER, "a pushed server");
+    });
+    assert_eq!(pushed["servers"][0]["hasSecret"], json!(true));
+    assert_eq!(pushed["servers"][0]["linkedWith"], json!("code"));
+    assert!(
+        !pushed.to_string().contains(&linked.secret),
+        "never the secret"
+    );
+    let read = admin.get("/api/v1/client/servers").await.expect(200).json();
+    assert_eq!(pushed, read);
+
     admin
-        .put(
-            "/api/v1/client/connection",
-            json!({
-                "serverUrl": "https://koppel-contract-elsewhere:5240",
-                "serverFingerprint": fingerprint,
-                "clientId": id,
-                "clientSecret": secret,
-            }),
+        .patch(
+            &format!("/api/v1/client/servers/{}", linked.server_id),
+            json!({ "name": "pushed name" }),
         )
         .await
         .expect(202);
-    let pushed = expect(&mut events, "ConnectionChanged", |c| {
-        c["clientId"] == json!(id)
+    expect(&mut events, "ServersChanged", |c| {
+        c["servers"][0]["name"] == json!("pushed name")
     })
     .await;
-    assert_eq!(pushed["hasSecret"], json!(true));
-    assert!(!pushed.to_string().contains(&secret), "never the secret");
-    let read = admin
-        .get("/api/v1/client/connection")
+
+    admin
+        .delete(&format!("/api/v1/client/servers/{}", linked.server_id))
         .await
-        .expect(200)
-        .json();
-    assert_eq!(pushed, read);
+        .expect(202);
+    expect(&mut events, "ServersChanged", |c| {
+        c["servers"].as_array().is_some_and(Vec::is_empty)
+    })
+    .await;
 }
 
 // The device comes from the fake sysfs, which only Linux builds.
@@ -256,42 +261,25 @@ async fn client_devices_changed_follows_an_attach_and_a_detach() {
         )
         .await
         .expect(202);
-    pair.connect().await;
+    let linked = pair.connect().await;
     let admin = &pair.client_admin;
     crate::support::eventually("the client to list the server's device", WAIT, || async {
         let devices = admin.get("/api/v1/client/devices").await.expect(200).json();
-        (devices["devices"].as_array().is_some_and(|l| !l.is_empty())).then_some(())
+        (devices["servers"][0]["devices"]
+            .as_array()
+            .is_some_and(|l| !l.is_empty()))
+        .then_some(())
     })
     .await;
     let mut events = open(admin).await;
-    admin
-        .put_empty("/api/v1/client/devices/1-1/attachment")
-        .await
-        .expect(202);
+    let attachment = format!(
+        "/api/v1/client/servers/{}/devices/1-1/attachment",
+        linked.server_id
+    );
+    admin.put_empty(&attachment).await.expect(202);
     expect(&mut events, "ClientDevicesChanged", |_| true).await;
-    admin
-        .delete("/api/v1/client/devices/1-1/attachment")
-        .await
-        .expect(202);
+    admin.delete(&attachment).await.expect(202);
     expect(&mut events, "ClientDevicesChanged", |_| true).await;
-}
-
-#[tokio::test]
-async fn pairing_status_changed_follows_a_cancel() {
-    let main = Main::get().await;
-    let admin = &main.admin;
-    admin
-        .patch("/api/v1/settings", json!({ "role": "both" }))
-        .await
-        .expect(202);
-    let mut events = open(admin).await;
-    admin.delete("/api/v1/client/pairing").await.expect(202);
-    let pushed = expect(&mut events, "PairingStatusChanged", |s| {
-        s["state"] == json!("idle")
-    })
-    .await;
-    let read = admin.get("/api/v1/client/pairing").await.expect(200).json();
-    assert_eq!(pushed, read);
 }
 
 // Sharing writes to the Linux kernel's sysfs, which the instance gets as a folder of files here.
@@ -448,41 +436,6 @@ async fn a_pairing_code_cannot_be_open_for_a_few_seconds() {
         .put("/api/v1/server/enrollment/code", json!({ "seconds": 5 }))
         .await
         .expect(400);
-}
-
-#[tokio::test]
-async fn pairing_requests_changed_follows_a_client_asking_to_pair() {
-    let pair = Pair::get().await;
-    let identity = pair
-        .server_admin
-        .get("/api/v1/server/identity")
-        .await
-        .expect(200)
-        .json();
-    pair.server_admin
-        .put("/api/v1/server/pairing/window", json!({}))
-        .await
-        .expect(202);
-    let mut events = open(&pair.server_admin).await;
-    pair.client_admin
-        .post(
-            "/api/v1/client/pairing",
-            json!({ "serverUrl": pair.peer_url, "serverFingerprint": identity["fingerprint"], "serverName": identity["name"] }),
-        )
-        .await
-        .expect(202);
-    expect(&mut events, "PairingRequestsChanged", |o| {
-        o["requests"].as_array().is_some_and(|r| !r.is_empty())
-    })
-    .await;
-    pair.client_admin
-        .delete("/api/v1/client/pairing")
-        .await
-        .expect(202);
-    pair.server_admin
-        .delete("/api/v1/server/pairing/window")
-        .await
-        .expect(202);
 }
 
 // Broadcast works on Linux, in a container too; see the discovery test in client.rs.

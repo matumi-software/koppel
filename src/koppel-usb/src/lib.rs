@@ -16,6 +16,7 @@
 pub mod activity;
 mod checks;
 mod client;
+mod clients;
 mod data_plane;
 mod error;
 mod gateway;
@@ -39,6 +40,7 @@ use time::OffsetDateTime;
 pub use activity::{ActivityOutcome, ActivityReason, ActivitySink, EntityKind, EntityRef};
 pub use checks::{SystemCheck, attach_check, share_check};
 pub use client::{ClientOptions, Deps, Link, LinkEvents, LinkStatus, Links, UsbClient};
+pub use clients::{ClientServerDeps, ClientsError, Common, UsbClients};
 pub use data_plane::{RemoteClient, UsbDataPlane};
 pub use gateway::{GatewayOptions, UsbIpGateway};
 pub use host::{Capabilities, Export, HostKind, Platform, UsbAttacher, UsbHost, UsbIpDriver};
@@ -54,8 +56,8 @@ pub use usbip::{
     protocol,
 };
 pub use views::{
-    ClientDeviceView, ClientDevices, DeviceState, DeviceView, LinkState, RemoteDevices,
-    ServerDevices,
+    ClientDeviceView, ClientDevices, ClientServersView, DeviceState, DeviceView, LinkState,
+    RemoteDevices, ServerDevices, ServerDevicesView,
 };
 
 /// Public with the `test-util` feature, for the tests and test doubles; inside the crate always.

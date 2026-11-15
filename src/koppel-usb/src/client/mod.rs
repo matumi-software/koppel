@@ -10,6 +10,7 @@
 mod actor;
 mod attach;
 mod gateway_session;
+pub(crate) use self::gateway_session::{GatewayRequest, Peeked, read_request, refuse_import};
 mod slots;
 mod url;
 
@@ -295,6 +296,11 @@ pub(crate) enum Command {
     Gateway {
         port: Option<u16>,
         fault: Option<String>,
+    },
+    /// Whether the gateway would serve the driver's import of `key`, claiming nothing.
+    HasBooking {
+        key: AttachKey,
+        reply: oneshot::Sender<bool>,
     },
     /// The gateway serves the driver's import of `key`, once.
     Book {
@@ -659,6 +665,44 @@ impl UsbClient {
             reply,
         });
         let _ = shown.await;
+    }
+
+    /// Whether this client has asked the driver for `bus_id` and is waiting for it at the gateway.
+    pub async fn has_booking(&self, bus_id: &BusId) -> bool {
+        let epoch = self.shared.view().epoch.id;
+        let (reply, answer) = oneshot::channel();
+        self.shared.send(Command::HasBooking {
+            key: AttachKey {
+                epoch,
+                bus_id: bus_id.clone(),
+            },
+            reply,
+        });
+        answer.await.unwrap_or(false)
+    }
+
+    /// Whether the server this client links to is offering `bus_id` now.
+    pub fn offers(&self, bus_id: &BusId) -> bool {
+        self.shared.offered(bus_id).is_some()
+    }
+
+    /// Whether a USB/IP driver on this machine attaches for this client, so the gateway serves only
+    /// what the client asked the driver for.
+    pub fn uses_driver(&self) -> bool {
+        self.shared.uses_driver(&self.shared.view())
+    }
+
+    /// Serves a gateway connection whose request was already read, as [`Self::serve_gateway`] does.
+    pub(crate) async fn serve_gateway_request(
+        &self,
+        local: TcpStream,
+        peer: SocketAddr,
+        stopping: &CancellationToken,
+        request: GatewayRequest,
+    ) {
+        self.shared
+            .serve_gateway_request(local, peer, stopping, request)
+            .await;
     }
 
     /// Serves one plain USB/IP connection from a USB/IP driver on this machine, such as

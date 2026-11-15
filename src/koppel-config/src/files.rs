@@ -39,7 +39,7 @@ impl Role {
 }
 
 /// `null` reads as the type's default, as it did where 0.1.x wrote a missing list as `null`.
-fn or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+pub(crate) fn or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de> + Default,

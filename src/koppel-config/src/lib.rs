@@ -21,6 +21,7 @@ pub mod files;
 mod harden;
 mod paths;
 mod secret;
+mod servers;
 
 use std::sync::Arc;
 
@@ -40,6 +41,10 @@ pub use harden::harden_directory;
 pub use koppel_secrets::Secret;
 pub use paths::{KoppelPaths, default_root, log_folder, prepare_log_folder};
 pub use secret::{KeySource, KeySources, SecretBox, SecretError, SecretFormat, format_of};
+pub use servers::{
+    AttachedByServer, AttachedFromServer, ClientServers, DEFAULT_GIVE_UP_AFTER_SECONDS,
+    DEFAULT_RECONNECT, DEFAULT_RETRY_EVERY_SECONDS, FIRST_SERVER, ServerEntry,
+};
 
 use files::{
     AttachedDevices, ClientConnection, KoppelSettings, ServerSecrets, SharedDevices, UiCredentials,
@@ -82,6 +87,32 @@ pub mod open {
             Options {
                 start_with_defaults_when_unusable: true,
                 warn_unknown_keys: true,
+                ..Options::default()
+            },
+        )
+    }
+
+    /// `attached.json` as a list of servers: plain, and a bad file starts with nothing remembered. It reads
+    /// the flat file of one server too.
+    pub fn attached_by_server(paths: &KoppelPaths) -> ConfigFile<AttachedByServer> {
+        ConfigFile::new(
+            paths.attached_file(),
+            AttachedByServer::default(),
+            Options {
+                start_with_defaults_when_unusable: true,
+                warn_unknown_keys: true,
+                ..Options::default()
+            },
+        )
+    }
+
+    /// `connection.json` as a list of servers: encrypted. It reads the flat file of one server too.
+    pub fn servers(paths: &KoppelPaths, secrets: &Arc<SecretBox>) -> ConfigFile<ClientServers> {
+        ConfigFile::new(
+            paths.connection_file(),
+            ClientServers::default(),
+            Options {
+                codec: secrets.codec(),
                 ..Options::default()
             },
         )

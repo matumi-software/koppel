@@ -9,7 +9,8 @@
   "mark": "mark.png",
   "windowTitle": "Koppel Setup",
   "launch": { "target": "[ProgramFiles64Folder]Matumi (Pty) Ltd\\Koppel\\KoppelDesktop.exe", "arguments": "--open", "on": ["install", "update"] },
-  "screens": ["welcome"],
+  "screens": ["welcome", "licence"],
+  "licence": { "file": "licence.txt", "acceptRequired": true },
   "restartNote": "The USB driver is not ready until then, so shared and attached devices may not work.",
   "uninstallNote": "Your pairings, keys and settings stay in %ProgramData%\\Koppel. Delete that folder to remove them."
 }

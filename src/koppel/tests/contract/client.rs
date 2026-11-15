@@ -1,49 +1,59 @@
-//! The client role, against a real server: pairing through the code (approve, a wrong code, refuse,
-//! cancel, and the confirm step when it would replace a connection), the stored connection and its
-//! test, servers found on the network, and the client's devices. The client target reaches the main
-//! one at its own address.
+//! The client role, against a real server: adding a server by its pairing code or its server key (a
+//! wrong code, one already added, what is checked first), the list of servers and its changes, the
+//! connection test, servers found on the network, and the devices of each server. The client target
+//! reaches the main one at its own address.
 
 use std::time::Duration;
 
 use crate::support::shape::{self, Kind};
-use crate::support::{Body, Pair, Session, activity_with, eventually, json, tls, unique};
-use reqwest::Method;
+use crate::support::{Pair, Session, eventually, json, tls};
 use serde_json::Value;
 
 const WAIT: Duration = Duration::from_secs(60);
 
-async fn pairing(client: &Session) -> Value {
-    let status = client
-        .get("/api/v1/client/pairing")
-        .await
-        .expect(200)
-        .json();
-    shape::fields(&status, shape::PAIRING_STATUS, "GET /api/v1/client/pairing");
-    status
-}
-
-async fn connection(client: &Session) -> Value {
+async fn servers(client: &Session) -> Value {
     let value = client
-        .get("/api/v1/client/connection")
+        .get("/api/v1/client/servers")
         .await
         .expect(200)
         .json();
-    shape::fields(&value, shape::CONNECTION, "GET /api/v1/client/connection");
+    shape::fields(&value, shape::CLIENT_SERVERS, "GET /api/v1/client/servers");
+    shape::each(&value["servers"], "GET /api/v1/client/servers", |server| {
+        shape::fields(server, shape::CLIENT_SERVER, "a server of the client");
+    });
     value
 }
 
-async fn connection_test(client: &Session) -> Value {
-    let answer = client
-        .post_empty("/api/v1/client/connection/test")
+async fn connection_test(client: &Session, id: &str) -> Value {
+    let path = format!("/api/v1/client/servers/{id}/test");
+    let answer = client.post_empty(&path).await.expect(200).json();
+    shape::fields(
+        &answer,
+        shape::CONNECTION_TEST,
+        "POST /api/v1/client/servers/{id}/test",
+    );
+    answer
+}
+
+async fn client_devices(client: &Session) -> Value {
+    let devices = client
+        .get("/api/v1/client/devices")
         .await
         .expect(200)
         .json();
     shape::fields(
-        &answer,
-        shape::CONNECTION_TEST,
-        "POST /api/v1/client/connection/test",
+        &devices,
+        shape::CLIENT_DEVICES,
+        "GET /api/v1/client/devices",
     );
-    answer
+    shape::each(&devices["servers"], "client servers", |server| {
+        shape::fields(
+            server,
+            shape::CLIENT_SERVER_DEVICES,
+            "a server of GET /api/v1/client/devices",
+        );
+    });
+    devices
 }
 
 async fn fingerprint(admin: &Session) -> String {
@@ -64,246 +74,99 @@ async fn machine_name(admin: &Session) -> String {
         .to_owned()
 }
 
-/// Opens `server`'s pairing window, which Skakel 0.3.0 keeps closed until a person opens it, and
-/// waits until it shows as open.
-async fn open_pairing(server: &Session) {
-    server
-        .put("/api/v1/server/pairing/window", json!({ "minutes": 5 }))
-        .await
-        .expect(202)
-        .empty();
-    eventually("the pairing window to open", WAIT, || async {
-        let overview = server
-            .get("/api/v1/server/pairing")
-            .await
-            .expect(200)
-            .json();
-        (overview["window"]["open"] == json!(true)).then_some(())
-    })
-    .await;
-}
-
-/// Starts pairing on `client` with the server at `url`, and waits for the code.
-async fn start_pairing(client: &Session, url: &str, fingerprint: &str, name: &str) -> Value {
-    client
-        .post(
-            "/api/v1/client/pairing",
-            json!({ "serverUrl": url, "serverFingerprint": fingerprint, "serverName": name }),
-        )
-        .await
-        .expect(202)
-        .empty();
-    eventually("the client to show its code", WAIT, || async {
-        let status = pairing(client).await;
-        match status["state"].as_str() {
-            Some("waiting") => Some(status),
-            // The 202 already shows requesting; idle here would be the old race.
-            Some("requesting") => None,
-            other => panic!("pairing went to {other:?}: {status}"),
-        }
-    })
-    .await
-}
-
-/// The request on `server` from the client named `client_name`.
-async fn request_from(server: &Session, client_name: &str) -> Value {
-    eventually("the request to reach the server", WAIT, || async {
-        let overview = server
-            .get("/api/v1/server/pairing")
-            .await
-            .expect(200)
-            .json();
-        shape::fields(
-            &overview,
-            shape::PAIRING_OVERVIEW,
-            "GET /api/v1/server/pairing",
-        );
-        overview["requests"]
+/// Waits until the client's link to the server `id` is up, and gives the client's device list.
+async fn linked(client: &Session, id: &str) -> Value {
+    eventually("the client to link", WAIT, || async {
+        let devices = client_devices(client).await;
+        devices["servers"]
             .as_array()
-            .and_then(|requests| {
-                requests.iter().find(|r| {
-                    r["clientName"] == json!(client_name) && r["state"] == json!("waiting")
-                })
-            })
-            .cloned()
+            .and_then(|list| list.iter().find(|s| s["id"] == json!(id)))
+            .is_some_and(|s| s["link"] == json!("connected"))
+            .then_some(devices)
     })
     .await
 }
 
-async fn requests_on(server: &Session) -> Vec<Value> {
-    server
-        .get("/api/v1/server/pairing")
-        .await
-        .expect(200)
-        .json()["requests"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-}
-
-/// A client registered on the server through its UI, with its credentials.
-async fn new_client(server: &Session) -> (String, String) {
-    let created = server
-        .post(
-            "/api/v1/server/clients",
-            json!({ "name": unique("contract-client") }),
-        )
-        .await
-        .expect(201)
-        .json();
-    (
-        created["clientId"].as_str().expect("an id").to_owned(),
-        created["clientSecret"]
-            .as_str()
-            .expect("a secret")
-            .to_owned(),
-    )
-}
-
-async fn save_connection(client: &Session, url: &str, fingerprint: &str, id: &str, secret: &str) {
-    client
-        .put(
-            "/api/v1/client/connection",
-            json!({ "serverUrl": url, "serverFingerprint": fingerprint, "clientId": id, "clientSecret": secret }),
-        )
-        .await
-        .expect(202)
-        .empty();
-}
-
 #[tokio::test]
-async fn a_client_that_was_never_set_up_is_unconfigured() {
+async fn a_client_that_was_never_set_up_has_no_servers() {
     let pair = Pair::get().await;
-    let stored = connection(&pair.client_admin).await;
-    assert!(stored["serverUrl"].is_null(), "{stored}");
-    assert_eq!(stored["hasSecret"], json!(false));
-    let test = connection_test(&pair.client_admin).await;
-    assert_eq!(test["ok"], json!(false));
-    assert_eq!(test["outcome"], json!("incomplete"));
-    let devices = pair
-        .client_admin
-        .get("/api/v1/client/devices")
+    let client = &pair.client_admin;
+    assert_eq!(servers(client).await["servers"], json!([]));
+    let devices = client_devices(client).await;
+    assert_eq!(devices["servers"], json!([]), "{devices}");
+    client
+        .post_empty("/api/v1/client/servers/server-none/test")
         .await
-        .expect(200)
-        .json();
-    assert_eq!(devices["link"], json!("unconfigured"));
-    assert_eq!(pairing(&pair.client_admin).await["state"], json!("idle"));
+        .expect(404);
 }
 
 #[tokio::test]
-async fn pairing_with_the_code_registers_the_client_and_links_it() {
+async fn adding_a_server_with_the_code_registers_the_client_and_links_it() {
     let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
     let server_fingerprint = fingerprint(server).await;
-    let server_name = machine_name(server).await;
     let client_name = machine_name(client).await;
-    assert_eq!(pairing(client).await["state"], json!("idle"));
+    let server_name = machine_name(server).await;
 
-    // A connection to this same server already, which an earlier test may have left pointing
-    // elsewhere: an approval from the server it is connected to replaces the credentials without asking.
-    let (old_id, old_secret) = new_client(server).await;
-    save_connection(
-        client,
-        &pair.peer_url,
-        &server_fingerprint,
-        &old_id,
-        &old_secret,
-    )
-    .await;
-
-    // The address and fingerprint are checked before anything is sent.
-    client
-        .post(
-            "/api/v1/client/pairing",
-            json!({ "serverUrl": "http://elsewhere:5240", "serverFingerprint": server_fingerprint }),
-        )
+    // What is wrong with the request is said before anything is sent to the server.
+    let code = pair.show_code().await;
+    let add = |body: Value| client.post("/api/v1/client/servers", body);
+    add(json!({ "address": "http://elsewhere:5240", "code": code }))
         .await
-        .problem(&["serverUrl"]);
-    client
-        .post(
-            "/api/v1/client/pairing",
-            json!({ "serverUrl": pair.peer_url, "serverFingerprint": "AB:CD" }),
-        )
+        .problem(&["address"]);
+    add(json!({ "address": "not an address", "code": code }))
         .await
-        .problem(&["serverFingerprint"]);
-    client
-        .post("/api/v1/client/pairing", json!({}))
+        .problem(&["address"]);
+    add(json!({ "address": pair.peer_url, "code": "12" }))
         .await
-        .problem(&["serverUrl", "serverFingerprint"]);
+        .problem(&["code"]);
+    add(json!({ "address": pair.peer_url }))
+        .await
+        .problem(&["code"]);
+    add(json!({ "address": pair.peer_url, "code": code, "key": "kp1_x" }))
+        .await
+        .problem(&["code"]);
+    add(json!({ "address": pair.peer_url, "code": code, "name": "x".repeat(81) }))
+        .await
+        .problem(&["name"]);
+    assert_eq!(servers(client).await["servers"], json!([]));
 
-    // The fingerprint may be typed in any spelling.
-    open_pairing(server).await;
-    let typed = server_fingerprint.replace(':', "").to_ascii_lowercase();
-    let waiting = start_pairing(
-        client,
-        &format!("{}/ignored/path", pair.peer_url),
-        &typed,
-        &server_name,
-    )
-    .await;
-    let code = waiting["code"].as_str().expect("a code").to_owned();
-    assert!(
-        code.len() == 8 && code.chars().all(|c| c.is_ascii_digit()),
-        "eight digits: {code}"
-    );
-    assert!(waiting["expiresAt"].is_string());
-    assert_eq!(waiting["serverName"], json!(server_name));
-    assert_eq!(waiting["serverUrl"], json!(pair.peer_url));
-    // The status carries the fingerprint as typed or normalized; the digits are what count.
-    assert_eq!(
-        tls::normalize(waiting["serverFingerprint"].as_str().unwrap_or_default()),
-        server_fingerprint
-    );
-
-    let request = request_from(server, &client_name).await;
-    shape::fields(&request, shape::PAIRING_REQUEST, "a pairing request");
-    let request_id = request["id"].as_str().expect("an id").to_owned();
-    let approve = format!("/api/v1/server/pairing/requests/{request_id}/approval");
-
+    // A code the server is not showing is refused, and nothing is saved.
     let wrong_code = if code == "00000000" {
         "11111111"
     } else {
         "00000000"
     };
-    server
-        .post(&approve, json!({ "code": wrong_code }))
+    let refused = add(json!({ "address": pair.peer_url, "code": wrong_code }))
         .await
-        .problem(&["code"]);
-    assert!(
-        requests_on(server)
-            .await
-            .iter()
-            .any(|r| r["id"] == json!(request_id)),
-        "a wrong code leaves the request"
-    );
+        .expect(422)
+        .json();
+    assert_eq!(refused["code"], json!("enrolment_failed"), "{refused}");
+    assert!(refused["detail"].is_string(), "{refused}");
+    assert_eq!(servers(client).await["servers"], json!([]));
 
-    server
-        .post(&approve, json!({ "code": code }))
+    // The right code adds it, whatever path follows the address. A wrong code may have spent the
+    // one showing, so the server shows a new one.
+    let code = pair.show_code().await;
+    let added = add(json!({ "address": format!("{}/ignored/path", pair.peer_url), "code": code }))
         .await
-        .expect(202)
-        .empty();
-
-    let paired = eventually("the client to be paired", WAIT, || async {
-        let status = pairing(client).await;
-        (status["state"] == json!("paired")).then_some(status)
-    })
-    .await;
-    assert!(paired["code"].is_null());
+        .expect(201)
+        .json();
+    shape::fields(&added, shape::CLIENT_SERVER, "the added server");
+    assert_eq!(added["name"], json!(server_name));
+    assert_eq!(added["serverUrl"], json!(pair.peer_url));
     assert_eq!(
-        tls::normalize(paired["serverFingerprint"].as_str().unwrap_or_default()),
+        tls::normalize(added["serverFingerprint"].as_str().unwrap_or_default()),
         server_fingerprint
     );
+    assert_eq!(added["hasSecret"], json!(true));
+    assert_eq!(added["linkedWith"], json!("code"));
+    assert_eq!(added["reconnect"], json!(true));
+    let server_id = added["id"].as_str().expect("an id").to_owned();
+    let client_id = added["clientId"].as_str().expect("a client id").to_owned();
 
-    let stored = connection(client).await;
-    assert_eq!(stored["serverUrl"], json!(pair.peer_url));
-    assert_eq!(stored["serverFingerprint"], json!(server_fingerprint));
-    assert_eq!(stored["hasSecret"], json!(true));
-    let client_id = stored["clientId"].as_str().expect("a client id").to_owned();
-    assert_ne!(
-        client_id, old_id,
-        "the paired credentials replaced the old ones"
-    );
-
+    let listed = servers(client).await;
+    assert_eq!(listed["servers"], json!([added]));
     let clients = server
         .get("/api/v1/server/clients")
         .await
@@ -313,475 +176,171 @@ async fn pairing_with_the_code_registers_the_client_and_links_it() {
         .as_array()
         .and_then(|list| list.iter().find(|c| c["id"] == json!(client_id)))
         .cloned()
-        .expect("the server lists the paired client");
+        .expect("the server lists the enrolled client");
     assert_eq!(row["name"], json!(client_name));
-    assert!(
-        !requests_on(server)
-            .await
-            .iter()
-            .any(|r| r["id"] == json!(request_id))
-    );
-    server
-        .post(&approve, json!({ "code": code }))
-        .await
-        .expect(404);
 
-    let test = connection_test(client).await;
+    // The same server cannot be added twice, with a new code or not.
+    let code = pair.show_code().await;
+    let twice = add(json!({ "address": pair.peer_url, "code": code }))
+        .await
+        .expect(409)
+        .json();
+    assert_eq!(twice["code"], json!("already_added"), "{twice}");
+    assert_eq!(
+        servers(client).await["servers"].as_array().map(Vec::len),
+        Some(1)
+    );
+
+    let test = connection_test(client, &server_id).await;
     assert_eq!(test["ok"], json!(true), "{test}");
     assert_eq!(test["outcome"], json!("ok"));
 
-    let linked = eventually("the client to link", WAIT, || async {
-        let devices = client
-            .get("/api/v1/client/devices")
-            .await
-            .expect(200)
-            .json();
-        shape::fields(
-            &devices,
-            shape::CLIENT_DEVICES,
-            "GET /api/v1/client/devices",
-        );
-        (devices["link"] == json!("connected")).then_some(devices)
-    })
-    .await;
+    let devices = linked(client, &server_id).await;
     let shared = server
         .get("/api/v1/server/devices")
         .await
         .expect(200)
         .json();
+    let entry = &devices["servers"][0];
+    assert_eq!(entry["name"], json!(server_name));
     assert_eq!(
-        linked["devices"].as_array().map(Vec::len),
+        entry["devices"].as_array().map(Vec::len),
         shared["devices"].as_array().map(Vec::len),
         "the client sees what the server has"
     );
-
-    let added = activity_with(server, "clientAdded").await;
-    let entry = added
-        .iter()
-        .find(|e| e["entity"]["id"] == json!(client_id))
-        .expect("a clientAdded entry for the pairing");
-    assert_eq!(entry["outcome"], json!("succeeded"));
-
-    server
-        .delete(&format!("/api/v1/server/clients/{old_id}"))
-        .await
-        .expect(202);
 }
 
 #[tokio::test]
-async fn a_server_with_its_pairing_closed_tells_the_client_how_to_open_it() {
+async fn adding_a_server_with_its_key_links_it_and_a_wrong_key_is_refused() {
     let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
-    let server_fingerprint = fingerprint(server).await;
-    server
-        .delete("/api/v1/server/pairing/window")
+    let key = server
+        .get("/api/v1/server/enrollment/key")
         .await
-        .expect(202)
-        .empty();
-    eventually("the pairing window to close", WAIT, || async {
-        let overview = server
-            .get("/api/v1/server/pairing")
-            .await
-            .expect(200)
-            .json();
-        (overview["window"]["open"] == json!(false)).then_some(())
-    })
-    .await;
+        .expect(200)
+        .json()["key"]
+        .as_str()
+        .expect("a key")
+        .to_owned();
 
     client
         .post(
-            "/api/v1/client/pairing",
-            json!({ "serverUrl": pair.peer_url, "serverFingerprint": server_fingerprint, "serverName": "main" }),
+            "/api/v1/client/servers",
+            json!({ "address": pair.peer_url, "key": "not a key" }),
         )
         .await
-        .expect(202)
-        .empty();
-    let failed = eventually("the client to hear the server is closed", WAIT, || async {
-        let status = pairing(client).await;
-        match status["state"].as_str() {
-            Some("failed") => Some(status),
-            Some("requesting") => None,
-            other => panic!("pairing went to {other:?}: {status}"),
-        }
-    })
-    .await;
-    let message = failed["message"].as_str().expect("a message");
-    assert!(
-        message.contains("not taking pairing requests") && message.contains("Allow pairing"),
-        "{message}"
-    );
-    client
-        .delete("/api/v1/client/pairing")
-        .await
-        .expect(202)
-        .empty();
-}
+        .problem(&["key"]);
+    assert_eq!(servers(client).await["servers"], json!([]));
 
-#[tokio::test]
-async fn a_refused_request_tells_the_client_and_a_cancelled_one_leaves_the_server() {
-    let pair = Pair::get().await;
-    let (server, client) = (&pair.server_admin, &pair.client_admin);
-    let server_fingerprint = fingerprint(server).await;
-    let client_name = machine_name(client).await;
-
-    open_pairing(server).await;
-    start_pairing(client, &pair.peer_url, &server_fingerprint, "main").await;
-    let request = request_from(server, &client_name).await;
-    let request_id = request["id"].as_str().expect("an id").to_owned();
-    server
-        .delete(&format!("/api/v1/server/pairing/requests/{request_id}"))
+    let added = client
+        .post(
+            "/api/v1/client/servers",
+            json!({ "address": pair.peer_url, "key": key, "name": "by key" }),
+        )
         .await
-        .expect(202)
-        .empty();
-    eventually("the client to hear it was refused", WAIT, || async {
-        (pairing(client).await["state"] == json!("denied")).then_some(())
-    })
-    .await;
-    assert!(
-        !requests_on(server)
-            .await
-            .iter()
-            .any(|r| r["id"] == json!(request_id))
-    );
-    server
-        .delete(&format!("/api/v1/server/pairing/requests/{request_id}"))
-        .await
-        .expect(404);
-    let refused = activity_with(server, "clientAdded").await;
-    assert!(
-        refused.iter().any(|e| e["outcome"] == json!("failed")),
-        "a refused pairing is a failed clientAdded entry"
-    );
-
-    open_pairing(server).await;
-    start_pairing(client, &pair.peer_url, &server_fingerprint, "main").await;
-    let request = request_from(server, &client_name).await;
-    let request_id = request["id"].as_str().expect("an id").to_owned();
-    client
-        .delete("/api/v1/client/pairing")
-        .await
-        .expect(202)
-        .empty();
-    assert_eq!(pairing(client).await["state"], json!("idle"));
-    eventually("the server to drop the withdrawn request", WAIT, || async {
-        (!requests_on(server)
-            .await
-            .iter()
-            .any(|r| r["id"] == json!(request_id)))
-        .then_some(())
-    })
-    .await;
-    // Cancelling with nothing going on is fine.
-    client.delete("/api/v1/client/pairing").await.expect(202);
-}
-
-#[tokio::test]
-async fn three_wrong_codes_refuse_the_request_and_the_client_hears_it() {
-    let pair = Pair::get().await;
-    let (server, client) = (&pair.server_admin, &pair.client_admin);
-    let server_fingerprint = fingerprint(server).await;
-    let client_name = machine_name(client).await;
-
-    open_pairing(server).await;
-    let waiting = start_pairing(client, &pair.peer_url, &server_fingerprint, "main").await;
-    let code = waiting["code"].as_str().expect("a code").to_owned();
-    let request = request_from(server, &client_name).await;
-    let approve = format!(
-        "/api/v1/server/pairing/requests/{}/approval",
-        request["id"].as_str().unwrap_or_default()
-    );
-    let wrong = if code == "00000000" {
-        "11111111"
-    } else {
-        "00000000"
-    };
-    for _ in 0..3 {
-        let answer = server.post(&approve, json!({ "code": wrong })).await;
-        assert!(
-            [400, 404].contains(&answer.status),
-            "a wrong code: {}",
-            answer.status
-        );
-    }
-    server
-        .post(&approve, json!({ "code": code }))
-        .await
-        .expect(404);
-    eventually("the client to hear it was refused", WAIT, || async {
-        (pairing(client).await["state"] == json!("denied")).then_some(())
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn pairing_with_another_server_waits_for_the_person_to_confirm() {
-    let pair = Pair::get().await;
-    let (server, client) = (&pair.server_admin, &pair.client_admin);
-    client
-        .post_empty("/api/v1/client/pairing/confirmation")
-        .await
-        .problem(&["pairing"]);
-
-    // Connected to the main target first.
-    let main_fingerprint = fingerprint(server).await;
-    let (id, secret) = new_client(server).await;
-    save_connection(client, &pair.peer_url, &main_fingerprint, &id, &secret).await;
-
-    // The other server is the client target itself, as both: it serves pairing on its own port.
-    client
-        .patch("/api/v1/settings", json!({ "role": "both" }))
-        .await
-        .expect(202);
-    let own = client
-        .get("/api/v1/server/identity")
-        .await
-        .expect(200)
+        .expect(201)
         .json();
-    let own_url = format!("https://localhost:{}", own["httpsPort"]);
-    let own_fingerprint = own["fingerprint"]
-        .as_str()
-        .expect("a fingerprint")
-        .to_owned();
-    let client_name = machine_name(client).await;
-
-    let approve_self = || async {
-        open_pairing(client).await;
-        let waiting = start_pairing(client, &own_url, &own_fingerprint, "itself").await;
-        let request = request_from(client, &client_name).await;
-        client
-            .post(
-                &format!(
-                    "/api/v1/server/pairing/requests/{}/approval",
-                    request["id"].as_str().unwrap_or_default()
-                ),
-                json!({ "code": waiting["code"] }),
-            )
-            .await
-            .expect(202);
-        eventually(
-            "the client to ask before replacing its connection",
-            WAIT,
-            || async {
-                let status = pairing(client).await;
-                (status["state"] == json!("confirm")).then_some(status)
-            },
-        )
-        .await
-    };
-
-    let confirm = approve_self().await;
-    assert_eq!(confirm["serverName"], json!("itself"));
-    assert_eq!(confirm["serverFingerprint"], json!(own_fingerprint));
-    assert!(confirm["message"].is_string());
-    assert_eq!(
-        connection(client).await["serverFingerprint"],
-        json!(main_fingerprint),
-        "nothing saved yet"
-    );
-
-    // Discard keeps the connection.
-    client.delete("/api/v1/client/pairing").await.expect(202);
-    assert_eq!(pairing(client).await["state"], json!("idle"));
-    assert_eq!(
-        connection(client).await["serverFingerprint"],
-        json!(main_fingerprint)
-    );
-
-    // Replace saves the new one.
-    approve_self().await;
-    client
-        .post_empty("/api/v1/client/pairing/confirmation")
-        .await
-        .expect(202)
-        .empty();
-    eventually("the new connection to be saved", WAIT, || async {
-        (connection(client).await["serverFingerprint"] == json!(own_fingerprint)).then_some(())
-    })
-    .await;
-    eventually("the client to be paired", WAIT, || async {
-        (pairing(client).await["state"] == json!("paired")).then_some(())
-    })
-    .await;
-    client
-        .post_empty("/api/v1/client/pairing/confirmation")
-        .await
-        .problem(&["pairing"]);
-
-    server
-        .delete(&format!("/api/v1/server/clients/{id}"))
-        .await
-        .expect(202);
+    assert_eq!(added["name"], json!("by key"));
+    assert_eq!(added["linkedWith"], json!("key"));
+    let server_id = added["id"].as_str().expect("an id").to_owned();
+    linked(client, &server_id).await;
 }
 
 #[tokio::test]
-async fn a_saved_connection_is_checked_normalized_and_never_shows_its_secret() {
+async fn a_server_is_renamed_and_its_link_settings_changed_and_checked() {
     let pair = Pair::get().await;
-    let (server, client) = (&pair.server_admin, &pair.client_admin);
-    let server_fingerprint = fingerprint(server).await;
-    let (id, secret) = new_client(server).await;
-    let valid = json!({
-        "serverUrl": pair.peer_url,
-        "serverFingerprint": server_fingerprint,
-        "clientId": id,
-        "clientSecret": secret,
-    });
-    let with = |field: &str, value: Value| {
-        let mut body = valid.clone();
-        body[field] = value;
-        body
-    };
+    let client = &pair.client_admin;
+    let linked_server = pair.connect().await;
+    let path = format!("/api/v1/client/servers/{}", linked_server.server_id);
 
-    for (body, fields) in [
-        (
-            with("serverUrl", json!("http://elsewhere:5240")),
-            vec!["serverUrl"],
-        ),
-        (with("serverUrl", json!("not a url")), vec!["serverUrl"]),
-        (
-            with("serverFingerprint", json!("AB:CD")),
-            vec!["serverFingerprint"],
-        ),
-        (with("clientId", json!("   ")), vec!["clientId"]),
-        (
-            json!({}),
-            vec!["serverUrl", "serverFingerprint", "clientId"],
-        ),
+    for (body, field) in [
+        (json!({ "name": "" }), "name"),
+        (json!({ "name": "   " }), "name"),
+        (json!({ "name": "x".repeat(81) }), "name"),
+        (json!({ "retryEverySeconds": 0 }), "retryEverySeconds"),
+        (json!({ "retryEverySeconds": 3601 }), "retryEverySeconds"),
+        (json!({ "giveUpAfterSeconds": 0 }), "giveUpAfterSeconds"),
+        (json!({ "giveUpAfterSeconds": 301 }), "giveUpAfterSeconds"),
     ] {
-        client
-            .put("/api/v1/client/connection", body)
-            .await
-            .problem(&fields);
+        client.patch(&path, body).await.problem(&[field]);
     }
     client
-        .change(
-            Method::PUT,
-            "/api/v1/client/connection",
-            Body::Raw("application/json", "not json".to_owned()),
+        .patch(
+            "/api/v1/client/servers/server-none",
+            json!({ "name": "nobody" }),
         )
         .await
-        .expect(400);
+        .expect(404);
+    let untouched = servers(client).await;
+    assert_ne!(untouched["servers"][0]["name"], json!("nobody"));
 
-    // Stored as the server's address alone, the fingerprint in Koppel's spelling, the id trimmed.
-    let typed = server_fingerprint.replace(':', "").to_ascii_lowercase();
+    // The limits themselves are fine, and what is left out stays.
     client
-        .put(
-            "/api/v1/client/connection",
-            json!({
-                "serverUrl": format!("{}/some/path?x=1", pair.peer_url),
-                "serverFingerprint": typed,
-                "clientId": format!("  {id}  "),
-                "clientSecret": secret,
-            }),
+        .patch(
+            &path,
+            json!({ "name": "x".repeat(80), "retryEverySeconds": 3600, "giveUpAfterSeconds": 300 }),
         )
         .await
         .expect(202)
         .empty();
-    let stored = connection(client).await;
-    assert_eq!(stored["serverUrl"], json!(pair.peer_url));
-    assert_eq!(stored["serverFingerprint"], json!(server_fingerprint));
-    assert_eq!(stored["clientId"], json!(id));
-    assert_eq!(stored["hasSecret"], json!(true));
-    assert!(stored["nextServerFingerprint"].is_null());
-    assert!(
-        !client
-            .get("/api/v1/client/connection")
-            .await
-            .text()
-            .contains(&secret)
-    );
-    assert_eq!(connection_test(client).await["outcome"], json!("ok"));
+    client
+        .patch(&path, json!({ "reconnect": false }))
+        .await
+        .expect(202)
+        .empty();
+    let saved = eventually("the change to be saved", WAIT, || async {
+        let saved = servers(client).await["servers"][0].clone();
+        (saved["reconnect"] == json!(false)).then_some(saved)
+    })
+    .await;
+    assert_eq!(saved["name"], json!("x".repeat(80)));
+    assert_eq!(saved["retryEverySeconds"], json!(3600));
+    assert_eq!(saved["giveUpAfterSeconds"], json!(300));
+    assert_eq!(saved["clientId"], json!(linked_server.client_id));
+    assert_eq!(saved["hasSecret"], json!(true));
+}
 
-    // An empty secret keeps the stored one while the server stays the same, and only then.
-    client
-        .put("/api/v1/client/connection", with("clientSecret", json!("")))
-        .await
-        .expect(202);
-    assert_eq!(connection(client).await["hasSecret"], json!(true));
-    assert_eq!(connection_test(client).await["outcome"], json!("ok"));
-    let other = tls::normalize(&"ab".repeat(32));
-    client
-        .put(
-            "/api/v1/client/connection",
-            json!({ "serverUrl": pair.peer_url, "serverFingerprint": other, "clientId": id }),
-        )
-        .await
-        .problem(&["clientSecret"]);
-    client
-        .put(
-            "/api/v1/client/connection",
-            json!({ "serverUrl": "https://elsewhere:5240", "serverFingerprint": server_fingerprint, "clientId": id }),
-        )
-        .await
-        .problem(&["clientSecret"]);
-    assert_eq!(
-        connection(client).await["serverFingerprint"],
-        json!(server_fingerprint),
-        "a refused save changes nothing"
-    );
+#[tokio::test]
+async fn a_removed_server_is_gone_from_both_lists() {
+    let pair = Pair::get().await;
+    let client = &pair.client_admin;
+    let linked_server = pair.connect().await;
+    let path = format!("/api/v1/client/servers/{}", linked_server.server_id);
 
-    server
-        .delete(&format!("/api/v1/server/clients/{id}"))
-        .await
-        .expect(202);
+    client.delete(&path).await.expect(202).empty();
+    assert_eq!(servers(client).await["servers"], json!([]));
+    assert_eq!(client_devices(client).await["servers"], json!([]));
+    client.delete(&path).await.expect(404);
+    client.post_empty(&format!("{path}/test")).await.expect(404);
 }
 
 #[tokio::test]
 async fn the_connection_test_names_what_is_wrong_in_fixed_words() {
     let pair = Pair::get().await;
     let (server, client) = (&pair.server_admin, &pair.client_admin);
-    let server_fingerprint = fingerprint(server).await;
-    let (id, secret) = new_client(server).await;
+    let linked_server = pair.connect().await;
+    let id = linked_server.server_id.as_str();
 
-    let outcome = |url: String, fp: String, secret: String| {
-        let (client, id) = (client.clone(), id.clone());
-        async move {
-            save_connection(&client, &url, &fp, &id, &secret).await;
-            let answer = connection_test(&client).await;
-            assert!(!answer["message"].as_str().unwrap_or_default().is_empty());
-            (
-                answer["ok"].clone(),
-                answer["outcome"].as_str().unwrap_or_default().to_owned(),
-            )
-        }
-    };
+    let test = connection_test(client, id).await;
+    assert_eq!(test["ok"], json!(true), "{test}");
+    assert_eq!(test["outcome"], json!("ok"));
+    assert!(!test["message"].as_str().unwrap_or_default().is_empty());
 
-    assert_eq!(
-        outcome(
-            pair.peer_url.clone(),
-            server_fingerprint.clone(),
-            secret.clone()
-        )
-        .await,
-        (json!(true), "ok".to_owned())
-    );
-    assert_eq!(
-        outcome(
-            pair.peer_url.clone(),
-            tls::normalize(&"ab".repeat(32)),
-            secret.clone()
-        )
-        .await,
-        (json!(false), "certificateMismatch".to_owned())
-    );
-    assert_eq!(
-        outcome(
-            "https://koppel-contract-nowhere.invalid:5240".to_owned(),
-            server_fingerprint.clone(),
-            secret.clone()
-        )
-        .await,
-        (json!(false), "unreachable".to_owned())
-    );
-
-    // Wrong secrets, until the server turns this client away for a while (10 in a minute).
+    // The server gives the client a new secret, so the one the client holds is wrong, until the
+    // server turns this client away for a while (10 in a minute).
+    server
+        .post_empty(&format!(
+            "/api/v1/server/clients/{}/secret",
+            linked_server.client_id
+        ))
+        .await
+        .expect(200);
     let mut outcomes = Vec::new();
     for _ in 0..12 {
-        let (_, outcome) = outcome(
-            pair.peer_url.clone(),
-            server_fingerprint.clone(),
-            "wrong-secret".to_owned(),
-        )
-        .await;
+        let answer = connection_test(client, id).await;
+        assert_eq!(answer["ok"], json!(false), "{answer}");
+        assert!(!answer["message"].as_str().unwrap_or_default().is_empty());
+        let outcome = answer["outcome"].as_str().unwrap_or_default().to_owned();
         let done = outcome == "tooManyRequests";
         outcomes.push(outcome);
         if done {
@@ -804,11 +363,6 @@ async fn the_connection_test_names_what_is_wrong_in_fixed_words() {
             .all(|o| o == "rejectedCredentials"),
         "{outcomes:?}"
     );
-
-    server
-        .delete(&format!("/api/v1/server/clients/{id}"))
-        .await
-        .expect(202);
 }
 
 // Broadcast reaches the other instance on Linux, in a container too; the Windows runs turn
@@ -869,22 +423,17 @@ async fn the_client_finds_the_server_on_its_network() {
 async fn the_client_lists_its_devices_and_takes_attach_and_detach() {
     let pair = Pair::get().await;
     let client = &pair.client_admin;
-    let devices = client
-        .get("/api/v1/client/devices")
-        .await
-        .expect(200)
-        .json();
-    shape::fields(
-        &devices,
-        shape::CLIENT_DEVICES,
-        "GET /api/v1/client/devices",
-    );
+    let linked_server = pair.connect().await;
+    let id = linked_server.server_id.as_str();
+    let devices = client_devices(client).await;
+    let entry = &devices["servers"][0];
+    assert_eq!(entry["id"], json!(id));
     assert!(
         ["unconfigured", "connecting", "connected", "error"]
-            .contains(&devices["link"].as_str().unwrap_or_default()),
+            .contains(&entry["link"].as_str().unwrap_or_default()),
         "{devices}"
     );
-    shape::each(&devices["devices"], "client devices", |device| {
+    shape::each(&entry["devices"], "client devices", |device| {
         shape::fields(
             device,
             &[
@@ -900,29 +449,39 @@ async fn the_client_lists_its_devices_and_takes_attach_and_detach() {
         shape::fields(&device["device"], shape::DEVICE, "a client device's device");
     });
 
+    let attachment = |server: &str, bus_id: &str| {
+        format!("/api/v1/client/servers/{server}/devices/{bus_id}/attachment")
+    };
     for bad in ["bogus", "1-", "a-1"] {
         client
-            .put_empty(&format!("/api/v1/client/devices/{bad}/attachment"))
+            .put_empty(&attachment(id, bad))
             .await
             .problem(&["busId"]);
         client
-            .delete(&format!("/api/v1/client/devices/{bad}/attachment"))
+            .delete(&attachment(id, bad))
             .await
             .problem(&["busId"]);
     }
     client
-        .put_empty("/api/v1/client/devices/9-9/attachment")
+        .put_empty(&attachment(id, "9-9"))
         .await
         .expect(202)
         .empty();
     client
-        .delete("/api/v1/client/devices/9-9/attachment")
+        .delete(&attachment(id, "9-9"))
         .await
         .expect(202)
         .empty();
     // Detaching what is not attached is fine too.
+    client.delete(&attachment(id, "9-9")).await.expect(202);
+
+    // A server the client does not have has no devices to attach.
     client
-        .delete("/api/v1/client/devices/9-9/attachment")
+        .put_empty(&attachment("server-none", "9-9"))
         .await
-        .expect(202);
+        .expect(404);
+    client
+        .delete(&attachment("server-none", "9-9"))
+        .await
+        .expect(404);
 }

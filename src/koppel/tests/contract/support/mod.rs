@@ -688,38 +688,57 @@ impl Pair {
     }
 }
 
+/// A server added to a client by the pairing code, with what the server holds for that client.
+pub struct Linked {
+    /// The server's id on the client.
+    pub server_id: String,
+    /// The client's id on the server.
+    pub client_id: String,
+    /// The client's secret, as the server shows it.
+    pub secret: String,
+}
+
 impl Pair {
-    /// Registers a client on the server, saves its credentials on the client and waits until the
-    /// client's link is up. Returns the new client's id and secret.
-    pub async fn connect(&self) -> (String, String) {
-        let created = self
-            .server_admin
+    /// Has the server show a new pairing code and gives it.
+    pub async fn show_code(&self) -> String {
+        let shown = || async {
+            self.server_admin
+                .get("/api/v1/server/enrollment")
+                .await
+                .expect(200)
+                .json()["code"]["code"]
+                .as_str()
+                .map(str::to_owned)
+        };
+        let before = shown().await;
+        self.server_admin
+            .put("/api/v1/server/enrollment/code", json!({ "seconds": 60 }))
+            .await
+            .expect(202)
+            .empty();
+        eventually(
+            "the server to show a code",
+            Duration::from_secs(20),
+            || async { shown().await.filter(|code| Some(code) != before.as_ref()) },
+        )
+        .await
+    }
+
+    /// Adds the server to the client by a pairing code, as a person would, and waits until the
+    /// client's link is up.
+    pub async fn connect(&self) -> Linked {
+        let code = self.show_code().await;
+        let added = self
+            .client_admin
             .post(
-                "/api/v1/server/clients",
-                json!({ "name": unique("contract-client") }),
+                "/api/v1/client/servers",
+                json!({ "address": self.peer_url, "code": code }),
             )
             .await
             .expect(201)
             .json();
-        let fingerprint = self
-            .server_admin
-            .get("/api/v1/server/identity")
-            .await
-            .expect(200)
-            .json()["fingerprint"]
-            .clone();
-        self.client_admin
-            .put(
-                "/api/v1/client/connection",
-                json!({
-                    "serverUrl": self.peer_url,
-                    "serverFingerprint": fingerprint,
-                    "clientId": created["clientId"],
-                    "clientSecret": created["clientSecret"],
-                }),
-            )
-            .await
-            .expect(202);
+        let server_id = added["id"].as_str().unwrap_or_default().to_owned();
+        let client_id = added["clientId"].as_str().unwrap_or_default().to_owned();
         eventually("the client to link", Duration::from_secs(60), || async {
             let devices = self
                 .client_admin
@@ -727,16 +746,27 @@ impl Pair {
                 .await
                 .expect(200)
                 .json();
-            (devices["link"] == json!("connected")).then_some(())
+            devices["servers"]
+                .as_array()
+                .and_then(|list| list.iter().find(|s| s["id"] == json!(server_id)))
+                .is_some_and(|s| s["link"] == json!("connected"))
+                .then_some(())
         })
         .await;
-        (
-            created["clientId"].as_str().unwrap_or_default().to_owned(),
-            created["clientSecret"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned(),
-        )
+        let secret = self
+            .server_admin
+            .get(&format!("/api/v1/server/clients/{client_id}/secret"))
+            .await
+            .expect(200)
+            .json()["clientSecret"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        Linked {
+            server_id,
+            client_id,
+            secret,
+        }
     }
 }
 

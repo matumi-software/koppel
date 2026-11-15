@@ -569,71 +569,80 @@ pub async fn open_pairing(server: &Node) {
     .await;
 }
 
-/// Pairs `client` with `server` through the code, as a person would, and waits for the link.
-/// Returns the client's ID on the server.
-pub async fn pair(server: &Node, client: &Node) -> String {
-    open_pairing(server).await;
-    let fingerprint = server.get("/api/v1/server/identity").await["fingerprint"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let status = client
-        .post(
-            "/api/v1/client/pairing",
-            json!({ "serverUrl": server.url(), "serverFingerprint": fingerprint, "serverName": "bench" }),
-        )
-        .await;
-    assert_eq!(status, 202);
-    let code = eventually("the client to show a code", || async {
-        let pairing = client.get("/api/v1/client/pairing").await;
-        assert_ne!(pairing["state"], json!("failed"), "{pairing}");
-        pairing["code"].as_str().map(str::to_owned)
-    })
-    .await;
-    let request = eventually("the server to list the request", || async {
-        server.get("/api/v1/server/pairing").await["requests"][0]["id"]
+/// Has `server` show a new pairing code, as a person at the server does, and gives it.
+pub async fn show_code(server: &Node) -> String {
+    let shown = || async {
+        server.get("/api/v1/server/enrollment").await["code"]["code"]
             .as_str()
             .map(str::to_owned)
-    })
-    .await;
-    let approved = server
-        .post(
-            &format!("/api/v1/server/pairing/requests/{request}/approval"),
-            json!({ "code": code }),
-        )
+    };
+    let before = shown().await;
+    let status = server
+        .put("/api/v1/server/enrollment/code", json!({ "seconds": 60 }))
         .await;
-    assert_eq!(approved, 202);
-    eventually("the client to be paired", || async {
-        (client.get("/api/v1/client/pairing").await["state"] == json!("paired")).then_some(())
-    })
-    .await;
-    let id = client.get("/api/v1/client/connection").await["clientId"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    linked(client).await;
-    id
-}
-
-/// Waits for the client's link to be up, and gives its devices.
-pub async fn linked(client: &Node) -> Value {
-    eventually("the client to link", || async {
-        let devices = client.get("/api/v1/client/devices").await;
-        (devices["link"] == json!("connected")).then_some(devices)
+    assert_eq!(status, 202);
+    eventually("the server to show a code", || async {
+        shown().await.filter(|code| Some(code) != before.as_ref())
     })
     .await
 }
 
-/// Waits for the client's link to be down with a reason, and gives it.
+/// Adds `server` to `client` by the code the server shows, as a person would, and waits for the
+/// link. Returns the server's ID on the client and the client's ID on the server.
+pub async fn enrol(server: &Node, client: &Node) -> (String, String) {
+    let code = show_code(server).await;
+    let (status, added) = client
+        .call(
+            Method::POST,
+            "/api/v1/client/servers",
+            Some(json!({ "address": server.url(), "code": code })),
+        )
+        .await;
+    assert_eq!(status, 201, "{added}");
+    let server_id = added["id"].as_str().unwrap().to_owned();
+    let client_id = added["clientId"].as_str().unwrap().to_owned();
+    linked(client).await;
+    (server_id, client_id)
+}
+
+/// The entry of `client`'s server list with `id`.
+pub async fn server_of(client: &Node, id: &str) -> Value {
+    let servers = client.get("/api/v1/client/servers").await;
+    servers["servers"]
+        .as_array()
+        .and_then(|list| list.iter().find(|s| s["id"] == json!(id)))
+        .cloned()
+        .unwrap_or_else(|| panic!("no server {id} in {servers}"))
+}
+
+/// The first server of `client`'s device list, which is the only one these tests add.
+async fn first_server(client: &Node) -> Option<Value> {
+    let devices = client.get("/api/v1/client/devices").await;
+    devices["servers"].as_array()?.first().cloned()
+}
+
+/// Waits for the link to the client's server to be up, and gives that server with its devices.
+pub async fn linked(client: &Node) -> Value {
+    eventually("the client to link", || async {
+        first_server(client)
+            .await
+            .filter(|server| server["link"] == json!("connected"))
+    })
+    .await
+}
+
+/// Waits for the link to be down with a reason, and gives it.
 pub async fn down(client: &Node) -> String {
     eventually("the client's link to go down", || async {
-        let devices = client.get("/api/v1/client/devices").await;
-        (devices["link"] == json!("error")).then(|| {
-            devices["linkMessage"]
-                .as_str()
-                .unwrap_or_default()
-                .to_owned()
-        })
+        first_server(client)
+            .await
+            .filter(|server| server["link"] == json!("error"))
+            .map(|server| {
+                server["linkMessage"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
     })
     .await
 }

@@ -191,26 +191,6 @@ pub const PAIRING_REQUEST: &[(&str, Kind)] = &[
     ("message", Kind::OptStr),
 ];
 
-/// Where pairing stands on the client.
-pub const PAIRING_STATUS: &[(&str, Kind)] = &[
-    ("state", Kind::Str),
-    ("serverName", Kind::OptStr),
-    ("serverUrl", Kind::OptStr),
-    ("code", Kind::OptStr),
-    ("message", Kind::OptStr),
-    ("expiresAt", Kind::OptTime),
-    ("serverFingerprint", Kind::OptStr),
-];
-
-/// The client's stored connection, without the secret.
-pub const CONNECTION: &[(&str, Kind)] = &[
-    ("serverUrl", Kind::OptStr),
-    ("serverFingerprint", Kind::OptStr),
-    ("clientId", Kind::OptStr),
-    ("hasSecret", Kind::Bool),
-    ("nextServerFingerprint", Kind::OptStr),
-];
-
 /// The server's devices.
 pub const SERVER_DEVICES: &[(&str, Kind)] =
     &[("devices", Kind::Array), ("unavailable", Kind::OptStr)];
@@ -231,14 +211,40 @@ pub const DEVICE: &[(&str, Kind)] = &[
     ("interfaces", Kind::Any),
 ];
 
-/// The client's link and the devices it sees.
+/// One server of the client's list, without the secret.
+pub const CLIENT_SERVER: &[(&str, Kind)] = &[
+    ("id", Kind::Str),
+    ("name", Kind::OptStr),
+    ("serverUrl", Kind::OptStr),
+    ("serverFingerprint", Kind::OptStr),
+    ("clientId", Kind::OptStr),
+    ("hasSecret", Kind::Bool),
+    ("nextServerFingerprint", Kind::OptStr),
+    ("linkedWith", Kind::OptStr),
+    ("reconnect", Kind::Bool),
+    ("retryEverySeconds", Kind::Int),
+    ("giveUpAfterSeconds", Kind::Int),
+];
+
+/// The client's list of servers.
+pub const CLIENT_SERVERS: &[(&str, Kind)] = &[("servers", Kind::Array)];
+
+/// The client's servers, each with its link and the devices it offers, and what holds for the
+/// machine as a whole.
 pub const CLIENT_DEVICES: &[(&str, Kind)] = &[
-    ("link", Kind::Str),
-    ("linkMessage", Kind::OptStr),
-    ("devices", Kind::Array),
+    ("servers", Kind::Array),
     ("unavailable", Kind::OptStr),
     ("gateway", Kind::Bool),
     ("gatewayFault", Kind::OptStr),
+];
+
+/// One server of the client's device list: its link and its devices.
+pub const CLIENT_SERVER_DEVICES: &[(&str, Kind)] = &[
+    ("id", Kind::Str),
+    ("name", Kind::Str),
+    ("link", Kind::Str),
+    ("linkMessage", Kind::OptStr),
+    ("devices", Kind::Array),
 ];
 
 /// One server found on the network.

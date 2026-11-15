@@ -117,8 +117,10 @@ fn make(
             .unwrap_or_default(),
     );
     skakel_client::Link::new(&address, pins, credentials, {
-        // One try gives up after the server's own limit.
-        let options = ClientOptions::default().request_timeout(settings.give_up_after);
+        // One try gives up after the server's own limit, and a failed link waits its interval.
+        let options = ClientOptions::default()
+            .request_timeout(settings.give_up_after)
+            .retry_interval(settings.retry_every);
         match browser {
             Some(browser) => options.browser(browser),
             None => options,

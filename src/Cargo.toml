@@ -197,9 +197,9 @@ thiserror = "2.0.21"
 # The transport between Koppel machines: Skakel 0.3.0 (MIT), protocol version 3 over gRPC, from its
 # repository at the release tag; Skakel is not on crates.io. What they pull in is MIT, Apache-2.0, BSD, ISC,
 # Zlib, Unlicense or Unicode-3.0, as Skakel's docs/parts.md says.
-skakel-server = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.1" }
-skakel-client = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.1" }
-skakel-wire = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.1" }
+skakel-server = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.2" }
+skakel-client = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.2" }
+skakel-wire = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.2" }
 # Koppel's own gRPC service, the remote device list, from its .proto file, as Skakel builds its own:
 # prost (Apache-2.0) for the messages, tonic (MIT) for the service, protox (MIT OR Apache-2.0) to
 # compile the .proto file in Rust so no protoc is needed. All are in the tree through Skakel, at the

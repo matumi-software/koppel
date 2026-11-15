@@ -77,8 +77,8 @@ today, so they are part of this change:
   `ServersChanged` once it is written. A change to a link setting makes that server's link again.
 - What is enforced today: **Give up after** is the time one request of the link may take. **Reconnect** off
   ends the link at its first failure (Koppel stops it), and turning it on again makes a new link.
-  **Retry every** is saved and shown but not enforced: Skakel 0.3.1 backs off by itself, from 1 to 60
-  seconds, and has no setting for it. Enforcing it needs an option in Skakel.
+  **Retry every** is the wait between tries after a failure (Skakel 0.3.2's `retry_interval`: a random
+  time from half of it to all of it, never under a second).
 - Whether this machine's port and "accept from" are settings the service already has is checked against
   `docs/config.md` before anything is added for them; if they are not, they become settings in
   `settings.json` and need a restart of the network surface, which the UI says.

@@ -186,16 +186,17 @@ if (Test-Path $msiOut) { Remove-Item $msiOut -Recurse -Force }
 Invoke-Checked { dotnet build (Join-Path $installer 'Koppel.Installer\Koppel.Installer.wixproj') -c Release -nologo -v q -o $msiOut -p:RestoreLockedMode=true -p:StagingDir=$staging -p:Version=$Version }
 
 Write-Host 'Building setup.exe...'
-# The window's mark is the app icon at 256 px: the Linux package's icon, rendered from the design system's SVG by pnpm design:icons.
+# The window's brand, setup.exe and the taskbar all use the app icon, the design system's solid tile (rendered by pnpm design:icons).
+# The shared window reads resources\app-icon.ico by default, so setup.json needs no "icon".
 $resources = Join-Path $work 'installer-resources'
 New-Item -ItemType Directory -Force -Path $resources | Out-Null
-Copy-Item (Join-Path $installer '..\linux\icons\koppel-256.png') (Join-Path $resources 'mark.png') -Force
+$icon = Join-Path $resources 'app-icon.ico'
+Copy-Item (Join-Path $root 'resources\design-system\assets\Logos\koppel-app-icon.ico') $icon -Force
 # The licence page shows Koppel's own licence (GPL-3.0-or-later, the LICENSE file) and asks for it to be accepted (setup.json).
 # The third-party notices are generated and far too long for a page; they ship in the install folder.
 $licenceText = Join-Path $root 'LICENSE'
 if (-not (Test-Path $licenceText) -or (Get-Item $licenceText).Length -lt 1000) { throw "$licenceText is missing or empty: the setup window's licence page needs it." }
 Copy-Item $licenceText (Join-Path $resources 'licence.txt') -Force
-$icon = Join-Path $root 'resources\design-system\assets\Logos\koppel-app-icon.ico'
 
 Assert-InstallerVersion $Version
 Assert-Staging -Root $staging -Required @('Koppel.exe', 'KoppelDesktop.exe', 'THIRD-PARTY-NOTICES.txt', 'usbip\driver.ps1') -Forbidden @('*.pdb', '*.log', '*.tmp')

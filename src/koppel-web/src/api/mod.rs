@@ -34,7 +34,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::FromRef;
 use axum::middleware::{from_fn, from_fn_with_state};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 
 use crate::app::App;
 use crate::auth::endpoints as auth;
@@ -149,24 +149,18 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
 
     let client = Router::new()
         .route(
-            "/client/connection",
-            get(client::connection).put(client::save_connection),
+            "/client/servers",
+            get(client::servers).post(client::add_server),
         )
-        .route("/client/connection/test", post(client::test))
+        .route(
+            "/client/servers/{id}",
+            patch(client::change_server).delete(client::remove_server),
+        )
+        .route("/client/servers/{id}/test", post(client::test))
         .route("/client/discovery", get(client::discovery))
-        .route(
-            "/client/pairing",
-            get(client::pairing)
-                .post(client::begin_pairing)
-                .delete(client::cancel_pairing),
-        )
-        .route(
-            "/client/pairing/confirmation",
-            post(client::confirm_pairing),
-        )
         .route("/client/devices", get(client::devices))
         .route(
-            "/client/devices/{bus_id}/attachment",
+            "/client/servers/{server_id}/devices/{bus_id}/attachment",
             put(client::attach).delete(client::detach),
         )
         .with_state(ClientApi::from_ref(app))

@@ -186,6 +186,9 @@ pub struct Platform {
     /// This is Windows itself rather than Linux or a container, which changes what the system
     /// checks look at.
     pub native_windows: bool,
+    /// The kernel picks a free virtual port inside an attach, so the attaches of every server's
+    /// client, which share this platform, go one at a time.
+    attach_lock: Arc<tokio::sync::Mutex<()>>,
     reason: String,
 }
 
@@ -202,6 +205,7 @@ impl Platform {
             attacher,
             driver,
             native_windows: cfg!(windows),
+            attach_lock: Arc::new(tokio::sync::Mutex::new(())),
             reason: reason.into(),
         }
     }
@@ -269,6 +273,7 @@ impl Platform {
         speed: UsbSpeed,
     ) -> Result<u32, UsbError> {
         let attacher = self.attacher()?.clone();
+        let _one_at_a_time = self.attach_lock.lock().await;
         // Without the test-util feature a socket is the only kind of end there is.
         #[allow(clippy::infallible_destructuring_match)]
         let socket = match end {

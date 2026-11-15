@@ -23,14 +23,17 @@ port: number | null, attachedSince: string | null, fault: string | null,
  */
 attachedVia: string | null, };
 
-export type ClientDevices = { link: LinkState, linkMessage: string | null, devices: Array<ClientDeviceView>, unavailable: string | null, 
+export type ClientServersView = { servers: Array<ServerDevicesView>, 
 /**
- * True while the plain USB/IP gateway listens for a driver Koppel does not drive itself
- * (Koppel in a container on Windows), so the UI can show the command that attaches through it.
+ * Why this machine cannot attach, such as a missing driver, or `None`.
+ */
+unavailable: string | null, 
+/**
+ * True while the plain USB/IP gateway listens for a driver Koppel does not drive itself.
  */
 gateway: boolean, 
 /**
- * Why the gateway is not listening although it should be, such as a port that is taken.
+ * Why the gateway is not listening although it should be.
  */
 gatewayFault: string | null, };
 
@@ -51,8 +54,6 @@ hasSecret: boolean,
 linkedWith: string | null, };
 
 export type ConnectionTest = { ok: boolean, outcome: Outcome, message: string, };
-
-export type ConnectionView = { serverUrl: string | null, serverFingerprint: string | null, clientId: string | null, hasSecret: boolean, nextServerFingerprint: string | null, };
 
 export type DeviceState = "shared" | "attached" | "offline" | "local";
 
@@ -116,10 +117,6 @@ budgetExhausted: boolean, window: PairingWindowView, };
 
 export type PairingRequestView = { id: string, clientName: string, from: string, requestedAt: string, expiresAt: string, state: RequestState, message: string | null, };
 
-export type PairingState = "idle" | "requesting" | "waiting" | "confirm" | "paired" | "denied" | "expired" | "failed";
-
-export type PairingStatus = { state: PairingState, serverName: string | null, serverUrl: string | null, code: string | null, message: string | null, expiresAt: string | null, serverFingerprint: string | null, };
-
 export type PairingWindowView = { open: boolean, 
 /**
  * The server takes requests at any time (not something Koppel sets; kept so the UI need not
@@ -155,17 +152,71 @@ export type Role = "server" | "client" | "both";
 
 export type ServerDevices = { devices: Array<DeviceView>, unavailable: string | null, };
 
+export type ServerDevicesView = { 
+/**
+ * Koppel's id for the server, which names it in the routes that act on one of its devices.
+ */
+id: string, 
+/**
+ * What the server calls itself.
+ */
+name: string, link: LinkState, linkMessage: string | null, devices: Array<ClientDeviceView>, };
+
 export type ServerIdentity = { name: string, fingerprint: string, httpsPort: number, };
+
+export type ServerView = { 
+/**
+ * Koppel's id for the server, which names it in the routes.
+ */
+id: string, 
+/**
+ * What the server calls itself.
+ */
+name: string | null, serverUrl: string | null, serverFingerprint: string | null, clientId: string | null, hasSecret: boolean, nextServerFingerprint: string | null, 
+/**
+ * How it was linked: `pairing`, `code` or `key`.
+ */
+linkedWith: string | null, 
+/**
+ * Try again after the link drops.
+ */
+reconnect: boolean, 
+/**
+ * Seconds between tries while `reconnect` is on.
+ */
+retryEverySeconds: number, 
+/**
+ * Seconds one try may take.
+ */
+giveUpAfterSeconds: number, };
+
+export type ServersView = { servers: Array<ServerView>, };
 
 export type SystemCheck = { id: string, ok: boolean, title: string, detail: string, };
 
 export type SystemInfo = { name: string, version: string, commit: string, built: string, startedAt: string, role: Role, uiPort: number, httpsPort: number, fingerprint: string, os: string, tray: boolean, };
 
+export type AddServer = { 
+/**
+ * The server's HTTPS address, typed or from discovery.
+ */
+address: string, 
+/**
+ * The eight-digit pairing code the server is showing.
+ */
+code?: string, 
+/**
+ * The server key copied from the server.
+ */
+key?: string, 
+/**
+ * What to call the server in the list; the server's own name when left out.
+ */
+name?: string, };
+
 export type Approve = { code?: string, };
 
 export type ChangeRequest = { current?: string, next?: string, };
-
-export type ConnectionUpdate = { serverUrl?: string, serverFingerprint?: string, clientId?: string, clientSecret?: string, };
 
 export type CreateClient = { name?: string, };
 
@@ -173,12 +224,12 @@ export type OpenEnrollmentCode = { seconds?: number, };
 
 export type OpenPairing = { minutes?: number, };
 
-export type PairStart = { serverUrl?: string, serverFingerprint?: string, serverName?: string, };
-
 export type PasswordRequest = { password?: string, 
 /**
  * Setup only: the token the log shows, where one is required.
  */
 setupToken?: string, };
+
+export type ServerSettings = { name?: string, reconnect?: boolean, retryEverySeconds?: number, giveUpAfterSeconds?: number, };
 
 export type SettingsPatch = { role?: Role, shareOnStartup?: boolean, setupComplete?: boolean, notifyPairing?: boolean, notifyLink?: boolean, notifyAttachFailures?: boolean, };

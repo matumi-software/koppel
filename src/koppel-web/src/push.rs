@@ -20,7 +20,6 @@ use axum::Extension;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::response::sse::{self, KeepAlive, Sse};
-use koppel_app::connection::ConnectionView;
 use koppel_app::push::{Event, Pushed};
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::time::Instant;
@@ -55,15 +54,13 @@ impl PushApi {
             events.push(Event::EnrollmentChanged(&enrollment));
             events.push(Event::DevicesChanged(&devices));
         }
-        let (connection, found, pairing, attached);
+        let (servers, found, attached);
         if RoleScope::Client.served_to(settings.role) {
-            connection = ConnectionView::of(&self.connection.current());
+            servers = self.servers.view();
             found = self.client.discovered();
-            pairing = self.client.pairing();
             attached = self.usb_client.current();
-            events.push(Event::ConnectionChanged(&connection));
+            events.push(Event::ServersChanged(&servers));
             events.push(Event::ServersDiscovered(&found));
-            events.push(Event::PairingStatusChanged(&pairing));
             events.push(Event::ClientDevicesChanged(&attached));
         }
         events.iter().filter_map(Pushed::of).map(Arc::new).collect()

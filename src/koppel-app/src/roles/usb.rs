@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use koppel_usb::{
-    ActivityOutcome, ActivityReason, ActivitySink, ClientDevices, EntityRef, Platform,
-    ServerDevices, SystemCheck, UsbClient as Client, UsbServer as Server, attach_check,
+    ActivityOutcome, ActivityReason, ActivitySink, ClientServersView, ClientsError, EntityRef,
+    Platform, ServerDevices, SystemCheck, UsbClients, UsbServer as Server, attach_check,
     share_check,
 };
 
@@ -51,36 +51,39 @@ impl UsbServerRole {
     }
 }
 
-/// The client's USB side.
+/// The client's USB side: one client per saved server.
 pub struct UsbClientRole {
-    client: Client,
+    clients: UsbClients,
     platform: Platform,
 }
 
 impl UsbClientRole {
     /// Pushes what the UI shows as `ClientDevicesChanged` each time it may have changed.
-    pub fn new(client: Client, platform: Platform, push: Push) -> Arc<Self> {
-        client.on_changed(move |devices: Arc<ClientDevices>| {
+    pub fn new(clients: UsbClients, platform: Platform, push: Push) -> Arc<Self> {
+        clients.on_changed(move |view: Arc<ClientServersView>| {
             let push = push.clone();
-            async move { push.send(Event::ClientDevicesChanged(&devices)) }
+            async move { push.send(Event::ClientDevicesChanged(&view)) }
         });
-        Arc::new(Self { client, platform })
+        Arc::new(Self { clients, platform })
     }
 
-    pub fn current(&self) -> ClientDevices {
-        self.client.current()
+    pub fn current(&self) -> ClientServersView {
+        self.clients.current()
     }
 
-    /// Remembers the device and attaches it; the outcome follows as `ClientDevicesChanged`.
-    pub async fn attach(&self, bus_id: &str) {
-        if let Err(e) = self.client.begin_attach(bus_id).await {
-            tracing::warn!("Attaching {bus_id} failed: {e}");
+    /// Remembers the device of that server and attaches it; the outcome follows as
+    /// `ClientDevicesChanged`.
+    pub async fn attach(&self, server_id: &str, bus_id: &str) -> Result<(), ClientsError> {
+        let result = self.clients.begin_attach(server_id, bus_id).await;
+        if let Err(e) = &result {
+            tracing::warn!("Attaching {bus_id} from {server_id} failed: {e}");
         }
+        result
     }
 
     /// Detaches the device and forgets it.
-    pub async fn detach(&self, bus_id: &str) {
-        self.client.detach(bus_id).await;
+    pub async fn detach(&self, server_id: &str, bus_id: &str) -> Result<(), ClientsError> {
+        self.clients.detach(server_id, bus_id).await
     }
 
     /// Whether this machine can attach, for `/api/v1/system/checks`.
@@ -90,7 +93,7 @@ impl UsbClientRole {
 
     /// Why `attached.json` was not used, or `None`.
     pub fn problem(&self) -> Option<String> {
-        self.client.remembered_problem()
+        self.clients.remembered_problem()
     }
 }
 

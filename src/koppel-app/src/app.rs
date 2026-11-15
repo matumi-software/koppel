@@ -5,26 +5,26 @@
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
-use koppel_config::files::{
-    AttachedDevices, ClientConnection, KoppelSettings, ServerSecrets, SharedDevices,
+use koppel_config::files::{KoppelSettings, ServerSecrets, SharedDevices};
+use koppel_config::{ClientServers, ConfigFile, ConfigFileError, KoppelPaths, SecretBox, open};
+use koppel_usb::{
+    ActivitySink, GatewayOptions, Platform, SystemClock, UsbClients, UsbDataPlane, UsbIpGateway,
 };
-use koppel_config::{ConfigFile, ConfigFileError, KoppelPaths, SecretBox, open};
-use koppel_usb::{ActivitySink, GatewayOptions, Platform, SystemClock, UsbDataPlane, UsbIpGateway};
 use skakel_client::{Browser, BrowserOptions};
 use skakel_wire::SkakelApp;
 use tokio::sync::watch;
 
 use crate::activity::ActivityLog;
 use crate::certificate::CertificateSlot;
-use crate::connection::ConnectionView;
 use crate::host::Host;
 use crate::push::{Event, Push};
 use crate::roles::skakel::announcer::{Announcement, Announcer};
-use crate::roles::skakel::{
-    APP_ID, SecretsError, SecretsStore, ServerParts, ServerStartError, SkakelLinks,
-};
+use crate::roles::skakel::{APP_ID, SecretsError, SecretsStore, ServerParts, ServerStartError};
 use crate::roles::usb_store;
-use crate::roles::{SkakelClientRole, SkakelServerRole, UsbActivity, UsbClientRole, UsbServerRole};
+use crate::roles::{
+    Servers, ServersParts, SkakelClientRole, SkakelServerRole, UsbActivity, UsbClientRole,
+    UsbServerRole,
+};
 use crate::tasks::{STOP_WAIT, Tasks};
 
 /// What the roles are started with.
@@ -112,18 +112,17 @@ pub enum StartError {
 struct Files {
     settings: ConfigFile<KoppelSettings>,
     server_secrets: ConfigFile<ServerSecrets>,
-    connection: ConfigFile<ClientConnection>,
+    /// `connection.json`.
+    servers: ConfigFile<ClientServers>,
     devices: ConfigFile<SharedDevices>,
-    attached: ConfigFile<AttachedDevices>,
 }
 
 impl Files {
     fn stop(&self) {
         self.settings.stop();
         self.server_secrets.stop();
-        self.connection.stop();
+        self.servers.stop();
         self.devices.stop();
-        self.attached.stop();
     }
 }
 
@@ -134,7 +133,7 @@ struct Running {
     browser: Option<Browser>,
     usb_server: koppel_usb::UsbServer,
     data_plane: UsbDataPlane,
-    usb_client: koppel_usb::UsbClient,
+    servers: Arc<Servers>,
     gateway: UsbIpGateway,
 }
 
@@ -142,7 +141,7 @@ struct Running {
 pub struct App {
     pub host: Host,
     pub settings: ConfigFile<KoppelSettings>,
-    pub connection: ConfigFile<ClientConnection>,
+    pub servers: Arc<Servers>,
     pub activity: Arc<ActivityLog>,
     pub push: Push,
     pub server: Arc<SkakelServerRole>,
@@ -175,11 +174,11 @@ impl App {
         settings.start().await?;
         let server_secrets = open::server_secrets(&paths, &secrets);
         server_secrets.start().await?;
-        let connection = open::connection(&paths, &secrets);
-        connection.start().await?;
-        // koppel-usb starts these two itself.
+        let servers_file = open::servers(&paths, &secrets);
+        servers_file.start().await?;
+        // koppel-usb starts this one itself; the servers service starts `attached.json`.
         let devices = open::devices(&paths);
-        let attached = open::attached(&paths);
+        let attached = open::attached_by_server(&paths);
 
         {
             let push = push.clone();
@@ -188,14 +187,6 @@ impl App {
                 async {}
             });
         }
-        {
-            let push = push.clone();
-            connection.subscribe(move |value| {
-                push.send(Event::ConnectionChanged(&ConnectionView::of(&value)));
-                async {}
-            });
-        }
-
         let activity = Arc::new(ActivityLog::new(push.clone()));
         let usb_activity: Arc<dyn ActivitySink> = Arc::new(UsbActivity(activity.clone()));
         let clock = Arc::new(SystemClock);
@@ -272,34 +263,33 @@ impl App {
             }
             Browser::new(options)
         });
-        let links = SkakelLinks::new(
-            connection.clone(),
-            browser.clone(),
-            activity.clone(),
-            tasks.clone(),
-        );
-        let usb_client = koppel_usb::UsbClient::new(koppel_usb::Deps {
+        let usb_clients = UsbClients::new(koppel_usb::Common {
             settings: usb_store::settings(&settings),
-            connection: usb_store::connection(&connection),
-            remembered: usb_store::attached(&attached),
             platform: usb.platform.clone(),
-            links,
             activity: usb_activity.clone(),
             clock,
             options: usb.client,
         });
+        let servers = Servers::new(ServersParts {
+            file: servers_file.clone(),
+            attached: attached.clone(),
+            clients: usb_clients.clone(),
+            push: push.clone(),
+            browser: browser.clone(),
+            activity: activity.clone(),
+            tasks: tasks.clone(),
+            machine: host.name.clone(),
+        });
         let gateway = UsbIpGateway::new(
-            usb_client.clone(),
+            usb_clients.clone(),
             usb_store::settings(&settings),
             usb.gateway,
             None,
         );
         let client = SkakelClientRole::new(
-            connection.clone(),
             push.clone(),
             browser.clone(),
             own_fingerprint,
-            host.name.clone(),
             tasks.clone(),
         );
         client.follow(&settings).await;
@@ -307,18 +297,17 @@ impl App {
         let usb_server_role =
             UsbServerRole::new(usb_server.clone(), usb.platform.clone(), push.clone());
         let usb_client_role =
-            UsbClientRole::new(usb_client.clone(), usb.platform.clone(), push.clone());
+            UsbClientRole::new(usb_clients.clone(), usb.platform.clone(), push.clone());
         usb_server.start().await?;
         data_plane.start();
-        usb_client.start().await?;
+        servers.start().await?;
         gateway.start().await;
 
         let files = Files {
             settings: settings.clone(),
             server_secrets,
-            connection: connection.clone(),
+            servers: servers_file,
             devices,
-            attached,
         };
 
         Ok(Arc::new(Self {
@@ -329,7 +318,7 @@ impl App {
             usb_server: usb_server_role,
             usb_client: usb_client_role,
             settings,
-            connection,
+            servers: servers.clone(),
             push,
             certificate,
             running: Running {
@@ -338,7 +327,7 @@ impl App {
                 browser,
                 usb_server,
                 data_plane,
-                usb_client,
+                servers,
                 gateway,
             },
             files,
@@ -367,7 +356,7 @@ impl App {
     pub async fn stop(&self) {
         let running = &self.running;
         running.gateway.stop().await;
-        running.usb_client.stop().await;
+        running.servers.stop().await;
         running.data_plane.stop().await;
         running.usb_server.stop().await;
         if let Some(announcer) = &running.announcer {

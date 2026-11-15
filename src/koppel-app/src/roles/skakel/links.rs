@@ -14,7 +14,6 @@
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use koppel_config::ConfigFile;
 use koppel_config::files::ClientConnection;
 use koppel_usb::LinkStatus as UsbLinkStatus;
 use koppel_usb::{BoxFuture, DeviceStream, Link, LinkEvents, Links, OpenError, StreamOpener};
@@ -29,6 +28,7 @@ use super::remote::proto::remote_devices_client::RemoteDevicesClient;
 use super::streams::open_usb;
 use crate::activity::{ActivityLog, ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use crate::roles::usb_store::file_connection;
+use crate::servers::{LinkSettings, ServerSlot};
 use crate::sync::Unpoisoned;
 use crate::tasks::Tasks;
 
@@ -36,9 +36,10 @@ use crate::tasks::Tasks;
 /// stays up.
 const RESUBSCRIBE: Duration = Duration::from_secs(2);
 
-/// Makes the links, over `connection.json` and the browser the links follow a moved server with.
+/// Makes the links to one server, over its entry in `connection.json` and the browser the links
+/// follow a moved server with.
 pub struct SkakelLinks {
-    connection: ConfigFile<ClientConnection>,
+    slot: ServerSlot,
     browser: Option<Browser>,
     activity: Arc<ActivityLog>,
     tasks: Tasks,
@@ -46,13 +47,13 @@ pub struct SkakelLinks {
 
 impl SkakelLinks {
     pub fn new(
-        connection: ConfigFile<ClientConnection>,
+        slot: ServerSlot,
         browser: Option<Browser>,
         activity: Arc<ActivityLog>,
         tasks: Tasks,
     ) -> Arc<Self> {
         Arc::new(Self {
-            connection,
+            slot,
             browser,
             activity,
             tasks,
@@ -63,9 +64,11 @@ impl SkakelLinks {
 impl Links for SkakelLinks {
     fn connect(&self, connection: &koppel_usb::Connection, events: LinkEvents) -> Arc<dyn Link> {
         let connection = &file_connection(connection);
-        let made = make(connection, self.browser.clone());
+        let settings = self.slot.settings();
+        let made = make(connection, self.browser.clone(), settings);
         let shared = Arc::new(Shared {
-            saved: self.connection.clone(),
+            saved: self.slot.clone(),
+            settings,
             activity: self.activity.clone(),
             tasks: self.tasks.clone(),
             events,
@@ -93,6 +96,7 @@ impl Links for SkakelLinks {
 fn make(
     connection: &ClientConnection,
     browser: Option<Browser>,
+    settings: LinkSettings,
 ) -> Result<skakel_client::Link, String> {
     let address = connection
         .server_url
@@ -112,21 +116,21 @@ fn make(
             .cloned()
             .unwrap_or_default(),
     );
-    skakel_client::Link::new(
-        &address,
-        pins,
-        credentials,
+    skakel_client::Link::new(&address, pins, credentials, {
+        // One try gives up after the server's own limit.
+        let options = ClientOptions::default().request_timeout(settings.give_up_after);
         match browser {
-            Some(browser) => ClientOptions::default().browser(browser),
-            None => ClientOptions::default(),
-        },
-    )
+            Some(browser) => options.browser(browser),
+            None => options,
+        }
+    })
     .map_err(|e| e.failure().message().to_owned())
 }
 
 /// What the link's handlers share.
 struct Shared {
-    saved: ConfigFile<ClientConnection>,
+    saved: ServerSlot,
+    settings: LinkSettings,
     activity: Arc<ActivityLog>,
     tasks: Tasks,
     events: LinkEvents,
@@ -197,6 +201,13 @@ impl Shared {
         }
         if let Some(reported) = reported {
             self.events.status(reported).await;
+        }
+        // With reconnect off, the first failure ends the link; changing the setting makes a new one.
+        if status.state == LinkState::Failed
+            && !self.settings.reconnect
+            && let Some(link) = link.upgrade()
+        {
+            self.tasks.spawn(async move { link.stop().await });
         }
     }
 

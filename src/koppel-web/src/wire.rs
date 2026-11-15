@@ -23,16 +23,16 @@ use crate::api::server::{
 use crate::api::settings::{SettingsPatch, SystemInfo};
 use crate::auth::endpoints::{AuthState, ChangeRequest, PasswordRequest};
 use koppel_app::activity::ActivityEvent;
-use koppel_app::connection::{ConnectionUpdate, ConnectionView, PairStart};
 use koppel_app::roles::{
-    ClientView, ConnectionTest, DiscoveredServer, EnrollmentCodeView, EnrollmentKey,
+    AddServer, ClientView, ConnectionTest, DiscoveredServer, EnrollmentCodeView, EnrollmentKey,
     EnrollmentView, KeysView, NewClient, Outcome, PairingOverview, PairingRequestView,
-    PairingState, PairingStatus, PairingWindowView, RequestState,
+    PairingWindowView, RequestState, ServerSettings, ServerView, ServersView,
 };
 use koppel_config::files::{KoppelSettings, Role};
 use koppel_usb::{ActivityOutcome, ActivityReason, EntityKind, EntityRef, SystemCheck};
 use koppel_usb::{
-    ClientDeviceView, ClientDevices, DeviceState, DeviceView, LinkState, ServerDevices,
+    ClientDeviceView, ClientServersView, DeviceState, DeviceView, LinkState, ServerDevices,
+    ServerDevicesView,
 };
 
 /// Where the checked-in file lives, from the crate's folder.
@@ -60,11 +60,10 @@ fn decls() -> String {
         ActivityReason,
         AuthState,
         ClientDeviceView,
-        ClientDevices,
+        ClientServersView,
         ClientSecret,
         ClientView,
         ConnectionTest,
-        ConnectionView,
         DeviceState,
         DeviceView,
         DiscoveredServer,
@@ -80,25 +79,26 @@ fn decls() -> String {
         EnrollmentView,
         PairingOverview,
         PairingRequestView,
-        PairingState,
-        PairingStatus,
         PairingWindowView,
         Problem,
         RequestState,
         Role,
         ServerDevices,
+        ServerDevicesView,
         ServerIdentity,
+        ServerView,
+        ServersView,
         SystemCheck,
         SystemInfo,
         // Request bodies.
+        AddServer,
         Approve,
         ChangeRequest,
-        ConnectionUpdate,
         CreateClient,
         OpenEnrollmentCode,
         OpenPairing,
-        PairStart,
         PasswordRequest,
+        ServerSettings,
         SettingsPatch,
     );
     out.truncate(out.trim_end().len());
@@ -167,18 +167,17 @@ mod fixtures {
     fixtures!(
         "activity-event.json" => ActivityEvent,
         "auth-state.json" => AuthState,
-        "client-devices.json" => ClientDevices,
+        "client-devices.json" => ClientServersView,
         "client-secret.json" => ClientSecret,
         "clients.json" => Vec<ClientView>,
         "connection-test.json" => ConnectionTest,
-        "connection-view.json" => ConnectionView,
         "enrollment-key.json" => EnrollmentKey,
         "enrollment-view.json" => EnrollmentView,
         "discovered-servers.json" => Vec<DiscoveredServer>,
         "keys-view.json" => KeysView,
         "new-client.json" => NewClient,
         "pairing-overview.json" => PairingOverview,
-        "pairing-status.json" => PairingStatus,
+        "servers.json" => ServersView,
         "problem.json" => Problem,
         "problem-validation.json" => Problem,
         "server-devices.json" => ServerDevices,

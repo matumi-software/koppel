@@ -2,8 +2,9 @@
 //!
 //! - [`SkakelServerRole`]: the server's registered clients, its certificate, the pairing window and
 //!   pairing requests, over skakel-server and `secrets.json`.
-//! - [`SkakelClientRole`]: the client's connection test, the servers found on the network and
-//!   pairing, with skakel-client.
+//! - [`SkakelClientRole`]: the servers found on the network, with skakel-client.
+//! - [`Servers`]: the servers a client attaches from: adding one with a code or a key, removing it,
+//!   its link settings and its connection test.
 //! - [`UsbServerRole`] and [`UsbClientRole`]: koppel-usb's server and client with the push and the
 //!   system checks. Their views are koppel-usb's own types, serialised as they are.
 //!
@@ -17,6 +18,7 @@ use serde::Serialize;
 use time::OffsetDateTime;
 use ts_rs::TS;
 
+pub use crate::servers::{AddServer, ServerSettings, Servers, ServersError, ServersParts};
 pub use skakel::{SkakelClientRole, SkakelServerRole};
 pub use usb::UsbActivity;
 pub use usb::{UsbClientRole, UsbServerRole};
@@ -318,53 +320,60 @@ pub struct DiscoveredServer {
     pub url: String,
 }
 
-/// Where the client's pairing stands.
+/// One server this client attaches from, as the UI lists it. Never the secret.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
-pub struct PairingStatus {
-    pub state: PairingState,
-    pub server_name: Option<String>,
+pub struct ServerView {
+    /// Koppel's id for the server, which names it in the routes.
+    pub id: String,
+    /// What the server calls itself.
+    pub name: Option<String>,
     pub server_url: Option<String>,
-    pub code: Option<String>,
-    pub message: Option<String>,
-    #[serde(with = "time::serde::rfc3339::option")]
-    #[ts(type = "string | null")]
-    pub expires_at: Option<OffsetDateTime>,
     pub server_fingerprint: Option<String>,
+    pub client_id: Option<String>,
+    pub has_secret: bool,
+    pub next_server_fingerprint: Option<String>,
+    /// How it was linked: `pairing`, `code` or `key`.
+    pub linked_with: Option<String>,
+    /// Try again after the link drops.
+    pub reconnect: bool,
+    /// Seconds between tries while `reconnect` is on.
+    pub retry_every_seconds: u32,
+    /// Seconds one try may take.
+    pub give_up_after_seconds: u32,
 }
 
-/// Where the client's pairing stands.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, TS)]
+impl ServerView {
+    pub fn of(entry: &koppel_config::ServerEntry) -> Self {
+        Self {
+            id: entry.id.clone(),
+            name: entry.name.clone(),
+            server_url: entry.server_url.clone(),
+            server_fingerprint: entry.server_fingerprint.clone(),
+            client_id: entry.client_id.clone(),
+            has_secret: entry.client_secret.is_some(),
+            next_server_fingerprint: entry.next_server_fingerprint.clone(),
+            linked_with: entry.linked_with.clone(),
+            reconnect: entry.reconnect,
+            retry_every_seconds: entry.retry_every_seconds,
+            give_up_after_seconds: entry.give_up_after_seconds,
+        }
+    }
+}
+
+/// Every server this client attaches from, in the order they were added.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[cfg_attr(any(test, feature = "test-util"), derive(serde::Deserialize))]
 #[serde(rename_all = "camelCase")]
-pub enum PairingState {
-    #[default]
-    Idle,
-    Requesting,
-    Waiting,
-    /// The server approved, and the person confirms replacing the saved connection.
-    Confirm,
-    Paired,
-    Denied,
-    Expired,
-    Failed,
+pub struct ServersView {
+    pub servers: Vec<ServerView>,
 }
 
-impl PairingStatus {
-    pub fn idle() -> Self {
-        Self::of(PairingState::Idle, None)
-    }
-
-    pub fn of(state: PairingState, message: Option<String>) -> Self {
+impl ServersView {
+    pub fn of(servers: &koppel_config::ClientServers) -> Self {
         Self {
-            state,
-            server_name: None,
-            server_url: None,
-            code: None,
-            message,
-            expires_at: None,
-            server_fingerprint: None,
+            servers: servers.servers.iter().map(ServerView::of).collect(),
         }
     }
 }
@@ -383,19 +392,6 @@ mod tests {
 
     #[test]
     fn the_wire_words_are_0_1_xs() {
-        let states = [
-            (PairingState::Idle, "idle"),
-            (PairingState::Requesting, "requesting"),
-            (PairingState::Waiting, "waiting"),
-            (PairingState::Confirm, "confirm"),
-            (PairingState::Paired, "paired"),
-            (PairingState::Denied, "denied"),
-            (PairingState::Expired, "expired"),
-            (PairingState::Failed, "failed"),
-        ];
-        for (state, text) in states {
-            assert_eq!(word(state), text);
-        }
         let outcomes = [
             (Outcome::Ok, "ok"),
             (Outcome::Incomplete, "incomplete"),

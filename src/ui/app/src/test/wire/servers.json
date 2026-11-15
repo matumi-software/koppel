@@ -1,0 +1,17 @@
+{
+  "servers": [
+    {
+      "id": "server-1",
+      "name": "lab",
+      "serverUrl": "https://lab:5241",
+      "serverFingerprint": "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99",
+      "clientId": "bench-1",
+      "hasSecret": true,
+      "nextServerFingerprint": null,
+      "linkedWith": "code",
+      "reconnect": true,
+      "retryEverySeconds": 30,
+      "giveUpAfterSeconds": 10
+    }
+  ]
+}

@@ -5,14 +5,13 @@
 use std::sync::Arc;
 
 use koppel_config::files::KoppelSettings;
-use koppel_usb::{ClientDevices, ServerDevices};
+use koppel_usb::{ClientServersView, ServerDevices};
 use serde::Serialize;
 use tokio::sync::broadcast;
 
 use crate::activity::ActivityEvent;
-use crate::connection::ConnectionView;
 use crate::roles::{
-    ClientView, DiscoveredServer, EnrollmentView, KeysView, PairingOverview, PairingStatus,
+    ClientView, DiscoveredServer, EnrollmentView, KeysView, PairingOverview, ServersView,
 };
 
 /// Events a stream may fall behind by before it is closed. A UI reads them as they come, so only a
@@ -31,18 +30,16 @@ pub enum Event<'a> {
     ClientsChanged(&'a [ClientView]),
     /// Server: the certificate or the prepared next certificate changed.
     ServerKeysChanged(&'a KeysView),
-    /// Client: `connection.json` was written: the connection without its secret.
-    ConnectionChanged(&'a ConnectionView),
+    /// Client: `connection.json` was written: the servers without their secrets.
+    ServersChanged(&'a ServersView),
     /// Server: this machine's devices changed.
     DevicesChanged(&'a ServerDevices),
-    /// Client: the link, the server's devices or what is attached here changed.
-    ClientDevicesChanged(&'a ClientDevices),
+    /// Client: a server's link, its devices or what is attached here changed.
+    ClientDevicesChanged(&'a ClientServersView),
     /// Something went into the activity log: that one entry.
     ActivityRecorded(&'a ActivityEvent),
     /// Client: the servers found on the network changed.
     ServersDiscovered(&'a [DiscoveredServer]),
-    /// Client: pairing moved on.
-    PairingStatusChanged(&'a PairingStatus),
     /// Server: the pairing window or the pairing requests changed.
     PairingRequestsChanged(&'a PairingOverview),
     /// Server: the pairing code that is showing, or the server key, changed.
@@ -56,12 +53,11 @@ impl Event<'_> {
             Self::SettingsChanged(_) => "SettingsChanged",
             Self::ClientsChanged(_) => "ClientsChanged",
             Self::ServerKeysChanged(_) => "ServerKeysChanged",
-            Self::ConnectionChanged(_) => "ConnectionChanged",
+            Self::ServersChanged(_) => "ServersChanged",
             Self::DevicesChanged(_) => "DevicesChanged",
             Self::ClientDevicesChanged(_) => "ClientDevicesChanged",
             Self::ActivityRecorded(_) => "ActivityRecorded",
             Self::ServersDiscovered(_) => "ServersDiscovered",
-            Self::PairingStatusChanged(_) => "PairingStatusChanged",
             Self::PairingRequestsChanged(_) => "PairingRequestsChanged",
             Self::EnrollmentChanged(_) => "EnrollmentChanged",
         }

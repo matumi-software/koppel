@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use koppel_config::files::{KoppelSettings, Role};
-use koppel_usb::{ClientDevices, DeviceState, LinkState, ServerDevices};
+use koppel_usb::{ClientServersView, DeviceState, LinkState, ServerDevices};
 use tokio::sync::broadcast::{self, error::TryRecvError};
 
 use crate::activity::{ActivityEvent, ActivityOutcome, ActivityReason};
@@ -60,9 +60,8 @@ pub struct TrayFacts {
     pub role: Role,
     pub password_set: bool,
     pub setup_open: bool,
-    pub client: ClientDevices,
-    /// The host of the server a client is linked to, as the UI shows it.
-    pub server_host: Option<String>,
+    /// Every server the client attaches from, each named as the UI names it.
+    pub client: ClientServersView,
     pub server: ServerDevices,
 }
 
@@ -84,7 +83,7 @@ pub fn describe(facts: &TrayFacts) -> TrayState {
         lines.push(server_line(&facts.server));
     }
     if matches!(facts.role, Role::Client | Role::Both) {
-        lines.push(client_line(&facts.client, facts.server_host.as_deref()));
+        lines.push(client_line(&facts.client));
     }
     let tip = if lines.len() == 1 {
         format!("Koppel: {}", lines[0].0)
@@ -130,17 +129,50 @@ fn server_line(server: &ServerDevices) -> (String, bool) {
     )
 }
 
-fn client_line(client: &ClientDevices, server_host: Option<&str>) -> (String, bool) {
-    let server = server_host.unwrap_or("the server");
-    let attached = client.devices.iter().filter(|d| d.attached_here).count();
-    match client.link {
-        LinkState::Connected => (
-            format!("linked to {server}, {} attached", count(attached, "device")),
-            false,
-        ),
-        LinkState::Connecting => (format!("connecting to {server}"), false),
-        LinkState::Unconfigured => ("no server yet".to_owned(), false),
-        LinkState::Error => (format!("cannot reach {server}"), true),
+fn client_line(client: &ClientServersView) -> (String, bool) {
+    let attached: usize = client
+        .servers
+        .iter()
+        .map(|s| s.devices.iter().filter(|d| d.attached_here).count())
+        .sum();
+    let in_state = |state: LinkState| client.servers.iter().filter(|s| s.link == state).count();
+    let attention = in_state(LinkState::Error) > 0;
+    match client.servers.as_slice() {
+        [] => ("no server yet".to_owned(), false),
+        [one] => {
+            let server = if one.name.is_empty() {
+                "the server"
+            } else {
+                one.name.as_str()
+            };
+            match one.link {
+                LinkState::Connected => (
+                    format!("linked to {server}, {} attached", count(attached, "device")),
+                    false,
+                ),
+                LinkState::Connecting => (format!("connecting to {server}"), false),
+                LinkState::Unconfigured => ("no server yet".to_owned(), false),
+                LinkState::Error => (format!("cannot reach {server}"), true),
+            }
+        }
+        many => {
+            let linked = in_state(LinkState::Connected);
+            let text = if attention {
+                let lost = in_state(LinkState::Error);
+                format!(
+                    "linked to {linked} of {}, cannot reach {lost}, {} attached",
+                    count(many.len(), "server"),
+                    count(attached, "device")
+                )
+            } else {
+                format!(
+                    "linked to {linked} of {}, {} attached",
+                    count(many.len(), "server"),
+                    count(attached, "device")
+                )
+            };
+            (text, attention)
+        }
     }
 }
 
@@ -332,12 +364,6 @@ impl TrayFeed {
             password_set: self.auth_state.has_password(),
             setup_open: self.auth_state.setup_open(),
             client: app.usb_client.current(),
-            server_host: app
-                .connection
-                .current()
-                .server_url
-                .as_deref()
-                .and_then(host_of),
             server: app.usb_server.current(),
         }
     }
@@ -376,7 +402,7 @@ impl TrayFeed {
 mod tests {
     use super::*;
     use crate::activity::{EntityKind, EntityRef};
-    use koppel_usb::{ClientDeviceView, DeviceView};
+    use koppel_usb::{ClientDeviceView, DeviceView, ServerDevicesView};
     use time::OffsetDateTime;
 
     fn device(state: DeviceState) -> DeviceView {
@@ -389,20 +415,24 @@ mod tests {
         }
     }
 
-    fn client(link: LinkState, attached: usize) -> ClientDevices {
-        ClientDevices {
-            link,
-            link_message: None,
-            devices: (0..attached + 1)
-                .map(|i| ClientDeviceView {
-                    device: device(DeviceState::Shared),
-                    attached_here: i < attached,
-                    port: None,
-                    attached_since: None,
-                    fault: None,
-                    attached_via: None,
-                })
-                .collect(),
+    fn client(link: LinkState, attached: usize) -> ClientServersView {
+        ClientServersView {
+            servers: vec![ServerDevicesView {
+                id: "server-1".into(),
+                name: "t520-client".into(),
+                link,
+                link_message: None,
+                devices: (0..attached + 1)
+                    .map(|i| ClientDeviceView {
+                        device: device(DeviceState::Shared),
+                        attached_here: i < attached,
+                        port: None,
+                        attached_since: None,
+                        fault: None,
+                        attached_via: None,
+                    })
+                    .collect(),
+            }],
             unavailable: None,
             gateway: false,
             gateway_fault: None,
@@ -415,7 +445,6 @@ mod tests {
             password_set: true,
             setup_open: false,
             client: client(LinkState::Connected, 2),
-            server_host: Some("t520-client".into()),
             server: ServerDevices {
                 devices: vec![
                     device(DeviceState::Shared),
@@ -471,7 +500,7 @@ mod tests {
 
         let mut f = facts(Role::Client);
         f.client = client(LinkState::Error, 0);
-        f.server_host = None;
+        f.client.servers[0].name = String::new();
         assert_eq!(
             describe(&f),
             TrayState {
@@ -480,6 +509,7 @@ mod tests {
             }
         );
         f.client = client(LinkState::Unconfigured, 0);
+        f.client.servers.clear();
         assert_eq!(describe(&f).tip, "Koppel: no server yet");
         assert!(!describe(&f).attention);
 

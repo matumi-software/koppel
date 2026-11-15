@@ -13,7 +13,7 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use koppel_usb::{ClientDevices, LinkState};
+use koppel_usb::{ClientServersView, LinkState};
 use serde::Serialize;
 
 use crate::state::ReadyApi;
@@ -44,13 +44,14 @@ pub(crate) struct Readiness {
     pub ready: bool,
     pub gateway: GatewayState,
     pub certificate: CertificateState,
-    /// The link to the saved server. It is reported but does not decide `ready`: a client whose
-    /// server is away is working, and a monitor can read this field when it cares.
+    /// The links to the saved servers as one: connected when every server is, error when any is,
+    /// else connecting, and unconfigured with no server. It is reported but does not decide `ready`:
+    /// a client whose server is away is working, and a monitor can read this field when it cares.
     pub link: LinkState,
 }
 
 impl Readiness {
-    pub(crate) fn of(devices: &ClientDevices, certificate_loaded: bool) -> Self {
+    pub(crate) fn of(devices: &ClientServersView, certificate_loaded: bool) -> Self {
         let gateway = if devices.gateway_fault.is_some() {
             GatewayState::Faulted
         } else if devices.gateway {
@@ -67,8 +68,24 @@ impl Readiness {
             ready: gateway != GatewayState::Faulted && certificate == CertificateState::Loaded,
             gateway,
             certificate,
-            link: devices.link,
+            link: overall(devices),
         }
+    }
+}
+
+/// The links of every server as one state.
+fn overall(devices: &ClientServersView) -> LinkState {
+    let any = |state: LinkState| devices.servers.iter().any(|s| s.link == state);
+    if devices.servers.is_empty() {
+        LinkState::Unconfigured
+    } else if any(LinkState::Error) {
+        LinkState::Error
+    } else if any(LinkState::Connecting) {
+        LinkState::Connecting
+    } else if any(LinkState::Unconfigured) {
+        LinkState::Unconfigured
+    } else {
+        LinkState::Connected
     }
 }
 
@@ -87,12 +104,17 @@ pub(crate) async fn readyz(State(app): State<ReadyApi>) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use koppel_usb::ServerDevicesView;
 
-    fn devices(link: LinkState, gateway: bool, fault: Option<&str>) -> ClientDevices {
-        ClientDevices {
-            link,
-            link_message: Some("a message that must not leave".into()),
-            devices: Vec::new(),
+    fn devices(link: LinkState, gateway: bool, fault: Option<&str>) -> ClientServersView {
+        ClientServersView {
+            servers: vec![ServerDevicesView {
+                id: "server-1".into(),
+                name: "lab".into(),
+                link,
+                link_message: Some("a message that must not leave".into()),
+                devices: Vec::new(),
+            }],
             unavailable: None,
             gateway,
             gateway_fault: fault.map(str::to_owned),

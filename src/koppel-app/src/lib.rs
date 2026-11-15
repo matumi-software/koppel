@@ -17,6 +17,7 @@ pub mod host;
 pub mod push;
 pub mod random;
 pub mod roles;
+pub mod servers;
 pub mod sync;
 pub mod tasks;
 pub mod tray;

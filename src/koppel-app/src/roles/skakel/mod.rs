@@ -18,7 +18,7 @@ mod server;
 mod store;
 mod streams;
 
-pub use client::SkakelClientRole;
+pub use client::{SkakelClientRole, test_connection};
 pub use links::SkakelLinks;
 pub use remote::is_grpc_path;
 pub use server::SkakelServerRole;

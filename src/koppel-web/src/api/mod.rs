@@ -112,6 +112,16 @@ pub(crate) fn router(app: &Arc<App>) -> Router {
             "/server/clients/{id}/secret",
             get(server::client_secret).post(server::rotate_secret),
         )
+        .route("/server/enrollment", get(server::enrollment))
+        .route(
+            "/server/enrollment/code",
+            put(server::open_enrollment_code).delete(server::close_enrollment_code),
+        )
+        .route("/server/enrollment/key", get(server::enrollment_key))
+        .route(
+            "/server/enrollment/key/rotation",
+            post(server::rotate_enrollment_key),
+        )
         .route("/server/keys", get(server::keys))
         .route(
             "/server/keys/next-certificate",

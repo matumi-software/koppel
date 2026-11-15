@@ -11,7 +11,9 @@ use tokio::sync::broadcast;
 
 use crate::activity::ActivityEvent;
 use crate::connection::ConnectionView;
-use crate::roles::{ClientView, DiscoveredServer, KeysView, PairingOverview, PairingStatus};
+use crate::roles::{
+    ClientView, DiscoveredServer, EnrollmentView, KeysView, PairingOverview, PairingStatus,
+};
 
 /// Events a stream may fall behind by before it is closed. A UI reads them as they come, so only a
 /// stalled connection gets this far.
@@ -43,6 +45,8 @@ pub enum Event<'a> {
     PairingStatusChanged(&'a PairingStatus),
     /// Server: the pairing window or the pairing requests changed.
     PairingRequestsChanged(&'a PairingOverview),
+    /// Server: the pairing code that is showing, or the server key, changed.
+    EnrollmentChanged(&'a EnrollmentView),
 }
 
 impl Event<'_> {
@@ -59,6 +63,7 @@ impl Event<'_> {
             Self::ServersDiscovered(_) => "ServersDiscovered",
             Self::PairingStatusChanged(_) => "PairingStatusChanged",
             Self::PairingRequestsChanged(_) => "PairingRequestsChanged",
+            Self::EnrollmentChanged(_) => "EnrollmentChanged",
         }
     }
 }

@@ -44,7 +44,11 @@ hasNextCertificate: boolean,
 /**
  * Its secret is kept, so it can be copied again.
  */
-hasSecret: boolean, };
+hasSecret: boolean, 
+/**
+ * How it was linked: `pairing`, `code` or `key`. Empty for a client made before that was kept.
+ */
+linkedWith: string | null, };
 
 export type ConnectionTest = { ok: boolean, outcome: Outcome, message: string, };
 
@@ -97,6 +101,12 @@ export type LinkState = "unconfigured" | "connecting" | "connected" | "error";
 export type NewClient = { clientId: string, clientSecret: string, name: string, };
 
 export type Outcome = "ok" | "incomplete" | "unreachable" | "certificateMismatch" | "rejectedCredentials" | "clientUnknown" | "versionMismatch" | "unexpectedAnswer" | "tooManyRequests";
+
+export type EnrollmentCodeView = { code: string, expiresAt: string, };
+
+export type EnrollmentKey = { key: string, };
+
+export type EnrollmentView = { code: EnrollmentCodeView | null, keyRevision: number, };
 
 export type PairingOverview = { requests: Array<PairingRequestView>, 
 /**
@@ -158,6 +168,8 @@ export type ChangeRequest = { current?: string, next?: string, };
 export type ConnectionUpdate = { serverUrl?: string, serverFingerprint?: string, clientId?: string, clientSecret?: string, };
 
 export type CreateClient = { name?: string, };
+
+export type OpenEnrollmentCode = { seconds?: number, };
 
 export type OpenPairing = { minutes?: number, };
 

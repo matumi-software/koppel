@@ -24,6 +24,7 @@ const TESTED: &[&str] = &[
     "ServersDiscovered",
     "PairingStatusChanged",
     "PairingRequestsChanged",
+    "EnrollmentChanged",
 ];
 
 #[test]
@@ -363,6 +364,90 @@ async fn pairing_requests_changed_follows_the_window_opening_and_closing() {
     })
     .await;
     assert!(closed["window"]["until"].is_null(), "{closed}");
+}
+
+#[tokio::test]
+async fn enrollment_changed_follows_the_pairing_code_showing_and_closing() {
+    let main = Main::get().await;
+    let mut events = open(&main.admin).await;
+    main.admin
+        .put("/api/v1/server/enrollment/code", json!({ "seconds": 30 }))
+        .await
+        .expect(202)
+        .empty();
+    let shown = expect(&mut events, "EnrollmentChanged", |e| e["code"].is_object()).await;
+    let code = shown["code"]["code"].as_str().expect("the code is text");
+    assert_eq!(code.len(), 8, "{shown}");
+    assert!(code.bytes().all(|b| b.is_ascii_digit()), "{shown}");
+    assert!(shown["code"]["expiresAt"].is_string(), "{shown}");
+    let read = main
+        .admin
+        .get("/api/v1/server/enrollment")
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(read["code"]["code"], shown["code"]["code"]);
+
+    main.admin
+        .delete("/api/v1/server/enrollment/code")
+        .await
+        .expect(202)
+        .empty();
+    expect(&mut events, "EnrollmentChanged", |e| e["code"].is_null()).await;
+}
+
+#[tokio::test]
+async fn enrollment_changed_follows_the_server_key_being_rotated() {
+    let main = Main::get().await;
+    let key = main
+        .admin
+        .get("/api/v1/server/enrollment/key")
+        .await
+        .expect(200)
+        .json();
+    assert!(
+        key["key"].as_str().is_some_and(|k| k.starts_with("kp1_")),
+        "{key}"
+    );
+    let before = main
+        .admin
+        .get("/api/v1/server/enrollment")
+        .await
+        .expect(200)
+        .json()["keyRevision"]
+        .as_u64()
+        .expect("a number");
+    let mut events = open(&main.admin).await;
+
+    let rotated = main
+        .admin
+        .post("/api/v1/server/enrollment/key/rotation", json!({}))
+        .await
+        .expect(200)
+        .json();
+
+    assert_ne!(rotated["key"], key["key"]);
+    expect(&mut events, "EnrollmentChanged", |e| {
+        e["keyRevision"].as_u64().is_some_and(|r| r > before)
+    })
+    .await;
+    // The key asked for now is the new one.
+    let now = main
+        .admin
+        .get("/api/v1/server/enrollment/key")
+        .await
+        .expect(200)
+        .json();
+    assert_eq!(now["key"], rotated["key"]);
+}
+
+#[tokio::test]
+async fn a_pairing_code_cannot_be_open_for_a_few_seconds() {
+    let main = Main::get().await;
+    main.admin
+        .put("/api/v1/server/enrollment/code", json!({ "seconds": 5 }))
+        .await
+        .expect(400);
 }
 
 #[tokio::test]

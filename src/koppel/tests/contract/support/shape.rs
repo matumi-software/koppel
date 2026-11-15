@@ -149,7 +149,13 @@ pub const CLIENT: &[(&str, Kind)] = &[
     ("lastSeen", Kind::OptTime),
     ("hasNextCertificate", Kind::Bool),
     ("hasSecret", Kind::Bool),
+    ("linkedWith", Kind::OptStr),
 ];
+
+/// What the server shows for enrolling a client without approving it: the pairing code that is
+/// showing (an object with `code` and `expiresAt`, or `null`), and how often the server key has been
+/// rotated since the server started.
+pub const ENROLLMENT: &[(&str, Kind)] = &[("code", Kind::Any), ("keyRevision", Kind::Int)];
 
 /// The server's certificate and the next one while a handover is under way. 0.1.x also had the token
 /// signing key here; Skakel 0.3.0's tokens are not signed.

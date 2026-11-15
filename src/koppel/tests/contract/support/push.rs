@@ -81,6 +81,11 @@ pub const EVENTS: &[Event] = &[
         when: "server: the pairing window opened or closed, a pairing request arrived, was approved, refused, withdrawn or expired, or the budget filled",
         payload: Payload::Object(shape::PAIRING_OVERVIEW),
     },
+    Event {
+        name: "EnrollmentChanged",
+        when: "server: a pairing code started showing, was closed, ran out or was spent, or the server key was rotated",
+        payload: Payload::Object(shape::ENROLLMENT),
+    },
 ];
 
 #[cfg(test)]

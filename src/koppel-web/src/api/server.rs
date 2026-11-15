@@ -14,7 +14,8 @@ use crate::json::JsonBody;
 use crate::state::ServerApi;
 use koppel_app::activity::{ActivityOutcome, ActivityReason, EntityKind, EntityRef};
 use koppel_app::roles::{
-    Approval, ClientView, KeysView, NewClient, PairingOverview, RegisterError,
+    Approval, ClientView, EnrollmentKey, EnrollmentView, KeysView, NewClient, PairingOverview,
+    RegisterError,
 };
 
 #[derive(Serialize, TS)]
@@ -181,6 +182,76 @@ pub(crate) async fn rotate_secret(
         None,
     );
     Ok(secret(&value))
+}
+
+pub(crate) async fn enrollment(State(app): State<ServerApi>) -> Json<EnrollmentView> {
+    Json(app.server.enrollment())
+}
+
+/// How long a pairing code shows when the UI does not say. Skakel holds one to between 30 seconds and
+/// five minutes.
+const DEFAULT_CODE_SECONDS: u64 = 60;
+
+#[derive(Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub(crate) struct OpenEnrollmentCode {
+    #[serde(default)]
+    #[ts(type = "number", optional)]
+    seconds: Option<u64>,
+}
+
+/// Shows a new pairing code and answers 202; it shows in `EnrollmentChanged` once Skakel's server has
+/// it. Showing another replaces the one that is showing.
+pub(crate) async fn open_enrollment_code(
+    State(app): State<ServerApi>,
+    JsonBody(request): JsonBody<OpenEnrollmentCode>,
+) -> ApiResult<StatusCode> {
+    let seconds = request.seconds.unwrap_or(DEFAULT_CODE_SECONDS);
+    if !(30..=300).contains(&seconds) {
+        return Err(ApiError::invalid(&[(
+            "seconds",
+            "A pairing code can stay open for between 30 seconds and 5 minutes.",
+        )]));
+    }
+    app.server
+        .open_enrollment_code(std::time::Duration::from_secs(seconds))
+        .map_err(|e| ApiError::internal("Showing a pairing code", e))?;
+    accepted()
+}
+
+/// Closes the pairing code and answers 202.
+pub(crate) async fn close_enrollment_code(State(app): State<ServerApi>) -> ApiResult<StatusCode> {
+    app.server.close_enrollment_code();
+    accepted()
+}
+
+/// The server key, made the first time it is asked for.
+pub(crate) async fn enrollment_key(State(app): State<ServerApi>) -> ApiResult<Json<EnrollmentKey>> {
+    match app.server.enrollment_key().await {
+        Ok(key) => Ok(Json(EnrollmentKey { key })),
+        Err(e) => Err(ApiError::internal("Reading the server key", e)),
+    }
+}
+
+/// A new server key, given once in the answer. The old one stops working; clients already enrolled
+/// are not affected. `EnrollmentChanged` carries the new revision.
+pub(crate) async fn rotate_enrollment_key(
+    State(app): State<ServerApi>,
+) -> ApiResult<Json<EnrollmentKey>> {
+    match app.server.rotate_enrollment_key().await {
+        Ok(key) => {
+            app.activity.record(
+                machine(&app),
+                ActivityReason::SecretRotated,
+                ActivityOutcome::Succeeded,
+                "The server key was rotated".to_owned(),
+                None,
+            );
+            Ok(Json(EnrollmentKey { key }))
+        }
+        Err(e) => Err(ApiError::internal("Rotating the server key", e)),
+    }
 }
 
 pub(crate) async fn keys(State(app): State<ServerApi>) -> Json<KeysView> {

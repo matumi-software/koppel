@@ -249,6 +249,15 @@ impl Slots {
         }
     }
 
+    /// Whether the gateway would serve the driver's import for this device now: a look that claims
+    /// nothing, for the one that decides which server's client gets a connection.
+    pub fn has_booking(&self, key: &AttachKey) -> bool {
+        matches!(
+            self.map.get(key),
+            Some(SlotState::Attaching { booked, cancel, .. }) if *booked && !cancel.is_cancelled()
+        )
+    }
+
     /// An attachment is made: by this client's attach `attempt`, or by a visitor (`None`).
     pub fn register(
         &mut self,

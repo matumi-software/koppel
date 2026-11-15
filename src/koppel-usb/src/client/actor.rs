@@ -280,6 +280,9 @@ impl Actor {
             Command::Book { key, reply } => {
                 let _ = reply.send(self.slots.claim_booking(&key));
             }
+            Command::HasBooking { key, reply } => {
+                let _ = reply.send(self.slots.has_booking(&key));
+            }
             Command::Register {
                 key,
                 attempt,

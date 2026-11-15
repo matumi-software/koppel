@@ -216,6 +216,33 @@ pub struct ClientDevices {
     pub gateway_fault: Option<String>,
 }
 
+/// One server of a client with several: its link and the devices it shares.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerDevicesView {
+    /// Koppel's id for the server, which names it in the routes that act on one of its devices.
+    pub id: String,
+    /// What the server calls itself.
+    pub name: String,
+    pub link: LinkState,
+    pub link_message: Option<String>,
+    pub devices: Vec<ClientDeviceView>,
+}
+
+/// What a client with several servers shows: each server with its link and devices, and what is the
+/// machine's rather than a server's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientServersView {
+    pub servers: Vec<ServerDevicesView>,
+    /// Why this machine cannot attach, such as a missing driver, or `None`.
+    pub unavailable: Option<String>,
+    /// True while the plain USB/IP gateway listens for a driver Koppel does not drive itself.
+    pub gateway: bool,
+    /// Why the gateway is not listening although it should be.
+    pub gateway_fault: Option<String>,
+}
+
 /// USB interface classes as people know them.
 pub fn interface_class_name(code: u8) -> String {
     match code {

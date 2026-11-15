@@ -513,18 +513,23 @@ impl UsbAttacher for FakeKernel {
         let kept = socket
             .try_clone()
             .map_err(|e| UsbError::failed(e.to_string()))?;
-        lock(&self.state).attached.push(kept);
-        Ok(8)
+        let mut state = lock(&self.state);
+        state.attached.push(kept);
+        // The first attach is port 8, the next 9, and so on, so a detach names the one it ends.
+        Ok(7 + state.attached.len() as u32)
     }
 
     fn detach(&self, port: u32) -> Result<(), UsbError> {
         let mut state = lock(&self.state);
         state.detached_ports.push(port);
-        if let Some(socket) = state.attached.last() {
+        let at = (port as usize).saturating_sub(8);
+        let socket = state.attached.get(at).or(state.attached.last());
+        if let Some(socket) = socket {
             let _ = socket.shutdown(Shutdown::Both);
         }
         // Dropping the pipe's end closes it, as shutting the socket down does.
-        if let Some(end) = state.attached_memory.last_mut() {
+        let last = state.attached_memory.len().saturating_sub(1);
+        if let Some(end) = state.attached_memory.get_mut(at.min(last)) {
             end.take();
         }
         Ok(())
@@ -540,8 +545,9 @@ impl UsbAttacher for FakeKernel {
         _: u32,
         _: UsbSpeed,
     ) -> Result<u32, UsbError> {
-        lock(&self.state).attached_memory.push(Some(end));
-        Ok(8)
+        let mut state = lock(&self.state);
+        state.attached_memory.push(Some(end));
+        Ok(7 + state.attached_memory.len() as u32)
     }
 }
 

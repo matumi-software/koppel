@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::peer_check::{AnyPeer, GatewayPeerCheck};
 use crate::tasks::{Backoff, Tasks, lock};
-use crate::{Observed, Subscription, UsbClient, UsbSettings};
+use crate::{Observed, Subscription, UsbClient, UsbClients, UsbSettings};
 
 const STOP_WAIT: Duration = Duration::from_secs(5);
 const MIN_BACKOFF: Duration = Duration::from_secs(5);
@@ -73,7 +73,7 @@ pub struct UsbIpGateway {
 }
 
 struct Inner {
-    client: UsbClient,
+    client: GatewayTarget,
     settings: Arc<dyn Observed<UsbSettings>>,
     options: GatewayOptions,
     peer_check: Mutex<Option<Arc<dyn GatewayPeerCheck>>>,
@@ -90,7 +90,7 @@ impl UsbIpGateway {
     /// A gateway for `client`. `peer_check` decides which connections are served; `None` picks
     /// the kernel check on native Windows with a loopback address, and serves everyone elsewhere.
     pub fn new(
-        client: UsbClient,
+        client: impl Into<GatewayTarget>,
         settings: Arc<dyn Observed<UsbSettings>>,
         options: GatewayOptions,
         peer_check: Option<Arc<dyn GatewayPeerCheck>>,
@@ -98,7 +98,7 @@ impl UsbIpGateway {
         let stopping = CancellationToken::new();
         Self {
             inner: Arc::new(Inner {
-                client,
+                client: client.into(),
                 settings,
                 options,
                 peer_check: Mutex::new(peer_check),
@@ -306,7 +306,7 @@ impl Inner {
 }
 
 async fn serve(
-    client: UsbClient,
+    client: GatewayTarget,
     socket: TcpStream,
     peer: SocketAddr,
     gateway: SocketAddr,
@@ -324,4 +324,44 @@ async fn serve(
         return;
     }
     client.serve_gateway(socket, peer, &stopping).await;
+}
+
+/// Who the gateway serves its connections for: the one client, or every server's client.
+#[derive(Clone)]
+pub enum GatewayTarget {
+    One(UsbClient),
+    Many(UsbClients),
+}
+
+impl From<UsbClient> for GatewayTarget {
+    fn from(client: UsbClient) -> Self {
+        Self::One(client)
+    }
+}
+
+impl From<UsbClients> for GatewayTarget {
+    fn from(clients: UsbClients) -> Self {
+        Self::Many(clients)
+    }
+}
+
+impl GatewayTarget {
+    async fn set_gateway(&self, port: Option<u16>, fault: Option<String>) {
+        match self {
+            Self::One(client) => client.set_gateway(port, fault).await,
+            Self::Many(clients) => clients.set_gateway(port, fault).await,
+        }
+    }
+
+    async fn serve_gateway(
+        &self,
+        socket: TcpStream,
+        peer: SocketAddr,
+        stopping: &CancellationToken,
+    ) {
+        match self {
+            Self::One(client) => client.serve_gateway(socket, peer, stopping).await,
+            Self::Many(clients) => clients.serve_gateway(socket, peer, stopping).await,
+        }
+    }
 }

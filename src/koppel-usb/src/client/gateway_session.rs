@@ -15,19 +15,22 @@ use crate::upstream::MAX_LIST_BYTES;
 use crate::{ActivityOutcome, ActivityReason, BusId, CloseReason, protocol};
 
 /// What the driver asked for.
-enum GatewayRequest {
+pub(crate) enum GatewayRequest {
     DevList,
     Import(BusId),
 }
 
 /// What reading the request came to.
-enum Read {
+pub(crate) enum Read {
     Request(GatewayRequest),
     /// An import of a bus ID that is not one, or an operation Koppel does not serve.
     Refuse(&'static str),
     /// The driver went away, said nothing in time, or Koppel is stopping.
     Over,
 }
+
+/// What a gateway connection asks for, read ahead of the client that will serve it.
+pub(crate) type Peeked = Read;
 
 impl Shared {
     pub(super) async fn serve_gateway(
@@ -36,11 +39,7 @@ impl Shared {
         peer: SocketAddr,
         stopping: &CancellationToken,
     ) {
-        let from = match peer.ip() {
-            IpAddr::V4(v4) => v4.to_string(),
-            IpAddr::V6(v6) => v6.to_canonical().to_string(),
-        };
-        let request = match self.read_request(&mut local, stopping).await {
+        let request = match read_request(&mut local, self.options.attach_timeout, stopping).await {
             Read::Request(request) => request,
             Read::Refuse(why) => {
                 tracing::warn!("Gateway request failed: {why}");
@@ -48,6 +47,22 @@ impl Shared {
                 return;
             }
             Read::Over => return,
+        };
+        self.serve_gateway_request(local, peer, stopping, request)
+            .await;
+    }
+
+    /// Serves a connection whose request has been read.
+    pub(super) async fn serve_gateway_request(
+        &self,
+        mut local: TcpStream,
+        peer: SocketAddr,
+        stopping: &CancellationToken,
+        request: GatewayRequest,
+    ) {
+        let from = match peer.ip() {
+            IpAddr::V4(v4) => v4.to_string(),
+            IpAddr::V6(v6) => v6.to_canonical().to_string(),
         };
         let epoch = self.view().epoch.id;
         let booked = match self.book(&request, epoch).await {
@@ -75,43 +90,6 @@ impl Shared {
             GatewayRequest::Import(bus_id) => {
                 let key = AttachKey { epoch, bus_id };
                 self.serve_import(local, key, booked, &from, stopping).await;
-            }
-        }
-    }
-
-    /// Reads the request. A local peer that connects and says nothing must not hold the session
-    /// open for ever.
-    async fn read_request(&self, local: &mut TcpStream, stopping: &CancellationToken) -> Read {
-        let request = async {
-            let header = protocol::read_header(&mut *local).await?;
-            let parsed = match header.code {
-                protocol::OP_REQ_DEVLIST => Read::Request(GatewayRequest::DevList),
-                protocol::OP_REQ_IMPORT => {
-                    let text = protocol::read_bus_id(&mut *local).await?;
-                    match text.parse::<BusId>() {
-                        Ok(bus_id) => Read::Request(GatewayRequest::Import(bus_id)),
-                        Err(_) => Read::Refuse("an invalid bus ID: not a USB bus ID"),
-                    }
-                }
-                _ => Read::Over,
-            };
-            Ok::<_, std::io::Error>(parsed)
-        };
-        let request = tokio::select! {
-            r = tokio::time::timeout(self.options.attach_timeout, request) => r,
-            () = stopping.cancelled() => return Read::Over,
-        };
-        match request {
-            Ok(Ok(read)) => read,
-            Ok(Err(e)) => {
-                tracing::debug!("Gateway session ended: {e}");
-                Read::Over
-            }
-            Err(_) => {
-                tracing::warn!(
-                    "Gateway request failed: the driver did not finish its request in time"
-                );
-                Read::Over
             }
         }
     }
@@ -301,8 +279,52 @@ fn reply_code(request: &GatewayRequest) -> u16 {
 }
 
 /// Answers the driver with an error status, if it still listens.
+/// Refuses an import, for a connection no client of this machine will serve.
+pub(crate) async fn refuse_import(local: &mut TcpStream) {
+    refuse(local, protocol::OP_REP_IMPORT).await;
+}
+
 async fn refuse(local: &mut TcpStream, code: u16) {
     let _ = local
         .write_all(&protocol::header(code, protocol::STATUS_ERROR))
         .await;
+}
+
+/// Reads the request. A local peer that connects and says nothing must not hold the session open
+/// for ever, so it has `timeout`.
+pub(crate) async fn read_request(
+    local: &mut TcpStream,
+    timeout: std::time::Duration,
+    stopping: &CancellationToken,
+) -> Read {
+    let request = async {
+        let header = protocol::read_header(&mut *local).await?;
+        let parsed = match header.code {
+            protocol::OP_REQ_DEVLIST => Read::Request(GatewayRequest::DevList),
+            protocol::OP_REQ_IMPORT => {
+                let text = protocol::read_bus_id(&mut *local).await?;
+                match text.parse::<BusId>() {
+                    Ok(bus_id) => Read::Request(GatewayRequest::Import(bus_id)),
+                    Err(_) => Read::Refuse("an invalid bus ID: not a USB bus ID"),
+                }
+            }
+            _ => Read::Over,
+        };
+        Ok::<_, std::io::Error>(parsed)
+    };
+    let request = tokio::select! {
+        r = tokio::time::timeout(timeout, request) => r,
+        () = stopping.cancelled() => return Read::Over,
+    };
+    match request {
+        Ok(Ok(read)) => read,
+        Ok(Err(e)) => {
+            tracing::debug!("Gateway session ended: {e}");
+            Read::Over
+        }
+        Err(_) => {
+            tracing::warn!("Gateway request failed: the driver did not finish its request in time");
+            Read::Over
+        }
+    }
 }

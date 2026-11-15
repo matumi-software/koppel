@@ -1,6 +1,6 @@
 # Several servers on one client (design)
 
-Status: a design, not yet built. The approved UI is the Koppel prototype (the Heartwood design canvas and the live prototype), and everything it shows is in scope. A client today holds one server: one saved connection, one link, one
+Status: built in the service (koppel-config, koppel-usb, koppel-app, koppel-web); the UI is not moved yet. The approved UI is the Koppel prototype (the Heartwood design canvas and the live prototype), and everything it shows is in scope. A client today holds one server: one saved connection, one link, one
 device list and one `attached.json`. The redesign lets a client add any number of servers, each with
 its own link, and attach devices from all of them at once.
 
@@ -53,8 +53,11 @@ One actor owns a link, a device list and the slots of one server. That is kept a
 
 - `GET /api/v1/client/servers` is the list without secrets. `POST /api/v1/client/servers` takes
   `{ address, code }` or `{ address, key }` and an optional `name`, enrols with Skakel and saves the
-  server; it answers 202 and the server shows in `ServersChanged`. `DELETE .../servers/{id}` removes
-  one. `POST .../servers/{id}/test` is the connection test for that server.
+  server. It answers 201 with the new server once it is saved, or says why it was not (422 when the server
+  refused, 409 when it is added already, 400 for a bad address, code or key): enrolling needs an answer
+  the person can read, which a 202 could not carry. The server also shows in `ServersChanged`.
+  `DELETE .../servers/{id}` removes one and releases its devices. `POST .../servers/{id}/test` is the
+  connection test for that server.
 - `ConnectionChanged` becomes `ServersChanged` (the list). `ClientDevicesChanged` carries the new shape.
 - Discovery stays, to fill the address; the pairing routes (`/client/pairing`) are removed once the UI
   no longer uses them.
@@ -71,7 +74,11 @@ today, so they are part of this change:
   off it does not try again after it drops, otherwise it tries every `retryEverySeconds`, and a connect
   attempt that takes longer than `giveUpAfterSeconds` is abandoned.
 - `PATCH /api/v1/client/servers/{id}` changes them, under the confirm rule: the value shows in
-  `ServersChanged` once it is written.
+  `ServersChanged` once it is written. A change to a link setting makes that server's link again.
+- What is enforced today: **Give up after** is the time one request of the link may take. **Reconnect** off
+  ends the link at its first failure (Koppel stops it), and turning it on again makes a new link.
+  **Retry every** is saved and shown but not enforced: Skakel 0.3.1 backs off by itself, from 1 to 60
+  seconds, and has no setting for it. Enforcing it needs an option in Skakel.
 - Whether this machine's port and "accept from" are settings the service already has is checked against
   `docs/config.md` before anything is added for them; if they are not, they become settings in
   `settings.json` and need a restart of the network surface, which the UI says.

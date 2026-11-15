@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- The server can show a **pairing code** that works once, and keeps a **server key** that adds a computer at any time, with nothing to approve on the server (Skakel 0.3.1, which this takes). New routes under `/api/v1/server/enrollment`, a new push `EnrollmentChanged`, and a client's list entry says how it was linked (`linkedWith`: `pairing`, `code` or `key`). Today's pairing is unchanged. Adding a server on a client with a code or key follows with the client side.
+- The server can show a **pairing code** that works once, and keeps a **server key** that adds a computer at any time, with nothing to approve on the server (Skakel 0.3.1, which this takes). New routes under `/api/v1/server/enrollment`, a new push `EnrollmentChanged`, and a client's list entry says how it was linked (`linkedWith`: `pairing`, `code` or `key`). Today's pairing is unchanged. 
+- A client can attach from **several servers** at once. `connection.json` is a list of servers (an old file with one is read as a list of one), each with its own link, device list and part of `attached.json`, and a device is named by its server and bus ID. Add one with `POST /api/v1/client/servers` and a pairing code or server key; `PATCH` changes its name and link settings (reconnect, retry every, give up after), `DELETE` removes it. The attach routes are `PUT` and `DELETE` on `/api/v1/client/servers/{serverId}/devices/{busId}/attachment`.
+- **Removed:** the client's own pairing request (`/client/pairing`, `PairingStatusChanged`) and `/client/connection`. `ConnectionChanged` is `ServersChanged`, and `ClientDevicesChanged` lists each server's link and devices. The server's pairing window and requests are unchanged.
 
 ## 0.2.1 (2026-11-13)
 

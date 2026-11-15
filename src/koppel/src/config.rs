@@ -277,7 +277,13 @@ impl Settings {
         set(self.ui_port).unwrap_or(crate::UI_PORT)
     }
 
-    /// The network surface's port.
+    /// The network surface's port when a startup option or environment variable sets it. That wins
+    /// over the port in `settings.json`.
+    pub fn network_port_option(&self) -> Option<u16> {
+        set(self.network_port)
+    }
+
+    /// The network surface's port when nothing but the UI's port is set.
     pub fn network_port(&self) -> u16 {
         set(self.network_port).unwrap_or_else(|| self.ui_port())
     }

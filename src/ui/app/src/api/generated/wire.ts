@@ -95,7 +95,16 @@ notifyLink: boolean,
 /**
  * Windows app: the tray says when a device could not be attached.
  */
-notifyAttachFailures: boolean, };
+notifyAttachFailures: boolean, 
+/**
+ * Server: the port the network surface listens on, from the next start. Null leaves it to the
+ * startup options, and then to the UI's port. A startup option wins over this.
+ */
+networkPort: number | null, 
+/**
+ * Server: who the network surface takes calls from.
+ */
+networkAcceptFrom: AcceptFrom, };
 
 export type LinkState = "unconfigured" | "connecting" | "connected" | "error";
 
@@ -194,7 +203,11 @@ export type ServersView = { servers: Array<ServerView>, };
 
 export type SystemCheck = { id: string, ok: boolean, title: string, detail: string, };
 
-export type SystemInfo = { name: string, version: string, commit: string, built: string, startedAt: string, role: Role, uiPort: number, httpsPort: number, fingerprint: string, os: string, tray: boolean, };
+export type SystemInfo = { name: string, version: string, commit: string, built: string, startedAt: string, role: Role, uiPort: number, httpsPort: number, 
+/**
+ * A startup option or environment variable sets the network port, so the saved one is not used.
+ */
+networkPortFixed: boolean, fingerprint: string, os: string, tray: boolean, };
 
 export type AddServer = { 
 /**
@@ -232,4 +245,8 @@ setupToken?: string, };
 
 export type ServerSettings = { name?: string, reconnect?: boolean, retryEverySeconds?: number, giveUpAfterSeconds?: number, };
 
-export type SettingsPatch = { role?: Role, shareOnStartup?: boolean, setupComplete?: boolean, notifyPairing?: boolean, notifyLink?: boolean, notifyAttachFailures?: boolean, };
+export type SettingsPatch = { role?: Role, shareOnStartup?: boolean, setupComplete?: boolean, notifyPairing?: boolean, notifyLink?: boolean, notifyAttachFailures?: boolean, 
+/**
+ * A port, or null to clear it; left out leaves it as it is.
+ */
+networkPort: number | null, networkAcceptFrom?: AcceptFrom, };

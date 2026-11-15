@@ -1,6 +1,6 @@
 # Port and Accept from for this server (design)
 
-Status: a design, not built. The approved Koppel prototype edits two things for this machine as a
+Status: built in the service (koppel-config, koppel, koppel-web); the UI is not moved yet. The approved Koppel prototype edits two things for this machine as a
 server on the Connection page: **Port** and **Accept from** (this network only, or any network),
 staged with Revert and Apply. Neither is a setting today: the network port is only the startup
 option `KOPPEL_NETWORK_PORT` (else the UI port), and `KOPPEL_UI_ALLOW_FROM` covers the UI alone. The
@@ -39,13 +39,14 @@ Discovery (UDP) is unchanged: it only announces.
 
 `PATCH /api/v1/settings` takes the two fields as it takes the others, with a validation message for a
 port out of range, and `SettingsChanged` carries them (so `wire.ts` and its fixture change). The port in
-use is added to `GET /api/v1/system/info` as `networkPort`, with `networkPortSetBy` (`settings` or the
-name of the startup option).
+use is already `httpsPort` in `GET /api/v1/system/info`, which gains `networkPortFixed`: true when a
+startup option or environment variable set it, so the saved one is not used.
 
 ## Tests
 
-Unit: the range check, the precedence, and that `lan` refuses an address outside the ranges. Contract
-(to run only with your approval): a refused caller gets 403 on a network path and the UI is untouched.
+Unit: the patch (set, clear, leave alone, describe) and the local network test `lan` uses, which is the
+UI's. Not covered yet: the 403 on a network path over HTTP, and the port a start picks, which need a
+running host (contract tests, to run only with your approval).
 
 ## Not decided here
 

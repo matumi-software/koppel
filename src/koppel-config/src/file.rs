@@ -1212,7 +1212,7 @@ mod tests {
             .replace("\r\n", "\n");
         assert!(text.starts_with("{\n  \"role\": \"server\",\n"), "{text}");
         assert!(
-            text.ends_with("\"notifyAttachFailures\": true,\n  \"version\": 1\n}"),
+            text.ends_with("\"networkAcceptFrom\": \"any\",\n  \"version\": 1\n}"),
             "{text}"
         );
     }

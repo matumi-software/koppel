@@ -4,5 +4,7 @@
   "setupComplete": true,
   "notifyPairing": true,
   "notifyLink": true,
-  "notifyAttachFailures": true
+  "notifyAttachFailures": true,
+  "networkPort": null,
+  "networkAcceptFrom": "any"
 }

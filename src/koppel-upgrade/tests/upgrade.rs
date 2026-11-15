@@ -130,7 +130,8 @@ fn every_plain_file_of_each_install_reads_and_is_written_back_the_same() {
             setup_complete: true,
             notify_pairing: true,
             notify_link: false,
-            notify_attach_failures: true
+            notify_attach_failures: true,
+            ..KoppelSettings::default()
         }
     );
     let devices: SharedDevices =

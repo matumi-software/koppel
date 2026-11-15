@@ -66,6 +66,13 @@ pub mod open {
         )
     }
 
+    /// What `settings.json` holds now, read once and without watching, for what is needed before the
+    /// app starts. `None` when the file is missing or does not read; the app reports that itself.
+    pub fn saved_settings(paths: &KoppelPaths) -> Option<KoppelSettings> {
+        let text = std::fs::read_to_string(paths.settings_file()).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
     /// `devices.json`: plain, and a bad file starts with nothing shared.
     pub fn devices(paths: &KoppelPaths) -> ConfigFile<SharedDevices> {
         ConfigFile::new(

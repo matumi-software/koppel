@@ -357,6 +357,7 @@ impl Node {
                 started_at: time::OffsetDateTime::now_utc(),
                 ui_port: port,
                 network_port: port,
+                network_port_fixed: false,
                 tray: false,
                 os: "test".into(),
             },

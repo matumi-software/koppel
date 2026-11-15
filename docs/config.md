@@ -22,7 +22,7 @@ build passes it in, since it has no `.git`) and says `unknown` when it has none.
 | Option | Variable | 0.1.x name | Default |
 |---|---|---|---|
 | `--ui-port` | `KOPPEL_UI_PORT` | `Ports:Ui` | 5240 |
-| `--network-port` | `KOPPEL_NETWORK_PORT` | `Ports:Network` | the UI port |
+| `--network-port` | `KOPPEL_NETWORK_PORT` | `Ports:Network` | the port saved in the UI (`networkPort` in `settings.json`), else the UI port |
 | `--listen-address` | `KOPPEL_LISTEN_ADDRESS` | `Ports:Address` | every address |
 | `--ui-allow-from` | `KOPPEL_UI_ALLOW_FROM` | `Ui:AllowFrom` | `lan`, `local` in development |
 | `--ui-setup-window-minutes` | `KOPPEL_UI_SETUP_WINDOW_MINUTES` | `Ui:SetupWindowMinutes` | 10 |

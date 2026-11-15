@@ -35,8 +35,9 @@ use tower_http::timeout::{RequestBodyTimeoutLayer, TimeoutLayer};
 use tower_http::trace::TraceLayer;
 use tower_service::Service;
 
+use crate::access::{UiAccess, UiReach};
 use crate::app::App;
-use crate::guard::{self, RoleGate};
+use crate::guard::{self, NetworkAccess, RoleGate};
 use crate::state::ReadyApi;
 use crate::surface::{RoleScope, is_grpc_path, is_network_path, starts_with_segments};
 use crate::{api, ui};
@@ -148,6 +149,14 @@ pub(crate) fn network(app: &Arc<App>) -> Router {
                 scope: RoleScope::Server,
             },
             guard::role_gate,
+        ))
+        // Outside the role gate, so a caller the setting turns away learns nothing of the role.
+        .layer(from_fn_with_state(
+            NetworkAccess {
+                settings: app.core.settings.clone(),
+                lan: Arc::new(UiAccess::new(UiReach::Lan)),
+            },
+            guard::network_accept_from,
         ));
     wrapped(router)
 }

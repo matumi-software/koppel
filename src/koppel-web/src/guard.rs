@@ -33,7 +33,7 @@ use axum::http::{Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use koppel_config::ConfigFile;
-use koppel_config::files::KoppelSettings;
+use koppel_config::files::{AcceptFrom, KoppelSettings};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::access::{UiAccess, UiReach, address_key};
@@ -155,6 +155,37 @@ pub(crate) async fn allow_from(
             ),
         )
             .into_response();
+    }
+    next.run(request).await
+}
+
+/// What [`network_accept_from`] decides with: the saved choice, read on each request, and the local
+/// network test the UI's `lan` uses.
+#[derive(Clone)]
+pub(crate) struct NetworkAccess {
+    pub settings: ConfigFile<KoppelSettings>,
+    pub lan: Arc<UiAccess>,
+}
+
+/// `networkAcceptFrom` in `settings.json`: with `lan`, the network surface from an address outside this
+/// machine and the local network gets 403 and a line saying so. With `any` it takes every caller, and
+/// Skakel's tokens and limits decide as before.
+pub(crate) async fn network_accept_from(
+    State(access): State<NetworkAccess>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if access.settings.current().network_accept_from == AcceptFrom::Lan {
+        let Some(remote) = caller(&request) else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        };
+        if !access.lan.allows(remote.ip()) {
+            tracing::warn!(
+                "Refused a call from {}: this server accepts the local network only",
+                remote.ip()
+            );
+            return StatusCode::FORBIDDEN.into_response();
+        }
     }
     next.run(request).await
 }

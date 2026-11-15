@@ -3,7 +3,7 @@
 use axum::Json;
 use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
-use koppel_config::files::{KoppelSettings, Role};
+use koppel_config::files::{AcceptFrom, KoppelSettings, Role};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use ts_rs::TS;
@@ -30,6 +30,21 @@ pub(crate) struct SettingsPatch {
     notify_link: Option<bool>,
     #[serde(default)]
     notify_attach_failures: Option<bool>,
+    /// A port, or null to clear it; left out leaves it as it is.
+    #[serde(default, deserialize_with = "set_or_clear")]
+    #[ts(type = "number | null")]
+    network_port: Option<Option<u16>>,
+    #[serde(default)]
+    network_accept_from: Option<AcceptFrom>,
+}
+
+/// A field that is present as null is `Some(None)`: it clears the value. A missing one is `None`.
+fn set_or_clear<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 impl SettingsPatch {
@@ -69,6 +84,18 @@ impl SettingsPatch {
                 self.notify_attach_failures,
                 current.notify_attach_failures,
             ),
+            self.network_port
+                .filter(|port| *port != current.network_port)
+                .map(|port| match port {
+                    Some(port) => format!("Network port set to {port}"),
+                    None => "Network port cleared".to_owned(),
+                }),
+            self.network_accept_from
+                .filter(|from| *from != current.network_accept_from)
+                .map(|from| match from {
+                    AcceptFrom::Any => "Network surface accepts any network".to_owned(),
+                    AcceptFrom::Lan => "Network surface accepts this network only".to_owned(),
+                }),
         ]
         .into_iter()
         .flatten()
@@ -86,6 +113,10 @@ impl SettingsPatch {
             notify_attach_failures: self
                 .notify_attach_failures
                 .unwrap_or(current.notify_attach_failures),
+            network_port: self.network_port.unwrap_or(current.network_port),
+            network_accept_from: self
+                .network_accept_from
+                .unwrap_or(current.network_accept_from),
         }
     }
 }
@@ -101,6 +132,12 @@ pub(crate) async fn patch_settings(
     State(app): State<SettingsApi>,
     JsonBody(patch): JsonBody<SettingsPatch>,
 ) -> ApiResult<StatusCode> {
+    if patch.network_port == Some(Some(0)) {
+        return Err(ApiError::invalid(&[(
+            "networkPort",
+            "Use a port from 1 to 65535, or leave it empty.",
+        )]));
+    }
     let summary = patch.describe(&app.settings.current());
     if let Err(e) = app.settings.update(|current| patch.apply(current)).await {
         return Err(ApiError::internal("Saving the settings", e));
@@ -227,6 +264,8 @@ pub(crate) struct SystemInfo {
     role: Role,
     ui_port: u16,
     https_port: u16,
+    /// A startup option or environment variable sets the network port, so the saved one is not used.
+    network_port_fixed: bool,
     fingerprint: String,
     os: String,
     tray: bool,
@@ -244,6 +283,7 @@ pub(crate) async fn info(State(app): State<SettingsApi>) -> Json<SystemInfo> {
         role: app.settings.current().role,
         ui_port: host.ui_port,
         https_port: host.network_port,
+        network_port_fixed: host.network_port_fixed,
         fingerprint: app.server.fingerprint(),
         os: host.os.clone(),
         tray: host.tray,
@@ -268,6 +308,20 @@ mod tests {
             "Role set to client. Notifications for the link to the server turned off"
         );
         assert_eq!(SettingsPatch::default().describe(&current), "");
+        let network: SettingsPatch =
+            serde_json::from_str(r#"{"networkPort":5300,"networkAcceptFrom":"lan"}"#).unwrap();
+        assert_eq!(
+            network.describe(&current),
+            "Network port set to 5300. Network surface accepts this network only"
+        );
+        let applied = network.apply(&current);
+        assert_eq!(applied.network_port, Some(5300));
+        // Present as null clears it; left out keeps it.
+        let clear: SettingsPatch = serde_json::from_str(r#"{"networkPort":null}"#).unwrap();
+        assert_eq!(clear.apply(&applied).network_port, None);
+        let other: SettingsPatch = serde_json::from_str(r#"{"notifyLink":false}"#).unwrap();
+        assert_eq!(other.apply(&applied).network_port, Some(5300));
+        assert_eq!(other.apply(&applied).network_accept_from, AcceptFrom::Lan);
         assert_eq!(patch.apply(&current).role, Role::Client);
     }
 

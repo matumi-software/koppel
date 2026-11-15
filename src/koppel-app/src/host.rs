@@ -16,6 +16,8 @@ pub struct Host {
     pub started_at: OffsetDateTime,
     pub ui_port: u16,
     pub network_port: u16,
+    /// A startup option or environment variable set the network port, so `settings.json`'s is not used.
+    pub network_port_fixed: bool,
     /// True when Koppel runs as the installed Windows service, which keeps a tray icon (#88).
     pub tray: bool,
     /// The operating system, for the side panel.

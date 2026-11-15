@@ -113,9 +113,21 @@ fn finish(result: Result<(), Box<dyn Error>>) -> ExitCode {
     }
 }
 
+/// The network port saved in `settings.json`, when the file reads. A file that does not is reported
+/// when the app opens it, so nothing is said here.
+fn saved_network_port(paths: &koppel_config::KoppelPaths) -> Option<u16> {
+    koppel_config::open::saved_settings(paths)?.network_port
+}
+
 async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dyn Error>> {
     let ui_port = settings.ui_port();
-    let network_port = settings.network_port();
+    let paths = settings.paths(&std::env::current_dir()?);
+    // A startup option wins, then the port saved in the UI, then the UI's port.
+    let network_port_fixed = settings.network_port_option().is_some();
+    let network_port = settings
+        .network_port_option()
+        .or_else(|| saved_network_port(&paths))
+        .unwrap_or_else(|| settings.network_port());
     let address = settings.listen_address();
     let reach = settings.reach();
     let setup_window = settings.setup_window();
@@ -131,7 +143,6 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
     let usb = usb::options(settings)?;
 
     let secrets = open_files(settings)?;
-    let paths = settings.paths(&std::env::current_dir()?);
     let host = Host {
         name: koppel_web::machine_name(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -140,6 +151,7 @@ async fn run(settings: &Settings, service: Option<Service>) -> Result<(), Box<dy
         started_at: OffsetDateTime::now_utc(),
         ui_port,
         network_port,
+        network_port_fixed,
         tray: service.is_some(),
         os: koppel_web::os_label(),
     };

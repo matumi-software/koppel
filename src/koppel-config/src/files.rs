@@ -38,6 +38,16 @@ impl Role {
     }
 }
 
+/// Who the network surface takes calls from. `any` is every caller that has credentials, `lan` is this
+/// machine and the local network, by the caller's address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum AcceptFrom {
+    #[default]
+    Any,
+    Lan,
+}
+
 /// `null` reads as the type's default, as it did where 0.1.x wrote a missing list as `null`.
 pub(crate) fn or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
@@ -69,6 +79,14 @@ pub struct KoppelSettings {
     /// Windows app: the tray says when a device could not be attached.
     #[serde(alias = "NotifyAttachFailures")]
     pub notify_attach_failures: bool,
+    /// Server: the port the network surface listens on, from the next start. Null leaves it to the
+    /// startup options, and then to the UI's port. A startup option wins over this.
+    #[serde(alias = "NetworkPort")]
+    #[ts(type = "number | null")]
+    pub network_port: Option<u16>,
+    /// Server: who the network surface takes calls from.
+    #[serde(alias = "NetworkAcceptFrom")]
+    pub network_accept_from: AcceptFrom,
 }
 
 impl Default for KoppelSettings {
@@ -81,6 +99,8 @@ impl Default for KoppelSettings {
             notify_pairing: true,
             notify_link: true,
             notify_attach_failures: true,
+            network_port: None,
+            network_accept_from: AcceptFrom::Any,
         }
     }
 }

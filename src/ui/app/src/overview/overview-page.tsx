@@ -116,6 +116,11 @@ export function OverviewPage() {
   const rejected = items.filter((i) => i.state === 'fault').length;
   const remoteTitle = servers.length === 0 ? 'Remote devices' : servers.length === 1 ? `From ${servers[0].name}` : `From ${servers.length} servers`;
 
+  // The grid has up to three columns. The device tiles share the first row so it is filled: one tile takes
+  // the row, two give the devices the wider part, and three take a column each.
+  const devicesSpan = server && client ? 1 : server ? 2 : ('full' as const);
+  const clientsSpan = 1;
+
   return (
     <DrillView dir={drill.dir} viewKey="overview">
       <div className="kp-page">
@@ -123,7 +128,7 @@ export function OverviewPage() {
         <TileGrid label="Overview">
           <NeedsYouTile items={needs} />
           {server ? (
-            <Tile title={`Sharing from ${host}`} meta={`${sharedDevices.length} of ${devices.length}`} footerLink={{ label: 'All devices', onPress: () => goTo('devices') }}>
+            <Tile title={`Sharing from ${host}`} span={devicesSpan} meta={`${sharedDevices.length} of ${devices.length}`} footerLink={{ label: 'All devices', onPress: () => goTo('devices') }}>
               {devices.length ? (
                 <List label={`Devices on ${host}`} isDivided items={devices.slice(0, 5)} onAction={(id: Key) => open({ kind: 'dev', id: String(id) })}>
                   {(d) => {
@@ -147,7 +152,7 @@ export function OverviewPage() {
             </Tile>
           ) : null}
           {client ? (
-            <Tile title={remoteTitle} meta={remote.length ? `${here.length} of ${remote.length}` : undefined} footerLink={{ label: 'All remote devices', onPress: () => goTo('remote') }}>
+            <Tile title={remoteTitle} span={devicesSpan} meta={remote.length ? `${here.length} of ${remote.length}` : undefined} footerLink={{ label: 'All remote devices', onPress: () => goTo('remote') }}>
               {remote.length ? (
                 <List label="Remote devices" isDivided items={remote.slice(0, 5)} onAction={(id: Key) => { const r = remote.find((x) => x.key === String(id)); if (r) open({ kind: 'rem', id: r.key, serverId: r.server.id, busId: r.entry.device.busId }); }}>
                   {(r) => {
@@ -177,7 +182,7 @@ export function OverviewPage() {
             </Tile>
           ) : null}
           {server ? (
-            <Tile title="Clients" meta={`${usingClients.length} using devices`} footerLink={{ label: 'All clients', onPress: () => goTo('clients') }}>
+            <Tile title="Clients" span={clientsSpan} meta={`${usingClients.length} using devices`} footerLink={{ label: 'All clients', onPress: () => goTo('clients') }}>
               {clientList.length ? (
                 <List label={`Clients of ${host}`} isDivided items={clientList.slice(0, 5)} onAction={(id: Key) => open({ kind: 'cli', id: String(id) })}>
                   {(c) => {

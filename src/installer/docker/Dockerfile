@@ -89,6 +89,8 @@ COPY koppel-usb ./koppel-usb
 COPY koppel-web ./koppel-web
 COPY koppel-windows ./koppel-windows
 COPY usbip ./usbip
+# Skakel's crates, which Cargo.toml patches in by path.
+COPY vendor ./vendor
 COPY --from=ui /build/ui/app/dist ./ui/app/dist
 # The commit `koppel --version` names. The build has no .git, so the caller passes it (build.ps1, deploy.sh);
 # without it the version says `unknown`.

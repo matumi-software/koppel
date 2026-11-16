@@ -194,12 +194,13 @@ libc = "0.2.191"
 # tonic. The Display of each variant is the sentence the UI shows; the source stays for the log.
 thiserror = "2.0.21"
 
-# The transport between Koppel machines: Skakel 0.3.0 (MIT), protocol version 3 over gRPC, from its
-# repository at the release tag; Skakel is not on crates.io. What they pull in is MIT, Apache-2.0, BSD, ISC,
-# Zlib, Unlicense or Unicode-3.0, as Skakel's docs/parts.md says.
-skakel-server = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.0" }
-skakel-client = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.0" }
-skakel-wire = { git = "https://github.com/matumi-software/skakel", tag = "v0.3.0" }
+# The transport between Koppel machines: Skakel 0.3.0 (MIT), protocol version 3 over gRPC. Skakel is not on
+# crates.io: its release on GitHub carries each crate as a .crate file, and the ones Koppel uses are kept,
+# checked and unpacked in vendor/skakel (see its README), where [patch.crates-io] below points at them. What
+# they pull in is MIT, Apache-2.0, BSD, ISC, Zlib, Unlicense or Unicode-3.0, as Skakel's docs/parts.md says.
+skakel-server = "0.3.0"
+skakel-client = "0.3.0"
+skakel-wire = "0.3.0"
 # Koppel's own gRPC service, the remote device list, from its .proto file, as Skakel builds its own:
 # prost (Apache-2.0) for the messages, tonic (MIT) for the service, protox (MIT OR Apache-2.0) to
 # compile the .proto file in Rust so no protoc is needed. All are in the tree through Skakel, at the
@@ -232,3 +233,13 @@ strip = true
 # build, for 60 KB.
 [profile.release.package.ring]
 opt-level = 3
+
+# Skakel's crates, unpacked from the .crate files of its v0.3.0 release (vendor/skakel/SHA256SUMS). Cargo cannot
+# take a .crate file as it is, so each is named here by path; the crates that depend on one another find them
+# here too. .github/scripts/check-vendored-skakel.sh checks the folders against the files.
+[patch.crates-io]
+skakel-client = { path = "vendor/skakel/skakel-client-0.3.0" }
+skakel-proto = { path = "vendor/skakel/skakel-proto-0.3.0" }
+skakel-serial = { path = "vendor/skakel/skakel-serial-0.3.0" }
+skakel-server = { path = "vendor/skakel/skakel-server-0.3.0" }
+skakel-wire = { path = "vendor/skakel/skakel-wire-0.3.0" }

@@ -43,12 +43,11 @@ ignore = []
 
 [bans]
 multiple-versions = "allow"
-# The Skakel crates come from git at a tag and carry no version, which cargo-deny reads as a wildcard.
-wildcards = "allow"
+wildcards = "deny"
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# Skakel is not on crates.io; Koppel takes it from its repository at the release tag.
-allow-git = ["https://github.com/matumi-software/skakel"]
+# No git source: Skakel's crates are in vendor/skakel, patched in by path.
+allow-git = []

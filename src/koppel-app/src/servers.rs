@@ -1,5 +1,5 @@
 //! The servers a client attaches from. `connection.json` holds the list; this keeps one USB client
-//! per entry, adds a server by enrolling with a pairing code or a server key (Skakel 0.3.1),
+//! per entry, adds a server by enrolling with a pairing code or a server key (Skakel 0.3.0),
 //! removes one, changes its link settings and tests its connection. See `docs/several-servers.md`.
 //!
 //! The confirm rule holds: a change is written to `connection.json`, the file's subscription then

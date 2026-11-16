@@ -26,7 +26,7 @@ describe('the open page', () => {
     expect(window.location.hash).toBe('#remote');
 
     await act(async () => pending.resolve(json({ ...settings, role: 'client' })));
-    await screen.findByRole('heading', { name: 'Remote devices' });
+    await screen.findByRole('heading', { name: 'Add a server to attach its devices' });
 
     expect(window.location.hash).toBe('#remote');
   });
@@ -35,7 +35,7 @@ describe('the open page', () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
 
-    await screen.findByRole('heading', { name: 'Overview' });
+    await screen.findByRole('heading', { name: 'bench-pc' });
     expect(window.location.hash).toBe('#remote');
     expect(document.title).toBe('Overview - Koppel');
   });
@@ -55,7 +55,7 @@ describe('the navigation', () => {
   ] as const)('has the places a %s has, in the prototype order', async (role, names) => {
     mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, role }) });
     renderApp(<App />);
-    await screen.findByRole('heading', { name: 'Overview' });
+    await screen.findByRole('heading', { name: 'bench-pc' });
     await waitFor(() => expect(navNames().filter((name) => name !== 'admin')).toEqual(names));
   });
 });
@@ -91,7 +91,7 @@ describe('the link state in the strip', () => {
   it('says Live while the link is up', async () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
-    await screen.findByRole('heading', { name: 'Overview' });
+    await screen.findByRole('heading', { name: 'bench-pc' });
     await waitFor(() => expect(screen.getAllByText('Live').length).toBeGreaterThan(0));
   });
 

@@ -54,7 +54,7 @@ describe('first run in the app', () => {
 
     await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'client' }));
 
-    await screen.findByRole('heading', { name: 'Connection' });
+    await screen.findByRole('heading', { name: 'bench-pc on the network' });
   });
 
   it('lands a server on its clients', async () => {
@@ -65,7 +65,7 @@ describe('first run in the app', () => {
 
     await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'server' }));
 
-    await screen.findByRole('heading', { name: 'Clients' });
+    await screen.findByRole('heading', { name: 'Clients of bench-pc' });
   });
 
   it('does not leave the setup page when the server refuses', async () => {

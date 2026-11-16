@@ -71,7 +71,7 @@ export function RemoteDevicesPage() {
             {unavailable}
           </Callout>
         ) : null}
-        {gatewayFault ? (
+        {gatewayFault && gatewayFault !== unavailable ? (
           <Callout tone="warning" title="The USB/IP gateway is not listening">
             {gatewayFault}
           </Callout>

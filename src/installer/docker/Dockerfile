@@ -41,8 +41,9 @@ RUN npm install -g pnpm@$PNPM_VERSION
 WORKDIR /build/ui
 # The workspace's package files first, so the install is cached across source edits.
 COPY ui/package.json ui/pnpm-workspace.yaml ui/pnpm-lock.yaml ./
-COPY ui/react-ui/package.json react-ui/
 COPY ui/app/package.json app/
+# Heartwood's packages are files in the repository, and the install needs them.
+COPY ui/vendor vendor/
 RUN pnpm install --frozen-lockfile
 COPY ui ./
 RUN pnpm --filter koppel.ui build

@@ -10,20 +10,19 @@ folder per crate, the UI and the installers.
 | Folder | What |
 |---|---|
 | `docs/` | Architecture and decisions |
-| `resources/design-system/` | The design system: brand book, `tokens.json`, component specs and previews, logos. The source of every colour, size and component style |
+| `resources/design-system/` | Koppel's brand assets: the logos and the app icon, with the earlier design system's files. Colours, type, sizes and components now come from Heartwood (`@matumi/tokens`, `@matumi/ui`), see "UI" in `docs/ui.md` |
 | `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/building.md`) |
 | `src/koppel/` | The program (package `koppel`), and `tests/contract/`, the black-box tests that start it and drive it over HTTPS |
 | `src/koppel-*/` | The library crates: `koppel-config`, `koppel-secrets`, `koppel-upgrade`, `koppel-app`, `koppel-web`, `koppel-usb` and `koppel-windows` |
 | `src/usbip/` | The USB/IP protocol crate: the device model, bus ID, messages and relay, with no Koppel in it |
-| `src/ui/` | The UI, one pnpm workspace (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`): the React app (`app`, package `koppel.ui`) and the UI library (`react-ui`, package `@koppel/react-ui`) |
+| `src/ui/` | The UI, one pnpm workspace (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`): the React app (`app`, package `koppel.ui`), built on Heartwood's two packages, which are files in `vendor/heartwood` |
 | `src/installer/` | The installers: `windows/` (WiX: the MSI, and the setup.exe bundle around it with the shared Matumi window from Heartwood, with usbip-win2 vendored), `linux/` (nfpm, the `.deb` files), `docker/` (the `Dockerfile`, which builds the Linux binaries, the `.deb` files and the image, the compose files, `prepare-host.sh` and `deploy.sh`) and `notices/` (the third-party notices script and cargo-about's licence policy, shared by the Windows and Linux builds) |
-| `src/ui/tools/` | The design system scripts behind `pnpm design:sync` and `pnpm design:icons` |
+| `src/ui/tools/` | The script behind `pnpm design:icons` (the app icon) |
 
 ## Rules
 
 - **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the live push (Server-Sent Events at `/api/v1/events`) brings the value back after the server wrote its config file. Pushes are applied in `LiveProvider` (`live/push-table.ts`) and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/ui.md`.
-- **Design values come from `resources/design-system/`.** Do not hand-edit `ui/react-ui/src/styles/tokens.css` or `components.css`; change the design system and run `pnpm design:sync`.
-- **No new UI primitives in the app.** Add them to `@koppel/react-ui` and to the design system.
+- **Design values and components come from Heartwood** (`@matumi/tokens` and `@matumi/ui`, in `src/ui/vendor/heartwood`). Do not add another UI library, CSS framework, icon set (icons are lucide, Heartwood's own) or animation library, and do not hand-build buttons, fields, menus, dialogs, tooltips or lists. What Heartwood lacks is raised with Heartwood, not built here. Koppel's own layout is in `src/koppel.css`, on Heartwood's tokens. To take a new Heartwood release, replace the two `.tgz` files and `SHA256SUMS` in `vendor/heartwood` (its README says how) and run `pnpm install`.
 - **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (the protected group of `koppel-web/src/api/mod.rs`); put it in the anonymous group only when it must work signed out. A route for remote clients belongs to the network router (`koppel-web/src/routes.rs`). See "Ports and what they serve" in `docs/ports.md`.
 - **Program wiring goes in `koppel`**, everything else in the library crates. No crate depends on `koppel`.
 - **`usbip` knows nothing of Koppel.** The USB/IP device model, bus ID, messages and relay live there, and so do their proptests; it takes no Koppel crate and no `tokio-util`. A change to what goes on the USB/IP wire is made there.
@@ -38,9 +37,7 @@ Run the pnpm commands from `src/ui/` and the rest from `src/`:
 ```sh
 # from src/ui/
 pnpm install                                         # once
-pnpm design:sync                                     # after changing resources/design-system
 pnpm design:icons                                    # after changing the app icon
-pnpm --filter @koppel/react-ui test                  # component tests
 pnpm --filter koppel.ui typecheck
 pnpm --filter koppel.ui lint
 pnpm --filter koppel.ui test                         # app tests

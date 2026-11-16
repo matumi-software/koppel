@@ -5,10 +5,7 @@ import { ToastRegion } from '@matumi/ui';
 
 // Heartwood's tokens, then its components, then Koppel's own layer on top. The two fonts are bundled
 // here (Heartwood expects the app to), at the weights it uses.
-import '@fontsource/instrument-sans/400.css';
-import '@fontsource/instrument-sans/500.css';
-import '@fontsource/instrument-sans/600.css';
-import '@fontsource/jetbrains-mono/400.css';
+import './fonts.css';
 import '@matumi/tokens/tokens.css';
 import '@matumi/ui/heartwood.css';
 import './koppel.css';

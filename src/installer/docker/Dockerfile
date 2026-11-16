@@ -38,6 +38,8 @@ ARG PWSH_SHA256_ARM64=3179e07fd98f026d39c730ebcb7626d071aac3351b171dda13f9f38d99
 FROM --platform=$BUILDPLATFORM node:24.22.2-bookworm-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS ui
 ARG PNPM_VERSION
 RUN npm install -g pnpm@$PNPM_VERSION
+# The browser tests' dev dependency never fetches a browser here.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 WORKDIR /build/ui
 # The workspace's package files first, so the install is cached across source edits.
 COPY ui/package.json ui/pnpm-workspace.yaml ui/pnpm-lock.yaml ./

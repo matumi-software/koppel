@@ -41,6 +41,7 @@ pnpm design:icons                                    # after changing the app ic
 pnpm --filter koppel.ui typecheck
 pnpm --filter koppel.ui lint
 pnpm --filter koppel.ui test                         # app tests
+pnpm --filter koppel.ui e2e                          # browser tests (Playwright, Chromium, desktop and phone width), see docs/ui.md
 pnpm --filter koppel.ui build                        # the UI the program embeds, needed for a release build
 pnpm --filter koppel.ui dev                          # https://localhost:61040, /api proxied to KOPPEL_UI_URL (https://127.0.0.1:5240)
 

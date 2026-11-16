@@ -4,7 +4,8 @@ Share USB devices across the network. Plug a device into one machine and use it 
 
 Koppel speaks the standard USB/IP protocol and adds a web UI, authentication and encrypted transport
 around it. A machine runs as a server (shares its devices), a client (attaches them) or both. Clients
-find servers on the local network and pair by typing a code, so nobody copies secrets around.
+find servers on the local network and are added with a pairing code or a server key, so nobody copies secrets
+around. A client can attach devices from several servers at once.
 
 Status: version 0.2.1 is the latest release, early: a rewrite in Rust with the same UI and features, a few MB
 instead of about 100. On real hardware, a Debian 13 server in Docker shares two USB receivers and a flash
@@ -118,15 +119,18 @@ area opens the UI, and its menu shuts Koppel down until the next boot. **Koppel*
 too, and starts Koppel first if it is not running. See
 [docs/windows.md](docs/windows.md) for what the installer does to `%ProgramData%\Koppel` and the driver.
 
-## Pair a client
+## Add a server to a client
 
-1. On the client, open Configuration. Servers on your network lists the Koppel servers it hears.
-   Press Pair, and the client shows an eight-digit code.
-2. On the server, open Clients and press Allow pairing first: a server takes pairing requests only
-   while you have allowed it. Under Waiting to pair, type the code and press Approve.
+1. On the server, open Clients. **New pairing code** has a Show button: it shows eight digits that work once,
+   for 60 seconds. (**Server key** links a computer at any time without a code: Show it, and copy it.)
+2. On the client, open Connection and press the add button. Type the server's address (the one shown on the
+   server; a server found on the local network fills it in) and the pairing code, or choose the server key and
+   paste that. Press Connect (it reads Add server once the client has one).
 
-The client then has its own credentials and connects. A server on another network is entered by
-address under Configuration instead.
+The client then has its own credentials and links. Nothing has to be approved on the server. Add as many
+servers as you like: each is listed under Connection with its link, and its devices appear together under
+Remote devices, each saying which server it is on. On Connection a server's Reconnect, Retry every and Give up
+after can be changed, and a server can be tested or removed (which releases its devices).
 
 ## Ports
 
@@ -136,7 +140,10 @@ address under Configuration instead.
 | 5240 UDP | Finding servers on the local network |
 
 Koppel needs only 5240, TCP and UDP. `KOPPEL_NETWORK_PORT` puts what other machines do on a port of its own,
-and `KOPPEL_DISCOVERY_PORT` moves discovery; see [docs/ports.md](docs/ports.md).
+and `KOPPEL_DISCOVERY_PORT` moves discovery; see [docs/ports.md](docs/ports.md). A machine that is a server can
+also save its port, and limit what other machines may reach it from (this network only, or any network), under
+Connection in the UI. The port applies after Koppel restarts, and `KOPPEL_NETWORK_PORT`, when set, wins; see
+[docs/network-settings.md](docs/network-settings.md).
 
 A Windows client also has a port that never leaves the machine: a gateway on 127.0.0.1:3242 for
 usbip-win2's driver. The driver speaks plain USB/IP and cannot sign in, so it connects there and Koppel

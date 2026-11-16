@@ -28,6 +28,7 @@ function LinkCode({ code }: { code: { code: string; expiresAt: string } }) {
 export function ClientsPage() {
   const { locked, narrow } = useFrame();
   const now = useNow();
+  const soon = useNow(5_000);
   const host = useMachineName();
   const clients = useClients();
   const devices = useServerDevices().data?.devices;
@@ -67,6 +68,13 @@ export function ClientsPage() {
           >
             <div className="kp-stack-3">
               {enrollment.code ? <LinkCode key={enrollment.code.code} code={enrollment.code} /> : null}
+              {enrollment.code && Date.parse(enrollment.code.expiresAt) <= soon ? (
+                <div className="kp-actions">
+                  <Button variant="primary" icon={RefreshCw} isPending={enrollment.isPending} isDisabled={locked} onPress={enrollment.open}>
+                    Show a new code
+                  </Button>
+                </div>
+              ) : null}
               {enrollment.failure ? <Callout tone="danger" title="No new code">{enrollment.failure}</Callout> : null}
               <SettingsList label="Link a computer">
                 {enrollment.code ? null : (

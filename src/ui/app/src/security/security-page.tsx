@@ -71,12 +71,12 @@ function ServerCertificate({ locked }: { locked: boolean }) {
                 <span className="kp-line">
                   <IconButton icon={Trash2} label="Discard the new certificate" variant="secondary" danger quiet isPending={doing('cancel')} isDisabled={off} onPress={() => setConfirm('discard')} />
                   <Button variant="secondary" aria-label="Switch to the new certificate" isPending={doing('switch')} isDisabled={off} onPress={() => setConfirm('switch')}>
-                    Switch to it
+                    {doing('switch') ? 'Switching' : 'Switch to it'}
                   </Button>
                 </span>
               ) : (
                 <Button variant="secondary" aria-label="Prepare a new certificate" isPending={doing('prepare')} isDisabled={off} onPress={() => request({ type: 'prepare' })}>
-                  Prepare
+                  {doing('prepare') ? 'Preparing' : 'Prepare'}
                 </Button>
               )
             }

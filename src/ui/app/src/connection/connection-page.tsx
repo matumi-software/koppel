@@ -114,7 +114,10 @@ export function ConnectionPage() {
   const linkOf = (s: ServerView) => devices?.servers.find((d) => d.id === s.id)?.link ?? 'connecting';
 
   // Below 800 wide the panel is a sheet over the page, so it opens when a person asks (a Settings button), never on arrival.
-  const inspector = !settings.query.data || (narrow && !selected) ? null : selServer ? (
+  // The form is about a server that is not saved yet, so the panel of another one stays shut while it is open.
+  const first = client && list.length === 0;
+  const showForm = client && (adding || first);
+  const inspector = !settings.query.data || showForm || (narrow && !selected) ? null : selServer ? (
     <Inspector title="Settings" subject={serverLabel(selServer)} dirty={dirty} staged={{ onRevert: revert, onApply: apply, invalid: locked || invalid }} storageKey="koppel.connection">
       <PropertySection title="Link">
         <Property label="Address" type="readonly" copy value={selServer.serverUrl?.replace(/^https:\/\//, '') ?? ''} />
@@ -178,8 +181,6 @@ export function ConnectionPage() {
 
   if (!settings.query.data || (client && !serversQuery.data)) return <Loading />;
 
-  const first = client && list.length === 0;
-  const showForm = client && (adding || first);
   const failed = list.filter((s) => changes.failures[s.id]);
   const description = first
     ? 'Not paired with a server yet.'

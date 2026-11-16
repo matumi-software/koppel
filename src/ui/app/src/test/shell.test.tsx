@@ -113,6 +113,17 @@ describe('the link state in the strip', () => {
 
     expect(retry).toHaveBeenCalledOnce();
   });
+
+  it('puts Try again on the page, not only in the strip, while the link is down', async () => {
+    mockFetch(baseRoutes);
+    const retry = vi.fn();
+    renderApp(appWithLink('down', retry));
+
+    await screen.findByText('Not connected to the Koppel service');
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(retry).toHaveBeenCalledOnce();
+  });
 });
 
 describe('when Koppel does not answer', () => {

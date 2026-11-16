@@ -63,6 +63,8 @@ test('the form to add a server opens and fits', async ({ page }) => {
 
   await expect(page.getByLabel('Server address')).toBeVisible();
   await expect(page.getByLabel('Pairing code')).toBeVisible();
+  // The form is about a server that is not saved yet, so no other server's settings panel sits beside it.
+  expect(await page.locator('[class*="hw-inspector"]').count(), 'a settings panel is open beside the form').toBe(0);
   const measured = await overflow(page);
   expect(measured.page).toBeLessThanOrEqual(0);
   expect(measured.wide).toEqual([]);

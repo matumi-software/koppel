@@ -105,7 +105,7 @@ export class PendingStore<A, D, I = void> {
     const logId = this.logIds.get(key);
     if (logId) {
       this.logIds.delete(key);
-      if (failure && !serverLogged) this.activityApi?.update(logId, { state: 'fault', lead: 'Not done.', detail: failure });
+      if (failure && !serverLogged) this.activityApi?.update(logId, { state: 'fault', detail: failure });
       else this.activityApi?.remove(logId);
     }
   }
@@ -124,7 +124,7 @@ export class PendingStore<A, D, I = void> {
     this.failedActions.delete(key);
     this.publish({ pending: { ...this.snapshot.pending, [key]: action }, failures: this.without(this.snapshot.failures, key) });
     const describe = this.domain.describe?.(action);
-    const logId = describe && this.activityApi?.add({ state: 'pending', lead: 'Waiting.', text: describe.text, subject: describe.subject });
+    const logId = describe && this.activityApi?.add({ state: 'pending', text: describe.text, subject: describe.subject });
     if (logId) this.logIds.set(key, logId);
     this.timers.set(key, setTimeout(() => this.settle(key, 'no confirmation from the server.'), this.domain.timeoutMs));
     const sendId = ++this.sendCount;

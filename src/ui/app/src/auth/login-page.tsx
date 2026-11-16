@@ -1,35 +1,43 @@
 import { useMutation } from '@tanstack/react-query';
-import { Button, Field, FirstRunShell, Form, Note, PageHead, Row } from '@koppel/react-ui';
+import { useState } from 'react';
+import { SignInPage } from '@matumi/ui';
 import { login } from '@/api/auth';
-import { useServerErrors } from '@/errors';
+import { brand } from '@/brand';
+import { reasonOf } from '@/errors';
+import { SignedOutFrame } from '@/shell/signed-out-frame';
 
-/** Sign in with the admin password. The server's answer is shown as it comes, including how long to wait after too many tries. */
+/**
+ * Sign in with the admin password. The server's answer is shown as it comes, including how long to
+ * wait after too many tries. The password is never cleared silently.
+ */
 export default function LoginPage({ machineName, onSignedIn }: { machineName: string; onSignedIn: () => void }) {
   const signIn = useMutation({ mutationFn: login, onSuccess: onSignedIn });
-  const errors = useServerErrors(signIn.error, 'password', 'Could not sign in.');
+  const [blank, setBlank] = useState(false);
+  const busy = signIn.isPending || signIn.isSuccess;
+  const error = blank ? 'Enter the admin password.' : signIn.isError ? reasonOf(signIn.error, 'Could not sign in.') : undefined;
 
   return (
-    <FirstRunShell title="Sign in">
-      <PageHead title={`Sign in to ${machineName}`} lede="Enter the admin password for this machine." />
-      <Form
-        label="Sign in"
-        variant="card"
-        validationErrors={errors}
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!signIn.isPending) signIn.mutate(String(new FormData(event.currentTarget).get('password')));
+    <SignedOutFrame hideBrand flush>
+      <SignInPage
+        brand={brand}
+        title={`Sign in to ${machineName}`}
+        reason="Enter the admin password for this computer."
+        hideUser
+        tileTitle="Admin password"
+        embedded
+        error={error}
+        pending={busy}
+        onSubmit={({ password }) => {
+          if (busy) return;
+          if (!(password ?? '').trim()) {
+            setBlank(true);
+            return;
+          }
+          setBlank(false);
+          signIn.mutate(password ?? '');
         }}
-      >
-        <Field label="Password" name="password" type="password" autoComplete="current-password" autoFocus isRequired />
-        <Row justify="end">
-          <Button variant="primary" type="submit" isSending={signIn.isPending || signIn.isSuccess}>
-            {signIn.isPending || signIn.isSuccess ? 'Signing in' : 'Sign in'}
-          </Button>
-        </Row>
-      </Form>
-      <Note>
-        Forgot it? Run <code>Koppel --reset-password</code> on this machine to clear it, then set a new one here.
-      </Note>
-    </FirstRunShell>
+        note="Forgot it? Run koppel --reset-password on this computer, then set a new one here."
+      />
+    </SignedOutFrame>
   );
 }

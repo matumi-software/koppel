@@ -1,11 +1,11 @@
-import type { RoleOption } from '@koppel/react-ui';
+import type { RadioOption } from '@matumi/ui';
 import type { Role } from '@/api/settings';
 
-/** The three roles, worded the same in the first run and under Configuration. */
-export const roleOptions: readonly RoleOption<Role>[] = [
-  { value: 'server', title: 'Server', description: 'Shares the USB devices plugged into this machine with other machines on the network.' },
-  { value: 'client', title: 'Client', description: 'Attaches devices from a Koppel server, so programs here see them as if they were plugged in.' },
-  { value: 'both', title: 'Both', description: 'Shares its own devices and attaches devices from another server.' },
+/** The three roles, worded the same in the first run and in Settings. */
+export const roleOptions: readonly (RadioOption & { value: Role })[] = [
+  { value: 'server', label: 'Share its devices (server)' },
+  { value: 'client', label: 'Attach devices from a server (client)' },
+  { value: 'both', label: 'Both' },
 ];
 
 /**
@@ -16,4 +16,4 @@ export const isServerRole = (role: string | undefined) => role === 'server' || r
 export const isClientRole = (role: string | undefined) => role === 'client' || role === 'both';
 
 /** The role as shown to a person. */
-export const roleName = (role: string | undefined) => roleOptions.find((o) => o.value === role)?.title ?? 'Unknown';
+export const roleName = (role: string | undefined) => (role === 'server' ? 'Server' : role === 'client' ? 'Client' : role === 'both' ? 'Server and client' : 'Unknown');

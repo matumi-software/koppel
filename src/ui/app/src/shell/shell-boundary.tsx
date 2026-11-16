@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react';
-import { Button, ErrorBoundary } from '@koppel/react-ui';
+import { Button } from '@matumi/ui';
 import { useAuth } from '@/auth/auth-context';
+import { ErrorBoundary } from './error-boundary';
 
 /**
- * Around the whole app: a render error shows a card with Reload and Sign out, not a blank page that
- * takes Sign out with it.
+ * Around the whole app: a render error shows Reload and Sign out, not a blank page that takes Sign
+ * out with it.
  */
 export function ShellBoundary({ children }: { children: ReactNode }) {
   const { signOut } = useAuth();

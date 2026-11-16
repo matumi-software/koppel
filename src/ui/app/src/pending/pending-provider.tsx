@@ -1,5 +1,5 @@
 import { hashKey, useQueryClient } from '@tanstack/react-query';
-import { useAnnounce } from '@koppel/react-ui';
+import { useAnnounce } from '@/shared/announce-context';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useActivity } from '@/activity/activity-context';
 import { pendingDomains } from './domains';
@@ -12,10 +12,10 @@ const newStores = (): PendingStores => ({
   clientDevices: new PendingStore(pendingDomains.clientDevices),
   clients: new PendingStore(pendingDomains.clients),
   serverKeys: new PendingStore(pendingDomains.serverKeys),
-  connection: new PendingStore(pendingDomains.connection),
+  servers: new PendingStore(pendingDomains.servers),
+  enrollment: new PendingStore(pendingDomains.enrollment),
   pairingWindow: new PendingStore(pendingDomains.pairingWindow),
   pairingRequests: new PendingStore(pendingDomains.pairingRequests),
-  pairing: new PendingStore(pendingDomains.pairing),
 });
 
 /**

@@ -1,0 +1,96 @@
+/*
+ * Koppel's product layer on Heartwood: its Attached colours, and the layout glue the pages share.
+ * Ported from the approved prototype. Tokens only: no colour or size is made up here. `.kp-` classes
+ * are layout around @matumi/ui components, never a replacement for one.
+ */
+/* Koppel's product layer: its Attached state colours, the same values Heartwood documents. */
+:root, [data-theme="light"] { --state-attached: #2f6f74; --state-attached-subtle: #e9f1f1; --state-attached-text: #245a5e; }
+[data-theme="dark"] { --state-attached: #5fa0a6; --state-attached-subtle: #1b2829; --state-attached-text: #8fc3c7; }
+[data-theme="light-safe"] { --state-attached: #218883; --state-attached-subtle: #e4f6f5; --state-attached-text: #005b57; }
+[data-theme="dark-safe"] { --state-attached: #8bd0cb; --state-attached-subtle: #132b2a; --state-attached-text: #a4deda; }
+
+/* Layout glue for the prototype pages. Tokens only. */
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg-surface); color: var(--text-primary); font-family: var(--font-sans); font-size: 14px; line-height: 20px; }
+.kp-full { height: 100%; position: relative; }
+.kp-page, .kp-detail { display: flex; flex-direction: column; gap: var(--space-6); min-width: 0; }
+.kp-sections { display: flex; flex-direction: column; gap: var(--space-8); }
+.kp-section { display: flex; flex-direction: column; gap: var(--space-4); }
+.kp-h2 { margin: 0; font-size: 16px; line-height: 24px; font-weight: 600; }
+.kp-text, .kp-form { max-width: var(--size-width-lg); }
+.kp-form { display: flex; flex-direction: column; gap: var(--space-4); }
+.kp-form > .hw-page-header { margin-bottom: var(--space-2); }
+.kp-muted { margin: 0; color: var(--text-secondary); }
+.kp-line { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.kp-time { font-size: 12px; line-height: 16px; color: var(--text-secondary); }
+.kp-stack-1 { display: flex; flex-direction: column; gap: var(--space-1); }
+.kp-stack-2 { display: flex; flex-direction: column; gap: var(--space-2); }
+.kp-stack-3 { display: flex; flex-direction: column; gap: var(--space-3); }
+.kp-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.kp-end { justify-content: flex-end; }
+.kp-pad { padding: var(--space-2); }
+.kp-fill { flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; padding: var(--space-6); box-sizing: border-box; }
+.kp-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-6); margin: 0; }
+.kp-facts dt { color: var(--text-secondary); }
+.kp-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.kp-rows { display: flex; flex-direction: column; border-top: 1px solid var(--border-default); }
+.kp-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: var(--size-row-comfortable); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-default); }
+.kp-row-main { display: flex; flex-direction: column; min-width: 0; }
+.kp-popover { outline: none; }
+
+
+
+.kp-fit { display: flex; }
+.kp-popover .hw-popover { outline: none; }
+/* Heartwood v18: a ListDetail shows one pane at a time below 800 wide. Stand-in until @matumi/ui ships it. */
+.kp-narrow .hw-ld-list { width: 100%; border-right: 0; }
+.kp-narrow .hw-ld-detail { display: none; }
+/* Overview */
+.kp-props { display: flex; flex-direction: column; border-top: 1px solid var(--border-default); }
+.kp-prop { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-6); min-height: var(--size-row-comfortable); padding: var(--space-1) 0; border-bottom: 1px solid var(--border-default); }
+.kp-prop-name { flex: none; width: 160px; color: var(--text-secondary); }
+.kp-prop-value { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); }
+/* Pairing key */
+.kp-keybox { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--bg-inset); border: 1px solid var(--border-default); border-radius: var(--radius-md); }
+.kp-key { min-width: 0; overflow-wrap: anywhere; }
+/* Tile bodies and device cards */
+.kp-small { font-size: 13px; line-height: 18px; }
+.kp-count { font-weight: 400; margin-left: var(--space-1); }
+.kp-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-tile-rows { display: flex; flex-direction: column; }
+.kp-tile-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--size-row-comfortable); padding: var(--space-2) var(--space-3); }
+.kp-tile-row + .kp-tile-row { border-top: 1px solid var(--border-default); }
+.kp-props-tight .kp-prop-name { width: 96px; }
+.kp-props-tight { border-top: 0; }
+.kp-props-tight .kp-prop:last-child { border-bottom: 0; }
+.kp-card { justify-content: space-between; }
+.kp-card-open { all: unset; display: flex; flex-direction: column; gap: var(--space-1); cursor: pointer; border-radius: var(--radius-md); }
+.kp-card-open[data-focus-visible] { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.kp-card-open[data-hovered] .kp-card-name { text-decoration: underline; text-underline-offset: 3px; }
+.kp-card-name { font-size: 16px; line-height: 24px; font-weight: 600; }
+.kp-card-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: var(--size-control-sm); }
+/* Link a computer (ClaudeP's pairing code) */
+.kp-codeline { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.kp-code-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); }
+.kp-code { padding: var(--space-2) var(--space-4); background: var(--bg-inset); border: 1px solid var(--border-default); border-radius: var(--radius-lg); font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: 0.12em; font-variant-numeric: tabular-nums; }
+.kp-code[data-over] { color: var(--text-secondary); text-decoration: line-through; }
+.kp-code-left { font-weight: 600; font-variant-numeric: tabular-nums; }
+.kp-code-left[data-over] { color: var(--danger-text); }
+.kp-code-bar { height: 4px; max-width: var(--size-width-lg); background: var(--bg-inset); border-radius: var(--radius-full); overflow: hidden; }
+.kp-code-bar > div { height: 100%; background: var(--accent); border-radius: var(--radius-full); transition: width var(--duration-slow) var(--ease-standard); }
+.kp-keyrow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--border-default); }
+.kp-keyrow-name { width: 96px; font-weight: 500; color: var(--text-secondary); }
+.kp-grow { flex: 1; min-width: 160px; }
+/* Connection beside its inspector */
+.kp-danger { color: var(--danger-text); }
+/* Steady cards: one line under the name, so a longer state text never changes the card's height */
+.kp-card-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The server key row inside the padded pairing tile: a setting row with no inset of its own */
+.kp-keyrow { display: block; padding-top: 0; }
+.kp-keyrow .hw-list[data-settings] .hw-list-row { padding: var(--space-3) 0; }
+/* Rows that open in the inspector stay one line high */
+.kp-picked td { white-space: nowrap; }
+.kp-picked .kp-line { flex-wrap: nowrap; }
+
+/* The app's one live region (shared/announcer.tsx): heard, not seen. */
+.kp-announcer { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

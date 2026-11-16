@@ -1,15 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, Caption, Card, FirstRunShell, Note, PageHead, RoleCards, Row, SetupChecks, Steps } from '@koppel/react-ui';
+import { Button, PageHeader, RadioGroup, StatusDot } from '@matumi/ui';
 import type { Role } from '@/api/settings';
 import { roleOptions } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
 import { useMachineName } from '@/shared/use-machine-name';
+import { SignedOutFrame } from '@/shell/signed-out-frame';
 import { systemChecksOptions } from '@/queries';
 
 /**
- * First run: pick what this machine does, and see whether its kernel can do it. Continue saves the
- * role and marks setup done; the page leaves only when the server confirms both.
+ * First run, step two: pick what this computer does, and see whether it can do it. Continue saves
+ * the role and marks setup done; the page leaves only when the server confirms both.
  */
 export function SetupPage({ locked }: { locked: boolean }) {
   const host = useMachineName();
@@ -17,41 +18,42 @@ export function SetupPage({ locked }: { locked: boolean }) {
   const checks = useQuery(systemChecksOptions());
   const [role, setRole] = useState<Role | null>(null);
   const chosen = role ?? query.data?.role ?? 'server';
-  const pending = setup.isPending;
-  const failure = setup.failure;
 
   const needed = chosen === 'server' ? ['share'] : chosen === 'client' ? ['attach'] : ['share', 'attach'];
-  const blocking = (checks.data ?? []).filter((c) => needed.includes(c.id) && !c.ok);
+  const shown = (checks.data ?? []).filter((c) => needed.includes(c.id));
+  const blocking = shown.filter((c) => !c.ok);
 
   return (
-    <FirstRunShell title="Set up" width="wide">
-      <Steps steps={['Admin password', 'What this machine does', chosen === 'client' ? 'Server connection' : 'Clients']} current={1} />
-      <PageHead title={`Set up ${host}`} lede="Pick what this machine does. You can change it later under Configuration." />
-
-      <RoleCards label="Role" options={roleOptions} value={chosen} isDisabled={locked || pending} onChange={setRole} />
-
-      <Card label="Checking this machine">
-        <h2>Checking this machine</h2>
-        {checks.data ? (
-          <SetupChecks
-            checks={checks.data
-              .filter((c) => needed.includes(c.id))
-              .map((c) => ({ id: c.id, ok: c.ok, title: c.title, detail: c.detail }))}
-          />
-        ) : (
-          <Note>Checking…</Note>
-        )}
-      </Card>
-
-      {failure && <Note tone="error">Not saved: {failure}</Note>}
-      <Row justify="between">
-        <Caption tone={blocking.length ? 'fault' : 'faint'}>
-          {blocking.length ? 'Koppel can save this role, but it cannot use USB until the problems above are fixed.' : 'Everything this role needs is here.'}
-        </Caption>
-        <Button variant="primary" isSending={pending} isDisabled={locked} onPress={() => requestSetup(chosen)}>
-          {pending ? 'Saving' : 'Continue'}
-        </Button>
-      </Row>
-    </FirstRunShell>
+    <SignedOutFrame>
+      <div className="kp-page kp-form">
+        <PageHeader title={`What does ${host} do?`} description="Step 2 of 2. You can change this later in Settings." />
+        <RadioGroup
+          label="Role"
+          value={chosen}
+          isDisabled={locked || setup.isPending}
+          onChange={(value) => setRole(value as Role)}
+          items={roleOptions.map(({ value, label }) => ({ value, label }))}
+        />
+        <div className="kp-stack-1">
+          <span className="hw-label">This computer has</span>
+          {checks.data ? (
+            shown.map((c) => (
+              <StatusDot key={c.id} tone={c.ok ? 'success' : 'danger'}>
+                {c.ok ? c.title : `${c.title}. ${c.detail}`}
+              </StatusDot>
+            ))
+          ) : (
+            <span className="kp-muted">Checking…</span>
+          )}
+        </div>
+        {blocking.length > 0 && <p className="kp-muted">Koppel can save this role, but it cannot use USB until the problems above are fixed.</p>}
+        {setup.failure && <p className="kp-danger">Not saved: {setup.failure}</p>}
+        <div>
+          <Button variant="primary" isPending={setup.isPending} isDisabled={locked} onPress={() => requestSetup(chosen)}>
+            Continue
+          </Button>
+        </div>
+      </div>
+    </SignedOutFrame>
   );
 }

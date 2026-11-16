@@ -1,27 +1,22 @@
-import { putConnection, type ConnectionView } from '@/api/client';
 import {
   approvePairing,
-  cancelPairing,
   closePairingWindow,
-  confirmPairing,
   denyPairing,
   openPairingWindow,
-  startPairing,
-  type DiscoveredServer,
   type PairingOverview,
-  type PairingStatus,
 } from '@/api/pairing';
-import { cancelCertificate, prepareCertificate, revokeClient, switchCertificate, type ClientView, type KeysView } from '@/api/server';
-import { patchSettings, type Role, type KoppelSettings } from '@/api/settings';
-import { attachDevice, detachDevice, setShared, type ClientDevices, type ServerDevices } from '@/api/usb';
+import { cancelCertificate, closeEnrollmentCode, openEnrollmentCode, prepareCertificate, revokeClient, switchCertificate, type ClientView, type EnrollmentView, type KeysView } from '@/api/server';
+import { changeServer, removeServer, type ServerSettings, type ServersView } from '@/api/servers';
+import { patchSettings, type Role, type KoppelSettings, type SettingsPatch } from '@/api/settings';
+import { attachDevice, detachDevice, setShared, type ClientServersView, type ServerDevices } from '@/api/usb';
 import {
   clientDevicesOptions,
   clientsOptions,
-  connectionOptions,
+  enrollmentOptions,
   pairingRequestsOptions,
-  pairingStatusOptions,
   serverDevicesOptions,
   serverKeysOptions,
+  serversOptions,
   settingsOptions,
 } from '@/queries';
 import { hexOf } from '@/shared/fingerprint';
@@ -30,16 +25,10 @@ import type { PendingDomain } from './pending-store';
 /** How long to wait for the server's confirmation before calling a change failed. */
 export const confirmTimeoutMs = 10_000;
 
-const domain = <A, D, I = void>(value: PendingDomain<A, D, I>) => value;
+/** The pending key of a device on a server, which is also its `subject` in the activity log. */
+export const attachmentKey = (serverId: string, busId: string) => `${serverId}/${busId}`;
 
-/** The server stores only the scheme, host and port, in lower case, so compare those. */
-const originOf = (url: string) => {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return url.trim();
-  }
-};
+const domain = <A, D, I = void>(value: PendingDomain<A, D, I>) => value;
 
 type Setting = keyof KoppelSettings;
 
@@ -62,23 +51,28 @@ const settingLabels: Record<Setting, string> = {
   notifyPairing: 'Notify when a client wants to pair',
   notifyLink: 'Notify when the link to the server drops',
   notifyAttachFailures: 'Notify when a device does not attach',
+  networkPort: 'Port for clients',
+  networkAcceptFrom: 'Accept from',
 };
 
-/** What a save of the server connection asked for. The secret cannot be compared, so it is the send's input instead. */
-export interface ConnectionAction {
-  serverUrl: string;
-  serverFingerprint: string;
-  clientId: string;
-}
+const valueWord = (setting: Setting, value: KoppelSettings[Setting]) => {
+  if (typeof value === 'boolean') return value ? 'on' : 'off';
+  if (setting === 'networkPort') return value === null ? 'the default' : String(value);
+  if (setting === 'networkAcceptFrom') return value === 'lan' ? 'this network only' : 'any network';
+  return String(value);
+};
 
-/** The pending key of a save of the server connection. */
-export const connectionKey = 'connection';
+/**
+ * A change to one server of a client, or removing it. `change` carries only the fields being changed;
+ * `name` is the server's, for the activity log. A server has one change pending at a time, whichever kind.
+ */
+export type ServerAction = { type: 'change'; id: string; name: string; change: ServerSettings } | { type: 'remove'; id: string; name: string };
 
-/** Pairing buttons: Pair with a server, and the two buttons of a pairing under way. */
-export type PairingAction = { type: 'pair'; server: DiscoveredServer } | { type: 'cancel' } | { type: 'confirm' };
+/** Show a pairing code on this server (a new one replaces one that shows) or close it. `previous` is the code showing now, if any. */
+export type EnrollmentAction = { type: 'open'; previous: string | null } | { type: 'close' };
 
-/** The pending keys of the buttons of a pairing under way. A Pair button's key is the server's fingerprint. */
-export const pairingKeys = { cancel: 'cancel', confirm: 'confirm' } as const;
+/** The pending key of the pairing code: there is one, so one change to it is pending at a time. */
+export const enrollmentKey = 'code';
 
 /**
  * The certificate, by action. `switch` carries the fingerprint of the certificate it switches to.
@@ -109,11 +103,11 @@ export const pendingDomains = {
       text:
         action.type === 'setup'
           ? 'Finish setup'
-          : `${settingLabels[action.setting]}: ${typeof action.value === 'boolean' ? (action.value ? 'on' : 'off') : String(action.value)}`,
+          : `${settingLabels[action.setting]}: ${valueWord(action.setting, action.value)}`,
     }),
     verdict: (action, settings) =>
       (action.type === 'setup' ? settings.setupComplete && settings.role === action.role : settings[action.setting] === action.value) ? 'confirmed' : 'waiting',
-    send: (action) => patchSettings(action.type === 'setup' ? { role: action.role, setupComplete: true } : { [action.setting]: action.value }),
+    send: (action) => patchSettings(action.type === 'setup' ? { role: action.role, setupComplete: true } : ({ [action.setting]: action.value } satisfies Partial<SettingsPatch>)),
   }),
 
   serverDevices: domain<{ busId: string; share: boolean }, ServerDevices>({
@@ -129,18 +123,19 @@ export const pendingDomains = {
     send: ({ busId, share }) => setShared(busId, share),
   }),
 
-  clientDevices: domain<{ busId: string; attach: boolean }, ClientDevices>({
+  /** Attach or detach one device of one server. Two servers can offer the same bus ID, so the key names both. */
+  clientDevices: domain<{ serverId: string; busId: string; attach: boolean }, ClientServersView>({
     queryKey: clientDevicesOptions().queryKey,
     // Attaching can take a while: TLS, token, import and the kernel.
     timeoutMs: 30_000,
-    keyOf: (action) => action.busId,
-    describe: ({ busId, attach }) => ({ text: `${attach ? 'Attach' : 'Detach'} ${busId}`, subject: busId }),
-    verdict: ({ busId, attach }, next) => {
-      const entry = next.devices.find((d) => d.device.busId === busId);
+    keyOf: ({ serverId, busId }) => attachmentKey(serverId, busId),
+    describe: ({ serverId, busId, attach }) => ({ text: `${attach ? 'Attach' : 'Detach'} ${busId}`, subject: attachmentKey(serverId, busId) }),
+    verdict: ({ serverId, busId, attach }, next) => {
+      const entry = next.servers.find((s) => s.id === serverId)?.devices.find((d) => d.device.busId === busId);
       if (entry?.fault) return { failed: entry.fault };
       return (entry?.attachedHere ?? false) === attach ? 'confirmed' : 'waiting';
     },
-    send: ({ busId, attach }) => (attach ? attachDevice(busId) : detachDevice(busId)),
+    send: ({ serverId, busId, attach }) => (attach ? attachDevice(serverId, busId) : detachDevice(serverId, busId)),
   }),
 
   /** Revoke a client, by id. `name` is for the activity log. */
@@ -172,20 +167,40 @@ export const pendingDomains = {
     send: (action) => ({ prepare: prepareCertificate, cancel: cancelCertificate, switch: switchCertificate })[action.type](),
   }),
 
-  /** A save of the server connection. The input is the client secret: it goes to the server and no further. */
-  connection: domain<ConnectionAction, ConnectionView, string>({
-    queryKey: connectionOptions().queryKey,
+  /**
+   * Change a server's name or link settings, or remove it. A change is settled once the saved server
+   * has every field asked for, a removal once it is gone from the list. Adding a server is not here:
+   * its POST answers 201 with the reason of a refusal (see `addServer`).
+   */
+  servers: domain<ServerAction, ServersView>({
+    queryKey: serversOptions().queryKey,
     timeoutMs: confirmTimeoutMs,
-    keyOf: () => connectionKey,
-    describe: () => ({ text: 'Save the server connection' }),
-    verdict: (sent, view) =>
-      view.serverUrl !== null &&
-      originOf(view.serverUrl) === originOf(sent.serverUrl) &&
-      hexOf(view.serverFingerprint) === hexOf(sent.serverFingerprint) &&
-      view.clientId === sent.clientId.trim()
-        ? 'confirmed'
-        : 'waiting',
-    send: (sent, clientSecret) => putConnection({ ...sent, clientSecret }),
+    keyOf: (action) => action.id,
+    describe: (action) => ({ text: `${action.type === 'remove' ? 'Remove' : 'Change'} ${action.name}`, subject: action.id }),
+    verdict: (action, view) => {
+      const server = view.servers.find((s) => s.id === action.id);
+      if (action.type === 'remove') return server ? 'waiting' : 'confirmed';
+      if (!server) return { failed: 'the server is no longer there.' };
+      const { name, reconnect, retryEverySeconds, giveUpAfterSeconds } = action.change;
+      const same =
+        (name === undefined || server.name === name) &&
+        (reconnect === undefined || server.reconnect === reconnect) &&
+        (retryEverySeconds === undefined || server.retryEverySeconds === retryEverySeconds) &&
+        (giveUpAfterSeconds === undefined || server.giveUpAfterSeconds === giveUpAfterSeconds);
+      return same ? 'confirmed' : 'waiting';
+    },
+    send: (action) => (action.type === 'remove' ? removeServer(action.id) : changeServer(action.id, action.change)),
+  }),
+
+  /** Show a pairing code or close it. Settled once EnrollmentChanged shows a new code, or none. */
+  enrollment: domain<EnrollmentAction, EnrollmentView>({
+    queryKey: enrollmentOptions().queryKey,
+    timeoutMs: confirmTimeoutMs,
+    keyOf: () => enrollmentKey,
+    describe: (action) => ({ text: action.type === 'open' ? 'Show a pairing code' : 'Close the pairing code' }),
+    verdict: (action, view) =>
+      (action.type === 'open' ? view.code !== null && view.code.code !== action.previous : view.code === null) ? 'confirmed' : 'waiting',
+    send: (action) => (action.type === 'open' ? openEnrollmentCode() : closeEnrollmentCode()),
   }),
 
   /** Allow pairing or Close pairing. Settled once PairingRequestsChanged says the window is open or closed. */
@@ -206,26 +221,6 @@ export const pendingDomains = {
     describe: (action) => ({ text: `${action.type === 'approve' ? 'Approve' : 'Refuse'} pairing with ${action.name}`, subject: action.id }),
     verdict: ({ id }, view) => (view.requests.some((r) => r.id === id && r.state === 'waiting') ? 'waiting' : 'confirmed'),
     send: (action) => (action.type === 'approve' ? approvePairing(action.id, action.code) : denyPairing(action.id)),
-  }),
-
-  /**
-   * A pairing is confirmed once the request is under way, whatever it turns into: the outcome shows
-   * in the status.
-   */
-  pairing: domain<PairingAction, PairingStatus>({
-    queryKey: pairingStatusOptions().queryKey,
-    timeoutMs: confirmTimeoutMs,
-    keyOf: (action) => (action.type === 'pair' ? action.server.fingerprint : action.type),
-    describe: (action) => ({
-      text: action.type === 'cancel' ? 'Cancel pairing' : action.type === 'confirm' ? 'Replace the server connection' : `Pair with ${action.server.name}`,
-      subject: action.type === 'pair' ? action.server.fingerprint : action.type,
-    }),
-    verdict: (action, status) => {
-      if (action.type === 'cancel') return status.state === 'idle' ? 'confirmed' : 'waiting';
-      if (action.type === 'confirm') return status.state === 'confirm' ? 'waiting' : 'confirmed';
-      return status.state !== 'idle' && status.serverUrl !== null && originOf(status.serverUrl) === originOf(action.server.url) ? 'confirmed' : 'waiting';
-    },
-    send: (action) => (action.type === 'pair' ? startPairing(action.server) : action.type === 'cancel' ? cancelPairing() : confirmPairing()),
   }),
 };
 

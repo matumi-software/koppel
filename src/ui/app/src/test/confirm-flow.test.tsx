@@ -8,7 +8,7 @@ import { useSettings } from '@/settings/use-settings';
 import { accepted, deferred, json, mockFetch, renderApp } from './harness';
 import { settingsOptions } from '@/queries';
 
-const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
+const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true, networkPort: null, networkAcceptFrom: 'any' };
 
 /** A page that changes one setting and shows what the confirm rule says about it. */
 function SettingsPage() {
@@ -273,12 +273,12 @@ describe('live pushes', () => {
     for (const name of [
       'SettingsChanged',
       'ClientsChanged',
-      'ConnectionChanged',
+      'ServersChanged',
+      'EnrollmentChanged',
       'DevicesChanged',
       'ClientDevicesChanged',
       'ActivityRecorded',
       'PairingRequestsChanged',
-      'PairingStatusChanged',
       'ServersDiscovered',
     ]) {
       expect(live.count(name), name).toBe(1);

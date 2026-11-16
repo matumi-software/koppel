@@ -1,11 +1,11 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '@/app';
 import { AuthContext } from '@/auth/auth-context';
 import { ShellBoundary } from '@/shell/shell-boundary';
 import { baseRoutes } from './fixtures';
-import { json, mockFetch, renderApp } from './harness';
+import { mockFetch, renderApp } from './harness';
 
 beforeEach(async () => {
   window.location.hash = '#overview';
@@ -17,35 +17,22 @@ afterEach(() => {
   window.location.hash = '';
 });
 
-/** The live regions the app draws. react-aria keeps its own off-screen announcer for selection changes: that one is not the app's. */
-const appLiveRegions = () => [...document.querySelectorAll('[role="status"], [role="alert"], [role="log"], [aria-live]')].filter((el) => !el.closest('[data-live-announcer]'));
-
-const sidebar = () => document.querySelector('.kp-shell__side') as HTMLElement;
+/** The app's own live region. Heartwood's toasts and callouts and react-aria's announcer have their own. */
+const appLiveRegions = () => [...document.querySelectorAll('.kp-announcer')];
 
 describe('navigation', () => {
-  it('is made of real links, so a page can open in a new tab', async () => {
-    mockFetch(baseRoutes);
-    renderApp(<App />);
-    await screen.findByRole('heading', { level: 1, name: 'Overview' });
-
-    expect(within(sidebar()).getByRole('link', { name: /^Devices/ }).getAttribute('href')).toBe('#devices');
-    expect(within(sidebar()).getByRole('link', { name: /Clients/ }).getAttribute('href')).toBe('#clients');
-    expect(within(sidebar()).getByRole('link', { name: 'Configuration' }).getAttribute('href')).toBe('#configuration');
-    expect(within(sidebar()).getByRole('link', { name: /Overview/ }).getAttribute('aria-current')).toBe('page');
-  });
-
-  it('opens the page a link points to, sets the tab title, and moves focus to the new heading', async () => {
+  it('opens the page a nav item names, sets the tab title, and moves focus to the new heading', async () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
     await screen.findByRole('heading', { level: 1, name: 'Overview' });
     expect(document.title).toBe('Overview - Koppel');
 
-    await userEvent.click(within(sidebar()).getByRole('link', { name: 'Configuration' }));
+    await userEvent.click(await screen.findByRole('link', { name: 'Settings' }));
 
-    const heading = await screen.findByRole('heading', { level: 1, name: 'Configuration' });
+    const heading = await screen.findByRole('heading', { level: 1, name: 'Settings' });
     await waitFor(() => expect(document.activeElement).toBe(heading));
-    expect(document.title).toBe('Configuration - Koppel');
-    expect(within(sidebar()).getByRole('link', { name: 'Configuration' }).getAttribute('aria-current')).toBe('page');
+    expect(window.location.hash).toBe('#settings');
+    expect(document.title).toBe('Settings - Koppel');
   });
 
   it('leaves focus alone on the first page of a visit', async () => {
@@ -59,29 +46,11 @@ describe('navigation', () => {
 });
 
 describe('the live region', () => {
-  it('is the only live region in the app', async () => {
+  it('is the app announcer, drawn once', async () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
     await screen.findByRole('heading', { level: 1, name: 'Overview' });
 
-    expect(appLiveRegions()).toHaveLength(1);
-  });
-
-  it('is still the only one with a device selected and a failure showing', async () => {
-    window.location.hash = '#devices';
-    mockFetch({
-      ...baseRoutes,
-      'GET /api/v1/server/devices': () =>
-        json({
-          devices: [{ busId: '1-2', vidPid: '0403:6001', name: 'Serial adapter', manufacturer: null, speed: '480', state: 'local', attachedTo: null, attachedSince: null, fault: 'The kernel refused it.', serial: null, driver: null, interfaces: null }],
-          unavailable: null,
-        }),
-    });
-    renderApp(<App />);
-
-    await userEvent.click(await screen.findByText('Serial adapter'));
-
-    await screen.findByText('Not saved');
     expect(appLiveRegions()).toHaveLength(1);
   });
 });

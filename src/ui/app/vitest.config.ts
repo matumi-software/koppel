@@ -14,5 +14,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     css: false,
+    // Heartwood ships ES modules with extensionless imports, which only a bundler resolves: let Vite process it.
+    server: { deps: { inline: [/@matumi\//] } },
   },
 });

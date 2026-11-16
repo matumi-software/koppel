@@ -1,36 +1,50 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { AppShell, LinkDot, NavGroup, NavItem, Note, StatusCard, useAnnounce } from '@koppel/react-ui';
-import { ClientDevicesPage } from '@/devices/client-devices';
-import { ServerDevicesPage } from '@/devices/server-devices';
-import { hostOf, useClientDevices, useServerDevices } from '@/devices/use-devices';
-import { useAuth } from '@/auth/auth-context';
+import { useMemo } from 'react';
+import { useActivity } from '@/activity/activity-context';
+import { ActivityPage } from '@/activity/activity-page';
+import { ClientsPage } from '@/clients/clients-page';
+import { ConnectionPage } from '@/connection/connection-page';
+import { DevicesPage } from '@/devices/devices-page';
+import { RemoteDevicesPage } from '@/devices/remote-devices-page';
+import { useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { useLive } from '@/live/live-context';
 import { OverviewPage } from '@/overview/overview-page';
-import { ClientsPage } from '@/server/clients-page';
-import { ConfigurationPage } from '@/settings/configuration-page';
-import { isClientRole, isServerRole } from '@/settings/roles';
-import { SetupPage } from '@/setup/setup-page';
-import { storeAsideWidth, storedAsideWidth } from '@/shell/aside-width';
-import { usePending } from '@/pending/pending-context';
 import { setupKey } from '@/pending/domains';
-import { FrameContext, pageTitles, useHasNavigated, usePage, type Page } from '@/shell/frame-context';
-import { reasonOf } from '@/errors';
-import { formatVersion, serverLine } from '@/client/server-link';
-import { useActivity } from '@/activity/activity-context';
-import { useKoppelVersion, useMachineName } from '@/shared/use-machine-name';
-import { clientsOptions, connectionOptions, settingsOptions } from '@/queries';
+import { usePending } from '@/pending/pending-context';
+import { settingsOptions } from '@/queries';
+import { SecurityPage } from '@/security/security-page';
+import { isClientRole, isServerRole } from '@/settings/roles';
+import { SettingsPage } from '@/settings/settings-page';
+import { SetupPage } from '@/setup/setup-page';
+import { CouldNotReach } from '@/shell/could-not-reach';
+import { usePage } from '@/shell/frame-context';
+import { KoppelShell } from '@/shell/koppel-shell';
+import { Loading } from '@/shell/loading';
+import { pagesOf, type Page } from '@/shell/places';
+import { SignedOutFrame } from '@/shell/signed-out-frame';
+import { CheckPage } from '@/system/check-page';
 
+const pages: Record<Page, () => React.JSX.Element> = {
+  overview: OverviewPage,
+  devices: DevicesPage,
+  remote: RemoteDevicesPage,
+  clients: ClientsPage,
+  activity: ActivityPage,
+  check: CheckPage,
+  connection: ConnectionPage,
+  security: SecurityPage,
+  settings: SettingsPage,
+};
+
+/**
+ * What the signed-in app shows: the first-run role step until setup is confirmed, then the shell
+ * with the page the address names. The live link is the shell's concern (`locked`), not a reason to
+ * hide a page: what loaded stays on screen while it reconnects.
+ */
 export function App() {
-  const host = useMachineName();
-  const version = useKoppelVersion();
-  const { state: link, retry } = useLive();
-  const { signOut } = useAuth();
+  const { retry } = useLive();
   const { items } = useActivity();
-  const [isMenuOpen, setMenuOpen] = useState(false);
-  const [signOutFailure, setSignOutFailure] = useState<string>();
-  const [asideSlot, setAsideSlot] = useState<HTMLDivElement | null>(null);
-  const announce = useAnnounce();
+  const { state: link } = useLive();
   const locked = link !== 'live';
 
   const settings = useQuery(settingsOptions());
@@ -38,109 +52,42 @@ export function App() {
   // that, an address with no page is the overview.
   const { completed } = usePending('settings');
   const justSetUp = (completed[setupKey] ?? 0) > 0;
-  const page = usePage(justSetUp ? (settings.data?.role === 'client' ? 'configuration' : 'clients') : 'overview');
-  // Until the settings load, and for a role this UI does not know, the machine is neither.
-  const isServer = isServerRole(settings.data?.role);
-  const isClient = isClientRole(settings.data?.role);
-  const server = useServerDevices(isServer && !!settings.data?.setupComplete);
-  const client = useClientDevices(isClient && !!settings.data?.setupComplete);
-  const clients = useQuery({ ...clientsOptions(), enabled: isServer });
-  const connection = useQuery({ ...connectionOptions(), enabled: isClient });
-  const remote = hostOf(connection.data?.serverUrl);
+  const role = settings.data?.role;
+  const page = usePage(justSetUp ? (role === 'client' ? 'connection' : 'clients') : 'overview');
+  const ready = !!settings.data?.setupComplete;
+  const server = useServerDevices(isServerRole(role) && ready);
+  const client = useClientDevices(isClientRole(role) && ready);
 
   // A page that does not exist for this role falls back to the overview, once the role is known:
-  // before that a bookmarked #attach would be thrown away on every load.
-  const allowed: Page[] = ['overview', 'configuration', ...(isServer ? (['devices', 'clients'] as Page[]) : []), ...(isClient ? (['attach'] as Page[]) : [])];
-  const shown: Page = !settings.data || allowed.includes(page) ? page : 'overview';
+  // before that a bookmarked #remote would be thrown away on every load.
+  const shown: Page = !settings.data || pagesOf(role).includes(page) ? page : 'overview';
 
+  // The nav badge on Overview counts what asks for action: changes still waiting and devices with a fault.
   const pendingCount = items.filter((i) => i.state === 'pending').length;
   const faultCount =
-    (server.data?.devices ?? []).filter((d) => d.fault).length + (client.data?.devices ?? []).filter((e) => e.fault).length;
+    (server.data?.devices ?? []).filter((d) => d.fault).length +
+    (client.data?.servers ?? []).reduce((total, s) => total + s.devices.filter((e) => e.fault).length, 0);
   const needs = pendingCount + faultCount;
-
-  const closeMenu = () => setMenuOpen(false);
-  const item = (page: Page) => ({ href: `#${page}`, isCurrent: shown === page, onPress: closeMenu });
-
-  const nav = (
-    <>
-      <NavGroup>
-        <NavItem {...item('overview')} count={needs || undefined} countTone="pending">
-          Overview
-        </NavItem>
-      </NavGroup>
-      {isServer && (
-        <NavGroup label={`Sharing from ${host}`}>
-          <NavItem {...item('devices')} count={server.data?.devices.length}>
-            Devices
-          </NavItem>
-          <NavItem {...item('clients')} count={clients.data?.length}>
-            Clients
-          </NavItem>
-        </NavGroup>
-      )}
-      {isClient && (
-        <NavGroup label="Attaching">
-          <NavItem {...item('attach')} count={client.data?.devices.length}>
-            {remote ? `From ${remote}` : 'Devices'}
-          </NavItem>
-        </NavGroup>
-      )}
-      <NavGroup label="Settings">
-        <NavItem {...item('configuration')}>Configuration</NavItem>
-      </NavGroup>
-    </>
-  );
-
-  const navFoot = (
-    <StatusCard
-      state={link}
-      machineName={host}
-      version={formatVersion(version)}
-      detail={isClient && client.data ? serverLine(client.data.link, remote) : undefined}
-      onRetry={retry}
-      onSignOut={() => {
-        setSignOutFailure(undefined);
-        signOut().catch((error: unknown) => {
-          const reason = reasonOf(error, 'the request failed.');
-          setSignOutFailure(reason);
-          announce(`Signing out failed: ${reason}`);
-        });
-      }}
-      signOutError={signOutFailure}
-    />
-  );
-
-  const hasNavigated = useHasNavigated();
-  const frame = useMemo(() => ({ locked, asideSlot, hasNavigated }), [locked, asideSlot, hasNavigated]);
+  const counts = useMemo(() => ({ overview: needs || undefined }), [needs]);
 
   if (!settings.data) {
-    return <Note isPadded>{settings.isError ? 'Could not reach Koppel. Check that it is running, then reload.' : 'Loading…'}</Note>;
+    return settings.isError ? (
+      <SignedOutFrame flush>
+        <CouldNotReach isRetrying={settings.isFetching} onRetry={() => { void settings.refetch(); retry(); }} />
+      </SignedOutFrame>
+    ) : (
+      <SignedOutFrame>
+        <Loading />
+      </SignedOutFrame>
+    );
   }
 
-  if (!settings.data.setupComplete) {
-    return <SetupPage locked={locked} />;
-  }
+  if (!settings.data.setupComplete) return <SetupPage locked={locked} />;
 
-  // One shell for every page, so the side panel is one panel too: pages swap its content, never its width.
+  const Page = pages[shown];
   return (
-    <FrameContext.Provider value={frame}>
-      <AppShell
-        nav={nav}
-        navFoot={navFoot}
-        asideRef={setAsideSlot}
-        defaultAsideWidth={storedAsideWidth()}
-        onAsideWidthChange={storeAsideWidth}
-        title={pageTitles[shown]}
-        status={<LinkDot state={link} />}
-        isMenuOpen={isMenuOpen}
-        onMenuOpenChange={setMenuOpen}
-      >
-        {shown === 'overview' && <OverviewPage />}
-        {shown === 'devices' && <ServerDevicesPage />}
-        {shown === 'clients' && <ClientsPage />}
-        {shown === 'attach' && <ClientDevicesPage />}
-        {shown === 'configuration' && <ConfigurationPage />}
-      </AppShell>
-    </FrameContext.Provider>
+    <KoppelShell page={shown} role={role} counts={counts}>
+      <Page />
+    </KoppelShell>
   );
 }

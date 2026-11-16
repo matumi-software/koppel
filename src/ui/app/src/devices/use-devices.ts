@@ -6,7 +6,10 @@ export function useServerDevices(enabled = true) {
   return useQuery({ ...serverDevicesOptions(), enabled });
 }
 
-/** The server's shared devices and what is attached here (client role). ClientDevicesChanged keeps them current. */
+/**
+ * Every server this machine attaches from, each with its link and its devices (client role).
+ * ClientDevicesChanged keeps them current. Read `data.servers[i].devices`.
+ */
 export function useClientDevices(enabled = true) {
   return useQuery({ ...clientDevicesOptions(), enabled });
 }

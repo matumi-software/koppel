@@ -17,7 +17,7 @@ describe('setup', () => {
     renderApp(<SetupPage locked={false} />);
     await screen.findByRole('button', { name: 'Continue' });
 
-    await userEvent.click(screen.getByRole('radio', { name: /Client/ }));
+    await userEvent.click(screen.getByRole('radio', { name: /client/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     const patches = calls.filter((c) => c.key === 'PATCH /api/v1/settings');
@@ -29,13 +29,13 @@ describe('setup', () => {
     mockFetch({ ...baseRoutes, 'GET /api/v1/settings': () => json({ ...settings, setupComplete: false }), 'PATCH /api/v1/settings': () => accepted() });
     const { live } = renderApp(<SetupPage locked={false} />);
     await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
-    await screen.findByRole('button', { name: 'Saving' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('data-pending')).toBe(true));
 
     await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'client' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Saving' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('data-pending')).toBe(true));
 
     await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'server' }));
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Saving' })).toBeNull());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('data-pending')).toBe(false));
   });
 });
 
@@ -45,23 +45,23 @@ describe('first run in the app', () => {
   it('stays on the setup page, address untouched, until the server confirms, then lands on the page the role needs', async () => {
     unconfigured();
     const { live } = renderApp(<App />);
-    await userEvent.click(await screen.findByRole('radio', { name: /Client/ }));
+    await userEvent.click(await screen.findByRole('radio', { name: /client/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    await screen.findByRole('button', { name: 'Saving' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('data-pending')).toBe(true));
 
     expect(window.location.hash).toBe('');
-    expect(screen.getByRole('heading', { name: /Set up/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /What does/ })).toBeTruthy();
 
     await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'client' }));
 
-    await screen.findByRole('heading', { name: 'Configuration' });
+    await screen.findByRole('heading', { name: 'Connection' });
   });
 
   it('lands a server on its clients', async () => {
     unconfigured();
     const { live } = renderApp(<App />);
     await userEvent.click(await screen.findByRole('button', { name: 'Continue' }));
-    await screen.findByRole('button', { name: 'Saving' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('data-pending')).toBe(true));
 
     await act(async () => live.emit('SettingsChanged', { ...settings, setupComplete: true, role: 'server' }));
 

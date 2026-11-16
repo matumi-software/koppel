@@ -22,3 +22,16 @@ if (typeof globalThis.CSS === 'undefined') {
     value: { escape: (value: string) => value.replace(/[^\w-]/g, (c) => '\\' + c) },
   });
 }
+
+// jsdom has no matchMedia: every query reads as not matching (a wide, light screen) and never changes.
+if (typeof window.matchMedia === 'undefined') {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }),
+  });
+}

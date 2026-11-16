@@ -8,7 +8,7 @@ import { FakeEventSource } from './fake-event-source';
 import { json, mockFetch, renderApp } from './harness';
 import { settingsOptions, systemChecksOptions } from '@/queries';
 
-const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true };
+const settings: KoppelSettings = { role: 'server', shareOnStartup: false, setupComplete: true, notifyPairing: true, notifyLink: true, notifyAttachFailures: true, networkPort: null, networkAcceptFrom: 'any' };
 
 /** Shows the link's state and the settings the cache holds. */
 function Probe() {

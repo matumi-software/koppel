@@ -24,7 +24,7 @@ describe('navigation', () => {
   it('opens the page a nav item names, sets the tab title, and moves focus to the new heading', async () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
-    await screen.findByRole('heading', { level: 1, name: 'Overview' });
+    await screen.findByRole('heading', { level: 1, name: 'bench-pc' });
     expect(document.title).toBe('Overview - Koppel');
 
     await userEvent.click(await screen.findByRole('link', { name: 'Settings' }));
@@ -39,7 +39,7 @@ describe('navigation', () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
 
-    const heading = await screen.findByRole('heading', { level: 1, name: 'Overview' });
+    const heading = await screen.findByRole('heading', { level: 1, name: 'bench-pc' });
 
     expect(document.activeElement).not.toBe(heading);
   });
@@ -49,7 +49,7 @@ describe('the live region', () => {
   it('is the app announcer, drawn once', async () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
-    await screen.findByRole('heading', { level: 1, name: 'Overview' });
+    await screen.findByRole('heading', { level: 1, name: 'bench-pc' });
 
     expect(appLiveRegions()).toHaveLength(1);
   });

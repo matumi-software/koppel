@@ -11,6 +11,8 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   test: {
+    // The browser tests under e2e/ are Playwright's, run with `pnpm e2e`.
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
     css: false,

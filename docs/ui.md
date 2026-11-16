@@ -40,6 +40,10 @@ against the program (`koppel/tests/contract/push.rs`); the UI has its own tests 
 - **Adding a server** is the one change that is not pending: `POST /api/v1/client/servers` enrols with the server and answers 201, or says why not (a wrong code under the code field, an address added already under the address), and the list follows as `ServersChanged`. A server's Reconnect, Retry every and Give up after are staged in the side panel and sent together with Apply, under the confirm rule. Port is staged the same way and says "Applies after Koppel restarts"; Accept from applies at once.
 - **Secrets** are held only while on show. The server key is fetched when the person presses Show, and a new secret or key is shown once.
 
+## Testing in a browser
+
+The UI carries Playwright, as Heartwood's usage rules ask of every app with a web UI: `@playwright/test` is a dev dependency of `koppel.ui` and is never in the bundle. Browsers are not downloaded into the project. They live once on the machine, in the folder the user-level variable `PLAYWRIGHT_BROWSERS_PATH` names (`D:esources\playwright-browsers`), put there by `npx playwright install chromium`; set `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` in any install step that must not fetch one (the Dockerfile's UI stage does). `pnpm --filter koppel.ui e2e` starts the Vite dev server and runs the tests in `src/ui/app/e2e` in Chromium at desktop width and at phone width. The tests stand in for the service's answers with `page.route`, so no Koppel needs to run; the first one checks the first screens and that nothing scrolls sideways. A check against two real instances (as done on 2026-11-16 with the built UI) is still a manual job.
+
 ## Activity
 
 The server keeps an activity log in memory (`koppel-app/src/activity.rs`):

@@ -67,7 +67,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (!state.data) {
     return (
-      <SignedOutFrame flush={state.isError}>
+      <SignedOutFrame flush={state.isError} align={state.isError ? 'start' : 'centre'}>
         {state.isError ? <CouldNotReach isRetrying={state.isFetching} onRetry={recheck} /> : <Loading />}
       </SignedOutFrame>
     );

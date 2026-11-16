@@ -8,9 +8,10 @@ import { brand } from '@/brand';
  * does not jump when the app takes over. `hideBrand` is for SignInPage, which shows its own mark.
  * `flush` is for a page that fills the panel (the centred states).
  *
- * The page sits in the middle of the window, both ways, as Koppel's sign-in always has. Heartwood's
- * sign-in and a plain page both start at the panel's left edge, so this is Koppel's own override
- * (`.kp-centre` in koppel.css). A page that must start at the left passes `align="start"`.
+ * A plain page (the first password, setup, loading) sits in the middle of the window, both ways, as
+ * Koppel's sign-in always has: Koppel's own override, `.kp-centre` in koppel.css. Heartwood's SignInPage
+ * and EmptyState fill a flush panel and centre themselves, so they pass `align="start"` and the wrapper
+ * stays out of their way.
  */
 export function SignedOutFrame({
   hideBrand,

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Button, Callout, CopyValue, Dialog, TextField } from '@heartwood/ui';
 import { createClient, rotateClientSecret, type ClientView } from '@/api/server';
-import { reasonOf } from '@/errors';
+import { reasonOf, standalone } from '@/errors';
 import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useAnnounce } from '@/shared/announce-context';
 import { useFrame } from '@/shell/frame-context';
@@ -44,7 +44,7 @@ export function RotateSecretDialog({ client, onClose }: { client: Pick<ClientVie
         <p className="kp-muted">{client.name} stops getting new tokens until you give it the new secret. Devices it has attached stay attached until it reconnects.</p>
         {rotate.isError ? (
           <Callout tone="danger" title="Not rotated">
-            {reasonOf(rotate.error, 'the request failed.')}
+            {standalone(reasonOf(rotate.error, 'the request failed.'))}
           </Callout>
         ) : null}
       </div>
@@ -85,7 +85,7 @@ export function AddClientDialog({ onClose }: { onClose: () => void }) {
       </Dialog>
     );
   }
-  const error = add.isError ? reasonOf(add.error, 'the request failed.') : undefined;
+  const error = add.isError ? standalone(reasonOf(add.error, 'the request failed.')) : undefined;
   return (
     <Dialog
       title="Add a client by hand"

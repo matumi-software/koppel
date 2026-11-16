@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { Button, Callout, CopyValue, IconButton } from '@heartwood/ui';
 import { getEnrollmentKey, rotateEnrollmentKey } from '@/api/server';
-import { reasonOf } from '@/errors';
+import { reasonOf, standalone } from '@/errors';
 import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useAnnounce } from '@/shared/announce-context';
 import { useFrame } from '@/shell/frame-context';
@@ -63,7 +63,7 @@ export function ServerKey({ revision }: { revision: number | undefined }) {
             <p className="kp-muted">Computers already linked with the old key keep working. The old key can no longer link a new one, and the new key shows once.</p>
             {rotate.isError ? (
               <Callout tone="danger" title="Not rotated">
-                {reasonOf(rotate.error, 'the request failed.')}
+                {standalone(reasonOf(rotate.error, 'the request failed.'))}
               </Callout>
             ) : null}
           </div>

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { SignInPage } from '@heartwood/ui';
 import { login } from '@/api/auth';
 import { brand } from '@/brand';
-import { reasonOf } from '@/errors';
+import { reasonOf, standalone } from '@/errors';
 import { SignedOutFrame } from '@/shell/signed-out-frame';
 
 /**
@@ -14,7 +14,7 @@ export default function LoginPage({ machineName, onSignedIn }: { machineName: st
   const signIn = useMutation({ mutationFn: login, onSuccess: onSignedIn });
   const [blank, setBlank] = useState(false);
   const busy = signIn.isPending || signIn.isSuccess;
-  const error = blank ? 'Enter the admin password.' : signIn.isError ? reasonOf(signIn.error, 'Could not sign in.') : undefined;
+  const error = blank ? 'Enter the admin password.' : signIn.isError ? standalone(reasonOf(signIn.error, 'Could not sign in.')) : undefined;
 
   return (
     <SignedOutFrame hideBrand flush align="start">

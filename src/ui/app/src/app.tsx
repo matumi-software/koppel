@@ -1,19 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { useActivity } from '@/activity/activity-context';
 import { ActivityPage } from '@/activity/activity-page';
 import { ClientsPage } from '@/clients/clients-page';
 import { ConnectionPage } from '@/connection/connection-page';
 import { DevicesPage } from '@/devices/devices-page';
 import { RemoteDevicesPage } from '@/devices/remote-devices-page';
-import { useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { useLive } from '@/live/live-context';
 import { OverviewPage } from '@/overview/overview-page';
+import { useNeedsYou } from '@/overview/use-needs-you';
 import { setupKey } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';
 import { settingsOptions } from '@/queries';
 import { SecurityPage } from '@/security/security-page';
-import { isClientRole, isServerRole } from '@/settings/roles';
 import { SettingsPage } from '@/settings/settings-page';
 import { SetupPage } from '@/setup/setup-page';
 import { CouldNotReach } from '@/shell/could-not-reach';
@@ -43,7 +41,6 @@ const pages: Record<Page, () => React.JSX.Element> = {
  */
 export function App() {
   const { retry } = useLive();
-  const { items } = useActivity();
   const { state: link } = useLive();
   const locked = link !== 'live';
 
@@ -54,20 +51,13 @@ export function App() {
   const justSetUp = (completed[setupKey] ?? 0) > 0;
   const role = settings.data?.role;
   const page = usePage(justSetUp ? (role === 'client' ? 'connection' : 'clients') : 'overview');
-  const ready = !!settings.data?.setupComplete;
-  const server = useServerDevices(isServerRole(role) && ready);
-  const client = useClientDevices(isClientRole(role) && ready);
 
   // A page that does not exist for this role falls back to the overview, once the role is known:
   // before that a bookmarked #remote would be thrown away on every load.
   const shown: Page = !settings.data || pagesOf(role).includes(page) ? page : 'overview';
 
-  // The nav badge on Overview counts what asks for action: changes still waiting and devices with a fault.
-  const pendingCount = items.filter((i) => i.state === 'pending').length;
-  const faultCount =
-    (server.data?.devices ?? []).filter((d) => d.fault).length +
-    (client.data?.servers ?? []).reduce((total, s) => total + s.devices.filter((e) => e.fault).length, 0);
-  const needs = pendingCount + faultCount;
+  // The nav badge on Overview counts the same list Overview shows as Needs you.
+  const needs = useNeedsYou(locked).length;
   const counts = useMemo(() => ({ overview: needs || undefined }), [needs]);
 
   if (!settings.data) {

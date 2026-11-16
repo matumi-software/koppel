@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { App } from '@/app';
 import { OverviewPage } from '@/overview/overview-page';
 import { accepted, json, mockFetch, renderApp } from './harness';
 import { baseRoutes, inFrame } from './fixtures';
@@ -25,9 +26,17 @@ describe('the overview', () => {
 
     expect(await screen.findByText('Flash drive is not shared')).toBeTruthy();
     expect(screen.getByText('The device is busy.')).toBeTruthy();
-    expect(screen.getByText('Attaching needs vhci-hcd.')).toBeTruthy();
+    expect(screen.getByText('Attaching needs vhci-hcd')).toBeTruthy();
     expect(screen.getByText('bench-laptop wants to pair')).toBeTruthy();
     expect(screen.getByText(/3 things need you\./)).toBeTruthy();
+  });
+
+  it('counts in the nav badge what the overview lists as needing the person', async () => {
+    mockFetch(routes);
+    renderApp(<App />);
+
+    expect(await screen.findByText(/3 things need you\./)).toBeTruthy();
+    expect(screen.getAllByRole('link', { name: 'Overview3' }).length).toBeGreaterThan(0);
   });
 
   it('shares a faulted device again from Needs you, pending until confirmed', async () => {

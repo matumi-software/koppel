@@ -10,7 +10,7 @@ folder per crate, the UI and the installers.
 | Folder | What |
 |---|---|
 | `docs/` | Architecture and decisions |
-| `resources/design-system/` | Koppel's brand assets: the logos and the app icon, with the earlier design system's files. Colours, type, sizes and components now come from Heartwood (`@matumi/tokens`, `@matumi/ui`), see "UI" in `docs/ui.md` |
+| `resources/design-system/` | Koppel's brand assets (the logos, the app icon, the social images) and its voice and product rule. Colours, type, sizes and components now come from Heartwood (`@matumi/tokens`, `@matumi/ui`), see "UI" in `docs/ui.md` |
 | `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/building.md`) |
 | `src/koppel/` | The program (package `koppel`), and `tests/contract/`, the black-box tests that start it and drive it over HTTPS |
 | `src/koppel-*/` | The library crates: `koppel-config`, `koppel-secrets`, `koppel-upgrade`, `koppel-app`, `koppel-web`, `koppel-usb` and `koppel-windows` |

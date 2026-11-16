@@ -1,0 +1,780 @@
+//! The server: its builder, its listener and what the app holds on to.
+
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
+
+use std::convert::Infallible;
+
+use axum::Router;
+use axum::http::{Request, Response};
+use hyper::body::Incoming;
+use hyper_util::rt::TokioIo;
+use rustls::ServerConfig;
+use rustls::server::{ClientHello, ResolvesServerCert};
+use rustls::sign::CertifiedKey;
+use skakel_proto::v3::control_service_server::ControlServiceServer;
+use skakel_proto::v3::stream_service_server::StreamServiceServer;
+use skakel_wire::discovery::MAX_APP_VERSION_LENGTH;
+use skakel_wire::{
+    CONTROL_MESSAGE_LIMIT, Reason, STREAM_MESSAGE_LIMIT, SkakelApp, is_app_id, is_app_service_name,
+    is_stream_type,
+};
+use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+use tokio_rustls::TlsAcceptor;
+use tonic::body::Body;
+use tonic::server::NamedService;
+use tonic::service::RoutesBuilder;
+use tower_service::Service;
+
+use crate::control::Control;
+use crate::discovery::{Announcement, Discovery};
+use crate::enrollment::Enrollment;
+use crate::error::{OptionProblem, ServerError};
+use crate::events::{Events, ServerEvents};
+use crate::grpc::Guarded;
+use crate::http::{self, looks_like_tls, plain_http_answer};
+use crate::limits::Limits;
+use crate::pairing::{Pairing, PairingWindow};
+use crate::service::{Routers, SkakelService, connection_builder};
+use crate::sessions::Sessions;
+use crate::state::{CertificateSwitch, CertificatesView, ClientView, NewClient, ServerState};
+use crate::store::SkakelStore;
+use crate::streams::{Handler, StreamHandler, Streams, erase};
+
+/// How long a client has to start a TLS handshake, and to finish one.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long connections get to finish after the server stops.
+const STOP_GRACE: Duration = Duration::from_secs(3);
+/// What the server's handlers share.
+pub(crate) struct Shared {
+    pub name: String,
+    pub app: SkakelApp,
+    pub state: Arc<ServerState>,
+    pub limits: Limits,
+    pub pairing: Pairing,
+    pub enrollment: Enrollment,
+    pub sessions: Arc<Sessions>,
+    pub streams: HashMap<String, Handler>,
+    pub token_lifetime: Duration,
+}
+
+/// Adds an app's service to the routes, behind the token check, once the server's state exists.
+type AddService = Box<dyn FnOnce(&mut RoutesBuilder, Arc<Shared>) + Send>;
+
+/// An app's gRPC service, waiting for the server's state to be put in front of it.
+struct AppService {
+    name: &'static str,
+    add: AddService,
+}
+
+/// Builds a Skakel server. Give it an app id and version and a store, say where to listen, add
+/// the app's gRPC services, stream types and HTTPS routes, and [`start`](Self::start) it.
+pub struct SkakelServerBuilder {
+    app_id: String,
+    app_version: String,
+    store: Arc<dyn SkakelStore>,
+    name: String,
+    listen: SocketAddr,
+    discovery: bool,
+    discovery_bind: IpAddr,
+    discovery_port: Option<u16>,
+    token_requests_per_minute: u32,
+    pair_requests_per_minute: u32,
+    pairing_always_open: bool,
+    keep_client_secrets: bool,
+    certificate_host_name: String,
+    token_lifetime: Duration,
+    services: Vec<AppService>,
+    streams: HashMap<String, Handler>,
+    routes: Option<Router>,
+}
+
+fn machine_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "localhost".to_owned())
+}
+
+impl SkakelServerBuilder {
+    /// A builder for the app `app_id` (1 to 32 of `a-z`, `0-9` and `-`) at `app_version`,
+    /// keeping its state in `store`.
+    pub fn new(
+        app_id: impl Into<String>,
+        app_version: impl Into<String>,
+        store: impl SkakelStore,
+    ) -> Self {
+        let machine = machine_name();
+        Self {
+            app_id: app_id.into(),
+            app_version: app_version.into(),
+            store: Arc::new(store),
+            name: machine.clone(),
+            listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0),
+            discovery: true,
+            discovery_bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            discovery_port: None,
+            token_requests_per_minute: 60,
+            pair_requests_per_minute: 120,
+            pairing_always_open: false,
+            keep_client_secrets: false,
+            certificate_host_name: machine,
+            token_lifetime: skakel_wire::ACCESS_TOKEN_LIFETIME,
+            services: vec![],
+            streams: HashMap::new(),
+            routes: None,
+        }
+    }
+
+    /// The name people know the server by. Defaults to the machine's name.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// The address and TCP port to serve HTTPS on. A port of 0 takes a free one; discovery
+    /// announces the port actually bound. Defaults to every IPv4 address and a free port.
+    pub fn listen(mut self, address: SocketAddr) -> Self {
+        self.listen = address;
+        self
+    }
+
+    /// Whether to answer discovery probes. On by default.
+    pub fn discovery(mut self, enabled: bool) -> Self {
+        self.discovery = enabled;
+        self
+    }
+
+    /// The UDP port discovery answers on. Defaults to the TCP port. Needs to be the app's port
+    /// for clients to find the server, so it is only set apart for tests.
+    pub fn discovery_port(mut self, port: u16) -> Self {
+        self.discovery_port = Some(port);
+        self
+    }
+
+    /// The local address the discovery socket binds. Defaults to every IPv4 address, which is
+    /// what receiving broadcast probes takes; a server whose HTTPS listens on an IPv6 address
+    /// (such as `[::]`) also answers IPv6 probes, on an IPv6-only socket of its own on the same
+    /// port. An IPv6 address here binds IPv6 (and the unspecified `::` IPv4 too).
+    pub fn discovery_bind(mut self, address: IpAddr) -> Self {
+        self.discovery_bind = address;
+        self
+    }
+
+    /// Token requests one address may make a minute. Defaults to 60.
+    pub fn token_requests_per_minute(mut self, limit: u32) -> Self {
+        self.token_requests_per_minute = limit;
+        self
+    }
+
+    /// Pairing calls, polls included, one address may make a minute. Defaults to 120.
+    pub fn pair_requests_per_minute(mut self, limit: u32) -> Self {
+        self.pair_requests_per_minute = limit;
+        self
+    }
+
+    /// Takes new pairing requests always, with no window to open, as a server did before pairing
+    /// had windows. For an unattended setup with nobody to open one. By default a server takes
+    /// no new pairing request until the app calls [`SkakelServer::open_pairing`], so a person is
+    /// there when one arrives, and a stranger on the network cannot fill the server's pairing
+    /// budget at any time. See [`Pairing::open_pairing`].
+    pub fn pairing_always_open(mut self) -> Self {
+        self.pairing_always_open = true;
+        self
+    }
+
+    /// Keeps each client's secret in the state, for an app that shows it again. Off by default:
+    /// the state then holds only a hash.
+    pub fn keep_client_secrets(mut self, keep: bool) -> Self {
+        self.keep_client_secrets = keep;
+        self
+    }
+
+    /// The host name in the certificate. Clients pin the fingerprint and ignore it.
+    pub fn certificate_host_name(mut self, name: impl Into<String>) -> Self {
+        self.certificate_host_name = name.into();
+        self
+    }
+
+    /// How long the access tokens it issues last, at most the protocol's 30 minutes. For tests of
+    /// what happens when a token runs out: it is there with the `test-util` feature.
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn token_lifetime(mut self, lifetime: Duration) -> Self {
+        self.token_lifetime = lifetime;
+        self
+    }
+
+    /// Adds one of the app's own gRPC services, such as the server tonic generated from the app's
+    /// `.proto` file, beside Skakel's on the same port and connections. Its package must not be
+    /// `skakel` or start with `skakel.`.
+    ///
+    /// Skakel checks every call's bearer token, and the client's generation, before the service
+    /// sees it, and refuses one without a current token with `TOKEN_REFUSED`. A call that gets
+    /// through carries a [`ClientPrincipal`](crate::ClientPrincipal) in its extensions, so the app
+    /// knows which client called. When that client is revoked or its secret rotated, or the server
+    /// stops, Skakel ends its calls still running with `REVOKED`, `ROTATED` or `STOPPING`. A token
+    /// that expires does not end a call already running.
+    pub fn grpc_service<S>(mut self, service: S) -> Self
+    where
+        S: NamedService
+            + Service<Request<Body>, Response = Response<Body>, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        S::Future: Send + 'static,
+    {
+        self.services.push(AppService {
+            name: S::NAME,
+            add: Box::new(move |routes, shared| {
+                routes.add_service(Guarded::new(service, shared, true));
+            }),
+        });
+        self
+    }
+
+    /// Adds a stream type, opened with `StreamService.Open` and this type in its `open` frame.
+    pub fn stream(mut self, stream_type: impl Into<String>, handler: impl StreamHandler) -> Self {
+        self.streams.insert(stream_type.into(), erase(handler));
+        self
+    }
+
+    /// Adds the app's own routes. They sit beside Skakel's, and can take the bearer token with
+    /// the [`ClientPrincipal`](crate::ClientPrincipal) extractor. Paths under `/skakel/` are
+    /// Skakel's own.
+    pub fn routes(mut self, routes: Router) -> Self {
+        self.routes = Some(routes);
+        self
+    }
+
+    fn problems(&self) -> Vec<OptionProblem> {
+        let mut problems = vec![];
+        if !is_app_id(&self.app_id) {
+            problems.push(OptionProblem::AppId);
+        }
+        if self.app_version.trim().is_empty()
+            || self.app_version.chars().count() > MAX_APP_VERSION_LENGTH
+        {
+            problems.push(OptionProblem::AppVersion);
+        }
+        if self.name.trim().is_empty() {
+            problems.push(OptionProblem::Name);
+        }
+        if self.token_requests_per_minute < 1 || self.pair_requests_per_minute < 1 {
+            problems.push(OptionProblem::RateLimits);
+        }
+        if self.certificate_host_name.trim().is_empty() {
+            problems.push(OptionProblem::CertificateHostName);
+        }
+        for (i, service) in self.services.iter().enumerate() {
+            if !is_app_service_name(service.name) {
+                problems.push(OptionProblem::ServiceName(service.name.to_owned()));
+            } else if self.services[..i].iter().any(|s| s.name == service.name) {
+                problems.push(OptionProblem::ServiceAddedTwice(service.name.to_owned()));
+            }
+        }
+        for stream_type in self.streams.keys() {
+            if !is_stream_type(stream_type) {
+                problems.push(OptionProblem::StreamType(stream_type.clone()));
+            }
+        }
+        problems
+    }
+
+    /// Starts the server: binds the port, loads or makes its keys, starts answering discovery
+    /// and serving on a listener of its own.
+    pub async fn start(self) -> Result<SkakelServer, ServerError> {
+        let problems = self.problems();
+        if !problems.is_empty() {
+            return Err(ServerError::Options(problems));
+        }
+        let listener = TcpListener::bind(self.listen)
+            .await
+            .map_err(ServerError::Bind)?;
+        let local_addr = listener.local_addr().map_err(ServerError::Bind)?;
+        self.launch(Some(listener), local_addr).await
+    }
+
+    /// Starts the server without a listener, for an app that serves Skakel on its own, beside
+    /// its own pages: loads or makes its keys and starts answering discovery. `app_addr` is the
+    /// address the app's listener is bound to, with the port it actually bound; discovery
+    /// announces that port and answers on it (or on [`discovery_port`](Self::discovery_port)), and
+    /// [`SkakelServer::local_addr`] gives it back. [`listen`](Self::listen) is not used.
+    ///
+    /// The app then serves [`SkakelServer::service`] on its server, presents the certificate with
+    /// a TLS acceptor built from [`SkakelServer::tls_config`], and sets up its connections as
+    /// [`connection_builder`](crate::connection_builder) does. See the crate docs.
+    pub async fn start_mounted(self, app_addr: SocketAddr) -> Result<SkakelServer, ServerError> {
+        let mut problems = self.problems();
+        if self.discovery && self.discovery_port.is_none() && app_addr.port() == 0 {
+            problems.push(OptionProblem::DiscoveryPort);
+        }
+        if !problems.is_empty() {
+            return Err(ServerError::Options(problems));
+        }
+        self.launch(None, app_addr).await
+    }
+
+    /// Starts everything but the listener, and the accept loop when there is a listener.
+    async fn launch(
+        self,
+        listener: Option<TcpListener>,
+        local_addr: SocketAddr,
+    ) -> Result<SkakelServer, ServerError> {
+        let events = Events::new();
+        let state = ServerState::start(
+            self.store,
+            self.keep_client_secrets,
+            self.certificate_host_name,
+            self.app_id.clone(),
+            events,
+        )
+        .await?;
+        let pairing = Pairing::new(state.clone());
+        if self.pairing_always_open {
+            pairing.set_always_open();
+        }
+        pairing.spawn_sweeper();
+        let sessions = Sessions::new(state.clone());
+        sessions.spawn_watch();
+
+        let app = SkakelApp {
+            id: self.app_id,
+            version: self.app_version,
+        };
+        let name = self.name;
+        let shared = Arc::new(Shared {
+            name: name.clone(),
+            app: app.clone(),
+            state: state.clone(),
+            limits: Limits::new(
+                self.token_requests_per_minute,
+                self.pair_requests_per_minute,
+            ),
+            pairing: pairing.clone(),
+            enrollment: Enrollment::new(state.clone()),
+            sessions: sessions.clone(),
+            streams: self.streams,
+            token_lifetime: self.token_lifetime,
+        });
+
+        let mut router = http::router(shared.clone());
+        if let Some(routes) = self.routes {
+            router = router.merge(routes);
+        }
+        let https = http::guard(router, shared.clone());
+        let grpc = grpc_router(&shared, self.services);
+        let tls_config = tls_config(&state)?;
+
+        let (stop, stopped) = watch::channel(false);
+        let service = SkakelService::new(Routers { https, grpc }, stopped.clone());
+        let mut tasks = vec![];
+
+        let discovery = Discovery::new(
+            state.clone(),
+            Announcement {
+                name,
+                port: local_addr.port(),
+                app,
+            },
+            self.discovery_bind,
+            local_addr.is_ipv6(),
+            self.discovery_port.unwrap_or(local_addr.port()),
+            stopped.clone(),
+        );
+        if self.discovery {
+            // A port that is not free costs only discovery; clients can still enter the address,
+            // and `start_discovery` can try again.
+            let _ = discovery.start().await;
+        }
+
+        if let Some(listener) = listener {
+            tasks.push(tokio::spawn(accept_loop(
+                listener,
+                TlsAcceptor::from(tls_config.clone()),
+                service.clone(),
+                stopped.clone(),
+            )));
+        }
+
+        Ok(SkakelServer {
+            shared,
+            service,
+            tls_config,
+            local_addr,
+            discovery,
+            stop,
+            tasks,
+        })
+    }
+}
+
+/// Skakel's control and stream services and the app's, each behind the token check.
+fn grpc_router(shared: &Arc<Shared>, services: Vec<AppService>) -> Router {
+    let mut routes = RoutesBuilder::default();
+    let control = ControlServiceServer::new(Control {
+        shared: shared.clone(),
+    })
+    .max_decoding_message_size(CONTROL_MESSAGE_LIMIT)
+    .max_encoding_message_size(CONTROL_MESSAGE_LIMIT);
+    routes.add_service(Guarded::new(control, shared.clone(), false));
+    let streams = StreamServiceServer::new(Streams {
+        shared: shared.clone(),
+    })
+    .max_decoding_message_size(STREAM_MESSAGE_LIMIT)
+    .max_encoding_message_size(STREAM_MESSAGE_LIMIT);
+    routes.add_service(Guarded::new(streams, shared.clone(), false));
+    for service in services {
+        (service.add)(&mut routes, shared.clone());
+    }
+    routes.routes().into_axum_router()
+}
+
+/// A running Skakel server.
+pub struct SkakelServer {
+    shared: Arc<Shared>,
+    service: SkakelService,
+    tls_config: Arc<ServerConfig>,
+    local_addr: SocketAddr,
+    discovery: Discovery,
+    stop: watch::Sender<bool>,
+    tasks: Vec<JoinHandle<()>>,
+}
+
+impl SkakelServer {
+    /// The address HTTPS is served on, with the port actually bound. For a server started with
+    /// [`start_mounted`](SkakelServerBuilder::start_mounted), the app's address it was given.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    /// Skakel's HTTPS endpoints and gRPC services as one tower service, for an app that serves
+    /// Skakel on its own listener (see [`SkakelServerBuilder::start_mounted`]). Every request it
+    /// takes must carry the caller's address; see [`SkakelService`].
+    pub fn service(&self) -> SkakelService {
+        self.service.clone()
+    }
+
+    /// The TLS settings Skakel's own listener uses, for an app's TLS acceptor: the server's
+    /// certificate, ALPN `h2` and `http/1.1`, and no session resumption.
+    ///
+    /// Every handshake asks the server for its current certificate, so the acceptor presents a
+    /// switched certificate from the next connection on, as the protocol's handover needs, and
+    /// never the prepared one before the switch. Session resumption stays off because a resumed
+    /// session shows the client no certificate, and a client that follows a handover proves the
+    /// new certificate by the one a new connection presents. An app that changes the settings
+    /// (a clone of the config is a plain `rustls::ServerConfig`) keeps `cert_resolver`,
+    /// `session_storage` and `send_tls13_tickets` as they are.
+    ///
+    /// The settings belong to this server: an app that starts a new server builds its acceptor
+    /// again from the new server's settings.
+    pub fn tls_config(&self) -> Arc<ServerConfig> {
+        self.tls_config.clone()
+    }
+
+    /// The UDP address discovery answers on, when it is running.
+    pub fn discovery_addr(&self) -> Option<SocketAddr> {
+        self.discovery.address()
+    }
+
+    /// Binds the discovery port and starts answering probes, for a server that was built with
+    /// [`discovery(false)`](SkakelServerBuilder::discovery) or whose discovery was stopped, and
+    /// gives the address it answers on. Does nothing but give the address when it is already
+    /// answering, so it is safe to call again and from any task.
+    ///
+    /// A port that is not free is an error, and discovery stays off. After
+    /// [`stop_discovery`](Self::stop_discovery), a configured port of 0 takes the port it had
+    /// before. An error after [`shutdown`](Self::shutdown) has begun.
+    pub async fn start_discovery(&self) -> std::io::Result<SocketAddr> {
+        self.discovery.start().await
+    }
+
+    /// Stops answering probes and releases the UDP port before it returns. Does nothing when
+    /// discovery is not running, so it is safe to call again and from any task. Pairing, tokens
+    /// and every call already running are not affected, and clients that know the address can
+    /// still reach the server.
+    pub async fn stop_discovery(&self) {
+        self.discovery.stop().await;
+    }
+
+    /// The fingerprint of the certificate the server presents.
+    pub fn fingerprint(&self) -> String {
+        self.shared.state.fingerprint()
+    }
+
+    /// The registered clients.
+    pub fn clients(&self) -> Clients {
+        Clients {
+            state: self.shared.state.clone(),
+        }
+    }
+
+    /// The certificates.
+    pub fn certificates(&self) -> Certificates {
+        Certificates {
+            state: self.shared.state.clone(),
+        }
+    }
+
+    /// Enrolling a client with a pairing code or a server key, which needs no approval on the
+    /// server. See [`Enrollment`].
+    pub fn enrollment(&self) -> Enrollment {
+        self.shared.enrollment.clone()
+    }
+
+    /// The pairing requests.
+    pub fn pairing(&self) -> Pairing {
+        self.shared.pairing.clone()
+    }
+
+    /// Takes new pairing requests for `duration` (held to between one minute and one hour). The
+    /// same as [`Pairing::open_pairing`], which says what a window does and does not do.
+    pub fn open_pairing(&self, duration: Duration) {
+        self.shared.pairing.open_pairing(duration);
+    }
+
+    /// Closes the pairing window now. The same as [`Pairing::close_pairing`].
+    pub fn close_pairing(&self) {
+        self.shared.pairing.close_pairing();
+    }
+
+    /// Whether new pairing requests are taken now, and for how long. The same as
+    /// [`Pairing::pairing_window`].
+    pub fn pairing_window(&self) -> PairingWindow {
+        self.shared.pairing.pairing_window()
+    }
+
+    /// What happens on the server, as a stream the app can read. A slow reader misses events
+    /// rather than slowing the server.
+    pub fn subscribe(&self) -> ServerEvents {
+        self.shared.state.events.subscribe()
+    }
+
+    /// How many calls a client has running that stay open: control calls, streams and calls to
+    /// the app's own services.
+    pub fn open_sessions(&self, client_id: &str) -> usize {
+        self.shared.sessions.count_for(client_id)
+    }
+
+    /// Stops the server. Control calls are told `closing` and every call still running ends with
+    /// `STOPPING`, the listener closes, and connections have a few seconds to finish.
+    pub async fn shutdown(mut self) {
+        self.shared.sessions.end_all(Reason::Stopping);
+        // Every call hands its closing message and status on before it is gone, so connections are
+        // asked to wind down only after that, and not after a guess at how long it takes.
+        self.shared.sessions.wait_until_empty(STOP_GRACE).await;
+        self.stop.send_replace(true);
+        self.discovery.stop().await;
+        for task in self.tasks.drain(..) {
+            let _ = tokio::time::timeout(STOP_GRACE + Duration::from_secs(1), task).await;
+        }
+    }
+}
+
+impl Drop for SkakelServer {
+    fn drop(&mut self) {
+        self.shared.sessions.end_all(Reason::Stopping);
+        self.stop.send_replace(true);
+    }
+}
+
+/// The registered clients.
+#[derive(Clone)]
+pub struct Clients {
+    state: Arc<ServerState>,
+}
+
+impl Clients {
+    /// Every client.
+    pub fn all(&self) -> Vec<ClientView> {
+        self.state.clients()
+    }
+
+    /// Registers a client without pairing, for an app that makes its own. The name loses control
+    /// and format characters and the spaces around it; an empty one is an error.
+    pub async fn register(&self, name: &str) -> Result<NewClient, ServerError> {
+        self.state.register_client(name).await
+    }
+
+    /// Gives a client a new secret. Its tokens from before stop working, and its calls still
+    /// running end at once with `ROTATED`. `None` for an unknown client.
+    pub async fn rotate_secret(&self, client_id: &str) -> Result<Option<String>, ServerError> {
+        self.state.rotate_secret(client_id).await
+    }
+
+    /// Removes a client. Its tokens stop working, and its calls still running end at once with
+    /// `REVOKED`. False for an
+    /// unknown client.
+    pub async fn revoke(&self, client_id: &str) -> Result<bool, ServerError> {
+        self.state.revoke_client(client_id).await
+    }
+
+    /// The name of a client.
+    pub fn name_of(&self, client_id: &str) -> Option<String> {
+        self.state.find(client_id).map(|c| c.name)
+    }
+
+    /// The secret of a client, when the server was told to keep them.
+    pub fn secret_of(&self, client_id: &str) -> Option<String> {
+        self.state.find(client_id).and_then(|c| c.secret)
+    }
+}
+
+/// The server's certificates.
+#[derive(Clone)]
+pub struct Certificates {
+    state: Arc<ServerState>,
+}
+
+impl Certificates {
+    /// The certificate the server presents, DER.
+    pub fn certificate_der(&self) -> Vec<u8> {
+        self.state.loaded().certified.cert[0].as_ref().to_vec()
+    }
+
+    /// Its fingerprint.
+    pub fn fingerprint(&self) -> String {
+        self.state.fingerprint()
+    }
+
+    /// The fingerprint of the next certificate, during a handover.
+    pub fn next_fingerprint(&self) -> Option<String> {
+        self.state.loaded().next_fingerprint.clone()
+    }
+
+    /// Both fingerprints and when the next certificate was prepared.
+    pub fn view(&self) -> CertificatesView {
+        self.state.certificates()
+    }
+
+    /// Prepares the next certificate. Clients are told on the control channel; the server goes on
+    /// presenting the current one. Returns the next fingerprint, or `None` when one is already
+    /// prepared.
+    pub async fn prepare_next_certificate(&self) -> Result<Option<String>, ServerError> {
+        self.state.prepare_certificate().await
+    }
+
+    /// Drops the prepared certificate. Clients forget it. False when there was none.
+    pub async fn cancel_next_certificate(&self) -> Result<bool, ServerError> {
+        self.state.cancel_certificate().await
+    }
+
+    /// Presents the prepared certificate from now on. `None` when none was prepared; otherwise
+    /// the names of the clients that never stored it, who have to pair again.
+    pub async fn switch_certificate(&self) -> Result<Option<CertificateSwitch>, ServerError> {
+        self.state.switch_certificate().await
+    }
+}
+
+struct Resolver(Arc<ServerState>);
+
+impl std::fmt::Debug for Resolver {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Resolver")
+    }
+}
+
+impl ResolvesServerCert for Resolver {
+    fn resolve(&self, _client_hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        Some(self.0.loaded().certified.clone())
+    }
+}
+
+fn tls_config(state: &Arc<ServerState>) -> Result<Arc<ServerConfig>, ServerError> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = ServerConfig::builder_with_provider(provider)
+        // TLS 1.3 only: both ends are Skakel, and every certificate check here is a pin.
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| ServerError::Tls(Box::new(e)))?
+        .with_no_client_auth()
+        .with_cert_resolver(Arc::new(Resolver(state.clone())));
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    // No session resumption. A resumed session shows the client no certificate, and a client that follows
+    // a handover proves the new certificate by the one a new connection presents (docs/protocol.md,
+    // "Certificates"). rustls would also resume a session made under the old certificate after the
+    // switch. A full handshake on a P-256 certificate costs next to nothing.
+    config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
+    config.send_tls13_tickets = 0;
+    Ok(Arc::new(config))
+}
+
+async fn accept_loop(
+    listener: TcpListener,
+    acceptor: TlsAcceptor,
+    service: SkakelService,
+    mut stopped: watch::Receiver<bool>,
+) {
+    let mut connections = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            _ = stopped.changed() => break,
+            accepted = listener.accept() => match accepted {
+                Ok((stream, remote)) => {
+                    connections.spawn(serve_connection(
+                        stream,
+                        remote,
+                        acceptor.clone(),
+                        service.clone(),
+                        stopped.clone(),
+                    ));
+                }
+                // A connection that was reset before it was taken is its own affair.
+                Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            },
+            Some(_) = connections.join_next(), if !connections.is_empty() => {}
+        }
+    }
+    drop(listener);
+    let _ = tokio::time::timeout(STOP_GRACE, async {
+        while connections.join_next().await.is_some() {}
+    })
+    .await;
+    connections.abort_all();
+}
+
+async fn serve_connection(
+    mut stream: TcpStream,
+    remote: SocketAddr,
+    acceptor: TlsAcceptor,
+    service: SkakelService,
+    mut stopped: watch::Receiver<bool>,
+) {
+    let _ = stream.set_nodelay(true);
+    let mut first = [0u8; 1];
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, stream.peek(&mut first)).await {
+        Ok(Ok(1)) if looks_like_tls(first[0]) => {}
+        Ok(Ok(1)) => {
+            // Plain HTTP on the HTTPS port: say so, in words, instead of hanging up.
+            let _ = stream.write_all(&plain_http_answer()).await;
+            let _ = stream.shutdown().await;
+            return;
+        }
+        _ => return,
+    }
+    let Ok(Ok(tls)) = tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await else {
+        return;
+    };
+    let service = hyper::service::service_fn(move |mut request: hyper::Request<Incoming>| {
+        request
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(remote));
+        let mut service = service.clone();
+        async move { service.call(request).await }
+    });
+    let builder = connection_builder();
+    let connection = builder.serve_connection_with_upgrades(TokioIo::new(tls), service);
+    tokio::pin!(connection);
+    tokio::select! {
+        _ = connection.as_mut() => {}
+        _ = stopped.changed() => {
+            connection.as_mut().graceful_shutdown();
+            let _ = tokio::time::timeout(STOP_GRACE, connection.as_mut()).await;
+        }
+    }
+}

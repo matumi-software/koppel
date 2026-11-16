@@ -1,0 +1,614 @@
+//! A `serial` stream: one serial port on the server. Data goes both ways through
+//! [`send`](SerialConnection::send) and [`recv`](SerialConnection::recv); the port's settings and
+//! lines are changed with the control messages, and what the server says about the port comes back
+//! as properties and events. A change to the line settings counts as done only when the server
+//! answers it, by the request id the change carried.
+//!
+//! One task reads the stream, so control messages are seen while the app is not reading data. Data
+//! waits in a small buffer: an app that stops reading stops the reads, and the server slows down the
+//! port instead of losing bytes.
+
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::Duration;
+
+use prost::bytes::Bytes;
+use skakel_proto::v3::OpenRequest;
+use skakel_serial::{ClientMessage, ErrorCode, LineSettings, ModemStatus, ServerMessage};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio::task::JoinHandle;
+
+use crate::events::{Events, StateWatch};
+use crate::failure::{Error, FailureKind, bad_answer};
+use crate::streams::{Frame, StreamClose, StreamConnection};
+
+/// How long the server has to say the port is open after the stream opened.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long the server has to answer a change to the line settings, unless set otherwise.
+const DEFAULT_CHANGE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The longest control message read; a longer one is dropped.
+const MAX_CONTROL_BYTES: usize = 64 * 1024;
+
+/// How many chunks of data wait for the app to read them.
+const DATA_CHUNKS: usize = 16;
+
+/// What became of a change to the line settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SerialChange {
+    /// True when the server echoed the settings: the change is done. False when the port refused it.
+    pub applied: bool,
+    /// The settings on the port now: the echoed ones, or the ones before a refused change.
+    pub line_settings: LineSettings,
+    /// Why the port refused, from the server, for a person.
+    pub detail: Option<String>,
+}
+
+/// What the port reports besides the answer to a change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SerialEvent {
+    /// An input line changed. [`SerialConnection::modem_status`] has the new state already.
+    ModemStatus(ModemStatus),
+    /// The port reported an error (framing, parity, overrun), or refused something that was not a
+    /// line settings change.
+    Error {
+        /// What kind of error.
+        code: ErrorCode,
+        /// What happened, for a person.
+        detail: Option<String>,
+    },
+}
+
+enum Answer {
+    Applied(LineSettings),
+    Refused(Option<String>),
+}
+
+struct Pending {
+    /// The `request_id` the change went out with; an answer carries it back.
+    request_id: u32,
+    answer: oneshot::Sender<Answer>,
+}
+
+struct Answers {
+    change: Option<Pending>,
+    /// The next `request_id`: nonzero, and not the one the last change used.
+    next_id: u32,
+}
+
+impl Default for Answers {
+    fn default() -> Self {
+        Self {
+            change: None,
+            next_id: 1,
+        }
+    }
+}
+
+struct Shared {
+    line_settings: watch::Sender<LineSettings>,
+    modem_status: watch::Sender<ModemStatus>,
+    answers: Mutex<Answers>,
+    events: broadcast::Sender<SerialEvent>,
+}
+
+/// A `serial` stream.
+pub struct SerialConnection {
+    stream: Arc<StreamConnection>,
+    shared: Arc<Shared>,
+    data: tokio::sync::Mutex<mpsc::Receiver<Bytes>>,
+    changing: tokio::sync::Mutex<()>,
+    change_timeout: Mutex<Duration>,
+    receiving: JoinHandle<()>,
+}
+
+impl std::fmt::Debug for SerialConnection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SerialConnection").finish_non_exhaustive()
+    }
+}
+
+impl Drop for SerialConnection {
+    fn drop(&mut self) {
+        self.receiving.abort();
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl SerialConnection {
+    /// Waits for the server's `opened`, then starts reading.
+    pub(crate) async fn start(stream: StreamConnection) -> Result<Self, Error> {
+        let opened = tokio::time::timeout(OPEN_TIMEOUT, async {
+            match stream.recv().await {
+                None => {
+                    log::info!(
+                        "A serial stream closed with {:?} before the port opened",
+                        stream.close_info().map(|c| c.code)
+                    );
+                    Err(Error::of(FailureKind::ConnectionLost))
+                }
+                Some(Frame::Control(bytes)) if bytes.len() <= MAX_CONTROL_BYTES => {
+                    match ServerMessage::decode(&bytes) {
+                        Ok(ServerMessage::Opened {
+                            line_settings,
+                            modem_status,
+                        }) => Ok((line_settings, modem_status)),
+                        _ => Err(bad_answer(
+                            "The serial stream did not start with an opened message.",
+                        )),
+                    }
+                }
+                Some(_) => Err(bad_answer(
+                    "The serial stream did not start with an opened message.",
+                )),
+            }
+        })
+        .await
+        .map_err(Error::from_cause)?;
+        let (line_settings, modem_status) = opened?;
+
+        let (events, _) = broadcast::channel(64);
+        let shared = Arc::new(Shared {
+            line_settings: watch::channel(line_settings).0,
+            modem_status: watch::channel(modem_status).0,
+            answers: Mutex::new(Answers::default()),
+            events,
+        });
+        let stream = Arc::new(stream);
+        let (data_tx, data_rx) = mpsc::channel(DATA_CHUNKS);
+        let receiving = tokio::spawn(receive(stream.clone(), shared.clone(), data_tx));
+        Ok(Self {
+            stream,
+            shared,
+            data: tokio::sync::Mutex::new(data_rx),
+            changing: tokio::sync::Mutex::new(()),
+            change_timeout: Mutex::new(DEFAULT_CHANGE_TIMEOUT),
+            receiving,
+        })
+    }
+
+    /// The stream underneath.
+    pub fn stream(&self) -> &StreamConnection {
+        &self.stream
+    }
+
+    /// The port's settings, as the server last said.
+    pub fn line_settings(&self) -> LineSettings {
+        *self.shared.line_settings.borrow()
+    }
+
+    /// The port's settings, to wait on for the server's next word about them.
+    pub fn watch_line_settings(&self) -> StateWatch<LineSettings> {
+        StateWatch::new(self.shared.line_settings.subscribe())
+    }
+
+    /// The port's input lines, as the server last said.
+    pub fn modem_status(&self) -> ModemStatus {
+        *self.shared.modem_status.borrow()
+    }
+
+    /// The port's input lines, to wait on for the next change.
+    pub fn watch_modem_status(&self) -> StateWatch<ModemStatus> {
+        StateWatch::new(self.shared.modem_status.subscribe())
+    }
+
+    /// Modem line changes and errors the port reports, from now on and in order.
+    pub fn events(&self) -> Events<SerialEvent> {
+        Events::new(self.shared.events.subscribe())
+    }
+
+    /// Completes when the stream ended, with how: a [`StreamCloseReason::TypeDefined`] close whose
+    /// `type_reason` is [`PORT_FAULT`](skakel_serial::PORT_FAULT) is a port that reported a fault.
+    ///
+    /// [`StreamCloseReason::TypeDefined`]: crate::StreamCloseReason::TypeDefined
+    pub async fn closed(&self) -> StreamClose {
+        self.stream.closed().await
+    }
+
+    /// Sends bytes to the port.
+    pub async fn send(&self, data: impl Into<Bytes>) -> Result<(), Error> {
+        self.stream.send_data(data).await
+    }
+
+    /// The next bytes that came from the port, or `None` once the stream has ended and everything
+    /// was read. One task at a time reads.
+    pub async fn recv(&self) -> Option<Bytes> {
+        self.data.lock().await.recv().await
+    }
+
+    /// The next chunk of data for a byte-stream view that owns this connection.
+    pub(crate) fn poll_data(&mut self, cx: &mut Context<'_>) -> Poll<Option<Bytes>> {
+        self.data.get_mut().poll_recv(cx)
+    }
+
+    /// A sender for the data the port is sent, and the way to end the sending side.
+    pub(crate) fn outgoing(&self) -> Option<mpsc::Sender<OpenRequest>> {
+        self.stream.outgoing()
+    }
+
+    pub(crate) fn end_sending(&self) {
+        self.stream.end_sending();
+    }
+
+    /// How long the server has to answer a change to the line settings: 10 seconds unless set.
+    pub fn set_change_timeout(&self, timeout: Duration) {
+        *lock(&self.change_timeout) = timeout;
+    }
+
+    /// Changes the port's settings and waits until the server answers, or the port refuses. One
+    /// change at a time; the server has 10 seconds to answer, so a change it never answers does not
+    /// hold up the next. Each change goes out with its own request id and only the answer that
+    /// carries it is taken, so one that comes after its change stopped waiting is not taken for the
+    /// next.
+    ///
+    /// Every setting is sent; the protocol has no partial change. Fails with
+    /// [`FailureKind::ConnectionLost`] when the stream ended before the server answered, or
+    /// [`FailureKind::UnexpectedAnswer`] when the server did not answer in time. Either way the
+    /// change may still be applied; [`line_settings`](Self::line_settings) follows what the server
+    /// says. Dropping the future stops waiting.
+    pub async fn set_line_settings(&self, settings: LineSettings) -> Result<SerialChange, Error> {
+        let _changing = self.changing.lock().await;
+        let (answer, answered) = oneshot::channel();
+        let mut answered = answered;
+        let request_id = {
+            let mut answers = lock(&self.shared.answers);
+            let request_id = answers.next_id;
+            answers.next_id = request_id.checked_add(1).unwrap_or(1);
+            answers.change = Some(Pending { request_id, answer });
+            request_id
+        };
+
+        let result = async {
+            if self.stream.close_info().is_some() {
+                return Err(Error::of(FailureKind::ConnectionLost));
+            }
+            let timeout = *lock(&self.change_timeout);
+            let waited = tokio::time::timeout(timeout, async {
+                self.send_control(&ClientMessage::LineSettings {
+                    request_id,
+                    settings,
+                })
+                .await?;
+                match (&mut answered).await {
+                    Ok(Answer::Applied(applied)) => Ok(SerialChange {
+                        applied: true,
+                        line_settings: applied,
+                        detail: None,
+                    }),
+                    Ok(Answer::Refused(detail)) => Ok(SerialChange {
+                        applied: false,
+                        line_settings: self.line_settings(),
+                        detail,
+                    }),
+                    Err(_) => Err(Error::of(FailureKind::ConnectionLost)),
+                }
+            })
+            .await;
+            match waited {
+                Ok(result) => result,
+                Err(elapsed) => {
+                    log::warn!(
+                        "The server did not answer a change to the line settings on a serial stream within {} seconds",
+                        timeout.as_secs_f64()
+                    );
+                    Err(Error::caused(FailureKind::UnexpectedAnswer, elapsed))
+                }
+            }
+        }
+        .await;
+
+        lock(&self.shared.answers).change = None;
+        result
+    }
+
+    /// Sets the output lines. A line left `None` stays as it is. RTS is ignored while flow control
+    /// is RTS/CTS.
+    pub async fn set_modem_lines(&self, dtr: Option<bool>, rts: Option<bool>) -> Result<(), Error> {
+        self.send_control(&ClientMessage::ModemLines { dtr, rts })
+            .await
+    }
+
+    /// Starts or ends a break.
+    pub async fn set_break(&self, on: bool) -> Result<(), Error> {
+        self.send_control(&ClientMessage::Break { on }).await
+    }
+
+    /// Throws away what is buffered on the server: the bytes read from the port and not sent yet
+    /// (`input`), and the bytes waiting to be written to it (`output`).
+    pub async fn purge(&self, input: bool, output: bool) -> Result<(), Error> {
+        self.send_control(&ClientMessage::Purge { input, output })
+            .await
+    }
+
+    /// Ends the client's side of the stream and waits briefly for the server to end it.
+    pub async fn close(&self) {
+        self.stream.close().await;
+    }
+
+    /// One frame at a time, so a control message lands between the bytes sent before and after it.
+    async fn send_control(&self, message: &ClientMessage) -> Result<(), Error> {
+        self.stream.send_control(message.encode()).await
+    }
+}
+
+async fn receive(stream: Arc<StreamConnection>, shared: Arc<Shared>, data: mpsc::Sender<Bytes>) {
+    while let Some(frame) = stream.recv().await {
+        match frame {
+            Frame::Data(bytes) => {
+                if !bytes.is_empty() && data.send(bytes).await.is_err() {
+                    break;
+                }
+            }
+            Frame::Control(bytes) => {
+                if bytes.len() > MAX_CONTROL_BYTES {
+                    log::warn!("Dropped a control message on a serial stream: too long");
+                } else {
+                    handle(&shared, &bytes);
+                }
+            }
+        }
+    }
+    // The change waiting for an answer will not get one.
+    lock(&shared.answers).change = None;
+}
+
+fn handle(shared: &Shared, bytes: &[u8]) {
+    let message = match ServerMessage::decode(bytes) {
+        Ok(message) => message,
+        Err(why) => {
+            log::warn!("Dropped a control message on a serial stream: {why}");
+            return;
+        }
+    };
+    match message {
+        ServerMessage::Opened {
+            line_settings,
+            modem_status,
+        } => {
+            shared.line_settings.send_replace(line_settings);
+            shared.modem_status.send_replace(modem_status);
+        }
+        ServerMessage::LineSettings {
+            request_id,
+            settings,
+        } => {
+            // The port's settings are what the server says, whichever change this answers.
+            shared.line_settings.send_replace(settings);
+            if let Some(pending) = answer_for(shared, request_id) {
+                let _ = pending.send(Answer::Applied(settings));
+            }
+        }
+        ServerMessage::ModemStatus(status) => {
+            shared.modem_status.send_replace(status);
+            let _ = shared.events.send(SerialEvent::ModemStatus(status));
+        }
+        ServerMessage::Error {
+            request_id: 0,
+            code,
+            detail,
+        } => {
+            let _ = shared.events.send(SerialEvent::Error { code, detail });
+        }
+        ServerMessage::Error {
+            request_id,
+            code: _,
+            detail,
+        } => {
+            // A refusal of a change. One that names a change no longer waiting is ignored.
+            if let Some(pending) = answer_for(shared, request_id) {
+                let _ = pending.send(Answer::Refused(detail));
+            }
+        }
+        other => {
+            log::warn!("Ignored a serial control message this end does not use: {other:?}");
+        }
+    }
+}
+
+/// The change an answer belongs to, or `None` when it names no change that is waiting: an answer
+/// to a change that gave up, or one that carries no usable id.
+fn answer_for(shared: &Shared, request_id: u32) -> Option<oneshot::Sender<Answer>> {
+    let mut answers = lock(&shared.answers);
+    if request_id != 0 && answers.change.as_ref().map(|p| p.request_id) == Some(request_id) {
+        return answers.change.take().map(|p| p.answer);
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use skakel_serial::{DataBits, FlowControl, Parity, StopBits};
+
+    fn settings(baud: u32) -> LineSettings {
+        LineSettings {
+            baud,
+            data_bits: DataBits::Eight,
+            parity: Parity::None,
+            stop_bits: StopBits::One,
+            flow_control: FlowControl::None,
+        }
+    }
+
+    fn shared(pending: Option<(u32, oneshot::Sender<Answer>)>) -> Shared {
+        let (events, _) = broadcast::channel(8);
+        Shared {
+            line_settings: watch::channel(settings(9600)).0,
+            modem_status: watch::channel(ModemStatus {
+                cts: false,
+                dsr: false,
+                dcd: false,
+                ri: false,
+            })
+            .0,
+            answers: Mutex::new(Answers {
+                change: pending.map(|(request_id, answer)| Pending { request_id, answer }),
+                next_id: 1,
+            }),
+            events,
+        }
+    }
+
+    fn applied(request_id: u32, baud: u32) -> Vec<u8> {
+        ServerMessage::LineSettings {
+            request_id,
+            settings: settings(baud),
+        }
+        .encode()
+    }
+
+    fn refused(request_id: u32, detail: &str) -> Vec<u8> {
+        ServerMessage::Error {
+            request_id,
+            code: ErrorCode::Unsupported,
+            detail: Some(detail.into()),
+        }
+        .encode()
+    }
+
+    #[test]
+    fn the_answer_that_carries_the_pending_requests_id_is_its_answer() {
+        let (tx, mut rx) = oneshot::channel();
+        let shared = shared(Some((5, tx)));
+
+        handle(&shared, &applied(5, 115_200));
+
+        assert!(matches!(rx.try_recv(), Ok(Answer::Applied(s)) if s.baud == 115_200));
+        assert_eq!(shared.line_settings.borrow().baud, 115_200);
+    }
+
+    #[test]
+    fn an_answer_to_a_change_that_gave_up_is_not_taken_for_the_pending_one() {
+        let (tx, mut rx) = oneshot::channel();
+        let shared = shared(Some((6, tx)));
+
+        // The earlier changes' answers, with their own ids.
+        handle(&shared, &applied(5, 4800));
+        handle(&shared, &refused(4, "late"));
+
+        assert!(rx.try_recv().is_err(), "still waiting");
+        assert_eq!(
+            shared.line_settings.borrow().baud,
+            4800,
+            "the settings still follow the server"
+        );
+
+        // Now the pending change's own refusal.
+        handle(&shared, &refused(6, "no"));
+
+        assert!(matches!(rx.try_recv(), Ok(Answer::Refused(Some(d))) if d == "no"));
+    }
+
+    #[test]
+    fn an_answer_with_the_same_settings_but_another_id_is_not_the_pending_changes() {
+        let (tx, mut rx) = oneshot::channel();
+        let shared = shared(Some((2, tx)));
+
+        handle(&shared, &applied(1, 1200));
+
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn an_answer_with_no_request_id_is_not_an_answer_to_any_change() {
+        let (tx, mut rx) = oneshot::channel();
+        let shared = shared(Some((1, tx)));
+
+        handle(&shared, &applied(0, 1200));
+
+        assert!(rx.try_recv().is_err());
+        assert_eq!(shared.line_settings.borrow().baud, 1200);
+    }
+
+    #[test]
+    fn an_error_the_port_reported_on_its_own_is_an_event_and_does_not_refuse_the_change() {
+        let (tx, mut rx) = oneshot::channel();
+        let shared = shared(Some((1, tx)));
+        let mut events = shared.events.subscribe();
+
+        handle(
+            &shared,
+            &ServerMessage::Error {
+                request_id: 0,
+                code: ErrorCode::Parity,
+                detail: None,
+            }
+            .encode(),
+        );
+
+        assert!(rx.try_recv().is_err(), "the change is still waiting");
+        assert_eq!(
+            events.try_recv().unwrap(),
+            SerialEvent::Error {
+                code: ErrorCode::Parity,
+                detail: None
+            }
+        );
+    }
+
+    #[test]
+    fn modem_status_is_an_event_and_updates_the_state() {
+        let shared = shared(None);
+        let mut events = shared.events.subscribe();
+
+        handle(
+            &shared,
+            &ServerMessage::ModemStatus(ModemStatus {
+                cts: true,
+                dsr: true,
+                dcd: false,
+                ri: false,
+            })
+            .encode(),
+        );
+
+        assert!(shared.modem_status.borrow().cts);
+        assert!(matches!(events.try_recv().unwrap(), SerialEvent::ModemStatus(s) if s.dsr));
+    }
+
+    #[test]
+    fn a_message_that_is_not_a_serial_message_is_dropped() {
+        let shared = shared(None);
+
+        handle(&shared, &[0x2A, 0x00]);
+        handle(&shared, b"not protobuf");
+
+        assert_eq!(shared.line_settings.borrow().baud, 9600);
+    }
+
+    #[test]
+    fn an_answer_with_a_value_this_end_does_not_know_still_answers_the_pending_change() {
+        let (tx, mut rx) = oneshot::channel();
+        let shared = shared(Some((3, tx)));
+        let echo = skakel_proto::serial::SerialServerMessage {
+            message: Some(
+                skakel_proto::serial::serial_server_message::Message::LineSettings(
+                    skakel_proto::serial::LineSettingsApplied {
+                        request_id: 3,
+                        settings: Some(skakel_proto::serial::LineSettings {
+                            baud: 115_200,
+                            data_bits: 8,
+                            parity: 42,
+                            stop_bits: 1,
+                            flow_control: 1,
+                        }),
+                    },
+                ),
+            ),
+        };
+
+        handle(&shared, &prost::Message::encode_to_vec(&echo));
+
+        assert!(
+            matches!(rx.try_recv(), Ok(Answer::Applied(s)) if s.parity == Parity::Unknown(42)),
+            "the change is answered at once, not left to time out"
+        );
+        assert_eq!(shared.line_settings.borrow().parity, Parity::Unknown(42));
+    }
+}

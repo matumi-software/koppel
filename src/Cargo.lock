@@ -2289,7 +2289,6 @@ checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 [[package]]
 name = "skakel-client"
 version = "0.3.0"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#9d0976ffd4773bd43c669c69e737bb418179bc0d"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -2323,7 +2322,6 @@ dependencies = [
 [[package]]
 name = "skakel-proto"
 version = "0.3.0"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#9d0976ffd4773bd43c669c69e737bb418179bc0d"
 dependencies = [
  "prost",
  "protox",
@@ -2336,7 +2334,6 @@ dependencies = [
 [[package]]
 name = "skakel-serial"
 version = "0.3.0"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#9d0976ffd4773bd43c669c69e737bb418179bc0d"
 dependencies = [
  "prost",
  "skakel-proto",
@@ -2345,7 +2342,6 @@ dependencies = [
 [[package]]
 name = "skakel-server"
 version = "0.3.0"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#9d0976ffd4773bd43c669c69e737bb418179bc0d"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -2378,7 +2374,6 @@ dependencies = [
 [[package]]
 name = "skakel-wire"
 version = "0.3.0"
-source = "git+https://github.com/matumi-software/skakel?tag=v0.3.0#9d0976ffd4773bd43c669c69e737bb418179bc0d"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",

@@ -6,3 +6,6 @@ src/installer/windows/usbip-win2/** binary
 
 # Files Koppel 0.1.x wrote, kept byte for byte: the tests compare against them.
 src/koppel-upgrade/tests/fixtures/** binary
+
+# Skakel's crates, as its release shipped them: the check compares them byte for byte with the .crate files.
+src/vendor/skakel/** -text

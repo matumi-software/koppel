@@ -1,6 +1,8 @@
 // Generated from the Rust types by `KOPPEL_WRITE_WIRE=1 cargo test -p koppel-web wire`.
 // Do not edit: the test `generated_types_are_current` fails when this differs.
 
+export type AcceptFrom = "any" | "lan";
+
 export type ActivityEvent = { id: string, timestampUtc: string, entity: EntityRef, reason: ActivityReason, outcome: ActivityOutcome, summary: string, detail: string | null, };
 
 export type ActivityOutcome = "succeeded" | "failed";
@@ -249,4 +251,4 @@ export type SettingsPatch = { role?: Role, shareOnStartup?: boolean, setupComple
 /**
  * A port, or null to clear it; left out leaves it as it is.
  */
-networkPort: number | null, networkAcceptFrom?: AcceptFrom, };
+networkPort?: number | null, networkAcceptFrom?: AcceptFrom, };

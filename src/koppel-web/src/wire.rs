@@ -28,7 +28,7 @@ use koppel_app::roles::{
     EnrollmentView, KeysView, NewClient, Outcome, PairingOverview, PairingRequestView,
     PairingWindowView, RequestState, ServerSettings, ServerView, ServersView,
 };
-use koppel_config::files::{KoppelSettings, Role};
+use koppel_config::files::{AcceptFrom, KoppelSettings, Role};
 use koppel_usb::{ActivityOutcome, ActivityReason, EntityKind, EntityRef, SystemCheck};
 use koppel_usb::{
     ClientDeviceView, ClientServersView, DeviceState, DeviceView, LinkState, ServerDevices,
@@ -55,6 +55,7 @@ fn decls() -> String {
     }
     decls!(
         // Answers and pushes.
+        AcceptFrom,
         ActivityEvent,
         ActivityOutcome,
         ActivityReason,

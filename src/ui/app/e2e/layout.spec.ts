@@ -11,12 +11,17 @@ async function answerSignedOut(page: Page, state: object) {
   await page.route('**/api/v1/auth/state', (route) => route.fulfill({ json: state }));
 }
 
-/** The middle of an element, and of the panel it is in, in pixels from the left. */
+/** The middle of an element, and of the panel it is in, across and down, in pixels. */
 async function centres(page: Page, selector: string) {
   return page.evaluate((sel) => {
     const box = document.querySelector(sel)!.getBoundingClientRect();
     const panel = document.querySelector('main')!.getBoundingClientRect();
-    return { item: box.left + box.width / 2, panel: panel.left + panel.width / 2 };
+    return {
+      item: box.left + box.width / 2,
+      panel: panel.left + panel.width / 2,
+      itemDown: box.top + box.height / 2,
+      panelDown: panel.top + panel.height / 2,
+    };
   }, selector);
 }
 
@@ -26,8 +31,10 @@ test.describe('the signed-out screens', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Sign in to bench-pc' })).toBeVisible();
 
-    const { item, panel } = await centres(page, '.hw-tile');
+    const { item, panel, itemDown, panelDown } = await centres(page, '.hw-tile');
     expect(Math.abs(item - panel)).toBeLessThanOrEqual(2);
+    // The sign-in's column holds the tile and a mark above it, so the tile sits a little below the middle.
+    expect(Math.abs(itemDown - panelDown)).toBeLessThanOrEqual(80);
   });
 
   test('the first password is in the middle of the window', async ({ page }) => {
@@ -35,8 +42,9 @@ test.describe('the signed-out screens', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Set up bench-pc' })).toBeVisible();
 
-    const { item, panel } = await centres(page, '.kp-form');
+    const { item, panel, itemDown, panelDown } = await centres(page, '.kp-form');
     expect(Math.abs(item - panel)).toBeLessThanOrEqual(2);
+    expect(Math.abs(itemDown - panelDown)).toBeLessThanOrEqual(2);
   });
 });
 

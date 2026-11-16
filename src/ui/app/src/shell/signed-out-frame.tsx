@@ -25,7 +25,8 @@ export function SignedOutFrame({
   children: ReactNode;
 }) {
   return (
-    <AppShell platform="web" brand={brand} hideBrand={hideBrand} flush={flush}>
+    // A centred page needs a panel it can fill, so it is flush too; .kp-centre brings back the padding and scrolls.
+    <AppShell platform="web" brand={brand} hideBrand={hideBrand} flush={flush || align === 'centre'}>
       {align === 'centre' ? <div className="kp-centre">{children}</div> : children}
     </AppShell>
   );

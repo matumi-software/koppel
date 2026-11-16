@@ -1,5 +1,5 @@
 import { Activity, CircleCheck, LayoutGrid, Link2, Monitor, Plug, Settings, Shield, Usb, type LucideIcon } from 'lucide-react';
-import type { NavGroup, NavItem } from '@matumi/ui';
+import type { NavGroup, NavItem } from '@heartwood/ui';
 import { isClientRole, isServerRole } from '@/settings/roles';
 
 /**

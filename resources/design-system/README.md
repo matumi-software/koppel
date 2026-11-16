@@ -2,7 +2,7 @@
 
 Koppel shares USB devices across the network: a server offers the devices plugged into it, and a client attaches them as if they were local. *Koppel* is Afrikaans and Dutch for "couple" or "link". Koppel is a Matumi product and shares Matumi's colours: **canopy** green on warm **stone** neutrals, with Matumi's **river** for devices in use. It should feel like a well-labelled patch panel: precise, quiet and trustworthy, with state you can read from across the room.
 
-What is here: the logos and the app icon in `assets/Logos` (see its README), the social images in `assets/Social`, and below, what Koppel says and how it behaves, which is Koppel's own. Colours, type, spacing, focus, motion, icons and every component come from Heartwood, the Matumi design system (`@matumi/tokens` and `@matumi/ui`); how the UI uses them is in `docs/ui.md`.
+What is here: the logos and the app icon in `assets/Logos` (see its README), the social images in `assets/Social`, and below, what Koppel says and how it behaves, which is Koppel's own. Colours, type, spacing, focus, motion, icons and every component come from Heartwood, the Matumi design system (`@heartwood/tokens` and `@heartwood/ui`); how the UI uses them is in `docs/ui.md`.
 
 ## Product rule: the server confirms, the UI never assumes
 

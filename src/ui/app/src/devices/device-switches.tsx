@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Switch } from '@matumi/ui';
+import { Switch } from '@heartwood/ui';
 import type { DeviceView } from '@/api/usb';
 import { usePending } from '@/pending/pending-context';
 import { ConfirmDialog } from '@/shared/confirm-dialog';

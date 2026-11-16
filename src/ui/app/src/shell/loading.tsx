@@ -1,4 +1,4 @@
-import { Skeleton } from '@matumi/ui';
+import { Skeleton } from '@heartwood/ui';
 
 /** What shows while the first answer is on its way: the shape of a page, so nothing jumps. */
 export function Loading() {

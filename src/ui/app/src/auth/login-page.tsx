@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
-import { SignInPage } from '@matumi/ui';
+import { SignInPage } from '@heartwood/ui';
 import { login } from '@/api/auth';
 import { brand } from '@/brand';
 import { reasonOf } from '@/errors';

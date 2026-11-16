@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { AppShell } from '@matumi/ui';
+import { AppShell } from '@heartwood/ui';
 import { brand } from '@/brand';
 
 /**

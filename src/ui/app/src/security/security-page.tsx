@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { Button, Callout, CopyValue, Dialog, IconButton, PageHeader, SetPasswordDialog, SettingRow, SettingsList, showToast, Tile, TileStack, useChangePassword } from '@matumi/ui';
+import { Button, Callout, CopyValue, Dialog, IconButton, PageHeader, SetPasswordDialog, SettingRow, SettingsList, showToast, Tile, TileStack, useChangePassword } from '@heartwood/ui';
 import { changePassword } from '@/api/auth';
 import type { ClientView } from '@/api/server';
 import { minPasswordLength } from '@/auth/password-rules';

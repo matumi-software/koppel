@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { DrillLink, Tile, TileGrid } from '@matumi/ui';
+import { DrillLink, Tile, TileGrid } from '@heartwood/ui';
 
 /**
  * One device as a tile of a grid: its name opens it, one line says what it is doing, and the state

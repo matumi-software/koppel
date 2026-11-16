@@ -1,13 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ToastRegion } from '@matumi/ui';
+import { ToastRegion } from '@heartwood/ui';
 
 // Heartwood's tokens, then its components, then Koppel's own layer on top. The two fonts are bundled
 // here (Heartwood expects the app to), at the weights it uses.
 import './fonts.css';
-import '@matumi/tokens/tokens.css';
-import '@matumi/ui/heartwood.css';
+import '@heartwood/tokens/tokens.css';
+import '@heartwood/ui/heartwood.css';
 import './koppel.css';
 import { AuthGate } from './auth/auth-gate';
 import { App } from './app';

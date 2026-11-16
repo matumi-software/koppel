@@ -1,7 +1,7 @@
 /*
  * Koppel's product layer on Heartwood: its Attached colours, and the layout glue the pages share.
  * Ported from the approved prototype. Tokens only: no colour or size is made up here. `.kp-` classes
- * are layout around @matumi/ui components, never a replacement for one.
+ * are layout around @heartwood/ui components, never a replacement for one.
  */
 /* Koppel's product layer: its Attached state colours, the same values Heartwood documents. */
 :root, [data-theme="light"] { --state-attached: #2f6f74; --state-attached-subtle: #e9f1f1; --state-attached-text: #245a5e; }
@@ -42,7 +42,7 @@ body { background: var(--bg-surface); color: var(--text-primary); font-family: v
 
 .kp-fit { display: flex; }
 .kp-popover .hw-popover { outline: none; }
-/* Heartwood v18: a ListDetail shows one pane at a time below 800 wide. Stand-in until @matumi/ui ships it. */
+/* Heartwood v18: a ListDetail shows one pane at a time below 800 wide. Stand-in until @heartwood/ui ships it. */
 .kp-narrow .hw-ld-list { width: 100%; border-right: 0; }
 .kp-narrow .hw-ld-detail { display: none; }
 /* Overview */

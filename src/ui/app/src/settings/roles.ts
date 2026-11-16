@@ -1,4 +1,4 @@
-import type { RadioOption } from '@matumi/ui';
+import type { RadioOption } from '@heartwood/ui';
 import type { Role } from '@/api/settings';
 
 /** The three roles, worded the same in the first run and in Settings. */

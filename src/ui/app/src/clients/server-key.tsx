@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
-import { Button, Callout, CopyValue, IconButton } from '@matumi/ui';
+import { Button, Callout, CopyValue, IconButton } from '@heartwood/ui';
 import { getEnrollmentKey, rotateEnrollmentKey } from '@/api/server';
 import { reasonOf } from '@/errors';
 import { ConfirmDialog } from '@/shared/confirm-dialog';

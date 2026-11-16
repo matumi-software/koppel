@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { LogOut, RefreshCw, User } from 'lucide-react';
-import { AppShell, Button, Popover, showToast, StatusDot } from '@matumi/ui';
+import { AppShell, Button, Popover, showToast, StatusDot } from '@heartwood/ui';
 import { brand } from '@/brand';
 import { useAuth } from '@/auth/auth-context';
 import { reasonOf } from '@/errors';

@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { ActivityEvent as ActivityRow } from '@matumi/ui';
+import type { ActivityEvent as ActivityRow } from '@heartwood/ui';
 import type { ActivityEvent } from '@/api/activity';
 
 /** Where a line stands: our own change still waiting, done, or refused. */

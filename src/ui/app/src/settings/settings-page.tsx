@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { Select, SettingsPage as HeartwoodSettingsPage, Switch, type SettingsPageRow } from '@matumi/ui';
+import { Select, SettingsPage as HeartwoodSettingsPage, Switch, type SettingsPageRow } from '@heartwood/ui';
 import type { KoppelSettings, Role } from '@/api/settings';
 import { systemInfoOptions } from '@/queries';
 import { useFrame } from '@/shell/frame-context';

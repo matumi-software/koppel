@@ -1,4 +1,4 @@
-import type { ThirdPartyNotice } from '@matumi/ui';
+import type { ThirdPartyNotice } from '@heartwood/ui';
 
 /**
  * What the UI ships, with the version in the build and its licence. Taken from the installed

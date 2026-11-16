@@ -7,7 +7,7 @@
 - **Removed:** the client's own pairing request (`/client/pairing`, `PairingStatusChanged`) and `/client/connection`. `ConnectionChanged` is `ServersChanged`, and `ClientDevicesChanged` lists each server's link and devices. The server's pairing window and requests are unchanged.
 - **Port** and **Accept from** for this machine as a server are settings: `networkPort` and `networkAcceptFrom` in `settings.json`, changed with `PATCH /api/v1/settings`. Accept from (`any`, the default and today's behaviour, or `lan`) applies at once; the port applies at the next start, and a startup option or `KOPPEL_NETWORK_PORT` still wins over it (`networkPortFixed` in the system info says so). See `docs/network-settings.md`.
 
-- **The UI is rebuilt on the Heartwood design system** (`@matumi/ui` 0.1.0), with the pages, wording and behaviour of the approved prototype: Overview, Devices, Remote devices, Clients, Activity, System check, Connection, Security and Settings. `@koppel/react-ui` and `pnpm design:sync` are gone. The old `#configuration` and `#attach` addresses are now `#settings` and `#remote`.
+- **The UI is rebuilt on the Heartwood design system** (`@heartwood/ui` 0.1.0), with the pages, wording and behaviour of the approved prototype: Overview, Devices, Remote devices, Clients, Activity, System check, Connection, Security and Settings. `@koppel/react-ui` and `pnpm design:sync` are gone. The old `#configuration` and `#attach` addresses are now `#settings` and `#remote`.
 
 ## 0.2.1 (2026-11-13)
 

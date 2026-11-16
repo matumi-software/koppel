@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Button } from '@matumi/ui';
+import { Button } from '@heartwood/ui';
 import { useAuth } from '@/auth/auth-context';
 import { ErrorBoundary } from './error-boundary';
 

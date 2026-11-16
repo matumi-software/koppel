@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { Button, Callout, IconButton, SettingRow, SettingsList, Switch, TextField, Tile } from '@matumi/ui';
+import { Button, Callout, IconButton, SettingRow, SettingsList, Switch, TextField, Tile } from '@heartwood/ui';
 import { pairingWindowMinutes, type PairingRequestView } from '@/api/pairing';
 import { pairingWindowKey } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';

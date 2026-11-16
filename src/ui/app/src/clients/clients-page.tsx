@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { RefreshCw, Trash2 } from 'lucide-react';
-import { Button, Callout, DrillView, IconButton, PageHeader, PairingCode, SettingRow, SettingsList, StateLabel, StatusDot, Table, Tile, TileStack, useDrill } from '@matumi/ui';
+import { Button, Callout, DrillView, IconButton, PageHeader, PairingCode, SettingRow, SettingsList, StateLabel, StatusDot, Table, Tile, TileStack, useDrill } from '@heartwood/ui';
 import { states } from '@/brand';
 import { useServerDevices } from '@/devices/use-devices';
 import { useMachineName } from '@/shared/use-machine-name';

@@ -11,6 +11,13 @@ const date = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short'
 export const addedOn = (client: Pick<ClientView, 'createdAt'>) => date.format(new Date(client.createdAt));
 
 /** When a client last called, in words that move on with the clock passed in (see useNow). */
+/** A sentence for a client's row: "Last seen 5 min ago", or that it has not been seen since Koppel started. */
+export const lastSeenLine = (client: Pick<ClientView, 'lastSeen'>, now: number) => {
+  if (!client.lastSeen) return 'Not seen since Koppel started';
+  const when = lastSeen(client, now);
+  return `Last seen ${when.charAt(0).toLowerCase()}${when.slice(1)}`;
+};
+
 export const lastSeen = (client: Pick<ClientView, 'lastSeen'>, now: number) => {
   if (!client.lastSeen) return 'Not since Koppel started';
   const minutes = Math.round((now - new Date(client.lastSeen).getTime()) / 60_000);

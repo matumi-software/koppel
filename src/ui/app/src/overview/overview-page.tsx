@@ -3,7 +3,7 @@ import { CircleCheck, Link2, RefreshCw, UserPlus } from 'lucide-react';
 import { ActivityTile, DrillView, Facts, List, ListRow, NeedsYouTile, PageHeader, Tile, TileGrid, useDrill, type Key, type NeedsYouItem } from '@heartwood/ui';
 import { toEvents, useActivity } from '@/activity/activity-context';
 import { states } from '@/brand';
-import { lastSeen } from '@/clients/client-words';
+import { lastSeenLine } from '@/clients/client-words';
 import { ClientPage } from '@/clients/client-page';
 import { clientName, useClients } from '@/clients/use-clients';
 import { DevicePage } from '@/devices/device-page';
@@ -193,7 +193,7 @@ export function OverviewPage() {
                         drill
                         status={names.length ? stateOf('Attached') : { tone: 'neutral' }}
                         title={c.name}
-                        description={names.length ? names.join(', ') : `Last seen ${lastSeen(c, now).toLowerCase()}`}
+                        description={names.length ? names.join(', ') : lastSeenLine(c, now)}
                         statusLabel={names.length ? 'Attached' : 'Idle'}
                       />
                     );

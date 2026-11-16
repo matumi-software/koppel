@@ -108,6 +108,8 @@ pub mod open {
             Options {
                 start_with_defaults_when_unusable: true,
                 warn_unknown_keys: true,
+                // The flat shape of 0.2.1 and before, which is read as the first server's part.
+                known_names: &["serverFingerprint", "busIds", "vidPids"],
                 ..Options::default()
             },
         )

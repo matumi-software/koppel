@@ -1,15 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { answerSignedOut, serve, signedOut } from './support';
 
-// How the screens use the window. The service's answers are stood in by the test (the same JSON the unit
-// tests and the Rust wire test share), so no Koppel needs to run.
-const wire = (name: string) => JSON.parse(readFileSync(new URL(`../src/test/wire/${name}.json`, import.meta.url), 'utf8'));
-
-const signedOut = { ...wire('auth-state'), setupTokenRequired: false };
-
-async function answerSignedOut(page: Page, state: object) {
-  await page.route('**/api/v1/auth/state', (route) => route.fulfill({ json: state }));
-}
+// How the screens use the window, with the service's answers stood in (see support.ts).
 
 /** The middle of an element, and of the panel it is in, across and down, in pixels. */
 async function centres(page: Page, selector: string) {
@@ -47,45 +39,6 @@ test.describe('the signed-out screens', () => {
     expect(Math.abs(itemDown - panelDown)).toBeLessThanOrEqual(2);
   });
 });
-
-/** A server whose screens the Overview needs, answered from the fixtures. */
-async function serve(page: Page, role: 'server' | 'client' | 'both') {
-  const settings = { ...wire('settings'), role, setupComplete: true };
-  const servers = wire('servers');
-  const answers: Record<string, unknown> = {
-    '/api/v1/auth/state': { ...signedOut, signedIn: true, passwordSet: true, setupOpen: false },
-    '/api/v1/settings': settings,
-    '/api/v1/system/info': { ...wire('system-info'), role },
-    '/api/v1/system/checks': wire('system-checks').map((c: object) => ({ ...c, ok: true })),
-    '/api/v1/activity': [wire('activity-event')],
-    '/api/v1/server/clients': wire('clients'),
-    '/api/v1/server/devices': wire('server-devices'),
-    '/api/v1/server/enrollment': wire('enrollment-view'),
-    '/api/v1/server/keys': wire('keys-view'),
-    '/api/v1/server/identity': wire('server-identity'),
-    '/api/v1/server/pairing': wire('pairing-overview'),
-    '/api/v1/client/servers': servers,
-    '/api/v1/client/devices': wire('client-devices'),
-    '/api/v1/client/discovery': wire('discovered-servers'),
-  };
-  const push: [string, unknown][] = [
-    ['SettingsChanged', settings],
-    ...(role !== 'client'
-      ? ([['ClientsChanged', answers['/api/v1/server/clients']], ['ServerKeysChanged', answers['/api/v1/server/keys']], ['PairingRequestsChanged', answers['/api/v1/server/pairing']], ['EnrollmentChanged', answers['/api/v1/server/enrollment']], ['DevicesChanged', answers['/api/v1/server/devices']]] as [string, unknown][])
-      : []),
-    ...(role !== 'server'
-      ? ([['ServersChanged', servers], ['ServersDiscovered', answers['/api/v1/client/discovery']], ['ClientDevicesChanged', answers['/api/v1/client/devices']]] as [string, unknown][])
-      : []),
-  ];
-  await page.route('**/api/v1/**', (route) => {
-    const { pathname } = new URL(route.request().url());
-    if (pathname === '/api/v1/events') {
-      const body = push.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join('');
-      return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }, body });
-    }
-    return route.fulfill({ json: answers[pathname] ?? [] });
-  });
-}
 
 test.describe('the overview on a wide screen', () => {
   test.skip(({ isMobile }) => isMobile, 'a wide-screen check');

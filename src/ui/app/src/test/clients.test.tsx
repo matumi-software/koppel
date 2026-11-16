@@ -2,7 +2,9 @@ import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClientsPage } from '@/clients/clients-page';
-import { accepted, json, mockFetch, renderApp } from './harness';
+import { lastSeenLine } from '@/clients/client-words';
+import { clientsOptions } from '@/queries';
+import { accepted, json, mockFetch, newQueryClient, renderApp } from './harness';
 import { baseRoutes, inFrame } from './fixtures';
 import { clientSecret, clients, enrollmentKey, enrollmentView, newClient, pairingOverview } from './wire';
 
@@ -14,7 +16,29 @@ const routes = {
   'GET /api/v1/server/enrollment': () => json({ ...enrollmentView, code: null }),
 };
 
+describe('how a client was last seen is worded', () => {
+  const now = Date.parse('2026-01-01T10:00:00Z');
+
+  it('reads as a sentence in each case', () => {
+    expect(lastSeenLine({ lastSeen: null }, now)).toBe('Not seen since Koppel started');
+    expect(lastSeenLine({ lastSeen: '2026-01-01T09:59:40Z' }, now)).toBe('Last seen just now');
+    expect(lastSeenLine({ lastSeen: '2026-01-01T09:55:00Z' }, now)).toBe('Last seen 5 min ago');
+  });
+});
+
 describe('the clients of this server', () => {
+  it('asks the server again when the page opens, because last seen is not pushed', async () => {
+    const stale = clients.map((c) => ({ ...c, lastSeen: null }));
+    const fresh = clients.map((c) => ({ ...c, lastSeen: '2026-01-01T08:15:00Z' }));
+    mockFetch({ ...routes, 'GET /api/v1/server/clients': () => json(fresh) });
+    const queryClient = newQueryClient();
+    queryClient.setQueryData(clientsOptions().queryKey, stale);
+
+    renderApp(inFrame(<ClientsPage />), queryClient);
+
+    await waitFor(() => expect(screen.queryByText('Not since Koppel started')).toBeNull());
+  });
+
   it('asks before revoking, and shows Revoking until ClientsChanged drops the client', async () => {
     const { calls } = mockFetch({ ...routes, 'DELETE /api/v1/server/clients/client-2': () => accepted() });
     const { live } = renderApp(inFrame(<ClientsPage />));

@@ -54,7 +54,7 @@ async fn a_missing_file_is_seeded_with_the_defaults() {
     settings.start().await.unwrap();
 
     let written = fs::read(paths.settings_file()).unwrap();
-    let expected = "{\n  \"role\": \"server\",\n  \"shareOnStartup\": true,\n  \"setupComplete\": false,\n  \"notifyPairing\": true,\n  \"notifyLink\": true,\n  \"notifyAttachFailures\": true,\n  \"version\": 1\n}";
+    let expected = "{\n  \"role\": \"server\",\n  \"shareOnStartup\": true,\n  \"setupComplete\": false,\n  \"notifyPairing\": true,\n  \"notifyLink\": true,\n  \"notifyAttachFailures\": true,\n  \"networkPort\": null,\n  \"networkAcceptFrom\": \"any\",\n  \"version\": 1\n}";
     assert_eq!(String::from_utf8(written).unwrap(), expected);
     settings.stop();
     let _ = fs::remove_dir_all(dir);

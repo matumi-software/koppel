@@ -7,7 +7,7 @@ its own link, and attach devices from all of them at once.
 ## What a person sees
 
 - Connection lists the servers this computer attaches from, each with its link state and round trip.
-  "Add a server" takes an address and either a pairing code or a server key (Skakel 0.3.1 enrolment).
+  "Add a server" takes an address and either a pairing code or a server key (Skakel 0.3.0 enrolment).
   Each row can be removed, with a confirmation.
 - Remote devices lists the devices of every server together, each saying which server it is on.
   Attaching, detaching and the history work per device as they do now.
@@ -77,7 +77,7 @@ today, so they are part of this change:
   `ServersChanged` once it is written. A change to a link setting makes that server's link again.
 - What is enforced today: **Give up after** is the time one request of the link may take. **Reconnect** off
   ends the link at its first failure (Koppel stops it), and turning it on again makes a new link.
-  **Retry every** is the wait between tries after a failure (Skakel 0.3.2's `retry_interval`: a random
+  **Retry every** is the wait between tries after a failure (Skakel 0.3.0's `retry_interval`: a random
   time from half of it to all of it, never under a second).
 - Whether this machine's port and "accept from" are settings the service already has is checked against
   `docs/config.md` before anything is added for them; if they are not, they become settings in

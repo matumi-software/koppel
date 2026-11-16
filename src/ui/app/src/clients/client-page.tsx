@@ -9,7 +9,7 @@ import { serverKeysOptions } from '@/queries';
 import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useNow } from '@/shared/use-now';
 import { useFrame } from '@/shell/frame-context';
-import { addedOn, lastSeen, linkedWord } from './client-words';
+import { addedOn, lastSeen, lastSeenLine, linkedWord } from './client-words';
 import { useClients, useRevoke, useUsing } from './use-clients';
 import { RotateSecretDialog } from './secret-dialogs';
 
@@ -71,7 +71,7 @@ export function ClientPage({ clientId, back }: { clientId: string; back: Back })
           ) : using.length ? (
             `Using ${using.join(', ')}`
           ) : (
-            `Last seen ${lastSeen(client, now).toLowerCase()}`
+            lastSeenLine(client, now)
           )
         }
         actions={

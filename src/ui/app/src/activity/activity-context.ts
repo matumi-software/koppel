@@ -63,7 +63,8 @@ export function toEvents(items: readonly ActivityItem[], subject?: string): Acti
     .map((item) => ({
       id: item.id,
       time: when(item.at),
-      text: item.detail ? `${item.text}: ${item.detail}` : item.text,
+      // The summary is a sentence and ends with a full stop; the reason follows a colon, not the stop.
+      text: item.detail ? `${item.text.replace(/\.$/, '')}: ${item.detail}` : item.text,
       result: item.state === 'fault' ? { label: 'Rejected' } : item.state === 'pending' ? { label: 'Pending', tone: 'info' as const } : undefined,
     }));
 }

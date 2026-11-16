@@ -10,7 +10,8 @@ export const remoteWord = (e: ClientDeviceView) =>
 
 /** What a person can read on a card's second line, for a device of this machine. */
 export const deviceSub = (d: DeviceView, holder: string | null, fault: string | null | undefined) => {
-  if (fault) return `Not shared: ${fault}`;
+  // The tile's status already says Not shared; this line says why.
+  if (fault) return fault;
   if (d.state === 'attached') return `By ${holder ?? 'a client'}${since(d.attachedSince)}`;
   if (d.state === 'offline') return 'Unplugged';
   return `${d.manufacturer ?? 'Unknown maker'}, bus ${d.busId}`;
@@ -18,7 +19,7 @@ export const deviceSub = (d: DeviceView, holder: string | null, fault: string | 
 
 /** The same for a device of a server. */
 export const remoteSub = (e: ClientDeviceView, server: string, fault: string | null | undefined) => {
-  if (fault) return `Not attached: ${fault}`;
+  if (fault) return fault;
   if (e.attachedHere) return `From ${server}${since(e.attachedSince)}`;
   if (e.device.state === 'offline') return `Unplugged on ${server}`;
   if (e.device.state === 'attached') return `Another client of ${server} has it`;

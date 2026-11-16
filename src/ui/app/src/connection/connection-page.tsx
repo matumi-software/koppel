@@ -32,7 +32,7 @@ const portOk = (port: number | null) => port === null || (Number.isInteger(port)
  * Revert and Apply. Accept from applies at once. Every change is pending until the push brings it back.
  */
 export function ConnectionPage() {
-  const { locked } = useFrame();
+  const { locked, narrow } = useFrame();
   const host = useMachineName();
   const settings = useSettings();
   const role = settings.query.data?.role;
@@ -113,7 +113,8 @@ export function ConnectionPage() {
   const here = (s: ServerView) => (devices?.servers.find((d) => d.id === s.id)?.devices ?? []).filter((e) => e.attachedHere).map((e) => e.device.name);
   const linkOf = (s: ServerView) => devices?.servers.find((d) => d.id === s.id)?.link ?? 'connecting';
 
-  const inspector = !settings.query.data ? null : selServer ? (
+  // Below 800 wide the panel is a sheet over the page, so it opens when a person asks (a Settings button), never on arrival.
+  const inspector = !settings.query.data || (narrow && !selected) ? null : selServer ? (
     <Inspector title="Settings" subject={serverLabel(selServer)} dirty={dirty} staged={{ onRevert: revert, onApply: apply, invalid: locked || invalid }} storageKey="koppel.connection">
       <PropertySection title="Link">
         <Property label="Address" type="readonly" copy value={selServer.serverUrl?.replace(/^https:\/\//, '') ?? ''} />
@@ -212,7 +213,8 @@ export function ConnectionPage() {
                 { id: 'here', label: 'Attached here' },
                 { id: 'link', label: 'Link', width: 140 },
                 { id: 'act', label: 'Actions', width: 136 },
-              ]}
+                // A phone has no room for what is attached here; Remote devices lists it.
+              ].filter((column) => !narrow || column.id !== 'here')}
               rows={list.map((s) => ({ id: s.id }))}
               onRowAction={(id) => setSelected(String(id))}
               current={sel}

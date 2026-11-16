@@ -181,6 +181,9 @@ pub struct Options<T> {
     pub start_with_defaults_when_unusable: bool,
     /// Log the names in the file that Koppel does not know. For the files people edit by hand.
     pub warn_unknown_keys: bool,
+    /// With `warn_unknown_keys`: names the type reads but does not write (the flat shape of an older file), so
+    /// they are not reported as unknown.
+    pub known_names: &'static [&'static str],
     /// How long `update` waits for the subscribers to finish with its change before it returns
     /// anyway. The change is on disk by then.
     pub delivery_timeout: Duration,
@@ -193,6 +196,7 @@ impl<T> Default for Options<T> {
             validate: None,
             start_with_defaults_when_unusable: false,
             warn_unknown_keys: false,
+            known_names: &[],
             delivery_timeout: DELIVERY_TIMEOUT,
         }
     }
@@ -248,6 +252,7 @@ struct Inner<T> {
     validate: Option<Validator<T>>,
     lenient: bool,
     warn_unknown_keys: bool,
+    known_names: &'static [&'static str],
     delivery_timeout: Duration,
     gate: tokio::sync::Mutex<()>,
     state: Mutex<State<T>>,
@@ -303,6 +308,7 @@ where
                 validate: options.validate,
                 lenient: options.start_with_defaults_when_unusable,
                 warn_unknown_keys: options.warn_unknown_keys,
+                known_names: options.known_names,
                 delivery_timeout: options.delivery_timeout,
                 gate: tokio::sync::Mutex::new(()),
                 state: Mutex::new(State {
@@ -485,6 +491,7 @@ where
         let codec = self.codec.clone();
         let validate = self.validate.clone();
         let warn_unknown_keys = self.warn_unknown_keys;
+        let known_names = self.known_names;
         let known = lock(&self.state).last.map(|seen| seen.hash);
         tokio::task::spawn_blocking(move || {
             load_blocking(
@@ -492,6 +499,7 @@ where
                 codec.as_ref(),
                 validate.as_deref(),
                 warn_unknown_keys,
+                known_names,
                 known,
             )
         })
@@ -745,6 +753,7 @@ fn load_blocking<T: Serialize + DeserializeOwned>(
     codec: &dyn FileCodec,
     validate: Option<&ValidateFn<T>>,
     warn_unknown_keys: bool,
+    known_names: &[&str],
     known: Option<Hash>,
 ) -> Result<Loaded<T>, ConfigFileError> {
     let mut attempt = 1;
@@ -809,7 +818,7 @@ fn load_blocking<T: Serialize + DeserializeOwned>(
             format!("it is not valid ({invalid})"),
         ));
     }
-    let unknown = unknown_names(&names, &value);
+    let unknown = unknown_names(&names, &value, known_names);
     if !unknown.is_empty() {
         tracing::warn!(
             "{} has names Koppel does not know ({}). They are ignored, and gone after the next change Koppel writes",
@@ -852,7 +861,7 @@ fn take_version(path: &Path, value: &mut Value) -> Result<(), ConfigFileError> {
 
 /// The top level names in `input` that `value` has no field for, matched without regard to case
 /// as reading does.
-fn unknown_names<T: Serialize>(input: &[String], value: &T) -> Vec<String> {
+fn unknown_names<T: Serialize>(input: &[String], value: &T, also_known: &[&str]) -> Vec<String> {
     if input.is_empty() {
         return Vec::new();
     }
@@ -861,7 +870,10 @@ fn unknown_names<T: Serialize>(input: &[String], value: &T) -> Vec<String> {
     };
     input
         .iter()
-        .filter(|name| !known.keys().any(|k| k.eq_ignore_ascii_case(name)))
+        .filter(|name| {
+            !known.keys().any(|k| k.eq_ignore_ascii_case(name))
+                && !also_known.iter().any(|k| k.eq_ignore_ascii_case(name))
+        })
         .cloned()
         .collect()
 }
@@ -1201,8 +1213,10 @@ mod tests {
         let input: Vec<String> = ["Role", "shareOnStartup", "colour", "NOTIFYLINK", "x"]
             .map(String::from)
             .to_vec();
-        assert_eq!(unknown_names(&input, &settings), ["colour", "x"]);
-        assert!(unknown_names(&[], &settings).is_empty());
+        assert_eq!(unknown_names(&input, &settings, &[]), ["colour", "x"]);
+        assert!(unknown_names(&[], &settings, &[]).is_empty());
+        // Names the type reads from an older shape are not reported.
+        assert_eq!(unknown_names(&input, &settings, &["colour"]), ["x"]);
     }
 
     #[test]

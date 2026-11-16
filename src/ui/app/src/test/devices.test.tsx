@@ -35,11 +35,11 @@ describe('the devices of this machine', () => {
     await waitFor(() => expect(calls.find((c) => c.key === 'PUT /api/v1/server/devices/1-2/shared')?.body).toEqual({ shared: true }));
     // Asked for, not confirmed: the switch shows the target and the card still says what is true.
     expect(isOn(screen.getByRole('switch', { name: 'Share Flash drive' }))).toBe(true);
-    expect(screen.getByText(/Not shared: The device is busy\./)).toBeTruthy();
+    expect(screen.getByText(/The device is busy\./)).toBeTruthy();
 
     await act(async () => live.emit('DevicesChanged', { ...serverDevices, devices: [receiver, sharedFlash] }));
 
-    await waitFor(() => expect(screen.queryByText(/Not shared: The device is busy\./)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/The device is busy\./)).toBeNull());
     expect(isOn(screen.getByRole('switch', { name: 'Share Flash drive' }))).toBe(true);
   });
 

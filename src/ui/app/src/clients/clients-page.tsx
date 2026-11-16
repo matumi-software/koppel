@@ -26,7 +26,7 @@ function LinkCode({ code }: { code: { code: string; expiresAt: string } }) {
  * what each uses, and open one to revoke it or replace its secret. Revoking is pending until the list drops it.
  */
 export function ClientsPage() {
-  const { locked } = useFrame();
+  const { locked, narrow } = useFrame();
   const now = useNow();
   const host = useMachineName();
   const clients = useClients();
@@ -106,7 +106,8 @@ export function ClientsPage() {
                   { id: 'using', label: 'Using' },
                   { id: 'seen', label: 'Last seen', width: 160 },
                   { id: 'act', label: 'Actions', width: 100 },
-                ]}
+                  // A phone has no room for all of them; the computer's own page has every fact.
+                ].filter((column) => !narrow || !['via', 'seen'].includes(column.id))}
                 rows={list.map((c) => ({ id: c.id, name: c.name }))}
                 onRowAction={(id) => drill.open(String(id))}
                 renderCell={(row, col) => {

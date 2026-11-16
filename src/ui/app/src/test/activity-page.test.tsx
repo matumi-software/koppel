@@ -16,7 +16,7 @@ describe('the activity page', () => {
     mockFetch(routes);
     renderApp(inFrame(<ActivityPage />));
 
-    await screen.findByText('USB Receiver could not be attached.: The link dropped.');
+    await screen.findByText('USB Receiver could not be attached: The link dropped.');
     expect(screen.getByRole('heading', { name: 'Events on bench-pc' })).toBeTruthy();
     expect(screen.getByText('Rejected')).toBeTruthy();
     const rows = screen.getAllByRole('row').slice(1);

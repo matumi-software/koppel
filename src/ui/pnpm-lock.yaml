@@ -283,7 +283,7 @@ packages:
     version: 0.1.0
 
   '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.1.0.tgz':
-    resolution: {integrity: sha512-sCVUhWsl7CMvnYYbSpnejxMbnPZHtZwcQOZNPOyf33UyvgrjAgzNsT45nTXez5yP2Xyz/mdS7TEkRzcW4bYFpg==, tarball: file:vendor/heartwood/heartwood-ui-0.1.0.tgz}
+    resolution: {integrity: sha512-zpkClLLwi5xtZr25M7Mrv2KeulQminY6n5fqpOuC/lzrPoSJQp4yF/YbKsAfq7TPVHDKFGJjKO3aW2x0UUL8KQ==, tarball: file:vendor/heartwood/heartwood-ui-0.1.0.tgz}
     version: 0.1.0
     peerDependencies:
       '@heartwood/tokens': ^0.1.0

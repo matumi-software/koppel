@@ -17,7 +17,7 @@ export default function LoginPage({ machineName, onSignedIn }: { machineName: st
   const error = blank ? 'Enter the admin password.' : signIn.isError ? reasonOf(signIn.error, 'Could not sign in.') : undefined;
 
   return (
-    <SignedOutFrame hideBrand flush>
+    <SignedOutFrame hideBrand flush align="start">
       <SignInPage
         brand={brand}
         title={`Sign in to ${machineName}`}

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Plus, PlugZap, Settings, Trash2 } from 'lucide-react';
-import { Callout, IconButton, Inspector, PageHeader, Property, PropertySection, showToast, StatusDot, Table, Tile, TileStack } from '@matumi/ui';
+import { Callout, IconButton, Inspector, PageHeader, Property, PropertySection, showToast, StatusDot, Table, Tile, TileStack } from '@heartwood/ui';
 import type { ServerSettings, ServerView } from '@/api/servers';
 import { testServer } from '@/api/servers';
 import { useClients } from '@/clients/use-clients';

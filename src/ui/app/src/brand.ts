@@ -1,4 +1,4 @@
-import type { Brand, StateMap } from '@matumi/ui';
+import type { Brand, StateMap } from '@heartwood/ui';
 
 /**
  * Koppel's fixed state words: what a StateLabel or StatusDot shows for a device, a remote device or a

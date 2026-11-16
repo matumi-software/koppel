@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { CircleCheck, Link2, RefreshCw, UserPlus } from 'lucide-react';
-import { ActivityTile, DrillView, Facts, List, ListRow, NeedsYouTile, PageHeader, Tile, TileGrid, useDrill, type Key, type NeedsYouItem } from '@matumi/ui';
+import { ActivityTile, DrillView, Facts, List, ListRow, NeedsYouTile, PageHeader, Tile, TileGrid, useDrill, type Key, type NeedsYouItem } from '@heartwood/ui';
 import { toEvents, useActivity } from '@/activity/activity-context';
 import { states } from '@/brand';
 import { lastSeen } from '@/clients/client-words';

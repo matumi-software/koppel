@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, PageHeader, RadioGroup, StatusDot } from '@matumi/ui';
+import { Button, PageHeader, RadioGroup, StatusDot } from '@heartwood/ui';
 import type { Role } from '@/api/settings';
 import { roleOptions } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';

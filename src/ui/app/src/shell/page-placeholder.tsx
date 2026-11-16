@@ -1,4 +1,4 @@
-import { PageHeader } from '@matumi/ui';
+import { PageHeader } from '@heartwood/ui';
 
 /**
  * Stands in for a page that is not built on Heartwood yet, so the app compiles and navigates. A page

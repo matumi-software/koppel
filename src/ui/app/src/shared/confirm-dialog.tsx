@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { Button, Dialog } from '@matumi/ui';
-import type { IconComponent } from '@matumi/ui';
+import { Button, Dialog } from '@heartwood/ui';
+import type { IconComponent } from '@heartwood/ui';
 
 export interface ConfirmDialogProps {
   title: string;

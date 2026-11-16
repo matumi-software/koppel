@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Button, PageHeader, TextField } from '@matumi/ui';
+import { Button, PageHeader, TextField } from '@heartwood/ui';
 import { setupPassword } from '@/api/auth';
 import { reasonOf } from '@/errors';
 import { SignedOutFrame } from '@/shell/signed-out-frame';

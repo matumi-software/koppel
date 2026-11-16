@@ -23,12 +23,12 @@ importers:
       '@fontsource/jetbrains-mono':
         specifier: ^5.3.0
         version: 5.3.0
-      '@matumi/tokens':
-        specifier: file:../vendor/heartwood/matumi-tokens-0.1.0.tgz
-        version: file:vendor/heartwood/matumi-tokens-0.1.0.tgz
-      '@matumi/ui':
-        specifier: file:../vendor/heartwood/matumi-ui-0.1.0.tgz
-        version: file:vendor/heartwood/matumi-ui-0.1.0.tgz(@matumi/tokens@file:vendor/heartwood/matumi-tokens-0.1.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@heartwood/tokens':
+        specifier: file:../vendor/heartwood/heartwood-tokens-0.1.0.tgz
+        version: file:vendor/heartwood/heartwood-tokens-0.1.0.tgz
+      '@heartwood/ui':
+        specifier: file:../vendor/heartwood/heartwood-ui-0.1.0.tgz
+        version: file:vendor/heartwood/heartwood-ui-0.1.0.tgz(@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@tanstack/react-query':
         specifier: ^5.105.0
         version: 5.105.1(@types/react@19.3.0)(react@19.3.1)
@@ -278,6 +278,18 @@ packages:
   '@fontsource/jetbrains-mono@5.3.0':
     resolution: {integrity: sha512-fqDfB5I9f1p1TV486aUgB9t8zP84P0O1FtQR5Ol9vjwPy+S+EIGlVYm1cvj2W5shcZMTg2nZFdVMoH5wFu8a1A==}
 
+  '@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz':
+    resolution: {integrity: sha512-ym0fsL34QG01xm9lxqVKb27RE58/KqIxhM68LqIbgYTcdq8oRkCBEbtHm9gCZThY/CMQXZvKskS7UQLvC222mA==, tarball: file:vendor/heartwood/heartwood-tokens-0.1.0.tgz}
+    version: 0.1.0
+
+  '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.1.0.tgz':
+    resolution: {integrity: sha512-sCVUhWsl7CMvnYYbSpnejxMbnPZHtZwcQOZNPOyf33UyvgrjAgzNsT45nTXez5yP2Xyz/mdS7TEkRzcW4bYFpg==, tarball: file:vendor/heartwood/heartwood-ui-0.1.0.tgz}
+    version: 0.1.0
+    peerDependencies:
+      '@heartwood/tokens': ^0.1.0
+      react: ^19.0.0
+      react-dom: ^19.0.0
+
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
     engines: {node: '>=18.18.0'}
@@ -325,18 +337,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@matumi/tokens@file:vendor/heartwood/matumi-tokens-0.1.0.tgz':
-    resolution: {integrity: sha512-QT3/HKHGu0rXaSB1ZBDCIm0JfWH5jSy5D6xrTBioRU55yBcVAyS4/D4ccAmlj+O01hAlTSWDId+C9swP5wv1xg==, tarball: file:vendor/heartwood/matumi-tokens-0.1.0.tgz}
-    version: 0.1.0
-
-  '@matumi/ui@file:vendor/heartwood/matumi-ui-0.1.0.tgz':
-    resolution: {integrity: sha512-rKE8TOHIoXEzfttDbeIjl5HD/mOpNp8b8jDM5RRZXD2QWfw6S+CJQMLeOHGuz5ClEyRnRtJJ2Vqe8Wx5pVK/Ew==, tarball: file:vendor/heartwood/matumi-ui-0.1.0.tgz}
-    version: 0.1.0
-    peerDependencies:
-      '@matumi/tokens': ^0.1.0
-      react: ^19.0.0
-      react-dom: ^19.0.0
 
   '@oxc-project/types@0.156.0':
     resolution: {integrity: sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw==}
@@ -1764,6 +1764,20 @@ snapshots:
 
   '@fontsource/jetbrains-mono@5.3.0': {}
 
+  '@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz': {}
+
+  '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.1.0.tgz(@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+    dependencies:
+      '@heartwood/tokens': file:vendor/heartwood/heartwood-tokens-0.1.0.tgz
+      clsx: 2.1.1
+      lucide-react: 1.65.0(@types/react@19.3.0)(react@19.3.1)
+      react: 19.3.1
+      react-aria: 3.53.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react-aria-components: 1.22.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react-dom: 19.3.1(react@19.3.1)
+    transitivePeerDependencies:
+      - '@types/react'
+
   '@humanfs/core@0.19.2':
     dependencies:
       '@humanfs/types': 0.15.0
@@ -1812,20 +1826,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
-
-  '@matumi/tokens@file:vendor/heartwood/matumi-tokens-0.1.0.tgz': {}
-
-  '@matumi/ui@file:vendor/heartwood/matumi-ui-0.1.0.tgz(@matumi/tokens@file:vendor/heartwood/matumi-tokens-0.1.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
-    dependencies:
-      '@matumi/tokens': file:vendor/heartwood/matumi-tokens-0.1.0.tgz
-      clsx: 2.1.1
-      lucide-react: 1.65.0(@types/react@19.3.0)(react@19.3.1)
-      react: 19.3.1
-      react-aria: 3.53.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      react-aria-components: 1.22.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      react-dom: 19.3.1(react@19.3.1)
-    transitivePeerDependencies:
-      - '@types/react'
 
   '@oxc-project/types@0.156.0': {}
 

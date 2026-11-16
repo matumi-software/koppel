@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Button, Callout, CopyValue, Dialog, TextField } from '@matumi/ui';
+import { Button, Callout, CopyValue, Dialog, TextField } from '@heartwood/ui';
 import { createClient, rotateClientSecret, type ClientView } from '@/api/server';
 import { reasonOf } from '@/errors';
 import { ConfirmDialog } from '@/shared/confirm-dialog';

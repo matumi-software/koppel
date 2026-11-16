@@ -10,7 +10,7 @@ folder per crate, the UI and the installers.
 | Folder | What |
 |---|---|
 | `docs/` | Architecture and decisions |
-| `resources/design-system/` | Koppel's brand assets (the logos, the app icon, the social images) and its voice and product rule. Colours, type, sizes and components now come from Heartwood (`@matumi/tokens`, `@matumi/ui`), see "UI" in `docs/ui.md` |
+| `resources/design-system/` | Koppel's brand assets (the logos, the app icon, the social images) and its voice and product rule. Colours, type, sizes and components now come from Heartwood (`@heartwood/tokens`, `@heartwood/ui`), see "UI" in `docs/ui.md` |
 | `src/` | Shared build config: `.editorconfig`, and the Rust workspace (`Cargo.toml`, see "The Rust workspace" in `docs/building.md`) |
 | `src/koppel/` | The program (package `koppel`), and `tests/contract/`, the black-box tests that start it and drive it over HTTPS |
 | `src/koppel-*/` | The library crates: `koppel-config`, `koppel-secrets`, `koppel-upgrade`, `koppel-app`, `koppel-web`, `koppel-usb` and `koppel-windows` |
@@ -22,7 +22,7 @@ folder per crate, the UI and the installers.
 ## Rules
 
 - **The UI never assumes a change worked.** Send it over REST, show it as pending, and treat it as done only when the live push (Server-Sent Events at `/api/v1/events`) brings the value back after the server wrote its config file. Pushes are applied in `LiveProvider` (`live/push-table.ts`) and pending state lives in `PendingProvider`, above the pages. See "The confirm rule" in `docs/ui.md`.
-- **Design values and components come from Heartwood** (`@matumi/tokens` and `@matumi/ui`, in `src/ui/vendor/heartwood`). Do not add another UI library, CSS framework, icon set (icons are lucide, Heartwood's own) or animation library, and do not hand-build buttons, fields, menus, dialogs, tooltips or lists. What Heartwood lacks is raised with Heartwood, not built here. Koppel's own layout is in `src/koppel.css`, on Heartwood's tokens. To take a new Heartwood release, replace the two `.tgz` files and `SHA256SUMS` in `vendor/heartwood` (its README says how) and run `pnpm install`.
+- **Design values and components come from Heartwood** (`@heartwood/tokens` and `@heartwood/ui`, in `src/ui/vendor/heartwood`). Do not add another UI library, CSS framework, icon set (icons are lucide, Heartwood's own) or animation library, and do not hand-build buttons, fields, menus, dialogs, tooltips or lists. What Heartwood lacks is raised with Heartwood, not built here. Koppel's own layout is in `src/koppel.css`, on Heartwood's tokens. To take a new Heartwood release, replace the two `.tgz` files and `SHA256SUMS` in `vendor/heartwood` (its README says how) and run `pnpm install`.
 - **Every mutating fetch goes through `uiFetch`** (`api/http.ts`), which adds the `X-Koppel-UI` header the server requires. A route under `/api` on the UI port needs a session by default (the protected group of `koppel-web/src/api/mod.rs`); put it in the anonymous group only when it must work signed out. A route for remote clients belongs to the network router (`koppel-web/src/routes.rs`). See "Ports and what they serve" in `docs/ports.md`.
 - **Program wiring goes in `koppel`**, everything else in the library crates. No crate depends on `koppel`.
 - **`usbip` knows nothing of Koppel.** The USB/IP device model, bus ID, messages and relay live there, and so do their proptests; it takes no Koppel crate and no `tokio-util`. A change to what goes on the USB/IP wire is made there.

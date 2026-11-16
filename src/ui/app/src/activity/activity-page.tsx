@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ActivityPage as HeartwoodActivityPage } from '@matumi/ui';
+import { ActivityPage as HeartwoodActivityPage } from '@heartwood/ui';
 import { systemInfoOptions } from '@/queries';
 import { toEvents, useActivity } from './activity-context';
 

@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { CircleAlert, RefreshCw } from 'lucide-react';
-import { Button, EmptyState } from '@matumi/ui';
+import { Button, EmptyState } from '@heartwood/ui';
 
 interface Props {
   /** More buttons beside Reload, such as Sign out. */

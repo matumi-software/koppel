@@ -1,4 +1,4 @@
-import { Button, Facts, PageHeader } from '@matumi/ui';
+import { Button, Facts, PageHeader } from '@heartwood/ui';
 import { SignedOutFrame } from '@/shell/signed-out-frame';
 
 /**

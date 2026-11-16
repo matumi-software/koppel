@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { ThemePreference } from '@matumi/ui';
+import type { ThemePreference } from '@heartwood/ui';
 
 /**
  * What this browser chose for the look: light, dark or follow the system, and colour vision mode, which

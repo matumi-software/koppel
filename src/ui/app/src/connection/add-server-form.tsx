@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Button, TextField } from '@matumi/ui';
+import { Button, TextField } from '@heartwood/ui';
 import { RejectedError } from '@/api/http';
 import { discoveredServersOptions } from '@/queries';
 import { useAnnounce } from '@/shared/announce-context';

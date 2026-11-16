@@ -1,8 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useAnnounce, type LinkState } from '@koppel/react-ui';
+import { useAnnounce } from '@/shared/announce-context';
 import { useAuth } from '@/auth/auth-context';
-import { LiveContext } from './live-context';
+import { LiveContext, type LiveState } from './live-context';
 import { applyPush, downAfterFailures, eventsUrl, notInSnapshot, pushEvents, retryDelay } from './push-table';
 
 /**
@@ -19,7 +19,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { recheck } = useAuth();
   const announce = useAnnounce();
-  const [state, setState] = useState<LinkState>('reconnecting');
+  const [state, setState] = useState<LiveState>('reconnecting');
   // Bumped by retry, which starts the link afresh.
   const [start, setStart] = useState(0);
 

@@ -1,15 +1,18 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { ErrorBoundary, Note } from '@koppel/react-ui';
 import { logout, type AuthState } from '@/api/auth';
 import { onUnauthorized } from '@/api/http';
+import { authOptions } from '@/queries';
+import { CouldNotReach } from '@/shell/could-not-reach';
+import { ErrorBoundary } from '@/shell/error-boundary';
+import { Loading } from '@/shell/loading';
+import { SignedOutFrame } from '@/shell/signed-out-frame';
 import { AuthContext } from './auth-context';
 
 // The signed-out screens load only for a browser that is not signed in: the app is most of the code.
 const LoginPage = lazy(() => import('./login-page'));
 const SetPasswordPage = lazy(() => import('./set-password-page'));
 const SetupClosedPage = lazy(() => import('./setup-closed-page'));
-import { authOptions } from '@/queries';
 
 const setupRecheckMs = 15_000;
 const authKey = authOptions().queryKey;
@@ -62,14 +65,22 @@ export function AuthGate({ children }: { children: ReactNode }) {
     [recheck, queryClient],
   );
 
-  const loading = <Note isPadded>Loading…</Note>;
-
   if (!state.data) {
-    return state.isError ? <Note isPadded>Could not reach Koppel. Check that it is running, then reload.</Note> : loading;
+    return (
+      <SignedOutFrame flush={state.isError}>
+        {state.isError ? <CouldNotReach isRetrying={state.isFetching} onRetry={recheck} /> : <Loading />}
+      </SignedOutFrame>
+    );
   }
 
+  const loading = (
+    <SignedOutFrame>
+      <Loading />
+    </SignedOutFrame>
+  );
+
   // A render error anywhere below must not leave a blank page: the boundary offers Reload, and
-  // under the app its own Sign out (see App).
+  // under the app its own Sign out (see ShellBoundary).
   if (!state.data.passwordSet) {
     return (
       <ErrorBoundary>

@@ -1,7 +1,17 @@
 import type { Problem } from './generated/wire';
 
-/** The server refused the request. The message is ready to show after "Not saved: ". */
-export class RejectedError extends Error {}
+/**
+ * The server refused the request. The message is ready to show after "Not saved: ". `problem` is the
+ * whole problem document when the body was one, for a form that wants its `code` or the message per field.
+ */
+export class RejectedError extends Error {
+  readonly problem?: Partial<Problem>;
+
+  constructor(message: string, problem?: Partial<Problem>) {
+    super(message);
+    this.problem = problem;
+  }
+}
 
 /**
  * The body of an answer as the type the caller expects. Every caller names a type from
@@ -13,23 +23,22 @@ export async function readJson<T>(response: Response): Promise<T> {
   return body;
 }
 
-/**
- * The sentence a refusal carries, ready to show: the first message of a validation problem, else the
- * problem's `detail`. Undefined when the body is not a problem document.
- */
-export async function problemMessage(response: Response): Promise<string | undefined> {
+/** The problem document a refusal carries. Undefined when the body is not one. */
+export async function problemOf(response: Response): Promise<Partial<Problem> | undefined> {
   try {
-    const problem = await readJson<Partial<Problem>>(response);
-    const first = Object.values(problem.errors ?? {})[0]?.[0];
-    return first ?? problem.detail;
+    return await readJson<Partial<Problem>>(response);
   } catch {
     return undefined;
   }
 }
 
+/** The sentence a refusal carries, ready to show: the first message of a validation problem, else the problem's `detail`. */
+const sentenceOf = (problem: Partial<Problem> | undefined) => Object.values(problem?.errors ?? {})[0]?.[0] ?? problem?.detail;
+
 /** The refusal of a request as an error with the server's own sentence, or a generic one. */
 export async function rejection(response: Response): Promise<RejectedError> {
-  return new RejectedError((await problemMessage(response)) ?? `the server answered ${response.status}.`);
+  const problem = await problemOf(response);
+  return new RejectedError(sentenceOf(problem) ?? `the server answered ${response.status}.`, problem);
 }
 
 /**

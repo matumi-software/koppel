@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AnnouncerProvider } from '@koppel/react-ui';
+import { AnnouncerProvider } from '@/shared/announcer';
 import { render, screen } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';

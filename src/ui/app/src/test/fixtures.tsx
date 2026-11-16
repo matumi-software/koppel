@@ -1,13 +1,15 @@
-import { ConfigurationPage } from '@/settings/configuration-page';
+import type { ClientServersView } from '@/api/generated/wire';
 import { FrameContext, type FrameApi } from '@/shell/frame-context';
 import { json } from './harness';
-import { clientDevices, connectionView, pairingOverview, pairingStatus, serverIdentity, settings as settingsFixture, systemInfo } from './wire';
+import { clientDevices, enrollmentView, pairingOverview, serverIdentity, servers, settings as settingsFixture, systemInfo } from './wire';
 
 export const settings = settingsFixture;
 export const fingerprint = serverIdentity.fingerprint;
-export const connection = connectionView;
 
 const closedWindow = { open: false, alwaysOpen: false, until: null };
+
+/** A client with no server linked: what a machine shows before anything is added. */
+export const noServers: ClientServersView = { servers: [], unavailable: null, gateway: false, gatewayFault: null };
 
 /** The answers every page's requests get, unless a test routes its own. */
 export const baseRoutes = {
@@ -17,18 +19,15 @@ export const baseRoutes = {
   'GET /api/v1/system/checks': () => json([]),
   'GET /api/v1/system/info': () => json(systemInfo),
   'GET /api/v1/client/discovery': () => json([]),
-  'GET /api/v1/client/pairing': () => json({ ...pairingStatus, state: 'idle', serverName: null, serverUrl: null, code: null, expiresAt: null, serverFingerprint: null }),
-  'GET /api/v1/client/connection': () => json(connection),
-  'GET /api/v1/client/devices': () => json({ ...clientDevices, devices: [], gateway: false, gatewayFault: null }),
+  'GET /api/v1/client/servers': () => json(servers),
+  'GET /api/v1/client/devices': () => json({ ...clientDevices, ...noServers }),
   'GET /api/v1/server/devices': () => json({ devices: [], unavailable: null }),
   'GET /api/v1/server/clients': () => json([]),
+  'GET /api/v1/server/enrollment': () => json({ ...enrollmentView, code: null }),
   'GET /api/v1/server/pairing': () => json({ ...pairingOverview, requests: [], window: closedWindow }),
 };
 
-export const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({ locked: false, asideSlot: null, hasNavigated: false, ...overrides });
+export const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({ locked: false, narrow: false, hasNavigated: false, ...overrides });
 
-export const configuration = (locked = false) => (
-  <FrameContext.Provider value={frame({ locked })}>
-    <ConfigurationPage />
-  </FrameContext.Provider>
-);
+/** A page rendered inside the frame's context, for a test of one page. */
+export const inFrame = (page: React.ReactNode, overrides: Partial<FrameApi> = {}) => <FrameContext.Provider value={frame(overrides)}>{page}</FrameContext.Provider>;

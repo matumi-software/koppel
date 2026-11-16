@@ -1,12 +1,14 @@
 import { createContext, useContext } from 'react';
-import type { ActivityEntry, GlyphState } from '@koppel/react-ui';
+import type { ActivityEvent as ActivityRow } from '@matumi/ui';
 import type { ActivityEvent } from '@/api/activity';
+
+/** Where a line stands: our own change still waiting, done, or refused. */
+export type ActivityState = 'pending' | 'done' | 'fault';
 
 /** One line in the log: from the server, or a change of ours still waiting or refused before it got there. */
 export interface ActivityItem {
   id: string;
-  state: GlyphState;
-  lead?: string;
+  state: ActivityState;
   text: string;
   detail?: string;
   at: Date;
@@ -32,33 +34,11 @@ export function useActivity(): ActivityApi {
   return value;
 }
 
-const glyphs: Record<ActivityEvent['reason'], GlyphState> = {
-  shared: 'shared',
-  unshared: 'local',
-  attached: 'attached',
-  detached: 'local',
-  plugged: 'live',
-  unplugged: 'offline',
-  clientAdded: 'shared',
-  clientRevoked: 'local',
-  secretRotated: 'live',
-  reconfigured: 'live',
-  linkUp: 'live',
-  linkDown: 'fault',
-  signInFailed: 'fault',
-  passwordChanged: 'live',
-  certificatePrepared: 'live',
-  certificateCancelled: 'local',
-  certificateSwitched: 'live',
-  serverMoved: 'live',
-};
-
 export function fromServer(event: ActivityEvent): ActivityItem {
   const failed = event.outcome === 'failed';
   return {
     id: event.id,
-    state: failed ? 'fault' : glyphs[event.reason],
-    lead: failed ? 'Not done.' : undefined,
+    state: failed ? 'fault' : 'done',
     text: event.summary,
     detail: failed ? (event.detail ?? undefined) : undefined,
     at: new Date(event.timestampUtc),
@@ -72,11 +52,20 @@ const dayFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 's
 
 const when = (at: Date) => (at.toDateString() === new Date().toDateString() ? timeFormat.format(at) : `${dayFormat.format(at)} ${timeFormat.format(at)}`);
 
-/** For ActivityFeed: newest first, optionally only about one subject. */
-export function toEntries(items: readonly ActivityItem[], subject?: string): ActivityEntry[] {
+/**
+ * For Heartwood's ActivityPage and ActivityLog: newest first (the items already are), optionally
+ * only about one subject. A refusal reads "Rejected" with the server's reason after the text, a
+ * change still waiting reads "Pending".
+ */
+export function toEvents(items: readonly ActivityItem[], subject?: string): ActivityRow[] {
   return items
     .filter((item) => subject === undefined || item.subject === subject)
-    .map((item) => ({ id: item.id, state: item.state, lead: item.lead, text: item.text, detail: item.detail, time: when(item.at), kind: subject ? undefined : item.kind }));
+    .map((item) => ({
+      id: item.id,
+      time: when(item.at),
+      text: item.detail ? `${item.text}: ${item.detail}` : item.text,
+      result: item.state === 'fault' ? { label: 'Rejected' } : item.state === 'pending' ? { label: 'Pending', tone: 'info' as const } : undefined,
+    }));
 }
 
 /** How many lines the log keeps, on the server and here. */

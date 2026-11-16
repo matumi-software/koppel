@@ -2,10 +2,10 @@ import { queryOptions } from '@tanstack/react-query';
 import { mergeActivity } from '@/activity/activity-context';
 import { getActivity } from '@/api/activity';
 import { getAuthState } from '@/api/auth';
-import { getConnection } from '@/api/client';
-import { getClients, getIdentity, getServerKeys } from '@/api/server';
+import { getClients, getEnrollment, getIdentity, getServerKeys } from '@/api/server';
+import { getServers } from '@/api/servers';
 import { getSettings } from '@/api/settings';
-import { getDiscoveredServers, getPairingRequests, getPairingStatus } from '@/api/pairing';
+import { getDiscoveredServers, getPairingRequests } from '@/api/pairing';
 import { getSystemChecks, getSystemInfo } from '@/api/system';
 import { getClientDevices, getServerDevices } from '@/api/usb';
 
@@ -18,11 +18,11 @@ export const settingsOptions = () => queryOptions({ queryKey: ['settings'], quer
 export const clientsOptions = () => queryOptions({ queryKey: ['clients'], queryFn: getClients });
 export const identityOptions = () => queryOptions({ queryKey: ['identity'], queryFn: getIdentity });
 export const serverKeysOptions = () => queryOptions({ queryKey: ['server-keys'], queryFn: getServerKeys });
-export const connectionOptions = () => queryOptions({ queryKey: ['connection'], queryFn: getConnection });
+export const serversOptions = () => queryOptions({ queryKey: ['servers'], queryFn: getServers });
+export const enrollmentOptions = () => queryOptions({ queryKey: ['enrollment'], queryFn: getEnrollment });
 export const serverDevicesOptions = () => queryOptions({ queryKey: ['server-devices'], queryFn: getServerDevices });
 export const clientDevicesOptions = () => queryOptions({ queryKey: ['client-devices'], queryFn: getClientDevices });
 export const pairingRequestsOptions = () => queryOptions({ queryKey: ['pairing-requests'], queryFn: getPairingRequests });
-export const pairingStatusOptions = () => queryOptions({ queryKey: ['pairing-status'], queryFn: getPairingStatus });
 export const discoveredServersOptions = () => queryOptions({ queryKey: ['discovered-servers'], queryFn: getDiscoveredServers });
 export const systemInfoOptions = () => queryOptions({ queryKey: ['system-info'], queryFn: getSystemInfo });
 export const systemChecksOptions = () => queryOptions({ queryKey: ['system-checks'], queryFn: getSystemChecks });

@@ -12,10 +12,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource/instrument-sans": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@koppel/react-ui": "workspace:*",
     "@matumi/tokens": "file:../vendor/heartwood/matumi-tokens-0.1.0.tgz",
     "@matumi/ui": "file:../vendor/heartwood/matumi-ui-0.1.0.tgz",
     "@tanstack/react-query": "^5.105.0",
+    "lucide-react": "1.65.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

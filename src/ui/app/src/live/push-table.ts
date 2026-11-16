@@ -1,7 +1,7 @@
 import { hashKey, type Query, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { mergeActivity } from '@/activity/activity-context';
 import type { ActivityEvent } from '@/api/activity';
-import { activityOptions, clientDevicesOptions, clientsOptions, connectionOptions, discoveredServersOptions, pairingRequestsOptions, pairingStatusOptions, serverDevicesOptions, serverKeysOptions, settingsOptions, systemInfoOptions } from '@/queries';
+import { activityOptions, clientDevicesOptions, clientsOptions, discoveredServersOptions, enrollmentOptions, pairingRequestsOptions, serverDevicesOptions, serverKeysOptions, serversOptions, settingsOptions, systemInfoOptions } from '@/queries';
 
 const activityKey = activityOptions().queryKey;
 
@@ -44,11 +44,11 @@ export const pushTable: Record<string, Push> = {
   SettingsChanged: whole(settingsOptions().queryKey, [systemInfoOptions().queryKey]),
   ClientsChanged: whole(clientsOptions().queryKey),
   ServerKeysChanged: whole(serverKeysOptions().queryKey, [systemInfoOptions().queryKey]),
-  ConnectionChanged: whole(connectionOptions().queryKey),
+  EnrollmentChanged: whole(enrollmentOptions().queryKey),
+  ServersChanged: whole(serversOptions().queryKey),
   DevicesChanged: whole(serverDevicesOptions().queryKey),
   ClientDevicesChanged: whole(clientDevicesOptions().queryKey),
   PairingRequestsChanged: whole(pairingRequestsOptions().queryKey),
-  PairingStatusChanged: whole(pairingStatusOptions().queryKey),
   ServersDiscovered: whole(discoveredServersOptions().queryKey),
   // One event, not the whole list: merge it in by id, and if the list never loaded, load it.
   // The fetch in flight is not cancelled: it merges with the cache after it lands, so it keeps this event.

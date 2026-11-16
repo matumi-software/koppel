@@ -13,7 +13,7 @@ describe('first-run password', () => {
 
     await screen.findByRole('heading', { name: 'Set up bench-pc' });
 
-    expect(screen.getByText(new RegExp(`Setup is open until ${new Date('2026-11-03T12:40:00Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`))).toBeTruthy();
+    expect(screen.getByText(new RegExp(`Setup stays open until ${new Date('2026-11-03T12:40:00Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`))).toBeTruthy();
     expect(screen.queryByLabelText('Setup code')).toBeNull();
     expect(screen.queryByText(/setup-code\.txt|docker logs/)).toBeNull();
     expect(screen.queryByText('The app')).toBeNull();
@@ -113,7 +113,6 @@ describe('first-run password', () => {
 
     expect(screen.getByText(/Restart Koppel, then open this page again/)).toBeTruthy();
     expect(screen.getByText('sudo systemctl restart koppel')).toBeTruthy();
-    expect(screen.getByText('Restart Koppel', { selector: 'strong' })).toBeTruthy();
     expect(screen.queryByLabelText('New password')).toBeNull();
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }));
     await waitFor(() => expect(count('GET /api/v1/auth/state')).toBe(2));

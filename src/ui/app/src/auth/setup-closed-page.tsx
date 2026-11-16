@@ -1,4 +1,5 @@
-import { Button, Card, FirstRunShell, NoteList, PageHead, Row } from '@koppel/react-ui';
+import { Button, Facts, PageHeader } from '@matumi/ui';
+import { SignedOutFrame } from '@/shell/signed-out-frame';
 
 /**
  * No password was set while setup was open. Koppel takes the first one only for a while after it
@@ -6,30 +7,27 @@ import { Button, Card, FirstRunShell, NoteList, PageHead, Row } from '@koppel/re
  */
 export default function SetupClosedPage({ machineName, recheck }: { machineName: string; recheck: () => void }) {
   return (
-    <FirstRunShell title="Setup has timed out">
-      <PageHead
-        title="Setup has timed out"
-        lede={`Koppel takes the first password for ${machineName} only for a few minutes after it starts, so a stranger cannot claim a machine left waiting. Restart Koppel, then open this page again.`}
-      />
-      <Card label="How to restart Koppel">
-        <h2>How to restart Koppel</h2>
-        <NoteList>
-          <li>
-            In Docker: <code>docker compose restart koppel</code>
-          </li>
-          <li>
-            Linux package: <code>sudo systemctl restart koppel</code>
-          </li>
-          <li>
-            Windows app: right-click the Koppel icon in the notification area and pick <strong>Restart Koppel</strong>
-          </li>
-        </NoteList>
-      </Card>
-      <Row justify="end">
-        <Button variant="primary" onPress={recheck}>
-          Check again
-        </Button>
-      </Row>
-    </FirstRunShell>
+    <SignedOutFrame>
+      <div className="kp-page kp-text">
+        <PageHeader
+          title="Setup has timed out"
+          description={`For safety, Koppel takes the first password for ${machineName} only for a short while after it starts.`}
+        />
+        <p className="kp-muted">Restart Koppel, then open this page again within that time.</p>
+        <Facts
+          label="How to restart Koppel"
+          items={[
+            { label: 'Docker', value: 'docker compose restart koppel', copy: true },
+            { label: 'Linux package', value: 'sudo systemctl restart koppel', copy: true },
+            { label: 'Windows', value: 'Restart-Service Koppel', copy: true },
+          ]}
+        />
+        <div>
+          <Button variant="primary" onPress={recheck}>
+            Check again
+          </Button>
+        </div>
+      </div>
+    </SignedOutFrame>
   );
 }

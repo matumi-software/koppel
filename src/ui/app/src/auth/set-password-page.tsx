@@ -2,7 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Button, PageHeader, TextField } from '@heartwood/ui';
 import { setupPassword } from '@/api/auth';
-import { reasonOf } from '@/errors';
+import { reasonOf, standalone } from '@/errors';
 import { SignedOutFrame } from '@/shell/signed-out-frame';
 import { passwordHelp, passwordProblem, repeatProblem } from './password-rules';
 
@@ -28,7 +28,7 @@ export default function SetPasswordPage({
   const [problems, setProblems] = useState<{ password?: string; again?: string }>({});
   const setPasswordOnServer = useMutation({ mutationFn: setupPassword, onSettled: recheck });
   // A refusal of the token belongs under the token's field, any other under the password's.
-  const refusal = setPasswordOnServer.isError ? reasonOf(setPasswordOnServer.error, 'Could not set the password.') : undefined;
+  const refusal = setPasswordOnServer.isError ? standalone(reasonOf(setPasswordOnServer.error, 'Could not set the password.')) : undefined;
   const aboutToken = tokenRequired && refusal?.startsWith('The setup token') === true;
   const until = setupUntil ? new Date(setupUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
   const sending = setPasswordOnServer.isPending || setPasswordOnServer.isSuccess;

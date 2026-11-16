@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button, TextField } from '@heartwood/ui';
 import { RejectedError } from '@/api/http';
+import { standalone } from '@/errors';
 import { discoveredServersOptions } from '@/queries';
 import { useAnnounce } from '@/shared/announce-context';
 import { useFrame } from '@/shell/frame-context';
@@ -25,7 +26,7 @@ export function AddServerForm({ first, onClose }: { first: boolean; onClose: () 
   const problem = add.error instanceof RejectedError ? add.error.problem : undefined;
   const fields = problem?.errors;
   const credentialField = useKey ? 'key' : 'code';
-  const message = add.error?.message;
+  const message = add.error ? standalone(add.error.message) : undefined;
   const addressError = fields?.address?.[0] ?? (problem?.code === 'already_added' ? message : undefined);
   const credentialError = fields?.[credentialField]?.[0] ?? (message && !addressError && !fields ? message : undefined);
   const offered = found.filter((d) => !saved.some((s) => s.serverUrl === d.url));

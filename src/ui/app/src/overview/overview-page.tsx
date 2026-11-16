@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { CircleCheck, Link2, RefreshCw, UserPlus } from 'lucide-react';
-import { ActivityTile, DrillView, Facts, List, ListRow, NeedsYouTile, PageHeader, Tile, TileGrid, useDrill, type Key, type NeedsYouItem } from '@heartwood/ui';
+import { ActivityTile, DrillView, Facts, List, ListRow, NeedsYouTile, PageHeader, Tile, TileGrid, useDrill, type Key } from '@heartwood/ui';
 import { toEvents, useActivity } from '@/activity/activity-context';
 import { states } from '@/brand';
 import { lastSeenLine } from '@/clients/client-words';
@@ -11,13 +10,13 @@ import { deviceWord, remoteEntries, remoteWord } from '@/devices/device-words';
 import { RemoteDevicePage } from '@/devices/remote-device-page';
 import { useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { usePending } from '@/pending/pending-context';
-import { checksForRole } from '@/system/for-role';
-import { pairingRequestsOptions, systemChecksOptions, systemInfoOptions } from '@/queries';
+import { systemInfoOptions } from '@/queries';
 import { isClientRole, isServerRole, roleName } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
 import { useNow } from '@/shared/use-now';
 import { goTo, useFrame } from '@/shell/frame-context';
 import { Loading } from '@/shell/loading';
+import { useNeedsYou } from './use-needs-you';
 
 type Open = { kind: 'dev'; id: string } | { kind: 'rem'; id: string; serverId: string; busId: string } | { kind: 'cli'; id: string };
 
@@ -35,6 +34,9 @@ const uptime = (startedAt: string, now: number) => {
  */
 export function OverviewPage() {
   const { locked } = useFrame();
+  const needs = useNeedsYou(locked);
+  const sharing = usePending('serverDevices');
+  const attaching = usePending('clientDevices');
   const now = useNow();
   const settings = useSettings();
   const role = settings.query.data?.role;
@@ -44,11 +46,7 @@ export function OverviewPage() {
   const clientDevices = useClientDevices(client).data;
   const clients = useClients(server).data;
   const info = useQuery(systemInfoOptions()).data;
-  const checks = useQuery(systemChecksOptions()).data;
-  const pairing = useQuery({ ...pairingRequestsOptions(), enabled: server }).data;
   const { items } = useActivity();
-  const sharing = usePending('serverDevices');
-  const attaching = usePending('clientDevices');
   const drill = useDrill<Open>();
 
   if (!settings.query.data) return <Loading />;
@@ -72,39 +70,6 @@ export function OverviewPage() {
   const clientList = clients ?? [];
   const using = (id: string) => devices.filter((d) => d.state === 'attached' && d.attachedTo === id).map((d) => d.name);
   const usingClients = clientList.filter((c) => using(c.id).length);
-
-  const needs: NeedsYouItem[] = [
-    ...devices
-      .filter((d) => d.fault)
-      .map((d) => ({
-        id: `fault-${d.busId}`,
-        title: `${d.name} is not shared`,
-        description: d.fault ?? undefined,
-        action: { label: `Share ${d.name} again`, icon: RefreshCw, iconOnly: true, disabled: locked, pending: d.busId in sharing.pending, onPress: () => sharing.request({ busId: d.busId, share: true }) },
-      })),
-    ...remote
-      .filter((r) => r.entry.fault)
-      .map((r) => ({
-        id: `attach-${r.key}`,
-        title: `${r.entry.device.name} did not attach`,
-        description: r.entry.fault ?? undefined,
-        action: { label: `Attach ${r.entry.device.name} again`, icon: RefreshCw, iconOnly: true, disabled: locked, pending: r.key in attaching.pending, onPress: () => attaching.request({ serverId: r.server.id, busId: r.entry.device.busId, attach: true }) },
-      })),
-    ...servers
-      .filter((s) => s.link === 'error')
-      .map((s) => ({
-        id: `link-${s.id}`,
-        title: `Cannot reach ${s.name}`,
-        description: 'Devices attached from it stop working until it is back.',
-        action: { label: 'Open Connection', icon: Link2, onPress: () => goTo('connection') },
-      })),
-    ...checksForRole(checks ?? [], server, client)
-      .filter((c) => !c.ok)
-      .map((c) => ({ id: `check-${c.id}`, title: c.title, description: c.detail, action: { label: 'System check', icon: CircleCheck, onPress: () => goTo('check') } })),
-    ...(pairing?.requests ?? [])
-      .filter((r) => r.state === 'waiting')
-      .map((r) => ({ id: `pair-${r.id}`, title: `${r.clientName} wants to pair`, description: `From ${r.from}. Type the code it shows on Clients.`, action: { label: 'Review', icon: UserPlus, onPress: () => goTo('clients') } })),
-  ];
 
   const sentence =
     [

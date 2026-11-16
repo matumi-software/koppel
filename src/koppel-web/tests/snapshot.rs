@@ -47,7 +47,7 @@ async fn first_events(node: &Node, count: usize) -> Vec<(String, Value)> {
 async fn a_stream_opens_with_the_state_of_each_resource_the_role_has() {
     let dir = TempDir::new("snapshot-both");
     let node = Node::start(dir.path(), "both", None, FakeKernel::new()).await;
-    let events = first_events(&node, 10).await;
+    let events = first_events(&node, 9).await;
     let names: Vec<&str> = events.iter().map(|(n, _)| n.as_str()).collect();
     assert_eq!(
         names,

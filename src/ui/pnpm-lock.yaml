@@ -23,9 +23,6 @@ importers:
       '@fontsource/jetbrains-mono':
         specifier: ^5.3.0
         version: 5.3.0
-      '@koppel/react-ui':
-        specifier: workspace:*
-        version: link:../react-ui
       '@matumi/tokens':
         specifier: file:../vendor/heartwood/matumi-tokens-0.1.0.tgz
         version: file:vendor/heartwood/matumi-tokens-0.1.0.tgz
@@ -90,52 +87,6 @@ importers:
       typescript-eslint:
         specifier: ^8.58.0
         version: 8.72.1(eslint@9.39.5)(typescript@6.0.3)
-      vite:
-        specifier: ^8.0.4
-        version: 8.3.5(@types/node@24.19.2)
-      vitest:
-        specifier: ^4.1.8
-        version: 4.1.12(@types/node@24.19.2)(jsdom@29.1.1)(vite@8.3.5(@types/node@24.19.2))
-
-  react-ui:
-    dependencies:
-      '@fontsource/instrument-sans':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource/jetbrains-mono':
-        specifier: ^5.3.0
-        version: 5.3.0
-      react-aria-components:
-        specifier: ^1.17.0
-        version: 1.22.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-    devDependencies:
-      '@testing-library/react':
-        specifier: ^16.3.2
-        version: 16.3.3(@testing-library/dom@10.4.2)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@testing-library/user-event':
-        specifier: ^14.6.1
-        version: 14.6.8(@testing-library/dom@10.4.2)
-      '@types/react':
-        specifier: ^19.2.14
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: ^19.2.3
-        version: 19.3.0(@types/react@19.3.0)
-      '@vitejs/plugin-react':
-        specifier: ^6.0.1
-        version: 6.2.1(vite@8.3.5(@types/node@24.19.2))
-      jsdom:
-        specifier: ^29.1.1
-        version: 29.1.1
-      react:
-        specifier: ^19.2.4
-        version: 19.3.1
-      react-dom:
-        specifier: ^19.2.4
-        version: 19.3.1(react@19.3.1)
-      typescript:
-        specifier: ~6.0.2
-        version: 6.0.3
       vite:
         specifier: ^8.0.4
         version: 8.3.5(@types/node@24.19.2)

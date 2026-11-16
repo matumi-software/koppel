@@ -328,7 +328,7 @@ packages:
     version: 0.1.0
 
   '@matumi/ui@file:vendor/heartwood/matumi-ui-0.1.0.tgz':
-    resolution: {integrity: sha512-K8V2StN1InXqa/5//X2KPvR3/AlE6LP8D6HZANojFHnxog01ajuO0swLKRH8nR/S3uj81C/NSRzIQs51zhmneg==, tarball: file:vendor/heartwood/matumi-ui-0.1.0.tgz}
+    resolution: {integrity: sha512-rKE8TOHIoXEzfttDbeIjl5HD/mOpNp8b8jDM5RRZXD2QWfw6S+CJQMLeOHGuz5ClEyRnRtJJ2Vqe8Wx5pVK/Ew==, tarball: file:vendor/heartwood/matumi-ui-0.1.0.tgz}
     version: 0.1.0
     peerDependencies:
       '@matumi/tokens': ^0.1.0

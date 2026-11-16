@@ -4,13 +4,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CheckPage } from '@/system/check-page';
 import { baseRoutes, inFrame } from './fixtures';
 import { json, mockFetch, renderApp } from './harness';
-import { systemChecks } from './wire';
+import { systemChecks, systemInfo } from './wire';
+
+const both = { 'GET /api/v1/system/info': () => json({ ...systemInfo, role: 'both' }) };
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the system check page', () => {
   it('shows each check with its state, its words and the advice, and counts what needs a change', async () => {
-    mockFetch({ ...baseRoutes, 'GET /api/v1/system/checks': () => json(systemChecks) });
+    mockFetch({ ...baseRoutes, ...both, 'GET /api/v1/system/checks': () => json(systemChecks) });
     renderApp(inFrame(<CheckPage />));
 
     await screen.findByText('This machine can share USB devices.');
@@ -19,6 +21,15 @@ describe('the system check page', () => {
     expect(screen.getByText('Load the vhci-hcd module.')).toBeTruthy();
     expect(screen.getByText('1 needs a change')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'What bench-pc needs' })).toBeTruthy();
+  });
+
+  it('leaves out the check for a side this machine does not play', async () => {
+    mockFetch({ ...baseRoutes, 'GET /api/v1/system/checks': () => json(systemChecks) });
+    renderApp(inFrame(<CheckPage />));
+
+    await screen.findByText('This machine can share USB devices.');
+    expect(screen.queryByText('Attaching needs vhci-hcd.')).toBeNull();
+    expect(screen.getByText('All ready')).toBeTruthy();
   });
 
   it('says all ready when every check passes, and shows the install facts once', async () => {
@@ -32,7 +43,7 @@ describe('the system check page', () => {
 
   it('checks again on request', async () => {
     let answer = systemChecks;
-    const { count } = mockFetch({ ...baseRoutes, 'GET /api/v1/system/checks': () => json(answer) });
+    const { count } = mockFetch({ ...baseRoutes, ...both, 'GET /api/v1/system/checks': () => json(answer) });
     renderApp(inFrame(<CheckPage />));
     await screen.findByText('1 needs a change');
 

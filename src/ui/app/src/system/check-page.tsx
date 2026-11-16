@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { Button, Checklist, Facts, PageHeader, Tile, TileStack } from '@matumi/ui';
+import { isClientRole, isServerRole } from '@/settings/roles';
+import { checksForRole } from '@/system/for-role';
 import { systemChecksOptions, systemInfoOptions } from '@/queries';
 import { useNow } from '@/shared/use-now';
 import { CouldNotReach } from '@/shell/could-not-reach';
@@ -30,7 +32,8 @@ export function CheckPage() {
   }
 
   const name = info.data?.name ?? window.location.hostname;
-  const failing = checks.data.filter((c) => !c.ok).length;
+  const shown = checksForRole(checks.data, isServerRole(info.data?.role), isClientRole(info.data?.role));
+  const failing = shown.filter((c) => !c.ok).length;
   const data = info.data;
 
   return (
@@ -48,7 +51,7 @@ export function CheckPage() {
         <Tile title="Checks" meta={failing ? `${failing} ${failing === 1 ? 'needs' : 'need'} a change` : 'All ready'} padded>
           <Checklist
             label="Checks"
-            items={checks.data.map((c) => ({
+            items={shown.map((c) => ({
               id: c.id,
               state: c.ok ? ('ok' as const) : ('warning' as const),
               stateLabel: c.ok ? 'Ready' : 'Needs a change',

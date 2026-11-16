@@ -32,7 +32,7 @@ pub(crate) struct SettingsPatch {
     notify_attach_failures: Option<bool>,
     /// A port, or null to clear it; left out leaves it as it is.
     #[serde(default, deserialize_with = "set_or_clear")]
-    #[ts(type = "number | null")]
+    #[ts(type = "number | null", optional)]
     network_port: Option<Option<u16>>,
     #[serde(default)]
     network_accept_from: Option<AcceptFrom>,

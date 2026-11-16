@@ -11,6 +11,7 @@ import { deviceWord, remoteEntries, remoteWord } from '@/devices/device-words';
 import { RemoteDevicePage } from '@/devices/remote-device-page';
 import { useClientDevices, useServerDevices } from '@/devices/use-devices';
 import { usePending } from '@/pending/pending-context';
+import { checksForRole } from '@/system/for-role';
 import { pairingRequestsOptions, systemChecksOptions, systemInfoOptions } from '@/queries';
 import { isClientRole, isServerRole, roleName } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
@@ -97,7 +98,7 @@ export function OverviewPage() {
         description: 'Devices attached from it stop working until it is back.',
         action: { label: 'Open Connection', icon: Link2, onPress: () => goTo('connection') },
       })),
-    ...(checks ?? [])
+    ...checksForRole(checks ?? [], server, client)
       .filter((c) => !c.ok)
       .map((c) => ({ id: `check-${c.id}`, title: c.title, description: c.detail, action: { label: 'System check', icon: CircleCheck, onPress: () => goTo('check') } })),
     ...(pairing?.requests ?? [])

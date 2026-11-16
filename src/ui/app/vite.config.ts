@@ -19,6 +19,11 @@ export default defineConfig({
         },
         dedupe: ['react', 'react-dom'],
     },
+    build: {
+        // Koppel's content security policy takes fonts from its own origin only, so a font is a file
+        // beside the page and never a data: URI inlined into the stylesheet.
+        assetsInlineLimit: (file) => (/\.woff2?$/.test(file) ? false : undefined),
+    },
     server: {
         proxy: {
             // REST and the live push both live under /api/v1/.

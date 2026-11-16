@@ -20,7 +20,7 @@ describe('the system check page', () => {
     expect(screen.getByText('Attaching needs vhci-hcd.')).toBeTruthy();
     expect(screen.getByText('Load the vhci-hcd module.')).toBeTruthy();
     expect(screen.getByText('1 needs a change')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'What bench-pc needs' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'System check' })).toBeTruthy();
   });
 
   it('leaves out the check for a side this machine does not play', async () => {

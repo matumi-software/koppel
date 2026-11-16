@@ -97,20 +97,20 @@ export function RemoteDevicesPage() {
           <EmptyState title={`No devices match "${q}"`} />
         ) : (
           groups.map((group) => {
-            const items = shown.filter((r) => group.words.includes(remoteWord(r.entry)));
+            const items = shown.filter((r) => group.words.includes(remoteWord(r.entry, r.server.link)));
             if (!items.length) return null;
             return (
               <CardGroup key={group.title} title={group.title} count={items.length}>
                 {items.map((r) => {
                   const action = pending[r.key];
                   const fault = failures[r.key] ?? r.entry.fault;
-                  const word = remoteWord(r.entry);
+                  const word = remoteWord(r.entry, r.server.link);
                   return (
                     <DeviceCard
                       key={r.key}
                       id={r.key}
                       name={r.entry.device.name}
-                      sub={remoteSub(r.entry, r.server.name, fault)}
+                      sub={remoteSub(r.entry, r.server.name, fault, r.server.link)}
                       subDanger={!!fault}
                       state={action ? <StatusDot tone="pending">{action.attach ? 'Attaching' : 'Detaching'}</StatusDot> : <StateLabel states={states} state={word} />}
                       control={<AttachSwitch item={r} bare />}

@@ -54,11 +54,9 @@ export function DevicePage({ busId, back }: { busId: string; back: Back }) {
         actions={<ShareSwitch device={device} holder={holder} />}
       />
       {fault ? (
-        <div className="kp-text">
-          <Callout tone="danger" title={`${device.name} is not shared`}>
-            {fault}
-          </Callout>
-        </div>
+        <Callout tone="danger" title={`${device.name} is not shared`}>
+          {fault}
+        </Callout>
       ) : null}
       <TileStack>
         <Tile title="Details" padded>

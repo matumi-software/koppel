@@ -65,7 +65,7 @@ export function AddServerForm({ first, onClose }: { first: boolean; onClose: () 
       />
       {offered.length ? (
         <div className="kp-stack-2">
-          <span className="kp-muted kp-small">Found on this network</span>
+          <span className="kp-muted kp-small">Found on this network. Pick one to fill in its address.</span>
           <div className="kp-actions">
             {offered.map((d) => (
               <Button key={d.url} variant="secondary" onPress={() => edit(setAddress)(`${d.address}:${d.httpsPort}`)}>

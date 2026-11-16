@@ -122,7 +122,7 @@ export function OverviewPage() {
                 <List label="Remote devices" isDivided items={remote.slice(0, 5)} onAction={(id: Key) => { const r = remote.find((x) => x.key === String(id)); if (r) open({ kind: 'rem', id: r.key, serverId: r.server.id, busId: r.entry.device.busId }); }}>
                   {(r) => {
                     const action = attaching.pending[r.key];
-                    const word = remoteWord(r.entry);
+                    const word = remoteWord(r.entry, r.server.link);
                     return (
                       <ListRow
                         id={r.key}

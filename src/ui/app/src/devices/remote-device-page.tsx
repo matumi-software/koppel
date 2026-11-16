@@ -35,7 +35,7 @@ export function RemoteDevicePage({ serverId, busId, back }: { serverId: string; 
   const { entry, server } = item;
   const device = entry.device;
   const fault = failures[item.key] ?? entry.fault;
-  const word = remoteWord(entry);
+  const word = remoteWord(entry, server.link);
   const note = noteOf(word, server.name);
   const history = toEvents(items, item.key);
   const kind = kindOf(device);

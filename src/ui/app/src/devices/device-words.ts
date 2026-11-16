@@ -5,8 +5,9 @@ import { since } from './use-devices';
 export const deviceWord = (d: DeviceView) => (d.state === 'attached' ? 'Attached' : d.state === 'shared' ? 'Shared' : d.state === 'offline' ? 'Offline' : 'Not shared');
 
 /** The word for a device of a server, as seen from this machine. */
-export const remoteWord = (e: ClientDeviceView) =>
-  e.attachedHere ? 'Attached' : e.device.state === 'offline' ? 'Offline' : e.device.state === 'attached' ? 'In use' : 'Not attached';
+/** `link` is the server's: a device cannot be attached or used while its server cannot be reached. */
+export const remoteWord = (e: ClientDeviceView, link?: string) =>
+  link === 'error' ? 'Offline' : e.attachedHere ? 'Attached' : e.device.state === 'offline' ? 'Offline' : e.device.state === 'attached' ? 'In use' : 'Not attached';
 
 /** What a person can read on a card's second line, for a device of this machine. */
 export const deviceSub = (d: DeviceView, holder: string | null, fault: string | null | undefined) => {
@@ -18,8 +19,9 @@ export const deviceSub = (d: DeviceView, holder: string | null, fault: string | 
 };
 
 /** The same for a device of a server. */
-export const remoteSub = (e: ClientDeviceView, server: string, fault: string | null | undefined) => {
+export const remoteSub = (e: ClientDeviceView, server: string, fault: string | null | undefined, link?: string) => {
   if (fault) return fault;
+  if (link === 'error') return `Cannot reach ${server}`;
   if (e.attachedHere) return `From ${server}${since(e.attachedSince)}`;
   if (e.device.state === 'offline') return `Unplugged on ${server}`;
   if (e.device.state === 'attached') return `Another client of ${server} has it`;

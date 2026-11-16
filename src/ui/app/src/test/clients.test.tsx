@@ -97,6 +97,13 @@ describe('the clients of this server', () => {
     expect(await screen.findByText(/Valid for/)).toBeTruthy();
   });
 
+  it('offers a new code in words once the code has run out', async () => {
+    mockFetch({ ...routes, 'GET /api/v1/server/enrollment': () => json({ ...enrollmentView, code: { code: '48312290', expiresAt: new Date(Date.now() - 1000).toISOString() } }) });
+    renderApp(inFrame(<ClientsPage />));
+
+    expect(await screen.findByRole('button', { name: 'Show a new code' })).toBeTruthy();
+  });
+
   it('approves a pairing request with the digits typed, and keeps it waiting until it leaves the list', async () => {
     const { calls } = mockFetch({
       ...routes,

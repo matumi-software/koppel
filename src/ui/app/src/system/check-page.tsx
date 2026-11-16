@@ -39,8 +39,8 @@ export function CheckPage() {
   return (
     <div className="kp-page">
       <PageHeader
-        title={`What ${name} needs`}
-        description={`Checked at ${clock.format(checks.dataUpdatedAt)}.`}
+        title="System check"
+        description={`What ${name} needs to share or attach USB devices. Checked at ${clock.format(checks.dataUpdatedAt)}.`}
         actions={
           <Button variant="secondary" icon={RefreshCw} isPending={checks.isFetching} onPress={() => void checks.refetch()}>
             Check again

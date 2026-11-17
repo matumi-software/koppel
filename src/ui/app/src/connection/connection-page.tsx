@@ -119,6 +119,14 @@ export function ConnectionPage() {
   const showForm = client && (adding || first);
   const inspector = !settings.query.data || showForm || (narrow && !selected) ? null : selServer ? (
     <Inspector title="Settings" subject={serverLabel(selServer)} dirty={dirty} staged={{ onRevert: revert, onApply: apply, invalid: locked || invalid }} storageKey="koppel.connection">
+      {/* On a phone the panel is a sheet over the page, where the failure below the header cannot be seen. */}
+      {narrow && changes.failures[selServer.id] ? (
+        <div className="kp-sheet-note">
+          <Callout tone="danger" title="Not saved">
+            {changes.failures[selServer.id]}
+          </Callout>
+        </div>
+      ) : null}
       <PropertySection title="Link">
         <Property label="Address" type="readonly" copy value={selServer.serverUrl?.replace(/^https:\/\//, '') ?? ''} />
         <Property label="Reconnect" type="boolean" value={shown(selServer).reconnect} resetTo={selServer.reconnect} onChange={(v) => edit(selServer, { reconnect: !!v })} />

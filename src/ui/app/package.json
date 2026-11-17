@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "e2e": "playwright test",
+    "e2e:report": "node e2e/report.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

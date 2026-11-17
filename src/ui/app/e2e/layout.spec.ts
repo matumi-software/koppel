@@ -68,3 +68,17 @@ test.describe('the overview on a wide screen', () => {
     });
   }
 });
+
+test.describe('the pairing requests on a phone', () => {
+  test.skip(({ isMobile }) => !isMobile, 'a phone check');
+
+  test('the code field of a waiting request is wide enough to type eight digits', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await serve(page, 'server');
+    await page.goto('/#clients');
+    const field = page.getByLabel(/^Code shown on/).first();
+    await expect(field).toBeVisible();
+    // It once shrank to 12px beside the Approve button, so the digits could not be seen.
+    expect((await field.boundingBox())!.width).toBeGreaterThan(120);
+  });
+});

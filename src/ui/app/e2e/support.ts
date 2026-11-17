@@ -11,14 +11,25 @@ export async function answerSignedOut(page: Page, state: object) {
   await page.route('**/api/v1/auth/state', (route) => route.fulfill({ json: state }));
 }
 
+export interface ServeOptions {
+  /** Fields laid over the settings fixture. */
+  settings?: object;
+  /** Fields laid over the system info fixture. */
+  info?: object;
+  /** Whole answers, by path, laid over the fixtures' (and pushed again where a push carries them). */
+  answers?: Record<string, unknown>;
+  /** `up` (the default) opens the live link at once. `reconnecting` never opens it. `down` fails it until the app calls it down. */
+  link?: 'up' | 'reconnecting' | 'down';
+}
+
 /** A server whose screens the Overview needs, answered from the fixtures. */
-export async function serve(page: Page, role: 'server' | 'client' | 'both') {
-  const settings = { ...wire('settings'), role, setupComplete: true };
-  const servers = wire('servers');
+export async function serve(page: Page, role: 'server' | 'client' | 'both', options: ServeOptions = {}) {
+  const settings = { ...wire('settings'), role, setupComplete: true, ...options.settings };
+  const servers = options.answers?.['/api/v1/client/servers'] ?? wire('servers');
   const answers: Record<string, unknown> = {
     '/api/v1/auth/state': { ...signedOut, signedIn: true, passwordSet: true, setupOpen: false },
     '/api/v1/settings': settings,
-    '/api/v1/system/info': { ...wire('system-info'), role },
+    '/api/v1/system/info': { ...wire('system-info'), role, ...options.info },
     '/api/v1/system/checks': wire('system-checks').map((c: object) => ({ ...c, ok: true })),
     '/api/v1/activity': [wire('activity-event')],
     '/api/v1/server/clients': wire('clients'),
@@ -30,6 +41,7 @@ export async function serve(page: Page, role: 'server' | 'client' | 'both') {
     '/api/v1/client/servers': servers,
     '/api/v1/client/devices': wire('client-devices'),
     '/api/v1/client/discovery': wire('discovered-servers'),
+    ...options.answers,
   };
   const push: [string, unknown][] = [
     ['SettingsChanged', settings],
@@ -43,7 +55,7 @@ export async function serve(page: Page, role: 'server' | 'client' | 'both') {
   // The live push is a stand-in for EventSource that opens at once, sends the snapshot and stays open, so the
   // app is live and its controls work, as with a real server. A spec can send a later event with
   // `window.__push(name, data)`.
-  await page.addInitScript((events: [string, unknown][]) => {
+  await page.addInitScript(([events, link]: [[string, unknown][], string]) => {
     const sources: FakeEventSource[] = [];
     class FakeEventSource {
       readyState = 0;
@@ -54,6 +66,11 @@ export async function serve(page: Page, role: 'server' | 'client' | 'both') {
       constructor(url: string) {
         this.url = url;
         sources.push(this);
+        if (link === 'reconnecting') return;
+        if (link === 'down') {
+          setTimeout(() => this.onerror?.(new Event('error')), 0);
+          return;
+        }
         setTimeout(() => {
           this.readyState = 1;
           this.onopen?.(new Event('open'));
@@ -75,7 +92,7 @@ export async function serve(page: Page, role: 'server' | 'client' | 'both') {
     (window as unknown as { __push: (name: string, data: unknown) => void }).__push = (name, data) => {
       for (const source of sources) source.emit(name, data);
     };
-  }, push);
+  }, [push, options.link ?? 'up'] as [[string, unknown][], string]);
   await page.route('**/api/v1/**', (route) => {
     const request = route.request();
     const { pathname } = new URL(request.url());

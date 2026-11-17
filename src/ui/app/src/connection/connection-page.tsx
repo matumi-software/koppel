@@ -46,6 +46,13 @@ export function ConnectionPage() {
 
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<string>();
+  // Where the panel is a sheet it is not mounted until a person asks for it (a closed one leaves a rail that takes a
+  // phone's width) and is mounted open; where it is a column Heartwood holds its state.
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const pick = (id: string) => {
+    setSelected(id);
+    setSheetOpen(true);
+  };
   const [drafts, setDrafts] = useState<Record<string, Partial<Link>>>({});
   const [portDraft, setPortDraft] = useState<number | null>();
   const [removing, setRemoving] = useState<ServerView>();
@@ -113,12 +120,12 @@ export function ConnectionPage() {
   const here = (s: ServerView) => (devices?.servers.find((d) => d.id === s.id)?.devices ?? []).filter((e) => e.attachedHere).map((e) => e.device.name);
   const linkOf = (s: ServerView) => devices?.servers.find((d) => d.id === s.id)?.link ?? 'connecting';
 
-  // Up to 818 wide the panel is a sheet over the page, so it opens when a person asks (a Settings button), never on arrival.
+  // Where the panel is a sheet over the page it opens when a person asks (a Settings button), never on arrival.
   // The form is about a server that is not saved yet, so the panel of another one stays shut while it is open.
   const first = client && list.length === 0;
   const showForm = client && (adding || first);
-  const inspector = !settings.query.data || showForm || (narrow && !selected) ? null : selServer ? (
-    <Inspector title="Settings" subject={serverLabel(selServer)} dirty={dirty} staged={{ onRevert: revert, onApply: apply, invalid: locked || invalid }} storageKey="koppel.connection">
+  const inspector = !settings.query.data || showForm || (narrow && !sheetOpen) ? null : selServer ? (
+    <Inspector title="Settings" subject={serverLabel(selServer)} dirty={dirty} staged={{ onRevert: revert, onApply: apply, invalid: locked || invalid }} storageKey="koppel.connection" open={narrow ? true : undefined} onOpenChange={narrow ? setSheetOpen : undefined}>
       {/* On a phone the panel is a sheet over the page, where the failure below the header cannot be seen. */}
       {narrow && changes.failures[selServer.id] ? (
         <div className="kp-sheet-note">
@@ -149,7 +156,7 @@ export function ConnectionPage() {
       </PropertySection>
     </Inspector>
   ) : server ? (
-    <Inspector title="Settings" subject={host} dirty={dirty} staged={{ onRevert: revert, onApply: apply, invalid: locked || invalid }} storageKey="koppel.connection">
+    <Inspector title="Settings" subject={host} dirty={dirty} staged={{ onRevert: revert, onApply: apply, invalid: locked || invalid }} storageKey="koppel.connection" open={narrow ? true : undefined} onOpenChange={narrow ? setSheetOpen : undefined}>
       <PropertySection title="Sharing">
         <Property
           label="Port"
@@ -226,7 +233,7 @@ export function ConnectionPage() {
                 // the server's name, so the pinned Actions never sit over it and a long address wraps.
               ].filter((column) => !narrow || (column.id !== 'here' && column.id !== 'link'))}
               rows={list.map((s) => ({ id: s.id }))}
-              onRowAction={(id) => setSelected(String(id))}
+              onRowAction={(id) => pick(String(id))}
               current={sel}
               renderCell={(row, col) => {
                 const s = list.find((x) => x.id === row.id)!;
@@ -251,7 +258,7 @@ export function ConnectionPage() {
                 return (
                   <span className="kp-line">
                     <IconButton icon={PlugZap} label={`Test the connection to ${serverLabel(s)}`} size="sm" isDisabled={locked || testing === s.id} onPress={() => test.mutate(s.id)} />
-                    <IconButton icon={Settings} label={`Settings for ${serverLabel(s)}`} description="Opens them in the panel at the right." size="sm" onPress={() => setSelected(s.id)} />
+                    <IconButton icon={Settings} label={`Settings for ${serverLabel(s)}`} description="Opens them in the panel at the right." size="sm" onPress={() => pick(s.id)} />
                     <IconButton icon={Trash2} label={`Remove ${serverLabel(s)}`} danger isDisabled={locked || !!action} onPress={() => setRemoving(s)} />
                   </span>
                 );
@@ -271,13 +278,13 @@ export function ConnectionPage() {
                 { id: 'act', label: 'Actions', width: 80, actions: true },
               ]}
               rows={[{ id: 'self' }]}
-              onRowAction={() => setSelected('self')}
+              onRowAction={() => pick('self')}
               current={sel}
               renderCell={(_row, col) => {
                 if (col.id === 'name') return host;
                 if (col.id === 'addr') return <span className="hw-mono">{`${host}:${inUse ?? ''}`}</span>;
                 if (col.id === 'clients') return clients ? `${clients.length} linked` : '';
-                return <IconButton icon={Settings} label={`Settings for ${host}`} description="Opens them in the panel at the right." size="sm" onPress={() => setSelected('self')} />;
+                return <IconButton icon={Settings} label={`Settings for ${host}`} description="Opens them in the panel at the right." size="sm" onPress={() => pick('self')} />;
               }}
             />
           </Tile>

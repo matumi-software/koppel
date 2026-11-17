@@ -84,3 +84,23 @@ test('the connection page is not covered by its settings panel on a tablet', asy
   await page.getByRole('button', { name: 'Add a server' }).click();
   await expect(page.getByLabel('Server address')).toBeVisible();
 });
+
+test('the settings sheet opens when asked for and closes again', async ({ page, isMobile }) => {
+  // The phone project, and an iPad in portrait (810) on desktop: both are sheets.
+  if (!isMobile) await page.setViewportSize({ width: 810, height: 1080 });
+  await serve(page, 'client');
+  await page.goto('/#connection');
+  await expect(page.locator('main h1').first()).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(await page.locator('[class*="hw-inspector"]').count(), 'the panel is open on arrival').toBe(0);
+
+  await page.getByRole('button', { name: /Settings for lab/ }).first().click();
+  const sheet = page.getByRole('dialog', { name: 'Settings' });
+  await expect(sheet).toBeVisible();
+  await expect(page.getByLabel('Retry every')).toBeVisible();
+
+  await sheet.getByRole('button', { name: /^Hide / }).click();
+  await expect(sheet).toHaveCount(0);
+  expect(await page.locator('[class*="hw-inspector"]').count(), 'a closed sheet leaves a rail').toBe(0);
+  await expect(page.getByRole('button', { name: /Settings for lab/ }).first()).toBeVisible();
+});

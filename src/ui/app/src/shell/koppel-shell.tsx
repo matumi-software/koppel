@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { LogOut, RefreshCw, User } from 'lucide-react';
-import { AppShell, Button, Callout, Popover, toast, StatusDot } from '@heartwood/ui';
+import { AppShell, Button, Callout, Popover, toast, StatusDot, useInspectorSheet } from '@heartwood/ui';
 import { brand } from '@/brand';
 import { useAuth } from '@/auth/auth-context';
 import { reasonOf } from '@/errors';
 import { useLive } from '@/live/live-context';
 import { useAnnounce } from '@/shared/announce-context';
-import { useMedia } from '@/shared/use-media';
-import { FrameContext, FrameSlotsContext, goTo, useHasNavigated } from './frame-context';
+import { FrameContext, FrameSlotsContext, goTo, useHasNavigated, type FrameApi } from './frame-context';
 import { isPage, navGroups, places, type NavCounts, type Page } from './places';
 
 /**
@@ -68,6 +67,21 @@ export interface KoppelShellProps {
 }
 
 /**
+ * Tells the pages whether the settings panel is a sheet over the page (`narrow`), as Heartwood's own
+ * condition says it, so no width is written here. It sits inside the AppShell, where the hook can measure. On
+ * a phone and a tablet in portrait the panel is a sheet, a ListDetail shows one pane and the tables drop columns.
+ */
+function SheetFrame({ frame, children }: { frame: FrameApi; children: ReactNode }) {
+  const narrow = useInspectorSheet();
+  const value = useMemo(() => ({ ...frame, narrow }), [frame, narrow]);
+  return (
+    <FrameContext.Provider value={value}>
+      <div className={narrow ? 'kp-narrow kp-contents' : 'kp-contents'}>{children}</div>
+    </FrameContext.Provider>
+  );
+}
+
+/**
  * The window every page of the app sits in: Heartwood's AppShell with the role's navigation, the
  * link state in the strip and the account menu in the foot. Pages reach it through three small
  * seams: `useFrame` (locked, narrow), and `useFlush` and `useInspector` (frame-context.ts).
@@ -77,17 +91,12 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
   const { state } = useLive();
   const { signOut } = useAuth();
   const announce = useAnnounce();
-  // Where Heartwood's settings panel is a sheet over the page, not a column beside it: its container query puts
-  // the sheet on at 760 wide inside the window, which in a viewport with the icon-only sidebar is up to 818
-  // (measured: 818 is a sheet, 819 a column; an iPad portrait at 810 is a sheet). Koppel opens a panel on
-  // arrival only where it is a column.
-  const narrow = useMedia('(max-width: 818px)');
   const hasNavigated = useHasNavigated();
   const [flush, setFlush] = useState(false);
   const [inspector, setInspector] = useState<ReactNode>(null);
   const locked = state !== 'live';
 
-  const frame = useMemo(() => ({ locked, narrow, hasNavigated }), [locked, narrow, hasNavigated]);
+  const frame = useMemo(() => ({ locked, narrow: false, hasNavigated }), [locked, hasNavigated]);
   const slots = useMemo(() => ({ setFlush, setInspector }), []);
   const groups = useMemo(() => navGroups(role, counts), [role, counts]);
 
@@ -135,14 +144,15 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
           current={page}
           onNavigate={(id) => isPage(id) && goTo(id)}
           storageKey="koppel.sidebar"
-          className={narrow ? 'kp-narrow' : undefined}
           toolbarEnd={<LinkState />}
           phoneEnd={<LinkState short />}
           flush={flush}
           inspector={inspector}
         >
-          {locked ? <LinkNotice /> : null}
-          {children}
+          <SheetFrame frame={frame}>
+            {locked ? <LinkNotice /> : null}
+            {children}
+          </SheetFrame>
         </AppShell>
       </FrameSlotsContext.Provider>
     </FrameContext.Provider>

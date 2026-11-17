@@ -9,7 +9,6 @@ Every row was driven in Chromium at desktop width (1120 px) and phone width (390
 | Kind | Count | Status |
 |---|---|---|
 | contrast | 6 | Heartwood leaves it: the label and hint of a disabled property are 4.2:1, and WCAG exempts inactive controls (the check here is stricter) |
-| no-tooltip | 4 | Heartwood: a list row title that is cut shows no tooltip (the sub line does) |
 | clipped | 176 | By design: an ellipsis with a tooltip (a fingerprint, a long name), or Heartwood's tab label |
 
 ## Widths around the breakpoint

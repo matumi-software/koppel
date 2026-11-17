@@ -42,7 +42,7 @@ export interface FrameApi {
   hasNavigated: boolean;
   /** True while the UI's own link to its server is not live, so nothing may send a change. */
   locked: boolean;
-  /** True up to 818 wide, where the settings panel is a sheet over the page and a ListDetail shows one pane at a time. */
+  /** True while the settings panel is a sheet over the page (Heartwood's own condition, `useInspectorSheet`): a ListDetail then shows one pane at a time and the tables drop columns. */
   narrow: boolean;
 }
 

@@ -16,7 +16,6 @@ const hard = new Set<Finding['kind']>(['sideways', 'console', 'unnamed', 'offscr
 // finding that matches one is written to the report as known and does not fail the run; when Heartwood ships
 // the fix the entry is deleted.
 const known: { kind: Finding['kind']; match: RegExp; why: string }[] = [
-  { kind: 'no-tooltip', match: /^span\.hw-list-title /, why: 'Heartwood: a list row title that is cut shows no tooltip (the sub line does)' },
   { kind: 'contrast', match: /^span\.hw-(prop-label-text|visually-hidden) .* is 4\.2\d:1$/, why: 'Heartwood leaves it: the label and hint of a disabled property are 4.2:1, and WCAG exempts inactive controls (the check here is stricter)' },
 ];
 

@@ -48,6 +48,7 @@ body { background: var(--bg-surface); color: var(--text-primary); font-family: v
 .kp-fit { display: flex; }
 .kp-popover .hw-popover { outline: none; }
 /* Heartwood v18: a ListDetail shows one pane at a time below 800 wide. Stand-in until @heartwood/ui ships it. */
+.kp-contents { display: contents; }
 .kp-narrow .hw-ld-list { width: 100%; border-right: 0; }
 .kp-narrow .hw-ld-detail { display: none; }
 /* Overview */

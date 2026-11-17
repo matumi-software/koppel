@@ -222,21 +222,32 @@ export function ConnectionPage() {
                 { id: 'here', label: 'Attached here' },
                 { id: 'link', label: 'Link', width: 140 },
                 { id: 'act', label: 'Actions', width: 136, actions: true },
-                // A phone has no room for what is attached here; Remote devices lists it.
-              ].filter((column) => !narrow || column.id !== 'here')}
+                // A phone has no room for what is attached here (Remote devices lists it), and shows the link under
+                // the server's name, so the pinned Actions never sit over it and a long address wraps.
+              ].filter((column) => !narrow || (column.id !== 'here' && column.id !== 'link'))}
               rows={list.map((s) => ({ id: s.id }))}
               onRowAction={(id) => setSelected(String(id))}
               current={sel}
               renderCell={(row, col) => {
                 const s = list.find((x) => x.id === row.id)!;
                 const action = changes.pending[s.id];
-                if (col.id === 'name') return serverLabel(s);
-                if (col.id === 'here') return here(s).join(', ') || <span className="kp-muted">Nothing</span>;
-                if (col.id === 'link') {
-                  if (action) return <StatusDot tone="pending">{action.type === 'remove' ? 'Removing' : 'Applying'}</StatusDot>;
-                  const link = linkOf(s);
-                  return <StatusDot tone={linkTone[link]}>{linkWord[link]}</StatusDot>;
+                const state = action ? (
+                  <StatusDot tone="pending">{action.type === 'remove' ? 'Removing' : 'Applying'}</StatusDot>
+                ) : (
+                  <StatusDot tone={linkTone[linkOf(s)]}>{linkWord[linkOf(s)]}</StatusDot>
+                );
+                if (col.id === 'name') {
+                  return narrow ? (
+                    <span className="kp-cell-stack">
+                      <span className="kp-wrap-anywhere">{serverLabel(s)}</span>
+                      {state}
+                    </span>
+                  ) : (
+                    serverLabel(s)
+                  );
                 }
+                if (col.id === 'here') return here(s).join(', ') || <span className="kp-muted">Nothing</span>;
+                if (col.id === 'link') return state;
                 return (
                   <span className="kp-line">
                     <IconButton icon={PlugZap} label={`Test the connection to ${serverLabel(s)}`} size="sm" isDisabled={locked || testing === s.id} onPress={() => test.mutate(s.id)} />

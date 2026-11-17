@@ -3,7 +3,7 @@ import type { Page } from '@playwright/test';
 // What the pre-release pass measures on every screen it drives (see screens.spec.ts). Each finding is a fact
 // read from the live page, not a guess from the source: `kind` says what rule it breaks.
 export interface Finding {
-  kind: 'sideways' | 'console' | 'unnamed' | 'small-target' | 'contrast' | 'offscreen' | 'clipped';
+  kind: 'sideways' | 'console' | 'unnamed' | 'small-target' | 'contrast' | 'offscreen' | 'clipped' | 'no-tooltip';
   detail: string;
 }
 
@@ -151,9 +151,44 @@ export async function measure(page: Page, phone: boolean): Promise<Finding[]> {
       const style = getComputedStyle(el);
       if (el.scrollWidth > el.clientWidth + 1 && style.textOverflow === 'ellipsis' && style.overflow !== 'visible') {
         const hasTip = !!(el.getAttribute('title') || el.closest('[title], [aria-describedby], [data-tooltip]') || el.querySelector('[title]'));
+        el.setAttribute('data-audit-cut', '');
         found.push({ kind: 'clipped', detail: `${label(el)} is cut${hasTip ? ' (has a title)' : ''}` });
       }
     }
     return found as { kind: Finding['kind']; detail: string }[];
   }, phone);
+}
+
+/**
+ * Hovers each value the measurement found cut (up to four, one per distinct text) and checks that a tooltip
+ * shows the rest. Needs a pointer, so it is for the desktop width. Run after the picture is taken, since
+ * hovering can scroll and open things.
+ */
+export async function hoverCut(page: Page): Promise<Finding[]> {
+  const found: Finding[] = [];
+  const cut = page.locator('[data-audit-cut]');
+  const seen = new Set<string>();
+  const count = await cut.count();
+  for (let i = 0; i < count && seen.size < 4; i++) {
+    const el = cut.nth(i);
+    const text = ((await el.textContent()) ?? '').trim().replace(/\s+/g, ' ');
+    const kind = await el.evaluate((node) => `${node.tagName.toLowerCase()}.${String(node.className).split(' ')[0]}`);
+    if (seen.has(text)) continue;
+    seen.add(text);
+    await el.scrollIntoViewIfNeeded();
+    // A value under a dialog's scrim cannot be pointed at: there the dialog is what a person is reading.
+    const reachable = await el.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const top = document.elementFromPoint(box.left + Math.min(box.width / 2, 20), box.top + box.height / 2);
+      return !!top && (top === node || node.contains(top));
+    });
+    if (!reachable) continue;
+    await el.hover();
+    await page.waitForTimeout(800);
+    const tip = page.getByRole('tooltip').filter({ hasText: text.slice(0, 12) });
+    if (!(await tip.first().isVisible().catch(() => false))) found.push({ kind: 'no-tooltip', detail: `${kind} "${text.slice(0, 40)}" shows no tooltip with its full text on hover` });
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(150);
+  }
+  return found;
 }

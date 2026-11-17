@@ -113,7 +113,7 @@ export function ConnectionPage() {
   const here = (s: ServerView) => (devices?.servers.find((d) => d.id === s.id)?.devices ?? []).filter((e) => e.attachedHere).map((e) => e.device.name);
   const linkOf = (s: ServerView) => devices?.servers.find((d) => d.id === s.id)?.link ?? 'connecting';
 
-  // Below 800 wide the panel is a sheet over the page, so it opens when a person asks (a Settings button), never on arrival.
+  // Up to 818 wide the panel is a sheet over the page, so it opens when a person asks (a Settings button), never on arrival.
   // The form is about a server that is not saved yet, so the panel of another one stays shut while it is open.
   const first = client && list.length === 0;
   const showForm = client && (adding || first);

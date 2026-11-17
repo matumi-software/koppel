@@ -71,3 +71,16 @@ test('the form to add a server opens and fits', async ({ page }) => {
   expect(measured.page).toBeLessThanOrEqual(0);
   expect(measured.wide).toEqual([]);
 });
+
+test('the connection page is not covered by its settings panel on a tablet', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'sets its own width');
+  // 810 is an iPad in portrait: the panel is a sheet there, as on a phone, and opens only when asked for.
+  await page.setViewportSize({ width: 810, height: 1080 });
+  await serve(page, 'both');
+  await page.goto('/#connection');
+  await expect(page.locator('main h1').first()).toBeVisible();
+  await page.waitForTimeout(800);
+  expect(await page.locator('[class*="hw-inspector"]').count(), 'the settings panel is open on arrival').toBe(0);
+  await page.getByRole('button', { name: 'Add a server' }).click();
+  await expect(page.getByLabel('Server address')).toBeVisible();
+});

@@ -77,7 +77,11 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
   const { state } = useLive();
   const { signOut } = useAuth();
   const announce = useAnnounce();
-  const narrow = useMedia('(max-width: 799px)');
+  // Where Heartwood's settings panel is a sheet over the page, not a column beside it: its container query puts
+  // the sheet on at 760 wide inside the window, which in a viewport with the icon-only sidebar is up to 818
+  // (measured: 818 is a sheet, 819 a column; an iPad portrait at 810 is a sheet). Koppel opens a panel on
+  // arrival only where it is a column.
+  const narrow = useMedia('(max-width: 818px)');
   const hasNavigated = useHasNavigated();
   const [flush, setFlush] = useState(false);
   const [inspector, setInspector] = useState<ReactNode>(null);

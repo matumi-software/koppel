@@ -9,7 +9,7 @@ Every row was driven in Chromium at desktop width (1120 px) and phone width (390
 | Kind | Count | Status |
 |---|---|---|
 | contrast | 3 | Heartwood leaves it: the label and hint of a disabled property are 4.2:1, and WCAG exempts inactive controls (the check here is stricter) |
-| clipped | 96 | By design: an ellipsis with a tooltip (a fingerprint, a long name), or Heartwood's tab label |
+| clipped | 88 | By design: an ellipsis with a tooltip (a fingerprint, a long name), or Heartwood's tab label |
 
 ## Not covered by this pass
 

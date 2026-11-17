@@ -9,9 +9,8 @@ import { brand } from '@/brand';
  * `flush` is for a page that fills the panel (the centred states).
  *
  * A plain page (the first password, setup, loading) sits in the middle of the window, both ways, as
- * Koppel's sign-in always has: Koppel's own override, `.kp-centre` in koppel.css. Heartwood's SignInPage
- * and EmptyState fill a flush panel and centre themselves, so they pass `align="start"` and the wrapper
- * stays out of their way.
+ * Koppel's sign-in always has: the shell's `centred` option. Heartwood's SignInPage and EmptyState fill
+ * a flush panel and centre themselves, so they pass `align="start"` and the shell leaves them be.
  */
 export function SignedOutFrame({
   hideBrand,
@@ -25,9 +24,9 @@ export function SignedOutFrame({
   children: ReactNode;
 }) {
   return (
-    // A centred page needs a panel it can fill, so it is flush too; .kp-centre brings back the padding and scrolls.
-    <AppShell platform="web" brand={brand} hideBrand={hideBrand} flush={flush || align === 'centre'}>
-      {align === 'centre' ? <div className="kp-centre">{children}</div> : children}
+    // A centred page needs a panel it can fill, so the shell is flush too.
+    <AppShell platform="web" brand={brand} hideBrand={hideBrand} flush={flush || align === 'centre'} centred={align === 'centre'}>
+      {children}
     </AppShell>
   );
 }

@@ -130,7 +130,7 @@ describe('the clients of this server', () => {
     const { calls } = mockFetch({ ...routes, 'POST /api/v1/server/clients': () => json(newClient, 201) });
     renderApp(inFrame(<ClientsPage />));
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Client ID and secret' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Add by hand' }));
     await userEvent.type(await screen.findByRole('textbox', { name: 'Name' }), 'new-client');
     await userEvent.click(screen.getByRole('button', { name: 'Add client' }));
 

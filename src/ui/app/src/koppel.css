@@ -30,6 +30,8 @@ body { background: var(--bg-surface); color: var(--text-primary); font-family: v
 .kp-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .kp-end { justify-content: flex-end; }
 .kp-pad { padding: var(--space-2); }
+/* In the centred window the page is as wide as its content, so a width in percent would be nothing. */
+.kp-loading { width: min(var(--size-width-lg), calc(100vw - 2 * var(--space-6))); }
 .kp-fill { flex: 1; height: 100%; display: flex; align-items: center; justify-content: center; padding: var(--space-6); box-sizing: border-box; }
 .kp-facts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-6); margin: 0; }
 .kp-facts dt { color: var(--text-secondary); }

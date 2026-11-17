@@ -279,11 +279,11 @@ packages:
     resolution: {integrity: sha512-fqDfB5I9f1p1TV486aUgB9t8zP84P0O1FtQR5Ol9vjwPy+S+EIGlVYm1cvj2W5shcZMTg2nZFdVMoH5wFu8a1A==}
 
   '@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz':
-    resolution: {integrity: sha512-6hocWOtlkzfy1JcSTA26rO6SMZV386XIhgOyBhlCLYCOpp98b/RSIavFuBy7/3dbSKby4H2KmLl7s1Cg481NLw==, tarball: file:vendor/heartwood/heartwood-tokens-0.1.0.tgz}
+    resolution: {integrity: sha512-CaNMURAFQEPDeP3h0dFttgeVOKHY07ykstkGcrkQbniNS7WWnk+ieRtxOiGrGsM2wfmDEolH2K2kA9lMq9WgwA==, tarball: file:vendor/heartwood/heartwood-tokens-0.1.0.tgz}
     version: 0.1.0
 
   '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.1.0.tgz':
-    resolution: {integrity: sha512-R49f6GnVZxSoAJP4p1Av296n3hjtGSn7dB1xF2gghQVx9upR1GRmblwqp1QgNe8B+jHqKIiCvCgtLB6gL0VxxA==, tarball: file:vendor/heartwood/heartwood-ui-0.1.0.tgz}
+    resolution: {integrity: sha512-aFiExg4MsIErw+fc36YWFmy4HtlEAM641SSU+PsmdPV97SDrqvxuPbFqKCcapcdGNVXDK2Y7FaSacoTvl7EZDA==, tarball: file:vendor/heartwood/heartwood-ui-0.1.0.tgz}
     version: 0.1.0
     peerDependencies:
       '@heartwood/tokens': ^0.1.0

@@ -113,7 +113,7 @@ export function ClientsPage() {
                   { id: 'via', label: 'Linked with', width: 140 },
                   { id: 'using', label: 'Using' },
                   { id: 'seen', label: 'Last seen', width: 160 },
-                  { id: 'act', label: 'Actions', width: 100 },
+                  { id: 'act', label: 'Actions', width: 100, actions: true },
                   // A phone has no room for all of them; the computer's own page has every fact.
                 ].filter((column) => !narrow || !['via', 'seen'].includes(column.id))}
                 rows={list.map((c) => ({ id: c.id, name: c.name }))}

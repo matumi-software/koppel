@@ -8,13 +8,8 @@ Every row was driven in Chromium at desktop width (1120 px) and phone width (390
 
 | Kind | Count | Status |
 |---|---|---|
-| contrast | 1 | Heartwood: a hint hidden from sight but read by a screen reader |
-| contrast | 2 | Heartwood: the label of a disabled property is 4.2:1 (WCAG exempts inactive controls; the rule here is stricter) |
-| small-target | 162 | Heartwood: text, search, number and password fields are 38px tall on a phone, the floor is 40px |
-| small-target | 16 | Heartwood: the back button of a drilled page is 24px tall on a phone |
-| small-target | 4 | Heartwood: the link popover has a 16x6 Dismiss button on a phone |
-| small-target | 2 | Heartwood: the reset button of a changed property is 20px square on a phone |
-| clipped | 166 | By design: an ellipsis with a tooltip (a fingerprint, a long name), or Heartwood's tab label |
+| contrast | 3 | Heartwood leaves it: the label and hint of a disabled property are 4.2:1, and WCAG exempts inactive controls (the check here is stricter) |
+| clipped | 96 | By design: an ellipsis with a tooltip (a fingerprint, a long name), or Heartwood's tab label |
 
 ## Not covered by this pass
 

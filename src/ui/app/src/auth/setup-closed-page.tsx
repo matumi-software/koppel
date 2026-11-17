@@ -17,9 +17,9 @@ export default function SetupClosedPage({ machineName, recheck }: { machineName:
         <Facts
           label="How to restart Koppel"
           items={[
-            { label: 'Docker', value: 'docker compose restart koppel', copy: true },
-            { label: 'Linux package', value: 'sudo systemctl restart koppel', copy: true },
-            { label: 'Windows', value: 'Restart-Service Koppel', copy: true },
+            { label: 'Docker', value: 'docker compose restart koppel', path: true, copy: true },
+            { label: 'Linux package', value: 'sudo systemctl restart koppel', path: true, copy: true },
+            { label: 'Windows', value: 'Restart-Service Koppel', path: true, copy: true },
           ]}
         />
         <div>

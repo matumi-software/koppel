@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Plus, PlugZap, Settings, Trash2 } from 'lucide-react';
-import { Callout, IconButton, Inspector, PageHeader, Property, PropertySection, showToast, StatusDot, Table, Tile, TileStack } from '@heartwood/ui';
+import { Callout, IconButton, Inspector, PageHeader, Property, PropertySection, toast, StatusDot, Table, Tile, TileStack } from '@heartwood/ui';
 import type { ServerSettings, ServerView } from '@/api/servers';
 import { testServer } from '@/api/servers';
 import { useClients } from '@/clients/use-clients';
@@ -56,9 +56,9 @@ export function ConnectionPage() {
     onSettled: () => setTesting(undefined),
     onSuccess: (result, id) => {
       const name = serversQuery.data?.servers.find((s) => s.id === id);
-      showToast({ title: result.ok ? `${name ? serverLabel(name) : 'The server'} answers` : 'The connection test failed', description: result.message, tone: result.ok ? 'success' : 'danger' });
+      toast({ title: result.ok ? `${name ? serverLabel(name) : 'The server'} answers` : 'The connection test failed', text: result.message, tone: result.ok ? 'success' : 'danger' });
     },
-    onError: (error) => showToast({ title: 'The connection test failed', description: reasonOf(error, 'the request failed.'), tone: 'danger' }),
+    onError: (error) => toast({ title: 'The connection test failed', text: reasonOf(error, 'the request failed.'), tone: 'danger' }),
   });
 
   const list = serversQuery.data?.servers ?? [];
@@ -221,7 +221,7 @@ export function ConnectionPage() {
                 { id: 'name', label: 'Server', isRowHeader: true },
                 { id: 'here', label: 'Attached here' },
                 { id: 'link', label: 'Link', width: 140 },
-                { id: 'act', label: 'Actions', width: 136 },
+                { id: 'act', label: 'Actions', width: 136, actions: true },
                 // A phone has no room for what is attached here; Remote devices lists it.
               ].filter((column) => !narrow || column.id !== 'here')}
               rows={list.map((s) => ({ id: s.id }))}
@@ -257,7 +257,7 @@ export function ConnectionPage() {
                 { id: 'name', label: 'Server', isRowHeader: true },
                 { id: 'addr', label: 'Address' },
                 { id: 'clients', label: 'Clients', width: 120 },
-                { id: 'act', label: 'Actions', width: 80 },
+                { id: 'act', label: 'Actions', width: 80, actions: true },
               ]}
               rows={[{ id: 'self' }]}
               onRowAction={() => setSelected('self')}

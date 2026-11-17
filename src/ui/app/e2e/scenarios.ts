@@ -60,7 +60,8 @@ export const scenarios: Scenario[] = [
   {
     id: 'gate-loading', what: 'The sign-in state has not answered yet: a skeleton.',
     prepare: (page) => page.route('**/api/v1/auth/state', () => new Promise(() => {})),
-    ready: async (page) => { await expect(page.locator('[aria-busy="true"]').first()).toBeVisible(); },
+    // The skeleton once collapsed to nothing in the centred window, so the screen was blank.
+    ready: async (page) => { await expect(page.locator('.hw-skeleton').first()).toBeVisible(); expect((await page.locator('.hw-skeleton').first().boundingBox())!.width).toBeGreaterThan(50); },
   },
   {
     id: 'gate-could-not-reach', what: 'The service does not answer the sign-in state.', logsErrors: true,
@@ -119,7 +120,7 @@ export const scenarios: Scenario[] = [
   {
     id: 'app-loading', what: 'Signed in, the settings have not arrived.', role: 'both', options: { link: 'reconnecting' },
     prepare: (page) => page.route('**/api/v1/settings', () => new Promise(() => {})),
-    ready: async (page) => { await expect(page.locator('[aria-busy="true"]').first()).toBeVisible(); },
+    ready: async (page) => { await expect(page.locator('.hw-skeleton').first()).toBeVisible(); expect((await page.locator('.hw-skeleton').first().boundingBox())!.width).toBeGreaterThan(50); },
   },
   {
     id: 'app-could-not-reach', what: 'Signed in, the settings do not arrive.', role: 'both', options: { link: 'reconnecting' }, logsErrors: true,

@@ -12,7 +12,7 @@ export const places = {
   remote: { label: 'Remote devices', shortLabel: 'Remote', icon: Plug },
   clients: { label: 'Clients', icon: Monitor },
   activity: { label: 'Activity', icon: Activity },
-  check: { label: 'System check', icon: CircleCheck },
+  check: { label: 'System check', shortLabel: 'Check', icon: CircleCheck },
   connection: { label: 'Connection', icon: Link2 },
   security: { label: 'Security', icon: Shield },
   settings: { label: 'Settings', icon: Settings },

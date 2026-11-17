@@ -75,9 +75,21 @@ export async function measure(page: Page, phone: boolean): Promise<Finding[]> {
         // A link inside running text is as tall as its line; the rule is for controls on their own.
         if (el.tagName === 'A' && style.display === 'inline') continue;
         // A switch or checkbox is a hidden input inside the label that draws it: the label is the target.
-        const target = el instanceof HTMLInputElement && /checkbox|radio/.test(el.type) ? (el.closest('label') ?? el) : el;
+        const target = el instanceof HTMLInputElement && /checkbox|radio/.test(el.type) ? (el.closest('label') ?? el) : el.closest('.hw-control') ?? el;
+        // A control kept out of sight for a screen reader (react-aria's Dismiss in a popover) is not a target.
+        let hiddenAway = false;
+        for (let up: Element | null = el; up; up = up.parentElement) if (getComputedStyle(up).clip !== 'auto' && getComputedStyle(up).position === 'absolute') hiddenAway = true;
+        if (hiddenAway) continue;
         const box = target.getBoundingClientRect();
-        if (box.height < 39.5 || box.width < 39.5) found.push({ kind: 'small-target', detail: `${label(el)} is ${Math.round(box.width)}x${Math.round(box.height)}` });
+        // A small button may carry a 40px hit area larger than its box: a point 19px out from its middle, along
+        // the short side, still lands on it.
+        const hit = (dx: number, dy: number) => {
+          const at = document.elementFromPoint(box.left + box.width / 2 + dx, box.top + box.height / 2 + dy);
+          return !!at && (at === target || target.contains(at) || at.contains(target));
+        };
+        const wide = box.width >= 39.5 || (hit(-19, 0) && hit(19, 0));
+        const tall = box.height >= 39.5 || (hit(0, -19) && hit(0, 19));
+        if (!wide || !tall) found.push({ kind: 'small-target', detail: `${label(el)} is ${Math.round(box.width)}x${Math.round(box.height)}` });
       }
     }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { LogOut, RefreshCw, User } from 'lucide-react';
-import { AppShell, Button, Callout, Popover, showToast, StatusDot } from '@heartwood/ui';
+import { AppShell, Button, Callout, Popover, toast, StatusDot } from '@heartwood/ui';
 import { brand } from '@/brand';
 import { useAuth } from '@/auth/auth-context';
 import { reasonOf } from '@/errors';
@@ -112,7 +112,7 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
           signOut().catch((error: unknown) => {
             const reason = reasonOf(error, 'the request failed.');
             announce(`Signing out failed: ${reason}`);
-            showToast({ title: 'Could not sign out', description: reason, tone: 'danger' });
+            toast({ title: 'Could not sign out', text: reason, tone: 'danger' });
           });
         },
       },

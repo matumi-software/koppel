@@ -14,12 +14,7 @@ const hard = new Set<Finding['kind']>(['sideways', 'console', 'unnamed', 'offscr
 // finding that matches one is written to the report as known and does not fail the run; when Heartwood ships
 // the fix the entry is deleted.
 const known: { kind: Finding['kind']; match: RegExp; why: string }[] = [
-  { kind: 'small-target', match: /^input\.(react-aria-Input|hw-mono-value) .* is \d+x38$/, why: 'Heartwood: text, search, number and password fields are 38px tall on a phone, the floor is 40px' },
-  { kind: 'small-target', match: /^button\.hw-page-back /, why: 'Heartwood: the back button of a drilled page is 24px tall on a phone' },
-  { kind: 'small-target', match: /^button\.hw-prop-reset /, why: 'Heartwood: the reset button of a changed property is 20px square on a phone' },
-  { kind: 'small-target', match: /^button "Dismiss" is 16x6$/, why: 'Heartwood: the link popover has a 16x6 Dismiss button on a phone' },
-  { kind: 'contrast', match: /^span\.hw-prop-label-text .* is 4\.2\d:1$/, why: 'Heartwood: the label of a disabled property is 4.2:1 (WCAG exempts inactive controls; the rule here is stricter)' },
-  { kind: 'contrast', match: /^span\.hw-visually-hidden /, why: 'Heartwood: a hint hidden from sight but read by a screen reader' },
+  { kind: 'contrast', match: /^span\.hw-(prop-label-text|visually-hidden) .* is 4\.2\d:1$/, why: 'Heartwood leaves it: the label and hint of a disabled property are 4.2:1, and WCAG exempts inactive controls (the check here is stricter)' },
 ];
 
 test.use({ actionTimeout: 5000 });

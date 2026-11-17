@@ -61,8 +61,8 @@ function ServerCertificate({ locked }: { locked: boolean }) {
     <>
       <Tile title="Server certificate">
         <SettingsList label="Server certificate">
-          <SettingRow title="Fingerprint" description="Clients check it on every connection." control={<span className="kp-fingerprint"><CopyValue value={current.fingerprint} label="Fingerprint" /></span>} />
-          {next ? <SettingRow title="New fingerprint" description="Enter it on a client that did not get it." control={<span className="kp-fingerprint"><CopyValue value={next} label="New fingerprint" /></span>} /> : null}
+          <SettingRow title="Fingerprint" description="Clients check it on every connection." control={<CopyValue value={current.fingerprint} label="Fingerprint" />} />
+          {next ? <SettingRow title="New fingerprint" description="Enter it on a client that did not get it." control={<CopyValue value={next} label="New fingerprint" />} /> : null}
           <SettingRow
             title="New certificate"
             description={next ? ready : 'Make one ahead of time, so clients learn it before you switch.'}

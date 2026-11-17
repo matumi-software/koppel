@@ -14,8 +14,10 @@ async function overflow(page: Page) {
   return page.evaluate(() => {
     const edge = document.documentElement.clientWidth;
     const main = document.querySelector('main')!;
+    // A table inside a box that scrolls sideways is meant to be wider than the screen: that box is what must fit.
+    const scrolls = (el: Element) => { for (let up = el.parentElement; up && up !== main; up = up.parentElement) { if (/auto|scroll/.test(getComputedStyle(up).overflowX)) return up; } return null; };
     const wide = [...main.querySelectorAll('table, [role="grid"], [role="table"]')]
-      .map((el) => ({ what: el.getAttribute('aria-label') ?? el.tagName, right: Math.round(el.getBoundingClientRect().right) }))
+      .map((el) => ({ what: el.getAttribute('aria-label') ?? el.tagName, right: Math.round((scrolls(el) ?? el).getBoundingClientRect().right) }))
       .filter((el) => el.right > edge + 1);
     return { edge, page: document.documentElement.scrollWidth - edge, main: main.scrollWidth - main.clientWidth, wide };
   });

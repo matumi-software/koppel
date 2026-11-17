@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { answerSignedOut, serve, signedOut } from './support';
+import { answerSignedOut, serve, signedOut, wire } from './support';
 
 // How the screens use the window, with the service's answers stood in (see support.ts).
 
@@ -80,5 +80,40 @@ test.describe('the pairing requests on a phone', () => {
     await expect(field).toBeVisible();
     // It once shrank to 12px beside the Approve button, so the digits could not be seen.
     expect((await field.boundingBox())!.width).toBeGreaterThan(120);
+  });
+});
+
+test.describe('the servers table on a phone', () => {
+  test.skip(({ isMobile }) => !isMobile, 'a phone check');
+
+  test('the link of each server is readable beside its pinned actions, even with a long address', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const first = wire('servers').servers[0];
+    const long = `https://${'cellar-with-a-long-host-name.'.repeat(3)}example.net:5241`;
+    const servers = [first, { ...first, id: 'server-2', name: null, serverUrl: long }];
+    const devices = wire('client-devices');
+    await serve(page, 'client', {
+      answers: {
+        '/api/v1/client/servers': { servers },
+        '/api/v1/client/devices': { ...devices, servers: servers.map((s, i) => ({ id: s.id, name: s.name, link: i ? 'error' : 'connected', linkMessage: null, devices: [] })) },
+      },
+    });
+    await page.goto('/#connection');
+    const table = page.locator('[aria-label="Servers this computer attaches from"]');
+    await expect(table).toBeVisible();
+    await page.waitForTimeout(600);
+
+    // The Link column is gone: the status sits under the name, which wraps, so nothing needs a sideways scroll
+    // and the pinned actions are not over it.
+    const m = await table.evaluate((el) => {
+      const wrap = el.closest('.hw-table-wrap') ?? el.parentElement!;
+      const action = el.querySelector('tbody button')!.getBoundingClientRect();
+      const statuses = [...el.querySelectorAll('tbody .hw-status')].map((s) => s.getBoundingClientRect().right);
+      return { scrolls: wrap.scrollWidth - wrap.clientWidth, actionLeft: action.left, statuses };
+    });
+    expect(m.scrolls, 'the table scrolls sideways').toBeLessThanOrEqual(1);
+    expect(m.statuses.length, 'each row shows its link').toBe(2);
+    for (const right of m.statuses) expect(right, 'the link runs under the pinned actions').toBeLessThanOrEqual(m.actionLeft);
+    await expect(page.getByText('Cannot reach')).toBeVisible();
   });
 });

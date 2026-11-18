@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { LogOut, RefreshCw, User } from 'lucide-react';
 import { AppShell, Button, Callout, Popover, toast, StatusDot, useInspectorSheet } from '@heartwood/ui';
 import { brand } from '@/brand';
 import { useAuth } from '@/auth/auth-context';
 import { reasonOf } from '@/errors';
 import { useLive } from '@/live/live-context';
-import { FrameContext, FrameSlotsContext, goTo, useHasNavigated, type FrameApi } from './frame-context';
+import { FrameContext, FrameSlotsContext, goTo, type FrameApi } from './frame-context';
 import { isPage, navGroups, places, type NavCounts, type Page } from './places';
 
 /**
@@ -89,25 +89,12 @@ function SheetFrame({ frame, children }: { frame: FrameApi; children: ReactNode 
 export function KoppelShell({ page, role, counts, children }: KoppelShellProps) {
   const { state } = useLive();
   const { signOut } = useAuth();
-  const hasNavigated = useHasNavigated();
   const [inspector, setInspector] = useState<ReactNode>(null);
   const locked = state !== 'live';
 
-  const frame = useMemo(() => ({ locked, narrow: false, hasNavigated }), [locked, hasNavigated]);
+  const frame = useMemo(() => ({ locked, narrow: false }), [locked]);
   const slots = useMemo(() => ({ setInspector }), []);
   const groups = useMemo(() => navGroups(role, counts), [role, counts]);
-
-  // A page that opens because the person went to it takes focus on its heading, so a keyboard or a
-  // screen reader starts at the new page and not in the navigation; the first page of a visit leaves focus alone.
-  const opened = useRef(page);
-  useEffect(() => {
-    if (opened.current === page) return;
-    opened.current = page;
-    const heading = document.querySelector<HTMLElement>('.hw-app-content h1');
-    if (!heading) return;
-    heading.tabIndex = -1;
-    heading.focus({ preventScroll: true });
-  }, [page]);
 
   const account = {
     id: 'account',
@@ -131,13 +118,14 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
   return (
     <FrameContext.Provider value={frame}>
       <FrameSlotsContext.Provider value={slots}>
-        <title>{`${places[page].label} - Koppel`}</title>
         <AppShell
           platform="web"
           brand={brand}
           nav={groups}
           footerNav={[account]}
           current={page}
+          pageTitle={places[page].label}
+          focusMain
           onNavigate={(id) => isPage(id) && goTo(id)}
           storageKey="koppel.sidebar"
           toolbarEnd={<LinkState />}

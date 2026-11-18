@@ -27,7 +27,7 @@ export const baseRoutes = {
   'GET /api/v1/server/pairing': () => json({ ...pairingOverview, requests: [], window: closedWindow }),
 };
 
-export const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({ locked: false, narrow: false, hasNavigated: false, ...overrides });
+export const frame = (overrides: Partial<FrameApi> = {}): FrameApi => ({ locked: false, narrow: false, ...overrides });
 
 /** A page rendered inside the frame's context, for a test of one page. */
 export const inFrame = (page: React.ReactNode, overrides: Partial<FrameApi> = {}) => <FrameContext.Provider value={frame(overrides)}>{page}</FrameContext.Provider>;

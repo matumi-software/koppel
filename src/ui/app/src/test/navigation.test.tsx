@@ -25,14 +25,14 @@ describe('navigation', () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
     await screen.findByRole('heading', { level: 1, name: 'bench-pc' });
-    expect(document.title).toBe('Overview - Koppel');
+    expect(document.title).toBe('Overview · Koppel');
 
     await userEvent.click(await screen.findByRole('link', { name: 'Settings' }));
 
     const heading = await screen.findByRole('heading', { level: 1, name: 'Settings' });
     await waitFor(() => expect(document.activeElement).toBe(heading));
     expect(window.location.hash).toBe('#settings');
-    expect(document.title).toBe('Settings - Koppel');
+    expect(document.title).toBe('Settings · Koppel');
   });
 
   it('leaves focus alone on the first page of a visit', async () => {

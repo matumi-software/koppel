@@ -36,7 +36,7 @@ describe('first-run password', () => {
     await userEvent.click(button);
 
     expect(await screen.findByText('Use at least 10 characters.')).toBeTruthy();
-    expect(screen.getByText('The two passwords differ.')).toBeTruthy();
+    expect(screen.getByText('The two passwords do not match.')).toBeTruthy();
     expect(calls.some((c) => c.key === 'POST /api/v1/auth/setup')).toBe(false);
 
     await userEvent.clear(screen.getByLabelText('New password'));

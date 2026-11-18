@@ -42,6 +42,7 @@ export function RemoteDevicesPage() {
     return (
       <div className="kp-fill">
         <EmptyState
+          level={2}
           icon={Plug}
           title="Add a server to attach its devices"
           actions={
@@ -94,7 +95,7 @@ export function RemoteDevicesPage() {
           </Callout>
         ))}
         {entries.length > 0 && shown.length === 0 ? (
-          <EmptyState title={`No devices match "${q}"`} />
+          <EmptyState level={2} title={`No devices match "${q}"`} />
         ) : (
           groups.map((group) => {
             const items = shown.filter((r) => group.words.includes(remoteWord(r.entry, r.server.link)));

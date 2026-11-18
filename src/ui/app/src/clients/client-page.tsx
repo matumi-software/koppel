@@ -62,7 +62,7 @@ export function ClientPage({ clientId, back }: { clientId: string; back: Back })
     return (
       <div className="kp-page">
         <PageHeader back={back} title="Client not found" />
-        <EmptyState title="This client is no longer registered">It was revoked, or the list has not loaded yet.</EmptyState>
+        <EmptyState level={2} title="This client is no longer registered">It was revoked, or the list has not loaded yet.</EmptyState>
       </div>
     );
   }

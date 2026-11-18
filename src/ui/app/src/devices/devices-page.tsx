@@ -55,11 +55,11 @@ export function DevicesPage() {
           </Callout>
         ) : null}
         {devices.length === 0 ? (
-          <EmptyState icon={Usb} title="Plug in a USB device to share it">
+          <EmptyState level={2} icon={Usb} title="Plug in a USB device to share it">
             Koppel lists every USB device on {host} here. Nothing is shared until you choose to.
           </EmptyState>
         ) : shown.length === 0 ? (
-          <EmptyState title={`No devices match "${q}"`} />
+          <EmptyState level={2} title={`No devices match "${q}"`} />
         ) : (
           groups.map((group) => {
             const items = shown.filter((d) => group.states.includes(d.state));

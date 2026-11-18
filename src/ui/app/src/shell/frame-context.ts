@@ -42,7 +42,7 @@ export interface FrameApi {
   hasNavigated: boolean;
   /** True while the UI's own link to its server is not live, so nothing may send a change. */
   locked: boolean;
-  /** True while the settings panel is a sheet over the page (Heartwood's own condition, `useInspectorSheet`): a ListDetail then shows one pane at a time and the tables drop columns. */
+  /** True while the settings panel is a sheet over the page (Heartwood's own condition, `useInspectorSheet`) and the tables drop columns. */
   narrow: boolean;
 }
 
@@ -57,7 +57,6 @@ export function useFrame(): FrameApi {
 
 /** What a page hands up to the shell. The shell keeps it in state; nothing here makes a page re-render. */
 export interface FrameSlots {
-  setFlush: (flush: boolean) => void;
   setInspector: (inspector: ReactNode) => void;
 }
 
@@ -65,20 +64,8 @@ export const FrameSlotsContext = createContext<FrameSlots | null>(null);
 
 function useSlots(): FrameSlots {
   const value = useContext(FrameSlotsContext);
-  if (!value) throw new Error('useFlush and useInspector must be used inside the app frame.');
+  if (!value) throw new Error('useInspector must be used inside the app frame.');
   return value;
-}
-
-/**
- * A page whose content runs edge to edge in the panel, as a ListDetail does: call it with true while
- * that is so. The shell's AppShell `flush` follows, and goes back when the page leaves.
- */
-export function useFlush(flush: boolean) {
-  const { setFlush } = useSlots();
-  useLayoutEffect(() => {
-    setFlush(flush);
-    return () => setFlush(false);
-  }, [flush, setFlush]);
 }
 
 /**

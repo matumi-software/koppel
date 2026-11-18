@@ -28,7 +28,7 @@ export function RemoteDevicePage({ serverId, busId, back }: { serverId: string; 
     return (
       <div className="kp-page">
         <PageHeader back={back} title="Device not found" />
-        <EmptyState title="This device is no longer listed">It was unplugged, its server dropped it, or the list has not loaded yet.</EmptyState>
+        <EmptyState level={2} title="This device is no longer listed">It was unplugged, its server dropped it, or the list has not loaded yet.</EmptyState>
       </div>
     );
   }

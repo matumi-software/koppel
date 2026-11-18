@@ -2,7 +2,7 @@
 
 ## 0.3.0 (2026-11-18)
 
-Koppel 0.3.0 is the release after 0.2.0. Koppel 0.2.1 was withdrawn: its release page and tag are gone, and
+Koppel 0.3.0 is the release after 0.2.0. Koppel 0.2.1 was withdrawn: its release page is removed, and
 everything in it is part of 0.3.0. **Its notes are kept below, under 0.2.1, and apply to you if you upgrade from
 0.2.0 or earlier**: Skakel 3 does not talk to older versions, everyone signs in again, the first start rewrites
 `secrets.json` with no way back (back up the data folder first), and on Linux and in Docker the first password needs

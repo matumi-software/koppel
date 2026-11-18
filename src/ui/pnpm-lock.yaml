@@ -24,11 +24,11 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       '@heartwood/tokens':
-        specifier: file:../vendor/heartwood/heartwood-tokens-0.1.0.tgz
-        version: file:vendor/heartwood/heartwood-tokens-0.1.0.tgz
+        specifier: file:../vendor/heartwood/heartwood-tokens-0.2.0.tgz
+        version: file:vendor/heartwood/heartwood-tokens-0.2.0.tgz
       '@heartwood/ui':
-        specifier: file:../vendor/heartwood/heartwood-ui-0.1.0.tgz
-        version: file:vendor/heartwood/heartwood-ui-0.1.0.tgz(@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+        specifier: file:../vendor/heartwood/heartwood-ui-0.2.0.tgz
+        version: file:vendor/heartwood/heartwood-ui-0.2.0.tgz(@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.2.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       '@tanstack/react-query':
         specifier: ^5.105.0
         version: 5.105.1(@types/react@19.3.0)(react@19.3.1)
@@ -278,15 +278,15 @@ packages:
   '@fontsource/jetbrains-mono@5.3.0':
     resolution: {integrity: sha512-fqDfB5I9f1p1TV486aUgB9t8zP84P0O1FtQR5Ol9vjwPy+S+EIGlVYm1cvj2W5shcZMTg2nZFdVMoH5wFu8a1A==}
 
-  '@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz':
-    resolution: {integrity: sha512-g4Z6cyczgNejw1oZXBavsZL9iIj4bcbqigBlnVyLhJMADFbAFrI02hNFtZzIli06UXft+t/gM2HP5tgqm+BICA==, tarball: file:vendor/heartwood/heartwood-tokens-0.1.0.tgz}
-    version: 0.1.0
+  '@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.2.0.tgz':
+    resolution: {integrity: sha512-10z780cE/K6caEENMSnIpo5Oslpc6bnpnDBqQRtwIfgZD0NM2wEYCub0YZ+CqJDF2pSlvd9ZwdG7ZQfX4QXdCg==, tarball: file:vendor/heartwood/heartwood-tokens-0.2.0.tgz}
+    version: 0.2.0
 
-  '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.1.0.tgz':
-    resolution: {integrity: sha512-/R7MpztM+eZNMAKJzWAbIPYACzXRZJHu12j6j5MXDTjQ3H4wnt6MY0hY5zieei0OkFaPji3+57ZrjdU9gyRfFg==, tarball: file:vendor/heartwood/heartwood-ui-0.1.0.tgz}
-    version: 0.1.0
+  '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.2.0.tgz':
+    resolution: {integrity: sha512-goYnkJPWXak2NEA7qrCmA9cBvoebrM9WecGRIfbOWDJQVUJIKLLBdI++wZo5cveX+DZz79i0r0AROt11m+ZzMg==, tarball: file:vendor/heartwood/heartwood-ui-0.2.0.tgz}
+    version: 0.2.0
     peerDependencies:
-      '@heartwood/tokens': ^0.1.0
+      '@heartwood/tokens': ^0.2.0
       react: ^19.0.0
       react-dom: ^19.0.0
 
@@ -1764,11 +1764,11 @@ snapshots:
 
   '@fontsource/jetbrains-mono@5.3.0': {}
 
-  '@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz': {}
+  '@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.2.0.tgz': {}
 
-  '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.1.0.tgz(@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.1.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
+  '@heartwood/ui@file:vendor/heartwood/heartwood-ui-0.2.0.tgz(@heartwood/tokens@file:vendor/heartwood/heartwood-tokens-0.2.0.tgz)(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
-      '@heartwood/tokens': file:vendor/heartwood/heartwood-tokens-0.1.0.tgz
+      '@heartwood/tokens': file:vendor/heartwood/heartwood-tokens-0.2.0.tgz
       clsx: 2.1.1
       lucide-react: 1.65.0(@types/react@19.3.0)(react@19.3.1)
       react: 19.3.1

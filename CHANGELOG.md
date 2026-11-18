@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The UI takes Heartwood 0.2.0 (design 2.0).
+
 ## 0.3.0 (2026-11-18)
 
 Koppel 0.3.0 is the release after 0.2.0. Koppel 0.2.1 was withdrawn: its release page is removed, and

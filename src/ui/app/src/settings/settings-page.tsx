@@ -79,10 +79,10 @@ export function SettingsPage() {
                 <Select
                   aria-label="Role"
                   items={roleItems}
-                  selectedKey={known ? role.confirmed : null}
+                  value={known ? role.confirmed : null}
                   isPending={role.pendingTarget !== undefined}
                   isDisabled={locked || role.pendingTarget !== undefined}
-                  onSelectionChange={(key) => key !== null && key !== role.confirmed && requestChange('role', key as Role)}
+                  onChange={(next) => next !== role.confirmed && requestChange('role', next)}
                   width="var(--size-width-xs)"
                 />
               ),

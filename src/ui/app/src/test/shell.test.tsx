@@ -73,7 +73,8 @@ describe('sign out', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'admin' }));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Sign out' }));
 
-    await waitFor(() => expect(document.querySelector('.kp-announcer')?.textContent).toBe('Signing out failed: the server answered 500.'));
+    await screen.findByText('Could not sign out');
+    await screen.findByText('the server answered 500.');
   });
 });
 

@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Plus, PlugZap, Settings, Trash2 } from 'lucide-react';
-import { Callout, IconButton, Inspector, PageHeader, Property, PropertySection, toast, StatusDot, Table, Tile, TileStack } from '@heartwood/ui';
+import { Callout, ConfirmDialog, IconButton, Inspector, PageHeader, Property, PropertySection, toast, StatusDot, Table, Tile, TileStack } from '@heartwood/ui';
 import type { ServerSettings, ServerView } from '@/api/servers';
 import { testServer } from '@/api/servers';
 import { useClients } from '@/clients/use-clients';
 import { useClientDevices } from '@/devices/use-devices';
 import { reasonOf } from '@/errors';
 import { systemInfoOptions } from '@/queries';
-import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useMachineName } from '@/shared/use-machine-name';
 import { isClientRole, isServerRole } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
@@ -291,9 +290,18 @@ export function ConnectionPage() {
         ) : null}
       </TileStack>
       {removing ? (
-        <ConfirmDialog title={`Remove ${serverLabel(removing)}?`} commit="Remove" danger icon={Trash2} isDisabled={locked} onConfirm={() => changes.remove(removing)} onClose={() => setRemoving(undefined)}>
-          Koppel detaches the devices it has attached from {serverLabel(removing)} and forgets the server. To use it again, add it again with a pairing code or its key.
-        </ConfirmDialog>
+        <ConfirmDialog
+          title={`Remove ${serverLabel(removing)}?`}
+          body={`Koppel detaches the devices it has attached from ${serverLabel(removing)} and forgets the server. To use it again, add it again with a pairing code or its key.`}
+          confirmLabel="Remove"
+          danger
+          onConfirm={() => {
+            if (locked) return;
+            changes.remove(removing);
+            setRemoving(undefined);
+          }}
+          onCancel={() => setRemoving(undefined)}
+        />
       ) : null}
     </div>
   );

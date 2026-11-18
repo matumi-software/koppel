@@ -1,8 +1,7 @@
 import { useState } from 'react';
-import { Switch } from '@heartwood/ui';
+import { ConfirmDialog, Switch } from '@heartwood/ui';
 import type { DeviceView } from '@/api/usb';
 import { usePending } from '@/pending/pending-context';
-import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useFrame } from '@/shell/frame-context';
 import type { RemoteEntry } from './device-words';
 import { useClientDevices, useServerDevices } from './use-devices';
@@ -34,9 +33,17 @@ export function ShareSwitch({ device, holder, bare }: { device: DeviceView; hold
         {bare ? null : 'Shared'}
       </Switch>
       {confirming ? (
-        <ConfirmDialog title={`Stop sharing ${device.name}?`} commit="Stop sharing" danger onConfirm={() => send(false)} onClose={() => setConfirming(false)}>
-          {holder ?? 'A client'} is using it and loses it at once. You can share it again later.
-        </ConfirmDialog>
+        <ConfirmDialog
+          title={`Stop sharing ${device.name}?`}
+          body={`${holder ?? 'A client'} is using it and loses it at once. You can share it again later.`}
+          confirmLabel="Stop sharing"
+          danger
+          onConfirm={() => {
+            send(false);
+            setConfirming(false);
+          }}
+          onCancel={() => setConfirming(false)}
+        />
       ) : null}
     </>
   );

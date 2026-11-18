@@ -11,7 +11,7 @@ import { clients, keysView } from './wire';
 afterEach(() => vi.unstubAllGlobals());
 
 /** The live region, read directly: an open dialog hides it from the accessibility tree. */
-const liveRegion = () => document.querySelector('.kp-announcer')?.textContent;
+const liveRegion = () => document.querySelector('.hw-toast-region > .hw-visually-hidden:not([aria-live])')?.textContent?.replace(new RegExp(String.fromCharCode(0x200b), 'g'), '');
 
 const bare: KeysView = { ...keysView, nextFingerprint: null, nextPreparedAt: null };
 const routes = (keys: KeysView, role = 'server') => ({
@@ -116,7 +116,7 @@ describe('the admin password', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(calls.find((c) => c.key === 'POST /api/v1/auth/password')?.body).toEqual({ current: 'correct horse battery', next: 'another long password' });
     expect(new Headers(fetchMock.mock.calls.find(([url]) => url === '/api/v1/auth/password')![1]?.headers).get('X-Koppel-UI')).toBe('1');
-    expect(liveRegion()).toBe('The password was changed. Other browsers are signed out.');
+    await screen.findByText('Password changed. Other browsers are signed out.');
   });
 
   it('shows the refusal of the server under the current password and keeps what was typed', async () => {

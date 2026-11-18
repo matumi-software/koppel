@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AnnouncerProvider } from '@/shared/announcer';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
+import { ToastRegion } from '@heartwood/ui';
 import type { ReactElement } from 'react';
 import { vi } from 'vitest';
 import { ActivityProvider } from '@/activity/activity-provider';
@@ -26,23 +26,19 @@ export const live = {
 export function renderApp(ui: ReactElement, queryClient = newQueryClient()) {
   const tree = (node: ReactElement) => (
     <QueryClientProvider client={queryClient}>
-      <AnnouncerProvider>
-        <AuthContext.Provider value={signedIn}>
-          <LiveProvider>
-            <ActivityProvider>
-              <PendingProvider>{node}</PendingProvider>
-            </ActivityProvider>
-          </LiveProvider>
-        </AuthContext.Provider>
-      </AnnouncerProvider>
+      <AuthContext.Provider value={signedIn}>
+        <LiveProvider>
+          <ActivityProvider>
+            <PendingProvider>{node}</PendingProvider>
+          </ActivityProvider>
+        </LiveProvider>
+      </AuthContext.Provider>
+      <ToastRegion />
     </QueryClientProvider>
   );
   const result = render(tree(ui));
   return { ...result, live, queryClient, rerenderApp: (next: ReactElement) => result.rerender(tree(next)) };
 }
-
-/** What the app's one live region says now: what a screen reader was last told. */
-export const announced = () => screen.getByRole('status').textContent;
 
 export const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 /** A validation problem as the server writes it: 400 with each field's messages. */

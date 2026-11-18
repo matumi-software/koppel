@@ -15,7 +15,6 @@ import { LiveProvider } from './live/live-provider';
 import { PendingProvider } from './pending/pending-provider';
 import { ActivityProvider } from './activity/activity-provider';
 import { ShellBoundary } from './shell/shell-boundary';
-import { AnnouncerProvider } from './shared/announcer';
 import { startTheme } from './theme/theme';
 
 // `hw` turns on Heartwood's shared focus ring, disabled treatment and reduced motion, for overlays too.
@@ -31,20 +30,18 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <AnnouncerProvider>
-        <AuthGate>
-          <LiveProvider>
-            <ActivityProvider>
-              <PendingProvider>
-                <ShellBoundary>
-                  <App />
-                </ShellBoundary>
-              </PendingProvider>
-            </ActivityProvider>
-          </LiveProvider>
-        </AuthGate>
-        <ToastRegion />
-      </AnnouncerProvider>
+      <AuthGate>
+        <LiveProvider>
+          <ActivityProvider>
+            <PendingProvider>
+              <ShellBoundary>
+                <App />
+              </ShellBoundary>
+            </PendingProvider>
+          </ActivityProvider>
+        </LiveProvider>
+      </AuthGate>
+      <ToastRegion />
     </QueryClientProvider>
   </StrictMode>,
 );

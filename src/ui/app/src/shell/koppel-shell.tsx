@@ -5,7 +5,6 @@ import { brand } from '@/brand';
 import { useAuth } from '@/auth/auth-context';
 import { reasonOf } from '@/errors';
 import { useLive } from '@/live/live-context';
-import { useAnnounce } from '@/shared/announce-context';
 import { FrameContext, FrameSlotsContext, goTo, useHasNavigated, type FrameApi } from './frame-context';
 import { isPage, navGroups, places, type NavCounts, type Page } from './places';
 
@@ -90,7 +89,6 @@ function SheetFrame({ frame, children }: { frame: FrameApi; children: ReactNode 
 export function KoppelShell({ page, role, counts, children }: KoppelShellProps) {
   const { state } = useLive();
   const { signOut } = useAuth();
-  const announce = useAnnounce();
   const hasNavigated = useHasNavigated();
   const [inspector, setInspector] = useState<ReactNode>(null);
   const locked = state !== 'live';
@@ -123,7 +121,6 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
         onAction: () => {
           signOut().catch((error: unknown) => {
             const reason = reasonOf(error, 'the request failed.');
-            announce(`Signing out failed: ${reason}`);
             toast({ title: 'Could not sign out', text: reason, tone: 'danger' });
           });
         },

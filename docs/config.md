@@ -12,7 +12,7 @@ koppel [options] [serve]           # run Koppel; no command means serve
 koppel [options] reset-password    # clear the UI password and end every session
 koppel [options] healthcheck       # ask a running Koppel's /healthz: exit 0 if it answers, 1 if not
 koppel [options] diagnostics [FILE] # a report for a support request: config with secrets removed, USB state, the log's end
-koppel --version                   # koppel 0.2.1 (commit 1a2b3c4d5, built 2026-11-13)
+koppel --version                   # koppel 0.3.0 (commit 1a2b3c4d5, built 2026-11-13)
 ```
 
 A value that is not valid, or an option Koppel does not have, stops the start before anything runs, with
@@ -45,7 +45,7 @@ build passes it in, since it has no `.git`) and says `unknown` when it has none.
 
 Log levels come from `RUST_LOG`, not a setting.
 
-**0.1.x's names still work in 0.2.1**, and each one that is used is logged once at Warning as deprecated,
+**0.1.x's names still work in 0.3.0**, and each one that is used is logged once at Warning as deprecated,
 with the name to use instead. That covers the environment (`Ports__Ui`, `Paths__Config`, `Ui__AllowFrom`),
 matched without regard to case; the command line (`--Ports:Ui=5250`, `--Ports:Ui 5250`, `/Ports:Ui=5250`),
 which wins over the environment as before; and the flags `--reset-password` and `--healthcheck`, which are
@@ -182,7 +182,7 @@ with the same rules.
   - The other files need no rewrite: the current types read what 0.1.x and 0.2.0 wrote, and each takes
     the new shape the next time Koppel changes it. There is no downgrade: 0.1.x could not read the
     files after 0.2.0 sealed them, and 0.2.0 cannot read the new `secrets.json`. Back up the data folder
-    before the first start of 0.2.1 if you may go back.
+    before the first start of 0.3.0 if you may go back.
 - **The 0.1.x key ring is kept.** After a conversion `keys/` still holds the Data Protection key ring
   (`key-*.xml`, with the master key in plain base64 on Linux). Koppel never deletes it: that would end a
   rollback, and an upgrade should not remove a file its owner did not ask it to. It is no longer used,

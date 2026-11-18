@@ -7,7 +7,7 @@
 1. Copy `prepare-host.sh` to the machine and run it once with `sudo bash prepare-host.sh`. It installs Docker from Docker's signed apt repository, loads `usbip-host` and `vhci-hcd` and keeps them loaded at boot. If `modprobe` fails (Ubuntu cloud and minimal kernels), it prints the hint to install `linux-modules-extra-<kernel>`.
 2. Copy `docker-compose.yml` there and run `docker compose up -d`. It pulls `matumisoftware/koppel` from Docker Hub.
 
-The compose files pin the image tag (`matumisoftware/koppel:0.2.1`). To upgrade, edit the tag to the
+The compose files pin the image tag (`matumisoftware/koppel:0.3.0`). To upgrade, edit the tag to the
 new version, then `docker compose pull && docker compose up -d`. Config and keys stay in the `koppel`
 volume.
 
@@ -104,8 +104,8 @@ Run this on the PC that has Koppel 0.2.0 installed, once, before #154 is closed.
 
 Before you start:
 
-- [ ] Build the installer from `main` (`./installer/windows/build.ps1` from `src`, in a PowerShell, without redirecting the output). It is `artifacts\installer\Koppel-0.2.1-setup.exe` (at the repo root, next to `src`), and it should say 0.2.1.
-- [ ] Take a copy of `C:\ProgramData\Koppel` to `D:\backups\koppel-before-0.2.1` (`Copy-Item -Recurse`). It holds the pairings and the keys.
+- [ ] Build the installer from `main` (`./installer/windows/build.ps1` from `src`, in a PowerShell, without redirecting the output). It is `artifacts\installer\Koppel-0.3.0-setup.exe` (at the repo root, next to `src`), and it should say 0.2.1.
+- [ ] Take a copy of `C:\ProgramData\Koppel` to `D:\backups\koppel-before-0.3.0` (`Copy-Item -Recurse`). It holds the pairings and the keys.
 - [ ] Note how it is now, to compare after:
   - `sc qprivs Koppel` (the 0.2.0 service lists nothing: it has the full set of its account)
   - `sc qsidtype Koppel` (UNRESTRICTED)
@@ -115,8 +115,8 @@ Before you start:
 
 Upgrade over 0.2.0:
 
-- [ ] Run `Koppel-0.2.1-setup.exe` and click Yes at the UAC prompt. Click Install. It finishes without an error, and Launch opens the UI.
-- [ ] If it fails, nothing is lost: it rolls back. Run it again with a log, `Koppel-0.2.1-setup.exe /log setup.log`, and look in the log for `PrepareDataFolder`, `SetServicePrivileges` and `InstallUsbDriver`. A failure at `PrepareDataFolder` prints the reason, which is one of the sentences in `data_folder.rs` (a file or link where the folder should be, or an owner who is not an administrator).
+- [ ] Run `Koppel-0.3.0-setup.exe` and click Yes at the UAC prompt. Click Install. It finishes without an error, and Launch opens the UI.
+- [ ] If it fails, nothing is lost: it rolls back. Run it again with a log, `Koppel-0.3.0-setup.exe /log setup.log`, and look in the log for `PrepareDataFolder`, `SetServicePrivileges` and `InstallUsbDriver`. A failure at `PrepareDataFolder` prints the reason, which is one of the sentences in `data_folder.rs` (a file or link where the folder should be, or an owner who is not an administrator).
 - [ ] `sc query Koppel` says RUNNING.
 - [ ] `sc qprivs Koppel` lists exactly these six: SeAssignPrimaryTokenPrivilege, SeIncreaseQuotaPrivilege, SeTcbPrivilege, SeChangeNotifyPrivilege, SeRestorePrivilege, SeTakeOwnershipPrivilege. If it lists nothing, the `SetServicePrivileges` action failed (it is not vital); the setup log says why. Note which.
 - [ ] `sc qsidtype Koppel` says UNRESTRICTED.
@@ -137,9 +137,9 @@ What the reduced token has to keep doing (each is a place a missing privilege wo
 
 Repair and uninstall:
 
-- [ ] Apps, Koppel, Modify or Repair (or run `Koppel-0.2.1-setup.exe` again): it finishes, and the data folder and the pairings are as before.
+- [ ] Apps, Koppel, Modify or Repair (or run `Koppel-0.3.0-setup.exe` again): it finishes, and the data folder and the pairings are as before.
 - [ ] Uninstall from Apps. The service is gone (`sc query Koppel` says 1060), the Start menu entry and the firewall rules are gone, and `C:\ProgramData\Koppel` is still there with its owner and ACL as above (uninstall is not meant to delete the data). The driver Koppel installed is removed, and one you installed yourself is left alone.
-- [ ] Install again from `Koppel-0.2.1-setup.exe` over the left-over data folder: it takes the folder over without complaint, and the pairings are still there.
+- [ ] Install again from `Koppel-0.3.0-setup.exe` over the left-over data folder: it takes the folder over without complaint, and the pairings are still there.
 
 If the tray does not come up, Restart does not work, the service does not start or a USB attach fails after the upgrade, a privilege was cut that is needed. Write down which step, collect `Koppel.exe diagnostics` and the setup log, and put the privilege back by deleting the `RequiredPrivileges` value under `HKLM\SYSTEM\CurrentControlSet\Services\Koppel` and restarting the service (the Microsoft documentation says the account's own privileges apply again; this was not run). Then say so on #154 with the step that failed.
 

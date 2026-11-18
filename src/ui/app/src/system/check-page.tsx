@@ -5,8 +5,8 @@ import { isClientRole, isServerRole } from '@/settings/roles';
 import { checksForRole } from '@/system/for-role';
 import { systemChecksOptions, systemInfoOptions } from '@/queries';
 import { useNow } from '@/shared/use-now';
-import { CouldNotReach } from '@/shell/could-not-reach';
-import { Loading } from '@/shell/loading';
+import { clock } from '@/shared/time';
+import { QueryGate } from '@/shell/loading';
 
 const uptime = (since: string, now: number) => {
   const minutes = Math.max(0, Math.round((now - new Date(since).getTime()) / 60_000));
@@ -16,7 +16,6 @@ const uptime = (since: string, now: number) => {
   return `${Math.floor(hours / 24)} days`;
 };
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
 
 /**
  * What this computer needs to share or attach USB devices, from the service's own checks, then the
@@ -27,9 +26,7 @@ export function CheckPage() {
   const info = useQuery(systemInfoOptions());
   const now = useNow();
 
-  if (!checks.data) {
-    return checks.isError ? <CouldNotReach isRetrying={checks.isFetching} onRetry={() => void checks.refetch()} /> : <Loading />;
-  }
+  if (!checks.data) return <QueryGate query={checks} />;
 
   const name = info.data?.name ?? window.location.hostname;
   const shown = checksForRole(checks.data, isServerRole(info.data?.role), isClientRole(info.data?.role));

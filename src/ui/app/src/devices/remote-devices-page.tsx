@@ -4,7 +4,7 @@ import { Button, Callout, DrillView, EmptyState, PageHeader, SearchField, StateL
 import { states } from '@/brand';
 import { usePending } from '@/pending/pending-context';
 import { goTo } from '@/shell/frame-context';
-import { Loading } from '@/shell/loading';
+import { QueryGate } from '@/shell/loading';
 import { CardGroup, DeviceCard } from './device-card';
 import { AttachSwitch } from './device-switches';
 import { remoteEntries, remoteSub, remoteWord, serversTitle } from './device-words';
@@ -26,7 +26,7 @@ export function RemoteDevicesPage() {
   const drill = useDrill<{ serverId: string; busId: string }>();
   const [q, setQ] = useState('');
 
-  if (!query.data) return <Loading />;
+  if (!query.data) return <QueryGate query={query} />;
   const { servers, unavailable, gatewayFault } = query.data;
   const entries = remoteEntries(servers);
   const open = drill.top;

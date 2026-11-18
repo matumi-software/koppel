@@ -34,7 +34,8 @@ test.describe('the signed-out screens', () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Set up bench-pc' })).toBeVisible();
 
-    const { item, panel, itemDown, panelDown } = await centres(page, '.kp-form');
+    // The whole column (mark, title, reason and tile), which the page centres, not the tile alone.
+    const { item, panel, itemDown, panelDown } = await centres(page, '.hw-signin-col');
     expect(Math.abs(item - panel)).toBeLessThanOrEqual(2);
     expect(Math.abs(itemDown - panelDown)).toBeLessThanOrEqual(2);
   });

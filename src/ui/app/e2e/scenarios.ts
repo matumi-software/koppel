@@ -427,6 +427,11 @@ export const scenarios: Scenario[] = [
     ready: async (page) => { await expect(page.getByLabel('Server key')).toBeVisible(); },
   },
   {
+    id: 'connection-add-empty', what: 'The add form sent with nothing typed: each missing field says so.', role: 'client', hash: 'connection',
+    act: async (page) => { await page.getByRole('button', { name: 'Add a server' }).click(); await click(page, 'Add server'); },
+    ready: async (page) => { await text(page, 'Enter the server address.'); await text(page, 'Enter the pairing code.'); },
+  },
+  {
     id: 'connection-add-refused', what: 'The add form after the service refuses the address.', role: 'client', hash: 'connection', logsErrors: true,
     prepare: (page) => refuse(page, 'POST', '**/api/v1/client/servers', 409, { title: 'Conflict', status: 409, code: 'already_added', detail: 'This computer already has that server.' }),
     act: async (page) => { await page.getByRole('button', { name: 'Add a server' }).click(); await page.getByLabel('Server address').fill('nowhere'); await page.getByLabel('Pairing code').fill('12345678'); await click(page, 'Add server'); },

@@ -37,7 +37,7 @@ describe('the open page', () => {
 
     await screen.findByRole('heading', { name: 'bench-pc' });
     expect(window.location.hash).toBe('#remote');
-    expect(document.title).toBe('Overview - Koppel');
+    expect(document.title).toBe('Overview · Koppel');
   });
 });
 

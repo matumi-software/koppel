@@ -65,13 +65,16 @@ export function AddClientDialog({ onClose }: { onClose: () => void }) {
   const { locked } = useFrame();
   const announce = useAnnounce();
   const [name, setName] = useState('');
+  const [tried, setTried] = useState(false);
   const add = useMutation({
     mutationFn: createClient,
     onSuccess: (created) => announce(`${created.name} is added`),
   });
   const created = add.data;
   const submit = () => {
-    if (!add.isPending && name.trim() !== '') add.mutate(name.trim());
+    if (add.isPending) return;
+    setTried(true);
+    if (name.trim() !== '') add.mutate(name.trim());
   };
   if (created) {
     return (
@@ -93,7 +96,7 @@ export function AddClientDialog({ onClose }: { onClose: () => void }) {
       </Dialog>
     );
   }
-  const error = add.isError ? standalone(reasonOf(add.error, 'the request failed.')) : undefined;
+  const error = add.isError ? standalone(reasonOf(add.error, 'the request failed.')) : tried && name.trim() === '' ? 'Enter a name.' : undefined;
   return (
     <Dialog
       title="Add a client by hand"
@@ -104,7 +107,7 @@ export function AddClientDialog({ onClose }: { onClose: () => void }) {
           <Button variant="secondary" onPress={close}>
             Cancel
           </Button>
-          <Button variant="primary" isDisabled={locked || name.trim() === ''} isPending={add.isPending} onPress={submit}>
+          <Button variant="primary" isDisabled={locked} isPending={add.isPending} onPress={submit}>
             Add client
           </Button>
         </>

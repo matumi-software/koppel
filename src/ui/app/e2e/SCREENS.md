@@ -9,12 +9,12 @@ Every row was driven in Chromium at desktop width (1120 px) and phone width (390
 | Kind | Count | Status |
 |---|---|---|
 | contrast | 6 | Heartwood leaves it: the label and hint of a disabled property are 4.2:1, and WCAG exempts inactive controls (the check here is stricter) |
-| small-target | 468 | Heartwood: the skip link is 38 px high on a phone (the minimum is 40); it shows only while focused |
+| small-target | 472 | Heartwood: the skip link is 38 px high on a phone (the minimum is 40); it shows only while focused |
 | clipped | 176 | By design: an ellipsis with a tooltip (a fingerprint, a long name), or Heartwood's tab label |
 
 ## Widths around the breakpoint
 
-Every signed-in page and state at 640, 768, 799, 800, 1024 px, in light (500 runs, `e2e/widths.spec.ts`): the settings panel turns into a sheet and the tables drop columns here. Open findings: 0.
+Every signed-in page and state at 640, 768, 799, 800, 1024 px, in light (505 runs, `e2e/widths.spec.ts`): the settings panel turns into a sheet and the tables drop columns here. Open findings: 0.
 
 ## Not covered by this pass
 
@@ -60,6 +60,7 @@ Every signed-in page and state at 640, 768, 799, 800, 1024 px, in light (500 run
 | `clients-rotate-key-dialog` | Rotating the server key: the confirmation. | desktop dark, desktop dark-safe, desktop light, desktop light-safe, phone dark, phone dark-safe, phone light, phone light-safe | none |
 | `clients-rotate-result` | The new secret of a computer, shown once. | desktop dark, desktop dark-safe, desktop light, desktop light-safe, phone dark, phone dark-safe, phone light, phone light-safe | none |
 | `clients` | Clients: the fixture state (pairing window open, a waiting and a refused request, two computers). | desktop dark, desktop dark-safe, desktop light, desktop light-safe, phone dark, phone dark-safe, phone light, phone light-safe | none |
+| `connection-add-empty` | The add form sent with nothing typed: each missing field says so. | desktop dark, desktop dark-safe, desktop light, desktop light-safe, phone dark, phone dark-safe, phone light, phone light-safe | none |
 | `connection-add-key` | The add form switched to the server key. | desktop dark, desktop dark-safe, desktop light, desktop light-safe, phone dark, phone dark-safe, phone light, phone light-safe | none |
 | `connection-add-refused` | The add form after the service refuses the address. | desktop dark, desktop dark-safe, desktop light, desktop light-safe, phone dark, phone dark-safe, phone light, phone light-safe | none |
 | `connection-add-wrong-code` | The add form after the service refuses the pairing code. | desktop dark, desktop dark-safe, desktop light, desktop light-safe, phone dark, phone dark-safe, phone light, phone light-safe | none |

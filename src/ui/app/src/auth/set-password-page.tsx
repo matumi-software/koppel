@@ -37,6 +37,7 @@ export default function SetPasswordPage({
         brand={brand}
         title={`Set up ${machineName}`}
         reason={`Step 1 of 2. Choose the admin password. ${until ? `Setup stays open until ${until}, and whoever sets the password first owns it.` : 'Whoever sets the password first owns it.'}`}
+        hideUser
         newPassword
         passwordLabel="New password"
         minPasswordLength={minPasswordLength}

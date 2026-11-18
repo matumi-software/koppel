@@ -119,3 +119,19 @@ describe('the devices of every server', () => {
     ]);
   });
 });
+
+describe('a device list that cannot be read', () => {
+  it('says so with Try again instead of loading for ever, and asks again when pressed', async () => {
+    let answer = 500;
+    const { count } = mockFetch({ ...serverRoutes, 'GET /api/v1/server/devices': () => (answer === 200 ? json(serverDevices) : json({ title: 'Down' }, answer)) });
+    renderApp(inFrame(<DevicesPage />));
+
+    await screen.findByRole('heading', { name: 'Could not reach Koppel' });
+    const before = count('GET /api/v1/server/devices');
+    answer = 200;
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    await screen.findByRole('switch', { name: 'Share Flash drive' });
+    expect(count('GET /api/v1/server/devices')).toBeGreaterThan(before);
+  });
+});

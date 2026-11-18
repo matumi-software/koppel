@@ -104,3 +104,14 @@ test('the settings sheet opens when asked for and closes again', async ({ page, 
   expect(await page.locator('[class*="hw-inspector"]').count(), 'a closed sheet leaves a rail').toBe(0);
   await expect(page.getByRole('button', { name: /Settings for lab/ }).first()).toBeVisible();
 });
+
+test('Ctrl K focuses the device search, as its hint says', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'a phone has no keyboard shortcut');
+  await serve(page, 'server');
+  await page.goto('/#devices');
+  const search = page.getByRole('searchbox', { name: 'Search devices' });
+  await expect(search).toBeVisible();
+  await page.getByRole('heading', { level: 1 }).click();
+  await page.keyboard.press('Control+k');
+  await expect(search).toBeFocused();
+});

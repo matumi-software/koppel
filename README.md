@@ -7,10 +7,10 @@ around it. A machine runs as a server (shares its devices), a client (attaches t
 find servers on the local network and are added with a pairing code or a server key, so nobody copies secrets
 around. A client can attach devices from several servers at once.
 
-Status: version 0.2.1 is the latest release, early: a rewrite in Rust with the same UI and features, a few MB
+Status: version 0.3.0 is the latest release, early: a rewrite in Rust with the same UI and features, a few MB
 instead of about 100. On real hardware, a Debian 13 server in Docker shares two USB receivers and a flash
 drive to a native Windows 11 client, through an upgrade from 0.1.x, a 75 second network drop, and detaching
-and attaching by hand. A 0.2.1 machine does not link with a 0.2.0 or a 0.1.x one (Skakel 3), so update both ends, and back up the data folder first: there is no downgrade. Not yet run on real hardware with 0.2.1: a Linux client, a Windows server through usbipd-win, and a
+and attaching by hand. A 0.3.0 machine does not link with a 0.2.0 or a 0.1.x one (Skakel 3), so update both ends, and back up the data folder first: there is no downgrade. Not yet run on real hardware with 0.3.0: a Linux client, a Windows server through usbipd-win, and a
 Raspberry Pi (the Pi Zero build has only run under emulation). Printers are untried, and webcams do not
 stream from a Linux server to a Windows client yet. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests, which use the template in `.github/pull_request_template.md` and are reviewed by the owners in `.github/CODEOWNERS`; releases are tags on `main`.
 
@@ -54,7 +54,7 @@ armhf `.deb` below is the simpler way.
 The container uses the host's network so clients can find it. It restarts after a crash, and comes
 back at the next reboot even if someone stopped it by hand. The image has a health check, but plain Docker only reports an unhealthy container and does not restart it.
 
-The compose file pins the image version (`matumisoftware/koppel:0.2.1`). To upgrade, change the tag to the new
+The compose file pins the image version (`matumisoftware/koppel:0.3.0`). To upgrade, change the tag to the new
 version, then:
 
 ```sh
@@ -72,12 +72,12 @@ the machine from the [latest release](https://github.com/matumi-software/koppel/
 install it:
 
 ```sh
-wget https://github.com/matumi-software/koppel/releases/download/v0.2.1/koppel_0.2.1_amd64.deb
-sudo apt install ./koppel_0.2.1_amd64.deb
+wget https://github.com/matumi-software/koppel/releases/download/v0.3.0/koppel_0.3.0_amd64.deb
+sudo apt install ./koppel_0.3.0_amd64.deb
 ```
 
-On 64-bit Raspberry Pi OS, take `koppel_0.2.1_arm64.deb` instead, and on 32-bit Raspberry Pi OS on any Pi,
-the Zero included, `koppel_0.2.1_armhf.deb`.
+On 64-bit Raspberry Pi OS, take `koppel_0.3.0_arm64.deb` instead, and on 32-bit Raspberry Pi OS on any Pi,
+the Zero included, `koppel_0.3.0_armhf.deb`.
 
 The install loads the USB/IP modules now and at every boot, then starts the `koppel` service. Open
 `https://<machine>:5240` within 10 minutes and set the password, with the setup token that
@@ -92,14 +92,14 @@ The install loads the USB/IP modules now and at every boot, then starts the `kop
 ### Other Linux distributions
 
 On a distribution that does not install a `.deb` (Fedora, Arch, openSUSE and others), take the tarball for the
-machine from the same release: `koppel_0.2.1_amd64.tar.gz`, `koppel_0.2.1_arm64.tar.gz` or
-`koppel_0.2.1_armhf.tar.gz`. The program is one static binary, so it needs no libraries from the system. It
+machine from the same release: `koppel_0.3.0_amd64.tar.gz`, `koppel_0.3.0_arm64.tar.gz` or
+`koppel_0.3.0_armhf.tar.gz`. The program is one static binary, so it needs no libraries from the system. It
 needs a kernel that has the `usbip-host` and `vhci-hcd` modules, and systemd for the service.
 
 ```sh
-wget https://github.com/matumi-software/koppel/releases/download/v0.2.1/koppel_0.2.1_amd64.tar.gz
-tar -xzf koppel_0.2.1_amd64.tar.gz
-cd koppel_0.2.1_amd64
+wget https://github.com/matumi-software/koppel/releases/download/v0.3.0/koppel_0.3.0_amd64.tar.gz
+tar -xzf koppel_0.3.0_amd64.tar.gz
+cd koppel_0.3.0_amd64
 sudo ./install.sh
 ```
 

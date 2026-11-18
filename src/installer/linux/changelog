@@ -1,3 +1,18 @@
+koppel (0.3.0) unstable; urgency=medium
+
+  * Koppel 0.2.1 is withdrawn and its changes are part of this release: the
+    notes below for 0.2.1 apply when upgrading from 0.2.0 or earlier. Skakel 3
+    does not link with older versions, so update both ends, and back up
+    /var/lib/koppel first: the first start rewrites secrets.json and there is
+    no way back.
+  * A client can attach from several servers at once, and a server can show a
+    pairing code that works once or keep a server key that adds a computer at
+    any time.
+  * The UI is rebuilt on the Heartwood design system.
+  * Port and Accept from for this machine as a server are settings.
+
+ -- Matumi Software <70009674+RikusVanRensburg@users.noreply.github.com>  Wed, 18 Nov 2026 12:00:00 +0000
+
 koppel (0.2.1) unstable; urgency=medium
 
   * Fixes a gap in the UI's access rules: a request with a gRPC content type

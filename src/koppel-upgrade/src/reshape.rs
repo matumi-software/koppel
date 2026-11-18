@@ -1,4 +1,4 @@
-//! The one-time rewrite of `secrets.json` into the shape Koppel 0.2.1 stores: Skakel's own server
+//! The one-time rewrite of `secrets.json` into the shape Koppel 0.3.0 stores: Skakel's own server
 //! state, with each certificate as `{ certificate, privateKey }` (DER and PKCS#8, base64).
 //!
 //! Three older shapes are read, each only here:
@@ -60,7 +60,7 @@ pub fn reshape_secrets(
                 );
             }
             tracing::info!(
-                "{} was rewritten in the format Koppel 0.2.1 stores: the certificate as DER and a key, not PKCS#12",
+                "{} was rewritten in the format Koppel 0.3.0 stores: the certificate as DER and a key, not PKCS#12",
                 file.display()
             );
         }

@@ -7,7 +7,7 @@ format is described in Skakel's [`docs/protocol.md`](https://github.com/matumi-s
 the info endpoint, pairing, tokens and the client generation, the certificate handover, following a
 server that moved and the streams. Koppel 0.1.0 spoke what that document calls version 0, and 0.1.x
 version 1, so those releases cannot talk to each other. The Rust build speaks gRPC: Koppel 0.2.0
-speaks protocol version 2, Skakel 0.2.0's, and Koppel 0.2.1 speaks protocol version 3, Skakel
+speaks protocol version 2, Skakel 0.2.0's, and Koppel 0.3.0 speaks protocol version 3, Skakel
 0.3.0's. A protocol 3 machine does not talk to a protocol 2 one, so both ends of a link are updated
 together (see "Updating one machine" and "The roles on Skakel in Rust").
 
@@ -38,20 +38,20 @@ limits are Skakel's; see "Discovery", "Following a server" and "Pairing" in Skak
 
 ### Updating one machine
 
-Koppel 0.2.1 speaks Skakel protocol 3 and Koppel 0.2.0 protocol 2, which do not talk to each other, so
+Koppel 0.3.0 speaks Skakel protocol 3 and Koppel 0.2.0 protocol 2, which do not talk to each other, so
 a link works only when both machines are on the same line. What the update does on the machine that
 moves, and what shows while the other has not:
 
 - **Pairings survive.** The server's clients, their secret hashes and the certificate stay in
   `secrets.json`, and the client's saved server address, pinned fingerprint, client ID and secret stay
-  in `connection.json`; nothing is deleted or made again. Once both ends are on 0.2.1 the client
+  in `connection.json`; nothing is deleted or made again. Once both ends are on 0.3.0 the client
   connects with the credentials it already holds, with no new pairing. A client whose server is
   updated later waits.
 - **A protocol 2 peer is named, not guessed at.** The client's link shows Skakel's words, "This server
   speaks Skakel 2 and this app speaks Skakel 3. Update the server.", as the reason it is down; the
   connection test answers `versionMismatch` with the same words; and starting a pairing with a
-  protocol 2 server says so too and adds that Koppel 0.2.0 speaks Skakel 2 and 0.2.1 Skakel 3. A 0.2.0
-  client that reaches a 0.2.1 server gets the matching message from its own Skakel.
+  protocol 2 server says so too and adds that Koppel 0.2.0 speaks Skakel 2 and 0.3.0 Skakel 3. A 0.2.0
+  client that reaches a 0.3.0 server gets the matching message from its own Skakel.
 - **Discovery still lists a protocol 2 server** under "Servers on your network", and pairing with it
   fails with the message above.
 - **Pairing codes are eight digits,** and a server that has not opened its window turns requests away,

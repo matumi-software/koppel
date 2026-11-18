@@ -45,7 +45,7 @@ export async function measure(page: Page, phone: boolean): Promise<Finding[]> {
 
     // 2. Nothing visible sits past the right edge unless a scroll box holds it.
     for (const el of document.querySelectorAll('body *')) {
-      if (!visible(el) || scrolled(el) || el.closest('[aria-hidden="true"], .kp-announcer, .hw-visually-hidden')) continue;
+      if (!visible(el) || scrolled(el) || el.closest('[aria-hidden="true"], .hw-visually-hidden')) continue;
       const box = el.getBoundingClientRect();
       if (box.right > edge + 1 && getComputedStyle(el).position !== 'fixed') found.push({ kind: 'offscreen', detail: `${label(el)} ends ${Math.round(box.right - edge)}px past the edge` });
     }
@@ -147,7 +147,7 @@ export async function measure(page: Page, phone: boolean): Promise<Finding[]> {
 
     // 6. Text cut by an ellipsis or a clip is allowed only where a tooltip or a title carries the rest.
     for (const el of document.querySelectorAll('body *')) {
-      if (!visible(el) || el.closest('[aria-hidden="true"], .hw-visually-hidden, .kp-announcer')) continue;
+      if (!visible(el) || el.closest('[aria-hidden="true"], .hw-visually-hidden')) continue;
       const style = getComputedStyle(el);
       if (el.scrollWidth > el.clientWidth + 1 && style.textOverflow === 'ellipsis' && style.overflow !== 'visible') {
         const hasTip = !!(el.getAttribute('title') || el.closest('[title], [aria-describedby], [data-tooltip]') || el.querySelector('[title]'));

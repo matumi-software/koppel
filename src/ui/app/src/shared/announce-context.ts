@@ -1,11 +1,10 @@
-import { createContext, useContext } from 'react';
+import { announce } from '@heartwood/ui';
 
 export type Announce = (message: string) => void;
 
-export const AnnouncerContext = createContext<Announce>(() => {});
-
 /**
- * Says something to a screen reader: "Saved", "Not saved: the device is in use". Without an
- * AnnouncerProvider above it, it does nothing, so a component works on its own in a test.
+ * Says something to a screen reader: "Saved", "Not saved: the device is in use". It speaks through
+ * Heartwood's one live region (the ToastRegion's), which a toast also uses, so a screen reader hears one
+ * calm voice. A toast announces itself: do not announce the same event again beside it.
  */
-export const useAnnounce = (): Announce => useContext(AnnouncerContext);
+export const useAnnounce = (): Announce => announce;

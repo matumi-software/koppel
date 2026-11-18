@@ -51,6 +51,4 @@ body { background: var(--bg-surface); color: var(--text-primary); font-family: v
 .kp-picked td { white-space: nowrap; }
 .kp-picked .kp-line { flex-wrap: nowrap; }
 
-/* The app's one live region (shared/announcer.tsx): heard, not seen. */
-.kp-announcer { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 

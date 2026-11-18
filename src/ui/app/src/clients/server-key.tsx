@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
-import { Button, Callout, CopyValue, IconButton } from '@heartwood/ui';
+import { Button, Callout, ConfirmDialog, CopyValue, IconButton } from '@heartwood/ui';
 import { getEnrollmentKey, rotateEnrollmentKey } from '@/api/server';
 import { reasonOf, standalone } from '@/errors';
-import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useAnnounce } from '@/shared/announce-context';
 import { useFrame } from '@/shell/frame-context';
 
@@ -37,7 +36,6 @@ export function ServerKey({ revision }: { revision: number | undefined }) {
       setHeld({ key, revision, fresh: true });
       announce('New server key');
     },
-    onError: (error) => announce(`Not rotated: ${reasonOf(error, 'the request failed.')}`),
   });
   const visible = held && (held.fresh || held.revision === revision) ? held.key : undefined;
   return (
@@ -58,16 +56,26 @@ export function ServerKey({ revision }: { revision: number | undefined }) {
         onPress={() => setConfirming(true)}
       />
       {confirming ? (
-        <ConfirmDialog title="Rotate the server key?" commit="Rotate key" danger keepOpen isDisabled={locked} isPending={rotate.isPending} onConfirm={() => rotate.mutate(undefined, { onSuccess: () => setConfirming(false) })} onClose={() => setConfirming(false)}>
-          <div className="kp-stack-3">
-            <p className="kp-muted">Computers already linked with the old key keep working. The old key can no longer link a new one, and the new key shows once.</p>
-            {rotate.isError ? (
-              <Callout tone="danger" title="Not rotated">
-                {standalone(reasonOf(rotate.error, 'the request failed.'))}
-              </Callout>
-            ) : null}
-          </div>
-        </ConfirmDialog>
+        <ConfirmDialog
+          title="Rotate the server key?"
+          body={
+            <div className="kp-stack-3">
+              <p className="kp-muted">Computers already linked with the old key keep working. The old key can no longer link a new one, and the new key shows once.</p>
+              {rotate.isError ? (
+                <Callout tone="danger" title="Not rotated">
+                  {standalone(reasonOf(rotate.error, 'the request failed.'))}
+                </Callout>
+              ) : null}
+            </div>
+          }
+          confirmLabel="Rotate key"
+          danger
+          isPending={rotate.isPending}
+          onConfirm={() => {
+            if (!locked) rotate.mutate(undefined, { onSuccess: () => setConfirming(false) });
+          }}
+          onCancel={() => setConfirming(false)}
+        />
       ) : null}
     </span>
   );

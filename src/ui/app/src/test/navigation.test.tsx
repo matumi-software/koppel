@@ -17,8 +17,8 @@ afterEach(() => {
   window.location.hash = '';
 });
 
-/** The app's own live region. Heartwood's toasts and callouts and react-aria's announcer have their own. */
-const appLiveRegions = () => [...document.querySelectorAll('.kp-announcer')];
+/** The one live region: Heartwood's, which toasts and announce() both speak through. */
+const liveRegions = () => [...document.querySelectorAll('[role="region"][aria-label="Notifications"]')];
 
 describe('navigation', () => {
   it('opens the page a nav item names, sets the tab title, and moves focus to the new heading', async () => {
@@ -46,12 +46,12 @@ describe('navigation', () => {
 });
 
 describe('the live region', () => {
-  it('is the app announcer, drawn once', async () => {
+  it("is Heartwood's, drawn once", async () => {
     mockFetch(baseRoutes);
     renderApp(<App />);
     await screen.findByRole('heading', { level: 1, name: 'bench-pc' });
 
-    expect(appLiveRegions()).toHaveLength(1);
+    expect(liveRegions()).toHaveLength(1);
   });
 });
 

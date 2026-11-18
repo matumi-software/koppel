@@ -27,7 +27,6 @@ function usePasswordChange() {
       announce(`The password was not changed. ${reason}`);
       return reason;
     }
-    announce('The password was changed. Other browsers are signed out.');
     toast({ title: 'Password changed. Other browsers are signed out.', tone: 'success' });
   });
 }

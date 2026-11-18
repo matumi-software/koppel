@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Button, Callout, CopyValue, Dialog, TextField } from '@heartwood/ui';
+import { Button, Callout, ConfirmDialog, CopyValue, Dialog, TextField } from '@heartwood/ui';
 import { createClient, rotateClientSecret, type ClientView } from '@/api/server';
 import { reasonOf, standalone } from '@/errors';
-import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useAnnounce } from '@/shared/announce-context';
 import { useFrame } from '@/shell/frame-context';
 
@@ -17,7 +16,6 @@ export function RotateSecretDialog({ client, onClose }: { client: Pick<ClientVie
   const rotate = useMutation({
     mutationFn: () => rotateClientSecret(client.id),
     onSuccess: () => announce(`New secret for ${client.name}`),
-    onError: (error) => announce(`Not rotated: ${reasonOf(error, 'the request failed.')}`),
   });
   if (rotate.data) {
     return (
@@ -39,16 +37,26 @@ export function RotateSecretDialog({ client, onClose }: { client: Pick<ClientVie
     );
   }
   return (
-    <ConfirmDialog title={`Rotate the secret of ${client.name}?`} commit="Rotate secret" danger keepOpen isDisabled={locked} isPending={rotate.isPending} onConfirm={() => rotate.mutate()} onClose={onClose}>
-      <div className="kp-stack-3">
-        <p className="kp-muted">{client.name} stops getting new tokens until you give it the new secret. Devices it has attached stay attached until it reconnects.</p>
-        {rotate.isError ? (
-          <Callout tone="danger" title="Not rotated">
-            {standalone(reasonOf(rotate.error, 'the request failed.'))}
-          </Callout>
-        ) : null}
-      </div>
-    </ConfirmDialog>
+    <ConfirmDialog
+      title={`Rotate the secret of ${client.name}?`}
+      body={
+        <div className="kp-stack-3">
+          <p className="kp-muted">{client.name} stops getting new tokens until you give it the new secret. Devices it has attached stay attached until it reconnects.</p>
+          {rotate.isError ? (
+            <Callout tone="danger" title="Not rotated">
+              {standalone(reasonOf(rotate.error, 'the request failed.'))}
+            </Callout>
+          ) : null}
+        </div>
+      }
+      confirmLabel="Rotate secret"
+      danger
+      isPending={rotate.isPending}
+      onConfirm={() => {
+        if (!locked) rotate.mutate();
+      }}
+      onCancel={onClose}
+    />
   );
 }
 

@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { RefreshCw, Trash2 } from 'lucide-react';
-import { ActivityLog, Button, Callout, CopyValue, EmptyState, Facts, IconButton, PageHeader, SettingRow, SettingsList, StatusDot, Tile, TileStack } from '@heartwood/ui';
+import { ActivityLog, Button, Callout, ConfirmDialog, CopyValue, EmptyState, Facts, IconButton, PageHeader, SettingRow, SettingsList, StatusDot, Tile, TileStack } from '@heartwood/ui';
 import { toEvents, useActivity } from '@/activity/activity-context';
 import { getClientSecret, type ClientView } from '@/api/server';
 import { states } from '@/brand';
 import { serverKeysOptions } from '@/queries';
-import { ConfirmDialog } from '@/shared/confirm-dialog';
 import { useNow } from '@/shared/use-now';
 import { useFrame } from '@/shell/frame-context';
 import { addedOn, lastSeen, lastSeenLine, linkedWord } from './client-words';
@@ -22,9 +21,18 @@ export function RevokeDialog({ client, onClose }: { client: Pick<ClientView, 'id
   const { locked } = useFrame();
   const { revoke } = useRevoke();
   return (
-    <ConfirmDialog title={`Revoke ${client.name}?`} commit="Revoke" danger icon={Trash2} isDisabled={locked} onConfirm={() => revoke(client)} onClose={onClose}>
-      {client.name} can no longer get tokens or attach devices. To let it back, link it again.
-    </ConfirmDialog>
+    <ConfirmDialog
+      title={`Revoke ${client.name}?`}
+      body={`${client.name} can no longer get tokens or attach devices. To let it back, link it again.`}
+      confirmLabel="Revoke"
+      danger
+      onConfirm={() => {
+        if (locked) return;
+        revoke(client);
+        onClose();
+      }}
+      onCancel={onClose}
+    />
   );
 }
 

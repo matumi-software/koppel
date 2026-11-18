@@ -182,8 +182,10 @@ $vcRedistBuild = (Get-Item $vcRedist).VersionInfo.FileBuildPart
 Write-Host 'Building the MSI...'
 # The MSI is the install engine and is built as it always was (Koppel.Installer, the WiX 5 SDK). The shared module's own
 # MSI build is WiX 4.0.6, which has no Files element and would renumber the component GUIDs of a released product.
+# --no-incremental: MSBuild does not see the staged files or the version as inputs, so without it a cached MSI from an
+# earlier build is copied out unchanged (0.3.0 once shipped a setup.exe around an MSI that said 0.2.1).
 if (Test-Path $msiOut) { Remove-Item $msiOut -Recurse -Force }
-Invoke-Checked { dotnet build (Join-Path $installer 'Koppel.Installer\Koppel.Installer.wixproj') -c Release -nologo -v q -o $msiOut -p:RestoreLockedMode=true -p:StagingDir=$staging -p:Version=$Version }
+Invoke-Checked { dotnet build (Join-Path $installer 'Koppel.Installer\Koppel.Installer.wixproj') -c Release --no-incremental -nologo -v q -o $msiOut -p:RestoreLockedMode=true -p:StagingDir=$staging -p:Version=$Version }
 
 Write-Host 'Building setup.exe...'
 # The window's brand, setup.exe and the taskbar all use the app icon, the design system's solid tile (rendered by pnpm design:icons).

@@ -6,7 +6,7 @@ import { useServerDevices } from '@/devices/use-devices';
 import { useMachineName } from '@/shared/use-machine-name';
 import { useNow } from '@/shared/use-now';
 import { useFrame } from '@/shell/frame-context';
-import { Loading } from '@/shell/loading';
+import { QueryGate } from '@/shell/loading';
 import { ClientPage, RevokeDialog } from './client-page';
 import { lastSeen, linkedWord } from './client-words';
 import { PairingRequestsTile, PairingWindowRow } from './pairing-requests';
@@ -39,7 +39,7 @@ export function ClientsPage() {
   const [removing, setRemoving] = useState<{ id: string; name: string }>();
   const [adding, setAdding] = useState(false);
 
-  if (!clients.data) return <Loading />;
+  if (!clients.data) return <QueryGate query={clients} />;
   const list = clients.data;
   if (drill.top) {
     return (

@@ -5,7 +5,7 @@ import { states } from '@/brand';
 import { clientName, useClients } from '@/clients/use-clients';
 import { usePending } from '@/pending/pending-context';
 import { useMachineName } from '@/shared/use-machine-name';
-import { Loading } from '@/shell/loading';
+import { QueryGate } from '@/shell/loading';
 import { CardGroup, DeviceCard } from './device-card';
 import { DevicePage } from './device-page';
 import { ShareSwitch } from './device-switches';
@@ -29,7 +29,7 @@ export function DevicesPage() {
   const drill = useDrill<string>();
   const [q, setQ] = useState('');
 
-  if (!query.data) return <Loading />;
+  if (!query.data) return <QueryGate query={query} />;
   const { devices, unavailable } = query.data;
   const open = drill.top;
   if (open) {

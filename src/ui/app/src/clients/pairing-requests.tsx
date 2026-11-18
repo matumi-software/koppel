@@ -6,9 +6,9 @@ import { pairingWindowMinutes, type PairingRequestView } from '@/api/pairing';
 import { pairingWindowKey } from '@/pending/domains';
 import { usePending } from '@/pending/pending-context';
 import { pairingRequestsOptions } from '@/queries';
+import { clock } from '@/shared/time';
 import { useFrame } from '@/shell/frame-context';
 
-const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
 
 /**
  * The setting row that lets clients ask to pair: a switch for the window, pending until

@@ -12,7 +12,7 @@ import { useMachineName } from '@/shared/use-machine-name';
 import { isClientRole, isServerRole } from '@/settings/roles';
 import { useSettings } from '@/settings/use-settings';
 import { useFrame, useInspector } from '@/shell/frame-context';
-import { Loading } from '@/shell/loading';
+import { Loading, QueryGate } from '@/shell/loading';
 import { AddServerForm } from './add-server-form';
 import { serverLabel, useServerChanges, useServers } from './use-servers';
 
@@ -193,7 +193,8 @@ export function ConnectionPage() {
   ) : null;
   useInspector(inspector);
 
-  if (!settings.query.data || (client && !serversQuery.data)) return <Loading />;
+  if (!settings.query.data) return <Loading />;
+  if (client && !serversQuery.data) return <QueryGate query={serversQuery} />;
 
   const failed = list.filter((s) => changes.failures[s.id]);
   const description = first

@@ -17,7 +17,7 @@ const hard = new Set<Finding['kind']>(['sideways', 'console', 'unnamed', 'offscr
 // the fix the entry is deleted.
 const known: { kind: Finding['kind']; match: RegExp; why: string }[] = [
   { kind: 'contrast', match: /^span\.hw-(prop-label-text|visually-hidden) .* is 4\.2\d:1$/, why: 'Heartwood leaves it: the label and hint of a disabled property are 4.2:1, and WCAG exempts inactive controls (the check here is stricter)' },
-  { kind: 'small-target', match: /^a\.hw-skip "Skip to content" is \d+x3[0-9]$/, why: 'Heartwood: the skip link is 38 px high on a phone (the minimum is 40); it shows only while focused. Reported to Heartwood' },
+  { kind: 'small-target', match: /^a\.hw-skip "Skip to content" is \d+x3[0-9]$/, why: 'Heartwood: the skip link is 38 px high on a phone (the minimum is 40); it shows only while focused' },
 ];
 
 test.use({ actionTimeout: 5000 });

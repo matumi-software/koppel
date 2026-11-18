@@ -21,14 +21,16 @@ export function AddServerForm({ first, onClose }: { first: boolean; onClose: () 
   const [address, setAddress] = useState('');
   const [secret, setSecret] = useState('');
   const [useKey, setUseKey] = useState(false);
+  const [tried, setTried] = useState(false);
   const add = useAddServer();
 
   const problem = add.error instanceof RejectedError ? add.error.problem : undefined;
   const fields = problem?.errors;
   const credentialField = useKey ? 'key' : 'code';
   const message = add.error ? standalone(add.error.message) : undefined;
-  const addressError = fields?.address?.[0] ?? (problem?.code === 'already_added' ? message : undefined);
-  const credentialError = fields?.[credentialField]?.[0] ?? (message && !addressError && !fields ? message : undefined);
+  const addressError = fields?.address?.[0] ?? (problem?.code === 'already_added' ? message : undefined) ?? (tried && address.trim() === '' ? 'Enter the server address.' : undefined);
+  const credentialError =
+    fields?.[credentialField]?.[0] ?? (message && !addressError && !fields ? message : undefined) ?? (tried && secret.trim() === '' ? (useKey ? 'Enter the server key.' : 'Enter the pairing code.') : undefined);
   const offered = found.filter((d) => !saved.some((s) => s.serverUrl === d.url));
 
   const edit = (set: (value: string) => void) => (value: string) => {
@@ -36,6 +38,8 @@ export function AddServerForm({ first, onClose }: { first: boolean; onClose: () 
     if (add.isError) add.reset();
   };
   const submit = () => {
+    setTried(true);
+    if (address.trim() === '' || secret.trim() === '') return;
     const base = { address: address.trim() };
     add.mutate(useKey ? { ...base, key: secret.trim() } : { ...base, code: secret.replace(/\s/g, '') }, {
       onSuccess: (server) => {
@@ -91,7 +95,7 @@ export function AddServerForm({ first, onClose }: { first: boolean; onClose: () 
         />
       )}
       <div className="kp-actions">
-        <Button variant="primary" type="submit" isPending={add.isPending} isDisabled={locked || address.trim() === '' || secret.trim() === ''}>
+        <Button variant="primary" type="submit" isPending={add.isPending} isDisabled={locked}>
           {first ? 'Connect' : 'Add server'}
         </Button>
         <Button
@@ -99,6 +103,7 @@ export function AddServerForm({ first, onClose }: { first: boolean; onClose: () 
           onPress={() => {
             setUseKey(!useKey);
             setSecret('');
+            setTried(false);
             add.reset();
           }}
         >

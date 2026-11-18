@@ -69,14 +69,14 @@ export interface KoppelShellProps {
 /**
  * Tells the pages whether the settings panel is a sheet over the page (`narrow`), as Heartwood's own
  * condition says it, so no width is written here. It sits inside the AppShell, where the hook can measure. On
- * a phone and a tablet in portrait the panel is a sheet, a ListDetail shows one pane and the tables drop columns.
+ * a phone and a tablet in portrait the panel is a sheet and the tables drop columns.
  */
 function SheetFrame({ frame, children }: { frame: FrameApi; children: ReactNode }) {
   const narrow = useInspectorSheet();
   const value = useMemo(() => ({ ...frame, narrow }), [frame, narrow]);
   return (
     <FrameContext.Provider value={value}>
-      <div className={narrow ? 'kp-narrow kp-contents' : 'kp-contents'}>{children}</div>
+      <div className="kp-contents">{children}</div>
     </FrameContext.Provider>
   );
 }
@@ -84,7 +84,7 @@ function SheetFrame({ frame, children }: { frame: FrameApi; children: ReactNode 
 /**
  * The window every page of the app sits in: Heartwood's AppShell with the role's navigation, the
  * link state in the strip and the account menu in the foot. Pages reach it through three small
- * seams: `useFrame` (locked, narrow), and `useFlush` and `useInspector` (frame-context.ts).
+ * seams: `useFrame` (locked, narrow) and `useInspector` (frame-context.ts).
  * Pages are passed as `children` and never re-render because of the shell's own state.
  */
 export function KoppelShell({ page, role, counts, children }: KoppelShellProps) {
@@ -92,12 +92,11 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
   const { signOut } = useAuth();
   const announce = useAnnounce();
   const hasNavigated = useHasNavigated();
-  const [flush, setFlush] = useState(false);
   const [inspector, setInspector] = useState<ReactNode>(null);
   const locked = state !== 'live';
 
   const frame = useMemo(() => ({ locked, narrow: false, hasNavigated }), [locked, hasNavigated]);
-  const slots = useMemo(() => ({ setFlush, setInspector }), []);
+  const slots = useMemo(() => ({ setInspector }), []);
   const groups = useMemo(() => navGroups(role, counts), [role, counts]);
 
   // A page that opens because the person went to it takes focus on its heading, so a keyboard or a
@@ -146,7 +145,6 @@ export function KoppelShell({ page, role, counts, children }: KoppelShellProps) 
           storageKey="koppel.sidebar"
           toolbarEnd={<LinkState />}
           phoneEnd={<LinkState short />}
-          flush={flush}
           inspector={inspector}
         >
           <SheetFrame frame={frame}>

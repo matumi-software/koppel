@@ -1,18 +1,68 @@
-# Koppel
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="resources/design-system/assets/Logos/koppel-mark-on-dark.svg">
+    <img src="resources/design-system/assets/Logos/koppel-mark.svg" alt="The Koppel mark: a K whose arms end in a circle and an arrow" width="96">
+  </picture>
+</p>
 
-Share USB devices across the network. Plug a device into one machine and use it on another.
+<h1 align="center">Koppel</h1>
+
+<p align="center">Share USB devices across the network. Plug a device into one machine and use it on another.</p>
 
 Koppel speaks the standard USB/IP protocol and adds a web UI, authentication and encrypted transport
 around it. A machine runs as a server (shares its devices), a client (attaches them) or both. Clients
 find servers on the local network and are added with a pairing code or a server key, so nobody copies secrets
 around. A client can attach devices from several servers at once.
 
-Status: version 0.3.0 is the latest release, early: a rewrite in Rust with the same UI and features, a few MB
-instead of about 100. On real hardware, a Debian 13 server in Docker shares two USB receivers and a flash
-drive to a native Windows 11 client, through an upgrade from 0.1.x, a 75 second network drop, and detaching
-and attaching by hand. A 0.3.0 machine does not link with a 0.2.0 or a 0.1.x one (Skakel 3), so update both ends, and back up the data folder first: there is no downgrade. Not yet run on real hardware with 0.3.0: a Linux client, a Windows server through usbipd-win, and a
-Raspberry Pi (the Pi Zero build has only run under emulation). Printers are untried, and webcams do not
-stream from a Linux server to a Windows client yet. See [CHANGELOG.md](CHANGELOG.md). Work happens on short-lived branches merged into `main` through pull requests, which use the template in `.github/pull_request_template.md` and are reviewed by the owners in `.github/CODEOWNERS`; releases are tags on `main`.
+*Koppel* is Afrikaans and Dutch for "couple" or "link". Koppel is a [Matumi](https://github.com/matumi-software) product.
+
+New here? [Set up Koppel, step by step](docs/setup-guide.md) takes two machines from nothing to a shared device.
+
+## What it looks like
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/devices-dark.png">
+    <img src="docs/images/devices-light.png" alt="The Devices page of a server: each plugged-in device has a Share switch and a state" width="880">
+  </picture>
+  <br>
+  <sub>On the server, Devices lists what is plugged in. A switch shares a device.</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/pairing-code-dark.png">
+    <img src="docs/images/pairing-code-light.png" alt="The Clients page of a server: a pairing code with the time left, and the server key" width="880">
+  </picture>
+  <br>
+  <sub>On the server, Clients shows a pairing code that works once, and the server key.</sub>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/servers-dark.png">
+    <img src="docs/images/servers-light.png" alt="The Connection page of a client: the linked server with its link state, and its settings" width="880">
+  </picture>
+  <br>
+  <sub>On the client, Connection lists each server and its link. Add as many as you like.</sub>
+</p>
+
+The pictures are made from the UI with example data. How to get from nothing to a shared device is in the
+[step-by-step guide](docs/setup-guide.md), which also lists the known issues of this release.
+
+## Status
+
+Version 0.3.0 is the latest release, early: a rewrite in Rust with the same UI and features, a few MB
+instead of about 100. Tried on real hardware with 0.3.0: a Linux server in Docker shares two Logitech
+receivers (a keyboard and a mouse) and a flash drive to a Windows 11 client, and all three work there. Earlier
+builds also went through an upgrade from 0.1.x, a 75 second network drop, and detaching and attaching by
+hand. A 0.3.0 machine does not link with a 0.2.0 or a 0.1.x one (Skakel 3), so update both ends, and back up
+the data folder first: there is no downgrade. Not yet run on real hardware with 0.3.0: a Linux client, a Windows
+server through usbipd-win, and a Raspberry Pi (the Pi Zero build has only run under emulation). Printers are
+untried, and webcams do not stream from a Linux server to a Windows client yet. The
+[known issues](docs/setup-guide.md#known-issues-in-030) of 0.3.0 are in the guide. See [CHANGELOG.md](CHANGELOG.md).
+Work happens on short-lived branches merged into `main` through pull requests, which use the template in
+`.github/pull_request_template.md` and are reviewed by the owners in `.github/CODEOWNERS`; releases are tags on `main`.
 
 | Platform | Server | Client |
 |---|---|---|
@@ -118,19 +168,6 @@ https://localhost:5240 afterwards, accept the browser's certificate warning and 
 area opens the UI, and its menu shuts Koppel down until the next boot. **Koppel** in the Start menu opens the UI
 too, and starts Koppel first if it is not running. See
 [docs/windows.md](docs/windows.md) for what the installer does to `%ProgramData%\Koppel` and the driver.
-
-## Add a server to a client
-
-1. On the server, open Clients. **New pairing code** has a Show button: it shows eight digits that work once,
-   for 60 seconds. (**Server key** links a computer at any time without a code: Show it, and copy it.)
-2. On the client, open Connection and press the add button. Type the server's address (the one shown on the
-   server; a server found on the local network fills it in) and the pairing code, or choose the server key and
-   paste that. Press Connect (it reads Add server once the client has one).
-
-The client then has its own credentials and links. Nothing has to be approved on the server. Add as many
-servers as you like: each is listed under Connection with its link, and its devices appear together under
-Remote devices, each saying which server it is on. On Connection a server's Reconnect, Retry every and Give up
-after can be changed, and a server can be tested or removed (which releases its devices).
 
 ## Ports
 
